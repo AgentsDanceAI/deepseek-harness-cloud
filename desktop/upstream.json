@@ -1,0 +1,7 @@
+{
+  "desktopRepository": "https://github.com/anywhere-labs/deepseek-harness-desktop.git",
+  "desktopCommit": "4f68147091e585aaa1d815f99d30a657b3842d7c",
+  "harnessRepository": "https://github.com/deepseek-ai/deepseek-harness.git",
+  "harnessCommit": "47f943859bef60e4160492346772ded9b24f765a",
+  "runtimePackageVersion": "0.1.0-rc.6"
+}

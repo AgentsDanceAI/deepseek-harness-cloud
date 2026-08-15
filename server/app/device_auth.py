@@ -78,6 +78,36 @@ def approve(body: dict, user: dict = Depends(resolve_user)):
     return {"ok": True, "status": "denied" if deny else "approved"}
 
 
+@router.post("/login")
+def login(body: dict, request: Request):
+    """In-window email+password fallback for the desktop login wall: verifies
+    credentials and mints a device token in one call (no browser needed)."""
+    email = str(body.get("email", "")).strip().lower()
+    password = str(body.get("password", ""))
+    ip = request.client.host if request.client else ""
+    if rate_limit.login_locked(email, ip):
+        raise HTTPException(429, "locked_try_later")
+    user = db.query_one("SELECT * FROM users WHERE email=?", (email,))
+    if user is None or not user["password_hash"] \
+            or not security.verify_password(password, user["password_hash"]):
+        rate_limit.login_failed(email, ip)
+        raise HTTPException(401, "bad_credentials")
+    if user["status"] != "active":
+        raise HTTPException(403, "account_disabled")
+    device_id = security.new_id("dev_")
+    epoch = int(user["session_epoch"])
+    token = security.sign_token(user["id"], device_id=device_id, epoch=epoch, ttl=config.DEVICE_TOKEN_TTL)
+    now = time.time()
+    with db.tx() as conn:
+        conn.execute(
+            "INSERT INTO devices (id, user_id, name, platform, token_hash, epoch, last_seen, created) "
+            "VALUES (?,?,?,?,?,?,?,?)",
+            (device_id, user["id"], str(body.get("name", ""))[:80], str(body.get("platform", ""))[:40],
+             security.token_hash(token), epoch, now, now))
+        conn.execute("UPDATE users SET last_login=? WHERE id=?", (now, user["id"]))
+    return {"token": token, "user": public_user(dict(user))}
+
+
 @router.post("/poll")
 def poll(body: dict, request: Request):
     device_code = str(body.get("device_code", ""))

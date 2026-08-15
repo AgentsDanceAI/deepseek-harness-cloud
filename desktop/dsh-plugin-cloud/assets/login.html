@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<title>登录 DSH Cloud</title>
+<style>
+  :root {
+    --bg: #ffffff; --fg: #1a1d24; --muted: #6b7280; --line: #e5e7eb;
+    --accent: #4a6cf7; --accent-fg: #ffffff; --card: #f8fafc; --err: #dc2626; --ok: #16a34a;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #101318; --fg: #e5e9f0; --muted: #8b93a1; --line: #262b33;
+      --accent: #5d7bf9; --card: #171c23; --err: #f87171; --ok: #4ade80;
+    }
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body {
+    background: var(--bg); color: var(--fg);
+    font: 14px/1.6 system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    display: flex; flex-direction: column; min-height: 100vh; padding: 32px 36px;
+    -webkit-user-select: none; user-select: none;
+  }
+  h1 { font-size: 22px; letter-spacing: .2px; }
+  .sub { color: var(--muted); margin: 6px 0 24px; }
+  .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin-bottom: 20px; }
+  .tabs button {
+    background: none; border: none; color: var(--muted); font-size: 14px;
+    padding: 8px 12px; cursor: pointer; border-bottom: 2px solid transparent;
+  }
+  .tabs button.active { color: var(--fg); border-bottom-color: var(--accent); }
+  .panel { display: none; }
+  .panel.active { display: block; }
+  .code {
+    font: 600 30px/1 ui-monospace, "SF Mono", Consolas, monospace; letter-spacing: 4px;
+    text-align: center; background: var(--card); border: 1px solid var(--line);
+    border-radius: 10px; padding: 20px 8px; margin: 14px 0;
+    -webkit-user-select: text; user-select: text;
+  }
+  .hint { color: var(--muted); font-size: 13px; }
+  button.primary {
+    width: 100%; margin-top: 16px; padding: 11px; border: none; border-radius: 8px;
+    background: var(--accent); color: var(--accent-fg); font-size: 15px; cursor: pointer;
+  }
+  button.primary:disabled { opacity: .55; cursor: default; }
+  input {
+    width: 100%; margin-top: 10px; padding: 10px 12px; font-size: 14px;
+    background: var(--card); color: var(--fg); border: 1px solid var(--line); border-radius: 8px;
+  }
+  input:focus { outline: 2px solid var(--accent); border-color: transparent; }
+  .status { min-height: 22px; margin-top: 14px; font-size: 13px; color: var(--muted); text-align: center; }
+  .status.err { color: var(--err); }
+  .status.ok { color: var(--ok); }
+  .foot { margin-top: auto; padding-top: 24px; display: flex; justify-content: space-between; color: var(--muted); font-size: 12px; }
+  .foot a { color: var(--muted); cursor: pointer; text-decoration: underline; }
+</style>
+</head>
+<body>
+  <h1>DSH Cloud</h1>
+  <p class="sub">登录后即可使用云端模型服务，无需自备 API Key</p>
+
+  <div class="tabs">
+    <button id="tab-device" class="active">浏览器授权</button>
+    <button id="tab-password">邮箱密码</button>
+  </div>
+
+  <div id="panel-device" class="panel active">
+    <p class="hint">点击下方按钮，在浏览器中登录并授权本设备。授权码：</p>
+    <div class="code" id="user-code">••••-••••</div>
+    <button class="primary" id="open-browser" disabled>在浏览器中授权</button>
+    <div class="status" id="device-status"></div>
+  </div>
+
+  <div id="panel-password" class="panel">
+    <input id="email" type="email" placeholder="邮箱" autocomplete="username">
+    <input id="password" type="password" placeholder="密码" autocomplete="current-password">
+    <button class="primary" id="login-btn">登录</button>
+    <div class="status" id="password-status"></div>
+    <p class="hint" style="margin-top:12px">还没有账号？点击上方"浏览器授权"，在网页端注册后授权本设备。</p>
+  </div>
+
+  <div class="foot">
+    <span>登录即代表同意用户协议与隐私政策</span>
+    <a id="quit">退出</a>
+  </div>
+
+<script>
+(function () {
+  'use strict'
+  const $ = id => document.getElementById(id)
+  const tabs = { device: [$('tab-device'), $('panel-device')], password: [$('tab-password'), $('panel-password')] }
+  function show (name) {
+    for (const key of Object.keys(tabs)) {
+      tabs[key][0].classList.toggle('active', key === name)
+      tabs[key][1].classList.toggle('active', key === name)
+    }
+  }
+  $('tab-device').addEventListener('click', () => show('device'))
+  $('tab-password').addEventListener('click', () => show('password'))
+  $('quit').addEventListener('click', () => window.dshCloud.quit())
+
+  let verificationUrl = ''
+  const deviceStatus = $('device-status')
+  window.dshCloud.startDevice().then((started) => {
+    $('user-code').textContent = started.userCode
+    verificationUrl = started.verificationUrl
+    $('open-browser').disabled = false
+  }).catch(() => {
+    deviceStatus.textContent = '无法连接服务器，请检查网络后重启应用'
+    deviceStatus.className = 'status err'
+  })
+  $('open-browser').addEventListener('click', () => {
+    if (verificationUrl) window.dshCloud.openUrl(verificationUrl)
+    deviceStatus.textContent = '等待浏览器中完成授权…'
+    deviceStatus.className = 'status'
+  })
+  window.dshCloud.onStatus((payload) => {
+    if (payload.status === 'approved') {
+      deviceStatus.textContent = '授权成功，正在启动…'
+      deviceStatus.className = 'status ok'
+    } else if (payload.status === 'denied') {
+      deviceStatus.textContent = '授权被拒绝'
+      deviceStatus.className = 'status err'
+    } else if (payload.status === 'error') {
+      deviceStatus.textContent = '网络错误，重试中…'
+      deviceStatus.className = 'status err'
+    }
+  })
+
+  const passwordStatus = $('password-status')
+  $('login-btn').addEventListener('click', async () => {
+    const email = $('email').value.trim()
+    const password = $('password').value
+    if (!email || !password) return
+    $('login-btn').disabled = true
+    passwordStatus.textContent = '登录中…'
+    passwordStatus.className = 'status'
+    const outcome = await window.dshCloud.passwordLogin(email, password)
+    if (!outcome.ok) {
+      passwordStatus.textContent = /401/.test(outcome.error || '') ? '邮箱或密码错误' : '登录失败：' + outcome.error
+      passwordStatus.className = 'status err'
+      $('login-btn').disabled = false
+    } else {
+      passwordStatus.textContent = '登录成功，正在启动…'
+      passwordStatus.className = 'status ok'
+    }
+  })
+  $('password').addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') $('login-btn').click()
+  })
+})()
+</script>
+</body>
+</html>

@@ -1,0 +1,37 @@
+diff --git a/dsh-plugin-desktop/src/update-checker.ts b/dsh-plugin-desktop/src/update-checker.ts
+index f2e56f8..57041f2 100644
+--- a/dsh-plugin-desktop/src/update-checker.ts
++++ b/dsh-plugin-desktop/src/update-checker.ts
+@@ -1,7 +1,7 @@
+ /** Headless version checks against the public DSH Desktop release service. */
+ 
+ /** Public endpoint returning the latest stable DSH Desktop version. */
+-export const DESKTOP_VERSION_ENDPOINT = 'https://www.dshdesktop.cn/api/desktop/version'
++export const DESKTOP_VERSION_ENDPOINT = 'https://dshcloud.agentsdance.ai/api/desktop/version'
+ 
+ /** Maximum response body bytes accepted from the version service. */
+ export const MAX_VERSION_RESPONSE_BYTES = 4 * 1024
+diff --git a/dsh-plugin-desktop/src/update-download.ts b/dsh-plugin-desktop/src/update-download.ts
+index 18e4fec..89d7171 100644
+--- a/dsh-plugin-desktop/src/update-download.ts
++++ b/dsh-plugin-desktop/src/update-download.ts
+@@ -10,8 +10,8 @@ export type DesktopDownloadPlatform = 'darwin' | 'win32'
+ 
+ /** Fixed download endpoints that record one user-confirmed installer download. */
+ export const DESKTOP_DOWNLOAD_URLS: Readonly<Record<DesktopDownloadPlatform, string>> = {
+-  darwin: 'https://www.dshdesktop.cn/api/downloads/mac',
+-  win32: 'https://www.dshdesktop.cn/api/downloads/windows',
++  darwin: 'https://dshcloud.agentsdance.ai/api/downloads/mac',
++  win32: 'https://dshcloud.agentsdance.ai/api/downloads/windows',
+ }
+ 
+ /** Maximum accepted installer size, in bytes. */
+@@ -185,7 +185,7 @@ async function prepareDownloadPaths(
+ 
+   const extension = platform === 'darwin' ? 'dmg' : 'exe'
+   const platformName = platform === 'darwin' ? 'mac' : 'windows'
+-  const filename = `DSH-Desktop-${version}-${platformName}.${extension}`
++  const filename = `DSH-Cloud-Desktop-${version}-${platformName}.${extension}`
+   const completed = join(directory, filename)
+   const completedStat = await lstatOptional(completed)
+   if (completedStat !== undefined) {

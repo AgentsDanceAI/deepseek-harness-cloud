@@ -220,7 +220,7 @@ def logout(response: Response):
 
 
 @router.post("/password")
-def change_password(body: dict, user: dict = Depends(resolve_user), response: Response = None):
+def change_password(body: dict, user: dict = Depends(resolve_user)):
     old, new = str(body.get("old", "")), str(body.get("new", ""))
     if len(new) < 8:
         raise HTTPException(400, "password_too_short")

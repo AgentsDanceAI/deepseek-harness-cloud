@@ -1,0 +1,63 @@
+diff --git a/dsh-plugin-desktop/package.json b/dsh-plugin-desktop/package.json
+index bb502c1..249f6f8 100644
+--- a/dsh-plugin-desktop/package.json
++++ b/dsh-plugin-desktop/package.json
+@@ -224,8 +224,8 @@
+     "vitest": "4.1.8"
+   },
+   "build": {
+-    "appId": "ai.deepseek.dsh.desktop",
+-    "productName": "DSH Desktop",
++    "appId": "ai.agentsdance.dshcloud.desktop",
++    "productName": "DSH Cloud Desktop",
+     "asar": true,
+     "asarUnpack": [
+       "package.json",
+@@ -278,8 +278,8 @@
+       "allowToChangeInstallationDirectory": true,
+       "createDesktopShortcut": true,
+       "createStartMenuShortcut": true,
+-      "shortcutName": "DSH Desktop",
+-      "artifactName": "DSH-Desktop-${version}-${arch}-Setup.${ext}"
++      "shortcutName": "DSH Cloud Desktop",
++      "artifactName": "DSH-Cloud-Desktop-${version}-${arch}-Setup.${ext}"
+     },
+     "linux": {
+       "target": [
+diff --git a/dsh-plugin-desktop/src/index.ts b/dsh-plugin-desktop/src/index.ts
+index 3c6bfec..466e34b 100644
+--- a/dsh-plugin-desktop/src/index.ts
++++ b/dsh-plugin-desktop/src/index.ts
+@@ -140,8 +140,8 @@ export function apply(ctx: Context, config: Config): void {
+     () => ctx.desktopRuntime.schedule({
+       ...config,
+       url: desktopRendererUrl(ctx.webServer.port, config.mode, ctx.desktopRuntime.platform),
+-      productName: 'DSH Desktop',
+-      windowTitle: 'DeepSeek Harness Desktop',
++      productName: 'DSH Cloud Desktop',
++      windowTitle: 'DSH Cloud Desktop',
+       iconPath,
+       trayIcons,
+       readThemeSource: () => {
+diff --git a/dsh-plugin-desktop/src/main.ts b/dsh-plugin-desktop/src/main.ts
+index 48cd4da..1c9ed61 100644
+--- a/dsh-plugin-desktop/src/main.ts
++++ b/dsh-plugin-desktop/src/main.ts
+@@ -36,7 +36,7 @@ import {
+ } from './shutdown.ts'
+ 
+ const BIN_NAME = 'dsh-plugin-desktop'
+-const PRODUCT_NAME = 'DSH Desktop'
++const PRODUCT_NAME = 'DSH Cloud Desktop'
+ 
+ /** Report profile recovery without changing startup or rollback outcomes. */
+ function notifyProfileRecovery(runtime: ElectronDesktopRuntime, body: string): void {
+@@ -98,7 +98,7 @@ async function start(): Promise<void> {
+ 
+   app.on('second-instance', () => { runtime.show() })
+   await app.whenReady()
+-  if (process.platform === 'win32') app.setAppUserModelId('ai.deepseek.dsh.desktop')
++  if (process.platform === 'win32') app.setAppUserModelId('ai.agentsdance.dshcloud.desktop')
+   if (app.isPackaged && process.cwd() === '/') process.chdir(app.getPath('home'))
+ 
+   const failLoudProcess: FailLoudProcess = {

@@ -1,0 +1,33 @@
+diff --git a/dsh-plugin-desktop/src/main.ts b/dsh-plugin-desktop/src/main.ts
+index 48cd4da..b52c6ac 100644
+--- a/dsh-plugin-desktop/src/main.ts
++++ b/dsh-plugin-desktop/src/main.ts
+@@ -27,6 +27,7 @@ import {
+ } from './profile-manager.ts'
+ import { DesktopProfileService } from './profile-service.ts'
+ import { prepareDesktopProfile } from './profile.ts'
++import { cloudGate, cloudProfilePatches } from './cloud/index.ts'
+ import type { DesktopPnpmBootstrap } from './pnpm.ts'
+ import {
+   createDesktopExitCoordinator,
+@@ -116,6 +117,12 @@ async function start(): Promise<void> {
+   })
+ 
+   try {
++    // DSH Cloud login wall: the Host never boots without a cloud session.
++    const cloudSession = await cloudGate()
++    if (cloudSession === undefined) {
++      await shutdown.request(0)
++      return
++    }
+     const environment = loadLayeredEnv(BIN_NAME, process.cwd())
+     const electronVersion = process.versions.electron
+     if (electronVersion === undefined) {
+@@ -143,6 +150,7 @@ async function start(): Promise<void> {
+       process.platform,
+       activeProfileName,
+     )
++    prepared.patches.push(...cloudProfilePatches())
+     const desktopPnpmBootstrap: DesktopPnpmBootstrap = {
+       activeProfileName,
+       activeProfileDir: prepared.profile.dir,

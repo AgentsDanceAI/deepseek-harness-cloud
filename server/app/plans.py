@@ -86,7 +86,9 @@ def check_run_blocked(user_id: str) -> str | None:
     if not config.ENTITLE_ENFORCE:
         return None
     try:
-        if credits.balance(user_id) <= -config.OVERDRAFT_LIMIT_CREDITS:
+        # New requests need a positive balance; overdraft exists only so
+        # in-flight streams can finish and be billed truthfully.
+        if credits.balance(user_id) <= 0:
             return "insufficient_credits"
         return None
     except Exception:
