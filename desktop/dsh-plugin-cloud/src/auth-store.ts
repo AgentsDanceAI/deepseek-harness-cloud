@@ -30,11 +30,12 @@ export function loadToken(userDataDir: string): { token: string, email?: string 
   }
   try {
     const envelope = JSON.parse(raw) as Envelope
+    const email = envelope.email === undefined ? {} : { email: envelope.email }
     if (envelope.cipher === 'safeStorage') {
       const token = safeStorage.decryptString(Buffer.from(envelope.token, 'base64'))
-      return { token, email: envelope.email }
+      return { token, ...email }
     }
-    return { token: envelope.token, email: envelope.email }
+    return { token: envelope.token, ...email }
   } catch {
     // Corrupt or undecryptable (e.g. OS keying changed): treat as logged out.
     clearToken(userDataDir)
