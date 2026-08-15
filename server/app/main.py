@@ -1,0 +1,51 @@
+"""FastAPI application assembly."""
+from __future__ import annotations
+
+import logging
+
+from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
+from pathlib import Path
+
+from . import config, db
+
+log = logging.getLogger("dhc")
+
+
+def create_app() -> FastAPI:
+    if not config.auth_secret() and not config.DEV_MODE:
+        raise RuntimeError("AUTH_SECRET must be set (or DHC_DEV=1 for local development)")
+    if not config.UPSTREAM_API_KEY:
+        log.warning("UPSTREAM_API_KEY is not set — the LLM gateway will answer 503")
+
+    app = FastAPI(title="deepseek-harness-cloud", docs_url="/api/docs" if config.DEV_MODE else None,
+                  redoc_url=None, openapi_url="/api/openapi.json" if config.DEV_MODE else None)
+
+    db.ensure_schema()
+
+    from .accounts import router as accounts_router
+    from .admin import router as admin_router
+    from .device_auth import router as device_router
+    from .gateway import router as gateway_router
+    from .payments.api import router as payments_router
+    from .webpages import router as pages_router
+
+    app.include_router(accounts_router)
+    app.include_router(device_router)
+    app.include_router(gateway_router)
+    app.include_router(payments_router)
+    app.include_router(admin_router)
+
+    static_dir = Path(__file__).parent / "static"
+    if static_dir.is_dir():
+        app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+    app.include_router(pages_router)  # last: contains catch-all-ish page routes
+
+    @app.get("/api/health")
+    def health():
+        return {"ok": True, "service": "deepseek-harness-cloud"}
+
+    return app
+
+
+app = create_app()

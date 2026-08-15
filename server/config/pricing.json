@@ -1,0 +1,39 @@
+{
+  "_comment": "套餐与积分包的单一价目源。金额单位: 分 (CNY cents)。前端与支付模块都只读这里, 绝不信任客户端金额。1 积分 = ¥0.01 牌价模型用量。plan 积分当期有效 (31/366 天), pack 积分 12 个月有效。",
+  "currency": "CNY",
+  "tiers": {
+    "free": {
+      "name": "免费版",
+      "monthly_cents": 0,
+      "signup_credits": 500,
+      "monthly_credits": 0,
+      "concurrency": 1
+    },
+    "plus": {
+      "name": "Plus",
+      "monthly_cents": 2900,
+      "yearly_cents": 29000,
+      "monthly_credits": 3500,
+      "concurrency": 2
+    },
+    "pro": {
+      "name": "Pro",
+      "monthly_cents": 9900,
+      "yearly_cents": 99000,
+      "monthly_credits": 13000,
+      "concurrency": 5
+    },
+    "max": {
+      "name": "Max",
+      "monthly_cents": 29900,
+      "yearly_cents": 299000,
+      "monthly_credits": 42000,
+      "concurrency": 10
+    }
+  },
+  "packs": {
+    "pack1000": { "name": "1,000 积分", "cents": 1000, "credits": 1000, "valid_days": 365 },
+    "pack5250": { "name": "5,250 积分", "cents": 5000, "credits": 5250, "valid_days": 365 },
+    "pack11000": { "name": "11,000 积分", "cents": 10000, "credits": 11000, "valid_days": 365 }
+  }
+}

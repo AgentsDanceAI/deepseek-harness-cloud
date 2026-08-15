@@ -1,0 +1,25 @@
+{
+  "_comment": "模型目录与牌价。价格单位: 人民币元 / 百万 token。上线前必须按 DeepSeek 官方最新价目校准 (https://api-docs.deepseek.com 定价页), 这里的数字是占位默认值。1 积分 = ¥0.01 牌价用量, 实际扣费 = 牌价 × MODEL_PRICE_MARKUP (默认 1.2)。",
+  "models": [
+    {
+      "id": "deepseek-v4-flash",
+      "upstream_model": "deepseek-v4-flash",
+      "display_name": "DeepSeek V4 Flash",
+      "input_cny_per_m": 2.0,
+      "cache_read_cny_per_m": 0.2,
+      "output_cny_per_m": 6.0,
+      "context_window": 1000000,
+      "default": true
+    },
+    {
+      "id": "deepseek-v4-pro",
+      "upstream_model": "deepseek-v4-pro",
+      "display_name": "DeepSeek V4 Pro",
+      "input_cny_per_m": 8.0,
+      "cache_read_cny_per_m": 0.8,
+      "output_cny_per_m": 24.0,
+      "context_window": 1000000,
+      "default": false
+    }
+  ]
+}

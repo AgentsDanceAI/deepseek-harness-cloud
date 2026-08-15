@@ -1,0 +1,107 @@
+"""Central configuration. Every environment variable the server reads is declared here.
+
+Deployment notes live in deploy/.env.example — keep the two in sync.
+"""
+from __future__ import annotations
+
+import os
+from pathlib import Path
+
+CONFIG_DIR = Path(os.environ.get("DHC_CONFIG_DIR", Path(__file__).resolve().parent.parent / "config"))
+DATA_DIR = Path(os.environ.get("DHC_DATA_DIR", "/app/data"))
+
+
+def _env(name: str, default: str = "") -> str:
+    return os.environ.get(name, default).strip()
+
+
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int(os.environ.get(name, "") or default)
+    except ValueError:
+        return default
+
+
+def _env_float(name: str, default: float) -> float:
+    try:
+        return float(os.environ.get(name, "") or default)
+    except ValueError:
+        return default
+
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    raw = os.environ.get(name)
+    if raw is None or raw.strip() == "":
+        return default
+    return raw.strip().lower() not in ("0", "false", "no", "off")
+
+
+# --- identity / crypto ------------------------------------------------------
+# MUST be a long random value in production. Startup refuses to serve without it
+# unless DHC_DEV=1 (see main.py).
+def auth_secret() -> str:
+    return _env("AUTH_SECRET")
+
+
+DEV_MODE = _env_bool("DHC_DEV", False)
+SESSION_COOKIE = "dhc_session"
+SESSION_TTL = _env_int("AUTH_TOKEN_TTL", 90 * 24 * 3600)  # browser session tokens
+DEVICE_TOKEN_TTL = _env_int("DEVICE_TOKEN_TTL", 365 * 24 * 3600)  # desktop device tokens
+
+# --- database ---------------------------------------------------------------
+DB_BACKEND = _env("DB_BACKEND", "sqlite")  # sqlite | postgres
+DB_PATH = _env("DB_PATH", str(DATA_DIR / "dhc.db"))
+POSTGRES_DSN = _env("POSTGRES_DSN")  # required when DB_BACKEND=postgres
+
+# --- upstream LLM (the money secret: never leaves this process) -------------
+UPSTREAM_BASE_URL = _env("UPSTREAM_BASE_URL", "https://api.deepseek.com")
+UPSTREAM_API_KEY = _env("UPSTREAM_API_KEY")
+# dsh's web_search speaks Anthropic Messages; DeepSeek official serves it under /anthropic/v1.
+UPSTREAM_ANTHROPIC_BASE = _env("UPSTREAM_ANTHROPIC_BASE", UPSTREAM_BASE_URL.rstrip("/") + "/anthropic/v1")
+UPSTREAM_TIMEOUT_S = _env_float("UPSTREAM_TIMEOUT_S", 600.0)
+
+# --- pricing / credits ------------------------------------------------------
+MODEL_PRICE_MARKUP = _env_float("MODEL_PRICE_MARKUP", 1.2)
+FREE_SIGNUP_CREDITS = _env_int("FREE_SIGNUP_CREDITS", 500)  # 1 credit = ¥0.01 of listed usage
+SEARCH_CALL_CREDITS = _env_int("SEARCH_CALL_CREDITS", 5)  # flat per web_search call, on top of tokens
+OVERDRAFT_LIMIT_CREDITS = _env_int("OVERDRAFT_LIMIT_CREDITS", 200)  # in-flight streams may finish
+
+# --- gateway guards ---------------------------------------------------------
+GATEWAY_QPS = _env_float("GATEWAY_QPS", 5.0)  # per-user requests/second (token bucket)
+GATEWAY_QPS_BURST = _env_int("GATEWAY_QPS_BURST", 15)
+ENTITLE_ENFORCE = _env_bool("ENTITLE_ENFORCE", True)  # escape hatch: 0 disables credit gating
+
+# --- public URLs ------------------------------------------------------------
+PUBLIC_BASE = _env("PUBLIC_BASE", "http://127.0.0.1:8100")  # e.g. https://dsh.example.com
+
+# --- mail (email verification codes) ----------------------------------------
+MAIL_SMTP_HOST = _env("MAIL_SMTP_HOST")
+MAIL_SMTP_PORT = _env_int("MAIL_SMTP_PORT", 465)
+MAIL_SMTP_USER = _env("MAIL_SMTP_USER")
+MAIL_SMTP_PASS = _env("MAIL_SMTP_PASS")
+MAIL_FROM = _env("MAIL_FROM", MAIL_SMTP_USER)
+
+# --- registration switches --------------------------------------------------
+ALLOW_REGISTRATION = _env_bool("ALLOW_REGISTRATION", True)
+
+# --- payments (a provider activates when its variables are set) -------------
+STRIPE_SECRET_KEY = _env("STRIPE_SECRET_KEY")
+STRIPE_WEBHOOK_SECRET = _env("STRIPE_WEBHOOK_SECRET")
+ALIPAY_APP_ID = _env("ALIPAY_APP_ID")
+ALIPAY_APP_PRIVATE_KEY = _env("ALIPAY_APP_PRIVATE_KEY")
+ALIPAY_PUBLIC_KEY = _env("ALIPAY_PUBLIC_KEY")
+WECHAT_PAY_MCHID = _env("WECHAT_PAY_MCHID")
+WECHAT_PAY_SERIAL_NO = _env("WECHAT_PAY_SERIAL_NO")
+WECHAT_PAY_PRIVATE_KEY_PATH = _env("WECHAT_PAY_PRIVATE_KEY_PATH")
+WECHAT_PAY_APIV3_KEY = _env("WECHAT_PAY_APIV3_KEY")
+WECHAT_PAY_APPID = _env("WECHAT_PAY_APPID")
+
+# --- admin ------------------------------------------------------------------
+ADMIN_EMAILS = [e.strip().lower() for e in _env("ADMIN_EMAILS").split(",") if e.strip()]
+
+# --- legal entity (rendered into legal pages; replace with your company) ----
+LEGAL_ENTITY_ZH = _env("LEGAL_ENTITY_ZH", "北京跃迁效应人工智能科技有限公司")
+LEGAL_ENTITY_EN = _env("LEGAL_ENTITY_EN", "Beijing AgentsDance AI Technology Co., Ltd.")
+LEGAL_CONTACT_EMAIL = _env("LEGAL_CONTACT_EMAIL", "support@agentsdance.ai")
+ICP_NUMBER = _env("ICP_NUMBER", "")  # e.g. 京ICP备XXXXXXXX号-X
+PSB_NUMBER = _env("PSB_NUMBER", "")  # e.g. 京公网安备XXXXXXXXXXXXX号

@@ -1,0 +1,228 @@
+"""SQLite / PostgreSQL dual-backend layer.
+
+Pattern proven in a sibling production system: callers write sqlite-style SQL (`?`
+placeholders, `with tx():` transactions, `row["col"]` access) and this layer
+translates for Postgres. Constructs that do not translate (INSERT OR REPLACE,
+strftime, AUTOINCREMENT) are banned in app code; schema below sticks to the
+portable subset.
+"""
+from __future__ import annotations
+
+import os
+import sqlite3
+import threading
+import time
+from contextlib import contextmanager
+
+from . import config
+
+_local = threading.local()
+_pg_pool = None
+_init_lock = threading.Lock()
+_initialized = False
+
+SCHEMA = [
+    """CREATE TABLE IF NOT EXISTS users (
+        id TEXT PRIMARY KEY,
+        email TEXT UNIQUE NOT NULL,
+        password_hash TEXT NOT NULL DEFAULT '',
+        display_name TEXT NOT NULL DEFAULT '',
+        role TEXT NOT NULL DEFAULT 'user',
+        status TEXT NOT NULL DEFAULT 'active',
+        session_epoch INTEGER NOT NULL DEFAULT 0,
+        created REAL NOT NULL,
+        last_login REAL NOT NULL DEFAULT 0
+    )""",
+    """CREATE TABLE IF NOT EXISTS email_codes (
+        email TEXT NOT NULL,
+        code_hash TEXT NOT NULL,
+        purpose TEXT NOT NULL,
+        expires REAL NOT NULL,
+        attempts INTEGER NOT NULL DEFAULT 0,
+        created REAL NOT NULL
+    )""",
+    """CREATE TABLE IF NOT EXISTS devices (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        name TEXT NOT NULL DEFAULT '',
+        platform TEXT NOT NULL DEFAULT '',
+        token_hash TEXT UNIQUE NOT NULL,
+        epoch INTEGER NOT NULL DEFAULT 0,
+        revoked INTEGER NOT NULL DEFAULT 0,
+        last_seen REAL NOT NULL DEFAULT 0,
+        created REAL NOT NULL
+    )""",
+    """CREATE TABLE IF NOT EXISTS device_codes (
+        device_code_hash TEXT PRIMARY KEY,
+        user_code TEXT UNIQUE NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending',
+        user_id TEXT NOT NULL DEFAULT '',
+        client_info TEXT NOT NULL DEFAULT '{}',
+        expires REAL NOT NULL,
+        created REAL NOT NULL
+    )""",
+    """CREATE TABLE IF NOT EXISTS subscriptions (
+        user_id TEXT PRIMARY KEY,
+        tier TEXT NOT NULL,
+        cycle TEXT NOT NULL,
+        started REAL NOT NULL,
+        expires REAL NOT NULL,
+        updated REAL NOT NULL
+    )""",
+    """CREATE TABLE IF NOT EXISTS credit_grants (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        amount INTEGER NOT NULL,
+        remaining INTEGER NOT NULL,
+        expires REAL NOT NULL,
+        kind TEXT NOT NULL,
+        ref TEXT NOT NULL DEFAULT '',
+        created REAL NOT NULL
+    )""",
+    """CREATE TABLE IF NOT EXISTS usage_log (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        device_id TEXT NOT NULL DEFAULT '',
+        kind TEXT NOT NULL,
+        model TEXT NOT NULL DEFAULT '',
+        uncached_input INTEGER NOT NULL DEFAULT 0,
+        cache_read INTEGER NOT NULL DEFAULT 0,
+        output INTEGER NOT NULL DEFAULT 0,
+        credits INTEGER NOT NULL DEFAULT 0,
+        request_id TEXT NOT NULL DEFAULT '',
+        created REAL NOT NULL
+    )""",
+    """CREATE TABLE IF NOT EXISTS orders (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        item TEXT NOT NULL,
+        amount_cents INTEGER NOT NULL,
+        currency TEXT NOT NULL DEFAULT 'CNY',
+        status TEXT NOT NULL DEFAULT 'pending',
+        provider_ref TEXT NOT NULL DEFAULT '',
+        created REAL NOT NULL,
+        paid_at REAL NOT NULL DEFAULT 0
+    )""",
+    """CREATE TABLE IF NOT EXISTS consents (
+        user_id TEXT NOT NULL,
+        doc TEXT NOT NULL,
+        version TEXT NOT NULL,
+        created REAL NOT NULL
+    )""",
+    """CREATE TABLE IF NOT EXISTS kv (
+        k TEXT PRIMARY KEY,
+        v TEXT NOT NULL
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_grants_user ON credit_grants(user_id, expires)",
+    "CREATE INDEX IF NOT EXISTS idx_usage_user ON usage_log(user_id, created)",
+    "CREATE INDEX IF NOT EXISTS idx_orders_user ON orders(user_id, created)",
+    "CREATE INDEX IF NOT EXISTS idx_devices_user ON devices(user_id)",
+    "CREATE INDEX IF NOT EXISTS idx_email_codes ON email_codes(email, purpose)",
+]
+
+
+class _PgConn:
+    """Adapts a psycopg connection to the sqlite calling convention."""
+
+    def __init__(self, conn):
+        self._conn = conn
+
+    def execute(self, sql: str, params: tuple = ()):  # noqa: ANN001
+        cur = self._conn.cursor()
+        cur.execute(sql.replace("?", "%s"), params)
+        return cur
+
+    def commit(self) -> None:
+        self._conn.commit()
+
+    def rollback(self) -> None:
+        self._conn.rollback()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, *_):
+        if exc_type is None:
+            self._conn.commit()
+        else:
+            self._conn.rollback()
+        return False
+
+
+def _sqlite_conn() -> sqlite3.Connection:
+    conn = getattr(_local, "conn", None)
+    if conn is None:
+        os.makedirs(os.path.dirname(config.DB_PATH) or ".", exist_ok=True)
+        conn = sqlite3.connect(config.DB_PATH, timeout=30, check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=30000")
+        conn.execute("PRAGMA foreign_keys=ON")
+        _local.conn = conn
+    return conn
+
+
+def _postgres_conn():
+    global _pg_pool
+    if _pg_pool is None:
+        import psycopg
+        from psycopg.rows import dict_row
+        from psycopg_pool import ConnectionPool  # type: ignore[import-not-found]
+
+        _pg_pool = ConnectionPool(config.POSTGRES_DSN, min_size=1, max_size=10,
+                                  kwargs={"row_factory": dict_row, "autocommit": False})
+    return _pg_pool
+
+
+@contextmanager
+def tx():
+    """Transaction scope. Commits on success, rolls back on exception."""
+    ensure_schema()
+    if config.DB_BACKEND == "postgres":
+        pool = _postgres_conn()
+        with pool.connection() as raw:
+            yield _PgConn(raw)
+    else:
+        conn = _sqlite_conn()
+        with conn:
+            yield conn
+
+
+def query(sql: str, params: tuple = ()) -> list:
+    with tx() as conn:
+        return list(conn.execute(sql, params).fetchall())
+
+
+def query_one(sql: str, params: tuple = ()):
+    rows = query(sql, params)
+    return rows[0] if rows else None
+
+
+def ensure_schema() -> None:
+    global _initialized
+    if _initialized:
+        return
+    with _init_lock:
+        if _initialized:
+            return
+        if config.DB_BACKEND == "postgres":
+            pool = _postgres_conn()
+            with pool.connection() as raw:
+                for stmt in SCHEMA:
+                    raw.execute(_pg_schema(stmt))
+                raw.commit()
+        else:
+            conn = _sqlite_conn()
+            with conn:
+                for stmt in SCHEMA:
+                    conn.execute(stmt)
+        _initialized = True
+
+
+def _pg_schema(stmt: str) -> str:
+    return stmt.replace("REAL", "DOUBLE PRECISION").replace("INTEGER", "BIGINT")
+
+
+def now() -> float:
+    return time.time()
