@@ -1,0 +1,309 @@
+"""Server-rendered web console: landing, auth pages, device activation,
+dashboard, pricing, orders, legal, download.
+
+Pages are Jinja2-rendered shells; interactivity is small vanilla JS in
+static/app.js that talks to the JSON APIs. This router is included LAST by
+main.py. All templates share templates/base.html.
+"""
+from __future__ import annotations
+
+import html
+import os
+import re
+import time
+from pathlib import Path
+
+from fastapi import APIRouter, Request
+from fastapi.responses import RedirectResponse
+from fastapi.templating import Jinja2Templates
+
+from . import config, credits, plans
+from .accounts import try_resolve_user
+
+router = APIRouter(include_in_schema=False)
+
+TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
+# repo-root legal/ documents (terms.zh.md, ...). Overridable for tests/deploys.
+def _legal_dir() -> Path:
+    # resolved per request so tests/deploys can repoint via env at any time
+    return Path(os.environ.get("DHC_LEGAL_DIR") or Path(__file__).resolve().parents[2] / "legal")
+
+templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+
+
+# --- shared context ----------------------------------------------------------
+
+def _ctx(request: Request, page: str, **extra) -> dict:
+    try:
+        user = try_resolve_user(request)
+    except Exception:
+        user = None
+    ctx = {
+        "request": request,
+        "page": page,
+        "user": user,
+        "public_base": config.PUBLIC_BASE,
+        "icp_number": config.ICP_NUMBER,
+        "psb_number": config.PSB_NUMBER,
+        "legal_entity_zh": config.LEGAL_ENTITY_ZH,
+        "legal_contact_email": config.LEGAL_CONTACT_EMAIL,
+        "year": time.localtime().tm_year,
+    }
+    ctx.update(extra)
+    return ctx
+
+
+def _render(request: Request, template: str, page: str, **extra):
+    return templates.TemplateResponse(request, template, _ctx(request, page, **extra))
+
+
+def _pricing_safe() -> dict:
+    try:
+        return plans.pricing()
+    except Exception:
+        return {"currency": "CNY", "tiers": {}, "packs": {}}
+
+
+def _fmt_ts(ts: float | None) -> str:
+    if not ts:
+        return "—"
+    return time.strftime("%Y-%m-%d %H:%M", time.localtime(float(ts)))
+
+
+def _fmt_date(ts: float | None) -> str:
+    if not ts:
+        return "—"
+    return time.strftime("%Y-%m-%d", time.localtime(float(ts)))
+
+
+# --- minimal markdown -> HTML (headings/paragraphs/lists/bold/links/tables) --
+
+_H_RE = re.compile(r"^(#{1,6})\s+(.*)$")
+_UL_RE = re.compile(r"^\s*[-*+]\s+(.*)$")
+_OL_RE = re.compile(r"^\s*\d+[.)]\s+(.*)$")
+_HR_RE = re.compile(r"^\s*(-{3,}|\*{3,}|_{3,})\s*$")
+_SEP_CELL_RE = re.compile(r"^:?-{3,}:?$")
+_CODE_RE = re.compile(r"`([^`]+)`")
+_BOLD_RE = re.compile(r"\*\*(.+?)\*\*")
+_LINK_RE = re.compile(r"\[([^\]]+)\]\(((?:https?://|mailto:|/)[^)\s]*)\)")
+
+
+def _inline(text: str) -> str:
+    text = html.escape(text)
+    text = _CODE_RE.sub(r"<code>\1</code>", text)
+    text = _BOLD_RE.sub(r"<strong>\1</strong>", text)
+    text = _LINK_RE.sub(r'<a href="\2" rel="noopener">\1</a>', text)
+    return text
+
+
+def _split_row(line: str) -> list[str]:
+    return [c.strip() for c in line.strip().strip("|").split("|")]
+
+
+def markdown_to_html(md: str) -> str:
+    """Tiny, dependency-free converter for the legal documents. Escapes all
+    input first; supports headings, paragraphs, ul/ol lists, bold, inline
+    code, links and pipe tables. Anything else degrades to plain paragraphs."""
+    out: list[str] = []
+    para: list[str] = []
+    list_tag: str | None = None
+    table: list[str] = []
+
+    def flush_para() -> None:
+        if para:
+            out.append("<p>" + _inline(" ".join(para)) + "</p>")
+            para.clear()
+
+    def close_list() -> None:
+        nonlocal list_tag
+        if list_tag:
+            out.append(f"</{list_tag}>")
+            list_tag = None
+
+    def flush_table() -> None:
+        if not table:
+            return
+        rows = [_split_row(r) for r in table]
+        has_header = len(rows) >= 2 and all(_SEP_CELL_RE.match(c) for c in rows[1] if c)
+        out.append('<div class="table-wrap"><table>')
+        body = rows
+        if has_header:
+            out.append("<thead><tr>" + "".join(f"<th>{_inline(c)}</th>" for c in rows[0]) + "</tr></thead>")
+            body = rows[2:]
+        out.append("<tbody>")
+        for r in body:
+            out.append("<tr>" + "".join(f"<td>{_inline(c)}</td>" for c in r) + "</tr>")
+        out.append("</tbody></table></div>")
+        table.clear()
+
+    for raw in md.replace("\r\n", "\n").split("\n"):
+        line = raw.rstrip()
+        stripped = line.strip()
+
+        if stripped.startswith("|") or (table and "|" in stripped and stripped):
+            flush_para()
+            close_list()
+            table.append(stripped)
+            continue
+        flush_table()
+
+        if not stripped:
+            flush_para()
+            close_list()
+            continue
+
+        m = _H_RE.match(stripped)
+        if m:
+            flush_para()
+            close_list()
+            level = len(m.group(1))
+            out.append(f"<h{level}>{_inline(m.group(2))}</h{level}>")
+            continue
+
+        if _HR_RE.match(stripped):
+            flush_para()
+            close_list()
+            out.append("<hr>")
+            continue
+
+        m = _UL_RE.match(line)
+        if m:
+            flush_para()
+            if list_tag != "ul":
+                close_list()
+                out.append("<ul>")
+                list_tag = "ul"
+            out.append(f"<li>{_inline(m.group(1))}</li>")
+            continue
+
+        m = _OL_RE.match(line)
+        if m:
+            flush_para()
+            if list_tag != "ol":
+                close_list()
+                out.append("<ol>")
+                list_tag = "ol"
+            out.append(f"<li>{_inline(m.group(1))}</li>")
+            continue
+
+        para.append(stripped)
+
+    flush_para()
+    close_list()
+    flush_table()
+    return "\n".join(out)
+
+
+# --- landing -----------------------------------------------------------------
+
+@router.get("/")
+def landing(request: Request):
+    pricing = _pricing_safe()
+    return _render(request, "index.html", "landing", pricing=pricing)
+
+
+# --- auth pages --------------------------------------------------------------
+
+@router.get("/login")
+def login_page(request: Request, next: str = "/console"):
+    return _render(request, "login.html", "login")
+
+
+@router.get("/activate")
+def activate_page(request: Request, code: str = ""):
+    return _render(request, "activate.html", "activate", code=code.strip().upper())
+
+
+# --- console -----------------------------------------------------------------
+
+@router.get("/console")
+def console_page(request: Request):
+    user = try_resolve_user(request)
+    if user is None:
+        return RedirectResponse("/login?next=/console", status_code=303)
+    uid = user["id"]
+    balance = credits.balance(uid)
+    plan = plans.current_plan(uid)
+    lt = time.localtime()
+    month_start = time.mktime((lt.tm_year, lt.tm_mon, 1, 0, 0, 0, 0, 0, -1))
+    usage = credits.usage_since(uid, month_start)
+    recent = []
+    for row in credits.recent_usage(uid, 20):
+        r = dict(row)
+        r["created_str"] = _fmt_ts(r.get("created"))
+        recent.append(r)
+    return _render(
+        request, "console.html", "console",
+        balance=balance,
+        balance_yuan=f"{balance / 100:.2f}",
+        plan=plan,
+        plan_expires_str=_fmt_date(plan.get("expires")) if plan.get("tier") != "free" else "",
+        usage=usage,
+        recent=recent,
+    )
+
+
+# --- pricing / orders --------------------------------------------------------
+
+@router.get("/pricing")
+def pricing_page(request: Request):
+    pricing = _pricing_safe()
+    tier_order = [t for t in ("free", "plus", "pro", "max") if t in pricing.get("tiers", {})]
+    return _render(request, "pricing.html", "pricing", pricing=pricing, tier_order=tier_order)
+
+
+@router.get("/orders")
+def orders_page(request: Request):
+    user = try_resolve_user(request)
+    if user is None:
+        return RedirectResponse("/login?next=/orders", status_code=303)
+    return _render(request, "orders.html", "orders")
+
+
+# --- legal -------------------------------------------------------------------
+
+LEGAL_DOCS = {
+    "terms": "服务条款",
+    "privacy": "隐私政策",
+    "refund": "退款政策",
+    "aup": "可接受使用政策",
+}
+
+
+@router.get("/legal/{doc}")
+def legal_page(request: Request, doc: str):
+    if doc not in LEGAL_DOCS:
+        return RedirectResponse("/legal/terms", status_code=303)
+    title = LEGAL_DOCS[doc]
+    path = _legal_dir() / f"{doc}.zh.md"
+    body_html = ""
+    pending = True
+    try:
+        if path.is_file():
+            body_html = markdown_to_html(path.read_text(encoding="utf-8"))
+            pending = False
+    except Exception:
+        body_html, pending = "", True
+    return _render(request, "legal.html", f"legal-{doc}",
+                   doc=doc, doc_title=title, body_html=body_html, pending=pending)
+
+
+@router.get("/privacy")
+def privacy_redirect():
+    return RedirectResponse("/legal/privacy", status_code=308)
+
+
+@router.get("/terms")
+def terms_redirect():
+    return RedirectResponse("/legal/terms", status_code=308)
+
+
+# --- download ----------------------------------------------------------------
+
+@router.get("/download")
+def download_page(request: Request):
+    return _render(
+        request, "download.html", "download",
+        url_mac=os.environ.get("DOWNLOAD_URL_MAC", "").strip(),
+        url_win=os.environ.get("DOWNLOAD_URL_WIN", "").strip(),
+    )

@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}下载 — DSH Cloud{% endblock %}
+{% block content %}
+<section class="section">
+  <div class="container">
+    <h1 class="section-title">下载 DSH 桌面应用</h1>
+    <p class="center muted">安装后在应用内登录 DSH Cloud 账号即可使用。</p>
+    <div class="grid grid-2 dl-grid">
+      <div class="card dl-card center">
+        <div class="dl-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a5 5 0 0 1 5 5c0 1-.3 2-.8 2.8C18.9 11 21 13.6 21 17c0 3-2 5-5 5H8c-3 0-5-2-5-5 0-3.4 2.1-6 4.8-7.2A5 5 0 0 1 12 2Z"/></svg>
+        </div>
+        <h3>macOS</h3>
+        <p class="muted small">Apple Silicon / Intel · macOS 12+</p>
+        {% if url_mac %}
+          <a class="btn btn-primary btn-block" href="{{ url_mac }}" rel="noopener">下载 .dmg</a>
+        {% else %}
+          <button class="btn btn-ghost btn-block" type="button" disabled>即将上线</button>
+        {% endif %}
+      </div>
+      <div class="card dl-card center">
+        <div class="dl-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="13" rx="1.5"/><path d="M8 21h8M12 17v4"/></svg>
+        </div>
+        <h3>Windows</h3>
+        <p class="muted small">Windows 10 / 11 · x64</p>
+        {% if url_win %}
+          <a class="btn btn-primary btn-block" href="{{ url_win }}" rel="noopener">下载 .exe</a>
+        {% else %}
+          <button class="btn btn-ghost btn-block" type="button" disabled>即将上线</button>
+        {% endif %}
+      </div>
+    </div>
+    <p class="center muted small">安装遇到问题？联系 <a href="mailto:{{ legal_contact_email }}">{{ legal_contact_email }}</a></p>
+  </div>
+</section>
+{% endblock %}

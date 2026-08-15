@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block title %}DSH Cloud — 桌面 AI 编程助手的云服务{% endblock %}
+{% block content %}
+<section class="hero">
+  <div class="container">
+    <h1>桌面 AI 编程助手 DSH 的<span class="accent">云服务版</span></h1>
+    <p class="hero-sub">登录即用、无需自购 API Key、免费额度起步。<br>
+      账号、积分与统一 LLM 网关，一次登录，桌面端直接开工。</p>
+    <div class="hero-actions">
+      <a class="btn btn-primary btn-lg" href="/download">下载桌面应用</a>
+      <a class="btn btn-ghost btn-lg" href="/login">登录 / 注册</a>
+    </div>
+    <p class="muted hero-note">新用户注册即送免费积分 · 无需绑定信用卡</p>
+  </div>
+</section>
+
+<section class="section">
+  <div class="container">
+    <h2 class="section-title">为什么选择 DSH Cloud</h2>
+    <div class="grid grid-3">
+      <div class="card feature">
+        <div class="feature-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="var(--accent)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 4 14h6l-1 8 9-12h-6z"/></svg>
+        </div>
+        <h3>登录即用</h3>
+        <p>在桌面应用里扫码授权，30 秒完成绑定。不用申请 API Key，不用配置代理，登录后直接开始写代码。</p>
+      </div>
+      <div class="card feature">
+        <div class="feature-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="var(--accent)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 10h18M7 15h4"/></svg>
+        </div>
+        <h3>按量积分计费</h3>
+        <p>1 积分 = ¥0.01 牌价用量，用多少扣多少。免费额度起步，套餐或积分包按需加购，账单在控制台一目了然。</p>
+      </div>
+      <div class="card feature">
+        <div class="feature-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="var(--accent)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 4 7v5c0 5 3.5 8 8 9 4.5-1 8-4 8-9V7z"/><path d="m9 12 2 2 4-4"/></svg>
+        </div>
+        <h3>统一 LLM 网关</h3>
+        <p>云端统一接入上游大模型，密钥不出服务器。设备可随时吊销，改密码即全端下线，安全省心。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section section-alt">
+  <div class="container">
+    <h2 class="section-title">定价一览</h2>
+    <div class="grid grid-3 teaser-grid">
+      {% for tier in ['plus', 'pro', 'max'] %}
+        {% set t = pricing.tiers.get(tier) %}
+        {% if t %}
+        <div class="card price-teaser {% if tier == 'pro' %}highlight{% endif %}">
+          {% if tier == 'pro' %}<div class="ribbon">最受欢迎</div>{% endif %}
+          <h3>{{ t.name }}</h3>
+          <div class="price"><span class="currency">¥</span>{{ t.monthly_cents // 100 }}<span class="per">/月</span></div>
+          <ul class="plain">
+            <li>每月 {{ '{:,}'.format(t.monthly_credits) }} 积分</li>
+            <li>{{ t.concurrency }} 路并发</li>
+          </ul>
+          <a class="btn {% if tier == 'pro' %}btn-primary{% else %}btn-ghost{% endif %} btn-block" href="/pricing">查看详情</a>
+        </div>
+        {% endif %}
+      {% endfor %}
+    </div>
+    <p class="center muted">还有免费版与按量积分包 · <a href="/pricing">查看完整定价 →</a></p>
+  </div>
+</section>
+
+<section class="section">
+  <div class="container center">
+    <h2 class="section-title">三步开始</h2>
+    <div class="grid grid-3 steps">
+      <div class="step"><div class="step-num">1</div><p>下载并安装 DSH 桌面应用</p></div>
+      <div class="step"><div class="step-num">2</div><p>在应用内点击登录，浏览器授权设备</p></div>
+      <div class="step"><div class="step-num">3</div><p>回到应用，开始 AI 编程</p></div>
+    </div>
+    <a class="btn btn-primary btn-lg" href="/download">立即下载</a>
+  </div>
+</section>
+{% endblock %}

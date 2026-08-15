@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}设备授权 — DSH Cloud{% endblock %}
+{% block content %}
+<section class="auth-wrap">
+  <div class="card auth-card" id="activate-card" data-code="{{ code }}" data-authed="{{ '1' if user else '' }}">
+    <h1 class="auth-title">设备授权</h1>
+
+    <div id="act-lookup" {% if code %}hidden{% endif %}>
+      <p class="muted">请输入桌面应用中显示的授权码：</p>
+      <form id="form-code-lookup">
+        <label>授权码
+          <input type="text" name="code" required placeholder="例如 ABCD-1234" value="{{ code }}" autocapitalize="characters">
+        </label>
+        <button class="btn btn-primary btn-block" type="submit">查询设备</button>
+      </form>
+    </div>
+
+    <div id="act-info" hidden>
+      <p class="muted">以下设备请求访问您的 DSH Cloud 账号：</p>
+      <div class="device-box">
+        <div class="device-line"><span class="muted">设备名称</span><strong id="act-device-name">—</strong></div>
+        <div class="device-line"><span class="muted">操作系统</span><span id="act-device-platform">—</span></div>
+        <div class="device-line"><span class="muted">应用版本</span><span id="act-device-version">—</span></div>
+        <div class="device-line"><span class="muted">授权码</span><code id="act-code-echo">—</code></div>
+      </div>
+
+      <div id="act-login" hidden>
+        <p class="notice">请先登录，再完成设备授权。</p>
+        <form id="form-act-login">
+          <label>邮箱
+            <input type="email" name="email" required placeholder="you@example.com" autocomplete="email">
+          </label>
+          <label>密码
+            <input type="password" name="password" required autocomplete="current-password">
+          </label>
+          <p class="form-error" id="act-login-error" hidden></p>
+          <button class="btn btn-primary btn-block" type="submit">登录</button>
+        </form>
+        <p class="muted small center"><a id="act-login-full" href="/login">使用邮箱验证码登录 / 注册 →</a></p>
+      </div>
+
+      <div id="act-actions" hidden>
+        <p class="form-error" id="act-error" hidden></p>
+        <div class="btn-row">
+          <button class="btn btn-primary btn-lg" id="btn-approve" type="button">授权此设备</button>
+          <button class="btn btn-danger-ghost btn-lg" id="btn-deny" type="button">拒绝</button>
+        </div>
+        <p class="muted small center" id="act-as" hidden></p>
+      </div>
+    </div>
+
+    <div id="act-done" class="center" hidden>
+      <div class="big-ok" aria-hidden="true">✓</div>
+      <h2 id="act-done-title">已授权</h2>
+      <p class="muted" id="act-done-msg">已授权，回到桌面应用即可。</p>
+    </div>
+
+    <div id="act-notfound" class="center" hidden>
+      <h2>授权码无效或已过期</h2>
+      <p class="muted">请回到桌面应用重新发起登录，获取新的授权码。</p>
+      <button class="btn btn-ghost" type="button" id="btn-act-retry">重新输入授权码</button>
+    </div>
+  </div>
+</section>
+{% endblock %}

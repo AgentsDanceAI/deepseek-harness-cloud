@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}登录 — DSH Cloud{% endblock %}
+{% block content %}
+<section class="auth-wrap">
+  <div class="card auth-card">
+    <h1 class="auth-title">登录 DSH Cloud</h1>
+
+    <div class="tabs" role="tablist">
+      <button class="tab active" data-tab="pw" type="button">密码登录</button>
+      <button class="tab" data-tab="code" type="button">邮箱验证码登录</button>
+    </div>
+
+    <form id="form-pw" class="tab-panel" autocomplete="on">
+      <label>邮箱
+        <input type="email" name="email" required placeholder="you@example.com" autocomplete="email">
+      </label>
+      <label>密码
+        <input type="password" name="password" required minlength="8" placeholder="至少 8 位" autocomplete="current-password">
+      </label>
+      <p class="form-error" id="pw-error" hidden></p>
+      <button class="btn btn-primary btn-block" type="submit">登录</button>
+    </form>
+
+    <form id="form-code" class="tab-panel" hidden autocomplete="on">
+      <label>邮箱
+        <input type="email" name="email" required placeholder="you@example.com" autocomplete="email">
+      </label>
+      <label>验证码
+        <span class="code-row">
+          <input type="text" name="code" required pattern="\d{6}" maxlength="6" inputmode="numeric" placeholder="6 位数字">
+          <button class="btn btn-ghost" type="button" id="btn-send-code">发送验证码</button>
+        </span>
+      </label>
+      <p class="form-error" id="code-error" hidden></p>
+      <button class="btn btn-primary btn-block" type="submit">登录 / 注册</button>
+      <p class="muted small">未注册的邮箱通过验证码登录后将自动创建账号。</p>
+    </form>
+
+    <div class="auth-divider"><span>还没有账号？</span></div>
+
+    <form id="form-reg" autocomplete="on">
+      <details>
+        <summary class="reg-link">使用邮箱 + 密码注册</summary>
+        <label>邮箱
+          <input type="email" name="email" required placeholder="you@example.com" autocomplete="email">
+        </label>
+        <label>密码
+          <input type="password" name="password" required minlength="8" placeholder="设置密码（至少 8 位）" autocomplete="new-password">
+        </label>
+        <p class="form-error" id="reg-error" hidden></p>
+        <p class="muted small">注册即表示同意 <a href="/legal/terms">服务条款</a> 与 <a href="/legal/privacy">隐私政策</a>。</p>
+        <button class="btn btn-primary btn-block" type="submit">注册</button>
+      </details>
+    </form>
+  </div>
+</section>
+{% endblock %}
