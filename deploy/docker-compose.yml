@@ -1,0 +1,44 @@
+# deepseek-harness-cloud — single-box deployment
+#
+#   cp deploy/.env.example deploy/.env   # fill in secrets
+#   docker compose -f deploy/docker-compose.yml --env-file deploy/.env up -d --build
+#
+# Caddy is the only public listener; the app binds loopback-only.
+services:
+  dhc-server:
+    build:
+      context: ../server
+    restart: unless-stopped
+    env_file: [".env"]
+    environment:
+      DHC_DATA_DIR: /app/data
+    volumes:
+      - dhc-data:/app/data
+    ports:
+      - "127.0.0.1:8100:8100"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8100/api/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  dhc-caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on: [dhc-server]
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DHC_DOMAIN: ${DHC_DOMAIN:-dshcloud.example.com}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+      - releases:/srv/releases:ro   # desktop installers served at /releases/*
+
+volumes:
+  dhc-data:
+  caddy-data:
+  caddy-config:
+  releases:

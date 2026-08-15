@@ -1,0 +1,16 @@
+# Public entry. Automatic HTTPS via Let's Encrypt once DNS points here.
+{$DHC_DOMAIN} {
+	encode gzip
+
+	# Desktop installer downloads (drop files into the `releases` volume;
+	# the desktop update endpoints below redirect here).
+	handle_path /releases/* {
+		root * /srv/releases
+		file_server
+	}
+
+	# Everything else -> the app (gateway streams need no buffering).
+	reverse_proxy dhc-server:8100 {
+		flush_interval -1
+	}
+}

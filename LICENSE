@@ -1,0 +1,15 @@
+deepseek-harness-cloud Private Repository License Notice
+
+Copyright (c) 2026 Beijing AgentsDance AI Technology Co., Ltd.
+All rights reserved.
+
+This repository, including its cloud service, billing, gateway, desktop
+overlay, and operations code, is confidential and is not licensed for public
+use, copying, modification, or redistribution except under a separate written
+agreement with Beijing AgentsDance AI Technology Co., Ltd.
+
+Third-party components retain their own licenses. The upstream projects
+deepseek-harness (Copyright (c) 2026 DeepSeek) and deepseek-harness-desktop
+(Copyright (c) 2026 Anywhere Labs) are licensed under the MIT License; see
+legal/THIRD_PARTY_NOTICES.md for the full notices that accompany any
+distributed desktop build.

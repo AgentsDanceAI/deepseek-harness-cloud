@@ -25,6 +25,7 @@ def create_app() -> FastAPI:
 
     from .accounts import router as accounts_router
     from .admin import router as admin_router
+    from .desktop_updates import router as updates_router
     from .device_auth import router as device_router
     from .gateway import router as gateway_router
     from .payments.api import router as payments_router
@@ -35,6 +36,7 @@ def create_app() -> FastAPI:
     app.include_router(gateway_router)
     app.include_router(payments_router)
     app.include_router(admin_router)
+    app.include_router(updates_router)
 
     static_dir = Path(__file__).parent / "static"
     if static_dir.is_dir():
