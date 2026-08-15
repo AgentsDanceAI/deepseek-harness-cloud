@@ -109,10 +109,11 @@ def test_legal_pages_placeholder_when_missing(client):
         assert "文档整理中" in r.text, doc
 
 
-def test_legal_page_renders_markdown(client):
-    from app import webpages
-
-    path = webpages._legal_dir() / "terms.zh.md"
+def test_legal_page_renders_markdown(client, tmp_path, monkeypatch):
+    # A dedicated tmp dir per run: this test writes and deletes a fixture file,
+    # and must never be able to touch the repo's real legal/ documents.
+    monkeypatch.setenv("DHC_LEGAL_DIR", str(tmp_path))
+    path = tmp_path / "terms.zh.md"
     path.write_text(
         "# 服务条款\n\n欢迎使用 **DSH Cloud**。\n\n- 第一条\n- 第二条\n\n"
         "| 项目 | 说明 |\n|---|---|\n| 积分 | 1 积分 = ¥0.01 |\n\n"
