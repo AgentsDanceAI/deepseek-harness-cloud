@@ -18,7 +18,7 @@ os.environ.update({
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
-from app import config, credits, db, zhipu_search  # noqa: E402
+from app import config, credits, db, rate_limit, zhipu_search  # noqa: E402
 from app.main import app  # noqa: E402
 
 
@@ -28,6 +28,7 @@ def _zhipu_mode(monkeypatch):
     # race); pin the ones this file depends on so suite order never matters.
     monkeypatch.setattr(config, "SEARCH_PROVIDER", "zhipu")
     monkeypatch.setattr(config, "ZHIPU_SEARCH_API_KEY", "zhipu-test-key")
+    rate_limit._windows.clear()  # reset shared per-IP register cap across suite
 
 
 def test_extract_query_strips_prefix():

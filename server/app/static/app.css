@@ -614,3 +614,11 @@ body[data-page="landing"] .brand:hover { color: #fff; }
 body[data-page="landing"] .site-nav a:not(.btn) { color: rgba(220, 231, 247, .75); }
 body[data-page="landing"] .site-nav a:not(.btn):hover,
 body[data-page="landing"] .site-nav a.active { color: #fff; }
+
+/* ---------- workspace starting spinner ---------- */
+.spinner {
+  width: 34px; height: 34px; border-radius: 999px;
+  border: 3px solid var(--brand-weak); border-top-color: var(--brand);
+  animation: spin 0.9s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }

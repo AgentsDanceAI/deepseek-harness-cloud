@@ -67,8 +67,10 @@ def try_resolve_user(request: Request) -> dict | None:
 
 def set_session_cookie(response: Response, user: dict) -> None:
     token = security.sign_token(user["id"], epoch=int(user["session_epoch"]))
+    extra = {"domain": config.COOKIE_DOMAIN} if config.COOKIE_DOMAIN else {}
     response.set_cookie(config.SESSION_COOKIE, token, max_age=config.SESSION_TTL,
-                        httponly=True, samesite="lax", secure=not config.DEV_MODE, path="/")
+                        httponly=True, samesite="lax", secure=not config.DEV_MODE,
+                        path="/", **extra)
 
 
 def _client_ip(request: Request) -> str:

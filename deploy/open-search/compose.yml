@@ -1,15 +1,14 @@
-# open-search.ai deployment — DHC server only.
+# open-search.ai deployment — DHC server + scoped docker proxy (cloud workspaces).
 #
 # The host's 80/443 and open-search.ai's TLS/Cloudflare origin are already owned
 # by the existing `the shared Caddy`. So we do NOT run our own Caddy here:
-# we run just the app on a shared docker network, connect that Caddy to the same
-# network, and point the open-search.ai site block at dhc-server:8100.
+# we run the app on shared docker networks, connect that Caddy to them, and
+# point the open-search.ai / work.open-search.ai site blocks at us.
 #
 #   docker network create dhc-net 2>/dev/null || true
+#   docker network create dshwork-net 2>/dev/null || true
 #   docker compose -f deploy/open-search/compose.yml --env-file deploy/open-search/.env up -d --build
-#   docker network connect dhc-net the shared Caddy 2>/dev/null || true
-#   # then edit the open-search.ai block in Caddyfile.gpu -> reverse_proxy dhc-server:8100
-#   # and: docker exec the shared Caddy caddy reload --config /etc/caddy/Caddyfile
+#   bash deploy/open-search/cutover.sh   # idempotent: networks + caddy blocks
 services:
   dhc-server:
     build:
@@ -24,18 +23,43 @@ services:
       - dhc-data:/app/data
     networks:
       - dhc-net
+      - dshwork-net    # reach per-user dsh containers for readiness probes
     expose:
       - "8100"
+    depends_on:
+      - dhc-docker-proxy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8100/api/health')"]
       interval: 30s
       timeout: 5s
       retries: 3
 
+  # Scoped docker socket: dhc-server manages ONLY containers/networks, never the
+  # raw socket. POST enabled so it can create/start/stop; exec/volumes denied.
+  dhc-docker-proxy:
+    image: tecnativa/docker-socket-proxy
+    container_name: dhc-docker-proxy
+    restart: unless-stopped
+    environment:
+      CONTAINERS: 1
+      NETWORKS: 1
+      IMAGES: 1
+      INFO: 1
+      POST: 1
+      EXEC: 0
+      VOLUMES: 0
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - dhc-net
+
 networks:
   dhc-net:
     external: true
     name: dhc-net
+  dshwork-net:
+    external: true
+    name: dshwork-net
 
 volumes:
   dhc-data:

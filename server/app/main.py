@@ -31,6 +31,7 @@ def create_app() -> FastAPI:
     from .oauth import router as oauth_router
     from .payments.api import router as payments_router
     from .webpages import router as pages_router
+    from .workspace import router as workspace_router
 
     app.include_router(accounts_router)
     app.include_router(oauth_router)
@@ -39,6 +40,15 @@ def create_app() -> FastAPI:
     app.include_router(payments_router)
     app.include_router(admin_router)
     app.include_router(updates_router)
+    app.include_router(workspace_router)
+
+    if config.WORK_ENABLED:
+        from .workspace import billing_reaper_loop
+
+        @app.on_event("startup")
+        async def _start_workspace_loop() -> None:
+            import asyncio
+            app.state.workspace_loop = asyncio.create_task(billing_reaper_loop())
 
     static_dir = Path(__file__).parent / "static"
     if static_dir.is_dir():
