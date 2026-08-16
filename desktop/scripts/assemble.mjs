@@ -9,7 +9,7 @@
  * commands (corepack yarn install / yarn build / yarn package:dir).
  */
 import { execFileSync } from 'node:child_process'
-import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -24,6 +24,8 @@ const opt = (name, fallback) => {
   return index >= 0 && args[index + 1] !== undefined ? args[index + 1] : fallback
 }
 const dest = resolve(opt('--dest', join(desktopDir, 'build', 'upstream')))
+/** Packaging glob for the login-wall assets; asserted by verify-contract. */
+export const CLOUD_ASSET_GLOB = 'build/cloud/**'
 
 const run = (command, cmdArgs, cwd) => execFileSync(command, cmdArgs, { cwd, stdio: 'inherit' })
 const capture = (command, cmdArgs, cwd) =>
@@ -65,6 +67,27 @@ cpSync(join(desktopDir, 'dsh-plugin-cloud', 'src'),
 cpSync(join(desktopDir, 'dsh-plugin-cloud', 'assets'),
   join(dest, 'dsh-plugin-desktop', 'build', 'cloud'), { recursive: true })
 console.log('assemble: copied dsh-plugin-cloud sources and assets')
+
+// 4b. electron-builder's `files` is an explicit ALLOW-LIST: upstream names its
+// icons under build/ one by one, so copying assets into build/cloud/ is not
+// enough — anything unlisted is silently dropped at packaging time. That is
+// exactly what shipped 2.0.0 with no login.html: the login window loaded a
+// missing file and rendered a blank white page. Registered programmatically
+// rather than as a patch so an upstream edit to package.json cannot drop it.
+{
+  const manifestPath = join(dest, 'dsh-plugin-desktop', 'package.json')
+  const pkg = JSON.parse(readFileSync(manifestPath, 'utf8'))
+  const files = pkg.build?.files
+  if (!Array.isArray(files)) {
+    throw new Error('assemble: upstream build.files is not an array — the cloud '
+      + 'assets can no longer be registered; re-check the packaging contract')
+  }
+  if (!files.includes(CLOUD_ASSET_GLOB)) {
+    files.push(CLOUD_ASSET_GLOB)
+    writeFileSync(manifestPath, `${JSON.stringify(pkg, null, 2)}\n`)
+  }
+  console.log(`assemble: registered ${CLOUD_ASSET_GLOB} in build.files`)
+}
 
 // 5. redistribution guard: the identity-scoped @anthropic-ai/claude-agent-sdk
 // authorization does not extend to us; the desktop tree must not depend on it.

@@ -52,6 +52,11 @@ jobs:
         run: |
           node -e "const fs=require('fs');const j=JSON.parse(fs.readFileSync('package.json','utf8'));j.build.publish=null;fs.writeFileSync('package.json',JSON.stringify(j,null,2))"
           corepack yarn exec electron-builder -- --win nsis --publish=never
+      - name: Verify login assets shipped
+        # electron-builder's `files` is an allow-list and drops unlisted paths
+        # SILENTLY: 2.0.0 shipped with no login.html and every user got a blank
+        # window. Only the artifact can prove it made it in.
+        run: node desktop/scripts/verify-package.mjs desktop/build/upstream/dsh-plugin-desktop/dist
       - name: Collect artifact
         run: |
           mkdir -p out
@@ -92,6 +97,10 @@ jobs:
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
         run: corepack yarn package:dir
+      - name: Verify login assets shipped
+        # See the Windows job: an unlisted asset is dropped silently at packaging
+        # time, which is how 2.0.0 shipped a blank login window.
+        run: node desktop/scripts/verify-package.mjs desktop/build/upstream/dsh-plugin-desktop/dist
       - name: Wrap DMG
         working-directory: desktop/build/upstream/dsh-plugin-desktop
         run: |
@@ -140,6 +149,10 @@ jobs:
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
         run: corepack yarn package:dir
+      - name: Verify login assets shipped
+        # See the Windows job: an unlisted asset is dropped silently at packaging
+        # time, which is how 2.0.0 shipped a blank login window.
+        run: node desktop/scripts/verify-package.mjs desktop/build/upstream/dsh-plugin-desktop/dist
       - name: Wrap DMG
         env:
           ARCH_LABEL: x64

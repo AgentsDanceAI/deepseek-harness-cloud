@@ -66,6 +66,11 @@ for (const banned of [
 // 5. our overlay landed
 check(existsSync(join(plugin, 'src', 'cloud', 'index.ts')), 'src/cloud overlay missing — run assemble.mjs')
 check(existsSync(join(plugin, 'build', 'cloud', 'login.html')), 'build/cloud assets missing — run assemble.mjs')
+// Present on disk is not enough: electron-builder's `files` is an allow-list,
+// and an unlisted path is dropped SILENTLY at packaging time. 2.0.0 shipped
+// that way — the login window loaded a missing file and showed a blank page.
+check((manifest.build?.files ?? []).includes('build/cloud/**'),
+  'build.files does not list build/cloud/** — the login assets would be dropped at packaging')
 check(readFileSync(join(plugin, 'src', 'main.ts'), 'utf8').includes('cloudGate'),
   'main.ts lacks the cloudGate call — 0003 patch not applied')
 
