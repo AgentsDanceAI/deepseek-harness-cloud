@@ -36,6 +36,7 @@ class FakeDocker:
         self.creates = 0
         self.starts = 0
         self.stops = 0
+        self.created_cmd = []   # boot script of each created container
 
     async def docker(self, method, path, *, json_body=None, params=None):
         import httpx
@@ -51,6 +52,7 @@ class FakeDocker:
             # user id, and the reaper bills whoever that label names
             self.containers[cname] = {"State": {"Status": "created"},
                                       "Config": {"Labels": (json_body or {}).get("Labels", {})}}
+            self.created_cmd.append(((json_body or {}).get("Cmd") or ["", "", ""])[-1])
             return resp(201, {"Id": cname})
         if path == "/containers/json":   # list — must precede the inspect pattern
             out = [{"Names": ["/" + n], "Labels": c["Config"]["Labels"]}
@@ -282,6 +284,19 @@ def container_http(monkeypatch):
 
     monkeypatch.setattr(workspace.httpx, "AsyncClient", lambda **kw: FakeUpstream())
     return seen
+
+
+def test_boot_seeds_platform_instructions_mergeably(fake):
+    """The agent must learn the preview URL from $DSH_HOME/AGENTS.md, and the
+    boot script must merge (not clobber) whatever the user wrote there."""
+    c, uid = _user("bootmd@test.local")
+    c.get("/api/work/route")
+    boot = fake.created_cmd[-1]
+    assert "/root/.dsh/AGENTS.md" in boot
+    assert "/preview/" in boot                      # the URL the agent hands out
+    assert "0.0.0.0" in boot                        # bind guidance
+    assert "dshcloud:begin" in boot and "dshcloud:end" in boot   # marker-delimited
+    assert "cat > /root/.dsh/AGENTS.md" not in boot  # never a wholesale overwrite
 
 
 def test_preview_requires_login():

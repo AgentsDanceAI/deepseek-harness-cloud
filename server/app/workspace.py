@@ -153,13 +153,28 @@ async def _create(user: dict) -> None:
         "- 纯静态单文件（如一个 index.html）也需要起个 http 服务再给预览地址，"
         "不要只把文件路径告诉用户。\n"
     )
+    # Boot runs on every container start, so both files self-heal if the agent
+    # or the user deletes them. AGENTS.md is merged rather than overwritten: our
+    # platform facts live between markers and anything the user wrote around
+    # them (their own global preferences) survives the restart.
+    merge_agents_md = (
+        "node -e '"
+        'const fs=require("fs"),p="/root/.dsh/AGENTS.md";'
+        'const B="<!-- dshcloud:begin -->",E="<!-- dshcloud:end -->";'
+        'const block=B+"\\n"+fs.readFileSync("/root/.dsh/.dshcloud-agents.md","utf8").trim()+"\\n"+E;'
+        'let cur="";try{cur=fs.readFileSync(p,"utf8")}catch(e){}'
+        'const re=new RegExp(B+"[\\\\s\\\\S]*?"+E);'
+        'fs.writeFileSync(p,re.test(cur)?cur.replace(re,block):(cur.trim()?block+"\\n\\n"+cur.trim()+"\\n":block+"\\n"));'
+        "'"
+    )
     boot = (
         "mkdir -p /root/.dsh && cat > /root/.dsh/settings.yaml <<'DHCEOF'\n"
         + settings_yaml +
         "DHCEOF\n"
-        "cat > /root/.dsh/AGENTS.md <<'DHCMDEOF'\n"
+        "cat > /root/.dsh/.dshcloud-agents.md <<'DHCMDEOF'\n"
         + agents_md +
         "DHCMDEOF\n"
+        + merge_agents_md + "\n"
         "socat TCP-LISTEN:3081,fork,reuseaddr TCP:127.0.0.1:3080 & "
         "exec dsh web --host 127.0.0.1 --port 3080"
     )
