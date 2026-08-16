@@ -1,0 +1,20 @@
+/* DSH Cloud mobile optimization layer, injected into the workspace document.
+   Conservative on purpose: dsh's class names are build artifacts we don't own,
+   so we only touch element-level and standards-level behavior. */
+@media (max-width: 760px), (display-mode: standalone) {
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    overscroll-behavior-y: none;                 /* no pull-to-refresh mid-chat */
+    padding-bottom: env(safe-area-inset-bottom); /* home-indicator clearance */
+  }
+  /* 16px floor stops iOS Safari from zooming the composer on focus */
+  textarea, input, select { font-size: 16px !important; }
+  * { -webkit-tap-highlight-color: transparent; }
+  ::-webkit-scrollbar { width: 3px; height: 3px; }
+  ::-webkit-scrollbar-thumb { background: rgba(127, 127, 127, .35); border-radius: 2px; }
+  /* larger touch targets for icon-rail buttons */
+  button, [role="button"] { min-height: 40px; min-width: 40px; }
+}
+@media (display-mode: standalone) {
+  body { padding-top: env(safe-area-inset-top); } /* notch clearance in app mode */
+}

@@ -60,34 +60,50 @@ print("    Caddyfile.gpu open-search.ai block replaced")
 PY
 fi
 
-echo "==> 5c/6 ensure work.<domain> Caddy block (cloud workspaces)"
+echo "==> 5c/6 ensure work.<domain> Caddy block (cloud workspaces, v2 PWA shell)"
 WORK_HOST="${WORK_DOMAIN:-work.open-search.ai}"
-if grep -q "^${WORK_HOST} {" "$CADDYFILE"; then
-  echo "    work block already present"
+if grep -q "dshwork-v2" "$CADDYFILE"; then
+  echo "    work v2 block already present"
 else
-  # forward_auth: EVERY request (incl. WS upgrade) first hits /api/work/route on
-  # dhc-server, which ensures the user's container is up and returns the upstream
-  # in X-Work-Upstream; Caddy then reverse-proxies there with a loopback Host so
-  # dsh's reachability fence trusts it. Anonymous/among-broke users are 302'd.
+  # drop any previous version of the work block first
+  python3 - "$CADDYFILE" "$WORK_HOST" <<'PY'
+import re, sys
+p, host = sys.argv[1], sys.argv[2]
+s = open(p, encoding="utf-8").read()
+s2 = re.sub(r"\n# ── DSH Cloud workspaces[^\n]*\n" + re.escape(host) + r"\s*\{.*?\n\}\n?",
+            "\n", s, flags=re.DOTALL)
+open(p, "w", encoding="utf-8").write(s2)
+print("    removed old work block" if s2 != s else "    no old work block")
+PY
+  # Routing (dshwork-v2):
+  #  - "/" (+PWA assets) go to dhc-server, which serves the container's document
+  #    with mobile/PWA layers injected (manifest, icons, service worker, CSS);
+  #  - everything else passes forward_auth (session -> container upstream) and
+  #    is reverse-proxied with a loopback Host so dsh's fence trusts it.
   cat >> "$CADDYFILE" <<EOF
 
-# ── DSH Cloud workspaces (dshwork) — per-user dsh containers ──
+# ── DSH Cloud workspaces (dshwork-v2) — per-user dsh containers + PWA shell ──
 ${WORK_HOST} {
-	@auth {
-		not path /api/work/route
+	@pwa path / /index.html /manifest.webmanifest /sw.js /pwa/*
+	handle @pwa {
+		@rootdoc path / /index.html
+		rewrite @rootdoc /api/work/shell
+		reverse_proxy dhc-server:8100
 	}
-	forward_auth @auth dhc-server:8100 {
-		uri /api/work/route
-		copy_headers X-Work-Upstream
-	}
-	reverse_proxy {http.request.header.X-Work-Upstream} {
-		header_up Host 127.0.0.1:3080
-		header_up Origin http://127.0.0.1:3080
-		flush_interval -1
+	handle {
+		forward_auth dhc-server:8100 {
+			uri /api/work/route
+			copy_headers X-Work-Upstream
+		}
+		reverse_proxy {http.request.header.X-Work-Upstream} {
+			header_up Host 127.0.0.1:3080
+			header_up Origin http://127.0.0.1:3080
+			flush_interval -1
+		}
 	}
 }
 EOF
-  echo "    appended ${WORK_HOST} block"
+  echo "    appended ${WORK_HOST} v2 block"
 fi
 
 echo "==> 5d/6 sync Caddyfile into the running container + reload"

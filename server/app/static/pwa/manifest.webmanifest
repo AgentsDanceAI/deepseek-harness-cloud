@@ -1,0 +1,16 @@
+{
+  "name": "DSH Cloud 云工作台",
+  "short_name": "DSH Cloud",
+  "description": "桌面 AI 编程助手的云工作台，手机也能办公",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0e1319",
+  "theme_color": "#0b1c38",
+  "icons": [
+    { "src": "/pwa/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/pwa/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/pwa/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

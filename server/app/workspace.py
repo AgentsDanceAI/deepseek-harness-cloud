@@ -205,6 +205,91 @@ async def work_route(request: Request):
     return Response(status_code=200, headers={"X-Work-Upstream": _upstream(user["id"])})
 
 
+# --- PWA shell: the workspace document with mobile/PWA layers injected -------
+
+_PWA_INJECT = """
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b1c38">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="DSH Cloud">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/pwa/icon-180.png">
+<link rel="stylesheet" href="/pwa/mobile.css">
+<script>if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catch(function(){})}</script>
+"""
+
+
+@router.get("/api/work/shell")
+async def work_shell(request: Request):
+    """The workspace index document, fetched from the user's container and
+    served with the PWA/mobile layers injected before </head>. dsh itself is
+    untouched — this survives upstream updates (plain string injection)."""
+    if not config.WORK_ENABLED:
+        return JSONResponse(status_code=404, content={"detail": "work_disabled"})
+    user = try_resolve_user(request)
+    site = config.PUBLIC_BASE.rstrip("/")
+    if user is None:
+        return RedirectResponse(f"{site}/login?next=/work", status_code=302)
+    if credits.balance(user["id"]) <= 0:
+        return RedirectResponse(f"{site}/pricing?reason=credits", status_code=302)
+    try:
+        state = await ensure_workspace(user)
+    except RuntimeError as e:
+        kind = "busy" if str(e) == "capacity" else "error"
+        return RedirectResponse(f"{site}/work/starting?state={kind}", status_code=302)
+    if state != "running":
+        return RedirectResponse(f"{site}/work/starting", status_code=302)
+    _last_seen[user["id"]] = time.time()
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            upstream = await client.get(f"http://{_upstream(user['id'])}/",
+                                        headers={"host": "127.0.0.1:3080"})
+    except httpx.HTTPError:
+        return RedirectResponse(f"{site}/work/starting", status_code=302)
+    html = upstream.text
+    if "</head>" in html:
+        html = html.replace("</head>", _PWA_INJECT + "</head>", 1)
+    return HTMLResponse(html, headers={"cache-control": "no-store"})
+
+
+_PWA_DIR = None
+
+
+def _pwa_path(name: str):
+    from pathlib import Path
+    global _PWA_DIR
+    if _PWA_DIR is None:
+        _PWA_DIR = Path(__file__).resolve().parent / "static" / "pwa"
+    return _PWA_DIR / name
+
+
+@router.get("/manifest.webmanifest")
+async def pwa_manifest():
+    from fastapi.responses import FileResponse
+    return FileResponse(_pwa_path("manifest.webmanifest"),
+                        media_type="application/manifest+json")
+
+
+@router.get("/sw.js")
+async def pwa_sw():
+    from fastapi.responses import FileResponse
+    return FileResponse(_pwa_path("sw.js"), media_type="text/javascript",
+                        headers={"cache-control": "no-cache"})
+
+
+@router.get("/pwa/{name}")
+async def pwa_asset(name: str):
+    from fastapi.responses import FileResponse
+    safe = re.sub(r"[^a-zA-Z0-9._-]", "", name)
+    path = _pwa_path(safe)
+    if not path.is_file():
+        return JSONResponse(status_code=404, content={"detail": "not_found"})
+    media = "text/css" if safe.endswith(".css") else "image/png"
+    return FileResponse(path, media_type=media,
+                        headers={"cache-control": "public, max-age=86400"})
+
+
 # --- user-facing endpoints ---------------------------------------------------
 
 @router.get("/api/work/status")
