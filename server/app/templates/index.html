@@ -1,43 +1,49 @@
 {% extends "base.html" %}
 {% block title %}DSH Cloud — 桌面 AI 编程助手，登录即用{% endblock %}
+{% block head %}<script src="/static/hero-waves.js" defer></script>{% endblock %}
 {% block content %}
-<section class="hero">
-  <div class="container">
-    <div class="hero-badge">
-      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.5 19a4.5 4.5 0 1 0-.9-8.9 6 6 0 1 0-11.1 3.4"/><path d="M6 19h11.5"/></svg>
-      基于开源 DeepSeek Harness · 云端账号版
-    </div>
-    <h1>桌面 AI 编程助手<br>登录即用，<span class="accent">无需 API Key</span></h1>
-    <p class="hero-sub">
-      账号、积分与统一模型网关都在云端备好：下载桌面应用，浏览器授权登录，
-      直接开始写代码。内置联网搜索，免费额度起步。
-    </p>
-    <div class="hero-actions">
-      {% if download_url_mac %}
-        <a class="btn btn-primary btn-lg" href="{{ download_url_mac }}">
+<section class="hero-dark">
+  <canvas id="hero-waves" aria-hidden="true"></canvas>
+  <div class="hero-grid" aria-hidden="true"></div>
+  <div class="hero-dots" aria-hidden="true"></div>
+  <div class="container hero-dark-inner">
+    <div class="hero-copy">
+      <div class="hero-badge-dark">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.5 19a4.5 4.5 0 1 0-.9-8.9 6 6 0 1 0-11.1 3.4"/><path d="M6 19h11.5"/></svg>
+        云端账号版 · 登录即用
+      </div>
+      <h1>DSH Cloud<br>桌面 AI 编程助手</h1>
+      <p class="hero-sub-dark">
+        基于开源 DeepSeek Harness 构建：账号、积分与统一模型网关都在云端备好，
+        无需自购 API Key，内置联网搜索，免费额度起步。
+      </p>
+      <p class="hero-note-dark">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v4h1"/></svg>
+        独立运营的商业服务，并非 DeepSeek 官方产品。
+      </p>
+      <div class="hero-actions-dark">
+        {% if download_url_mac %}
+        <a class="btn btn-hero" href="{{ download_url_mac }}">
           <span class="btn-icon"><svg viewBox="0 0 24 24" width="17" height="17" fill="currentColor" aria-hidden="true"><path d="M16.7 12.9c0-2.4 2-3.6 2-3.6a4.6 4.6 0 0 0-3.6-1.9c-1.5-.2-3 .9-3.7.9-.8 0-2-.9-3.3-.9A4.9 4.9 0 0 0 4 9.9c-1.8 3-.5 7.5 1.2 10 .8 1.2 1.8 2.5 3.1 2.5 1.3-.1 1.8-.8 3.3-.8s2 .8 3.3.8 2.2-1.2 3-2.4a10 10 0 0 0 1.4-2.8 4.4 4.4 0 0 1-2.6-4.3ZM14.2 5.6A4.5 4.5 0 0 0 15.3 2a4.6 4.6 0 0 0-3 1.5A4.3 4.3 0 0 0 11.2 7a3.8 3.8 0 0 0 3-1.4Z"/></svg></span>
-          下载 macOS 版
+          下载 Mac 版
         </a>
-      {% else %}
-        <a class="btn btn-primary btn-lg" href="/download">下载桌面应用</a>
-      {% endif %}
-      {% if download_url_win %}
-        <a class="btn btn-ghost btn-lg" href="{{ download_url_win }}">
+        {% else %}
+        <a class="btn btn-hero" href="/download">下载桌面应用</a>
+        {% endif %}
+        {% if download_url_win %}
+        <a class="btn btn-hero" href="{{ download_url_win }}">
           <span class="btn-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M3 5.5 10.5 4.4v7.1H3zM12 4.2 21 3v8.5h-9zM3 13.5h7.5v7.1L3 19.5zM12 13.5h9V21l-9-1.3z"/></svg></span>
           下载 Windows 版
         </a>
-      {% endif %}
-      {% if not user %}
-        <a class="btn btn-ghost btn-lg" href="/login">登录 / 注册</a>
-      {% endif %}
-    </div>
-    <p class="muted hero-note">新用户注册即送免费积分 · 无需绑定信用卡</p>
-    <p class="hero-disclaimer">本产品基于开源 DeepSeek Harness 构建，独立运营，并非 DeepSeek 官方产品。</p>
-
-    <div class="screen-wrap">
-      <div class="screen-frame">
-        <img src="/static/img/desktop-preview.png" alt="DSH 桌面应用界面：左侧工作区会话列表，右侧 AI 编程对话" width="2654" height="1838">
+        {% endif %}
       </div>
+      <div class="hero-actions-sub">
+        {% if not user %}<a class="btn btn-hero-ghost" href="/login">登录 / 注册</a>{% endif %}
+        <span class="hero-free-note">注册即送免费积分 · 无需绑定信用卡</span>
+      </div>
+    </div>
+    <div class="hero-shot" aria-hidden="true">
+      <img src="/static/img/desktop-preview.png" alt="" width="2654" height="1838" loading="eager">
     </div>
   </div>
 </section>
