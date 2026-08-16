@@ -90,6 +90,12 @@ www.{primary} {{
 \t\tforward_auth dhc-server:8100 {{
 \t\t\turi /api/work/route
 \t\t\tcopy_headers X-Work-Upstream
+\t\t\t# Strip the WS Upgrade header from the AUTH subrequest: dsh's chat
+\t\t\t# uses WebSocket upgrades (/api/events.mux, /api/events.host); with
+\t\t\t# Upgrade present uvicorn routes the /api/work/route subrequest as a
+\t\t\t# WS handshake to an HTTP-only path -> 403 -> forward_auth fails ->
+\t\t\t# the whole chat WS is killed (page loads, replies never arrive).
+\t\t\theader_up -Upgrade
 \t\t}}
 \t\treverse_proxy {{http.request.header.X-Work-Upstream}} {{
 \t\t\theader_up Host 127.0.0.1:3080

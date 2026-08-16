@@ -131,6 +131,20 @@ async def _create(user: dict) -> None:
             f"DEEPSEEK_API_KEY={token}",
             f"DEEPSEEK_SEARCH_BASE_URL={gateway}/llm/anthropic/v1",
             "DSH_TELEMETRY_DISABLED=1",
+            # The per-user container IS the sandbox boundary (512MB/1CPU/pids512,
+            # isolated network, no docker.sock, non-privileged, ephemeral). dsh's
+            # own bash sandbox needs bubblewrap or a Landlock kernel (5.13+) —
+            # neither exists in dsh-local:rc6 on this al8 5.10 host, so under the
+            # default "workspace-write" mode EVERY bash call died with "no sandbox
+            # backend is usable on this host" and the agent then stalled on an
+            # approval prompt no cloud UI can answer. dsh's web profile keys both
+            # the sandbox-policy mode AND the approval policy off this one env
+            # var (dump-config: mode = DSH_PERMISSION_MODE ?? 'workspace-write';
+            # approval = mode==='danger-full-access' ? 'never' : 'ask'), so
+            # danger-full-access makes tools run unconfined and prompt-free —
+            # correct when the container is the sandbox. DSH_ is bootstrap-only
+            # (a workspace .env cannot forge it); only we set it, here.
+            "DSH_PERMISSION_MODE=danger-full-access",
         ],
         "HostConfig": {
             "Memory": config.WORK_MEM_LIMIT_MB * 1024 * 1024,
