@@ -134,10 +134,32 @@ async def _create(user: dict) -> None:
         "  provider: dshcloud\n"
         "  model: deepseek-v4-flash\n"
     )
+    # dsh loads $DSH_HOME/AGENTS.md as user-global instructions for every
+    # session. Without this the agent tells people to open http://localhost:PORT
+    # — which is the CONTAINER's loopback and unreachable from their browser.
+    agents_md = (
+        "# DSH Cloud 云工作台\n\n"
+        "你运行在一个云端容器里，用户通过浏览器访问你。用户的电脑和这个容器"
+        "**不是同一台机器**。\n\n"
+        "## 让用户能打开你做的网页 / 服务\n\n"
+        "- **绝不要**让用户访问 `http://localhost:<端口>` 或 `127.0.0.1` —— 那是本容器的"
+        "回环地址，用户的浏览器打不开。\n"
+        f"- 本容器的端口可以通过这个公网地址预览：`{gateway}/preview/<端口>/`\n"
+        f"  例如你在 8080 起了服务，就告诉用户打开 `{gateway}/preview/8080/`\n"
+        "- **服务必须监听 `0.0.0.0`**，只听 127.0.0.1 的服务无法被预览代理到。\n"
+        "  - `python3 -m http.server 8080 --bind 0.0.0.0`\n"
+        "  - vite: `--host 0.0.0.0`；next: `-H 0.0.0.0`\n"
+        "- 页面里引用资源请用**相对路径**（`./game.js`），预览代理对相对路径最稳。\n"
+        "- 纯静态单文件（如一个 index.html）也需要起个 http 服务再给预览地址，"
+        "不要只把文件路径告诉用户。\n"
+    )
     boot = (
         "mkdir -p /root/.dsh && cat > /root/.dsh/settings.yaml <<'DHCEOF'\n"
         + settings_yaml +
         "DHCEOF\n"
+        "cat > /root/.dsh/AGENTS.md <<'DHCMDEOF'\n"
+        + agents_md +
+        "DHCMDEOF\n"
         "socat TCP-LISTEN:3081,fork,reuseaddr TCP:127.0.0.1:3080 & "
         "exec dsh web --host 127.0.0.1 --port 3080"
     )
@@ -233,6 +255,149 @@ async def ensure_workspace(user: dict) -> str:
     if uid not in _starting:
         _starting[uid] = time.time()
     return "starting"
+
+
+# --- port preview (see the app the agent just built) -------------------------
+# The agent builds a web page and starts a server inside the container. Its
+# `localhost:PORT` is the CONTAINER's loopback — unreachable from the user's
+# browser. These routes publish a container port over the authenticated main
+# domain: /preview/<port>/<path> proxies to dshwork-<hex>:<port>/<path>.
+# dhc-server sits on dshwork-net, so it can reach the container directly.
+
+PREVIEW_PROBE_PORTS = (8080, 3000, 5173, 8000, 5000, 4173, 8888, 3001, 4200, 9000)
+_PREVIEW_PORT_COOKIE = "dhc_preview_port"
+# Ports we will never expose: dsh's own UI (its API drives the agent with the
+# session's authority) and the socat bridge in front of it.
+_PREVIEW_BLOCKED_PORTS = {3080, 3081}
+_HOP_HEADERS = {"connection", "keep-alive", "transfer-encoding", "upgrade",
+                "proxy-authenticate", "proxy-authorization", "te", "trailer",
+                "content-encoding", "content-length"}
+
+
+async def _port_open(user_id: str, port: int, timeout: float = 0.6) -> bool:
+    """TCP-connect probe. The docker socket proxy denies exec (by design), so
+    reachability is tested the same way the proxy itself would reach it."""
+    try:
+        fut = asyncio.open_connection(_cname(user_id), port)
+        reader, writer = await asyncio.wait_for(fut, timeout=timeout)
+        writer.close()
+        try:
+            await writer.wait_closed()
+        except Exception:
+            pass
+        return True
+    except Exception:
+        return False
+
+
+async def _open_ports(user_id: str) -> list[int]:
+    probes = [p for p in PREVIEW_PROBE_PORTS if p not in _PREVIEW_BLOCKED_PORTS]
+    results = await asyncio.gather(*(_port_open(user_id, p) for p in probes))
+    return [p for p, ok in zip(probes, results) if ok]
+
+
+def _inject_base(body: bytes, prefix: str) -> bytes:
+    """Give proxied HTML a <base> so its relative links resolve under /preview/
+    instead of the site root."""
+    lowered = body[:4096].lower()
+    tag = f'<base href="{prefix}">'.encode()
+    for anchor in (b"<head>", b"<html>"):
+        idx = lowered.find(anchor)
+        if idx != -1:
+            cut = idx + len(anchor)
+            return body[:cut] + tag + body[cut:]
+    return tag + body
+
+
+@router.get("/preview")
+async def preview_index(request: Request):
+    """Port picker: which of the container's ports are actually serving."""
+    user = try_resolve_user(request)
+    site = config.PUBLIC_BASE.rstrip("/")
+    if user is None:
+        return RedirectResponse(f"{site}/login?next=/preview", status_code=302)
+    info = await _inspect(user["id"])
+    running = bool(info) and (info.get("State") or {}).get("Status") == "running"
+    ports = await _open_ports(user["id"]) if running else []
+    if ports:
+        rows = "".join(
+            f'<li><a href="/preview/{p}/">端口 {p} — /preview/{p}/</a></li>' for p in ports)
+        body = f"<p>检测到以下端口正在提供服务：</p><ul>{rows}</ul>"
+    elif running:
+        body = ("<p>没有检测到正在监听的端口。让智能体启动服务时监听 "
+                "<code>0.0.0.0</code>，例如 "
+                "<code>python3 -m http.server 8080 --bind 0.0.0.0</code>，"
+                "然后访问 <code>/preview/8080/</code>。</p>")
+    else:
+        body = '<p>云工作台未在运行。<a href="/work">先进入云工作台 →</a></p>'
+    return HTMLResponse(
+        "<!doctype html><meta charset=utf-8><title>端口预览 · DSH Cloud</title>"
+        "<style>body{font:15px/1.7 system-ui,sans-serif;max-width:640px;margin:60px auto;"
+        "padding:0 20px;color:#1a2233}a{color:#2663c9}code{background:#f0f4fa;padding:2px 6px;"
+        "border-radius:4px}</style><h1>端口预览</h1>" + body +
+        '<p style="margin-top:28px"><a href="/work">← 返回云工作台</a></p>')
+
+
+@router.api_route("/preview/{port}/{path:path}",
+                  methods=["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"])
+async def preview_proxy(request: Request, port: int, path: str):
+    user = try_resolve_user(request)
+    site = config.PUBLIC_BASE.rstrip("/")
+    if user is None:
+        return RedirectResponse(f"{site}/login?next=/preview/{port}/{path}", status_code=302)
+    if not (1 <= port <= 65535) or port in _PREVIEW_BLOCKED_PORTS:
+        return JSONResponse(status_code=400, content={"detail": "port_not_previewable"})
+    info = await _inspect(user["id"])
+    if not info or (info.get("State") or {}).get("Status") != "running":
+        return RedirectResponse(f"{site}/work", status_code=302)
+
+    url = f"http://{_cname(user['id'])}:{port}/{path}"
+    fwd = {k: v for k, v in request.headers.items()
+           if k.lower() not in _HOP_HEADERS and k.lower() not in ("host", "cookie")}
+    try:
+        async with httpx.AsyncClient(timeout=30.0, follow_redirects=False) as http:
+            upstream = await http.request(
+                request.method, url, params=dict(request.query_params),
+                headers=fwd, content=await request.body())
+    except httpx.HTTPError:
+        return HTMLResponse(status_code=502, content=(
+            f"<!doctype html><meta charset=utf-8><p>端口 {port} 没有响应。"
+            "确认服务已启动且监听 <code>0.0.0.0</code>（不是 127.0.0.1）。</p>"
+            '<p><a href="/preview">← 查看正在监听的端口</a></p>'))
+
+    body = upstream.content
+    headers = {k: v for k, v in upstream.headers.items() if k.lower() not in _HOP_HEADERS}
+    ctype = upstream.headers.get("content-type", "")
+    if ctype.startswith("text/html"):
+        body = _inject_base(body, f"/preview/{port}/")
+    # Relocate upstream redirects into the preview namespace so a trailing-slash
+    # redirect (the common case) doesn't bounce the user out to the site root.
+    location = upstream.headers.get("location")
+    if location and location.startswith("/"):
+        headers["location"] = f"/preview/{port}{location}"
+    resp = Response(content=body, status_code=upstream.status_code, headers=headers)
+    # Assets requested with an absolute path ("/style.css") land outside this
+    # prefix; the cookie lets the fallback handler route them back here.
+    resp.set_cookie(_PREVIEW_PORT_COOKIE, str(port), max_age=86400,
+                    httponly=True, samesite="lax",
+                    secure=config.PUBLIC_BASE.startswith("https"),
+                    domain=config.COOKIE_DOMAIN or None)
+    return resp
+
+
+async def preview_fallback(request: Request):
+    """Last-resort handler (registered after every real route in main.py).
+
+    A previewed page that requests an absolute-path asset ("/assets/app.js")
+    escapes the /preview/<port>/ prefix and would 404. The preview cookie names
+    the port that page came from, so route it back. Without the cookie this is
+    an ordinary 404.
+    """
+    port_raw = request.cookies.get(_PREVIEW_PORT_COOKIE, "")
+    path = request.path_params.get("path", "")
+    if not port_raw.isdigit() or path.startswith("preview"):
+        return JSONResponse(status_code=404, content={"detail": "not_found"})
+    return await preview_proxy(request, int(port_raw), path)
 
 
 # --- routing (Caddy forward_auth hits this on EVERY request incl. WS) --------

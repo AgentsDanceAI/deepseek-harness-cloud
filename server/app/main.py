@@ -31,6 +31,7 @@ def create_app() -> FastAPI:
     from .oauth import router as oauth_router
     from .payments.api import router as payments_router
     from .webpages import router as pages_router
+    from .workspace import preview_fallback as workspace_preview_fallback
     from .workspace import router as workspace_router
 
     app.include_router(accounts_router)
@@ -67,6 +68,13 @@ def create_app() -> FastAPI:
     @app.get("/api/health")
     def health():
         return {"ok": True, "service": "deepseek-harness-cloud"}
+
+    # Registered after every real route, so it only ever sees requests that
+    # would otherwise 404: a previewed page asking for an absolute-path asset
+    # ("/style.css") from outside its /preview/<port>/ prefix. The preview
+    # cookie says which port that page came from.
+    app.add_route("/{path:path}", workspace_preview_fallback,
+                  methods=["GET", "HEAD"])
 
     return app
 

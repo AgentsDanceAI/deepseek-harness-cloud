@@ -244,3 +244,98 @@ def test_status_reports_state(fake):
     assert s["enabled"] is True
     assert s["credits_per_min"] == 2
     assert s["state"] in ("running", "starting")
+
+
+# --- port preview: the agent's server runs on the CONTAINER's loopback -------
+
+@pytest.fixture()
+def container_http(monkeypatch):
+    """Stub the container's own HTTP server (what /preview/<port>/ proxies to)."""
+    seen = {}
+
+    class FakeUpstream:
+        def __init__(self):
+            self.routes = {
+                "/": (200, "text/html", b"<html><head><title>Snake</title></head>"
+                                        b"<body><script src='./game.js'></script></body></html>"),
+                "/game.js": (200, "application/javascript", b"// snake"),
+                "/dir": (301, "text/html", b""),
+            }
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        async def request(self, method, url, **kw):
+            import httpx as _h
+            seen["url"] = url
+            seen["method"] = method
+            path = "/" + url.split("/", 3)[3] if url.count("/") >= 3 else "/"
+            code, ctype, body = self.routes.get(path, (404, "text/plain", b"nope"))
+            headers = {"content-type": ctype}
+            if code == 301:
+                headers["location"] = "/dir/"
+            return _h.Response(code, headers=headers, content=body,
+                               request=_h.Request(method, url))
+
+    monkeypatch.setattr(workspace.httpx, "AsyncClient", lambda **kw: FakeUpstream())
+    return seen
+
+
+def test_preview_requires_login():
+    r = TestClient(app).get("/preview/8080/", follow_redirects=False)
+    assert r.status_code == 302 and "/login" in r.headers["location"]
+
+
+def test_preview_proxies_container_port(fake, container_http):
+    c, uid = _user("prev@test.local")
+    c.get("/api/work/route"); c.get("/api/work/route")
+    r = c.get("/preview/8080/")
+    assert r.status_code == 200
+    assert container_http["url"] == f"http://{workspace._cname(uid)}:8080/"
+    # relative asset refs must resolve under the preview prefix, not the site root
+    assert '<base href="/preview/8080/">' in r.text
+    assert "Snake" in r.text
+
+
+def test_preview_rejects_dsh_own_ports(fake, container_http):
+    """3080/3081 drive the agent with the session's authority — never proxy them."""
+    c, _ = _user("prevblock@test.local")
+    c.get("/api/work/route"); c.get("/api/work/route")
+    for port in (3080, 3081):
+        assert c.get(f"/preview/{port}/").status_code == 400
+
+
+def test_preview_rewrites_upstream_redirect(fake, container_http):
+    c, _ = _user("prevredir@test.local")
+    c.get("/api/work/route"); c.get("/api/work/route")
+    r = c.get("/preview/8080/dir", follow_redirects=False)
+    assert r.status_code == 301
+    assert r.headers["location"] == "/preview/8080/dir/"
+
+
+def test_absolute_asset_path_falls_back_through_cookie(fake, container_http):
+    """A previewed page asking for "/game.js" escapes the prefix; the preview
+    cookie routes it back instead of 404ing."""
+    c, uid = _user("prevfall@test.local")
+    c.get("/api/work/route"); c.get("/api/work/route")
+    c.get("/preview/8080/")                       # sets the cookie
+    r = c.get("/game.js")
+    assert r.status_code == 200
+    assert container_http["url"] == f"http://{workspace._cname(uid)}:8080/game.js"
+
+
+def test_fallback_never_shadows_real_routes(fake, container_http):
+    """The catch-all is registered last; real pages and APIs must still win."""
+    c, _ = _user("prevshadow@test.local")
+    c.get("/api/work/route"); c.get("/api/work/route")
+    c.get("/preview/8080/")                       # cookie is set for this client
+    assert c.get("/api/health").json()["ok"] is True
+    assert c.get("/api/work/status").json()["enabled"] is True
+    assert c.get("/pricing").status_code == 200
+
+
+def test_unknown_path_without_cookie_is_404():
+    assert TestClient(app).get("/no/such/thing").status_code == 404
