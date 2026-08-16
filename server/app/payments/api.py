@@ -13,6 +13,7 @@ alipay the literal text "success", wechat {"code": "SUCCESS"}.
 """
 from __future__ import annotations
 
+import asyncio
 import secrets
 import time
 from urllib.parse import parse_qsl
@@ -22,7 +23,7 @@ from fastapi.responses import JSONResponse, PlainTextResponse
 
 from .. import config, db, plans
 from ..accounts import resolve_user
-from . import alipay_provider, base, stripe_provider, wechatpay_provider
+from . import alipay_provider, base, stripe_provider, waffo_provider, wechatpay_provider
 
 router = APIRouter(prefix="/api/pay", tags=["pay"])
 
@@ -37,6 +38,8 @@ def active_providers() -> list[str]:
     if (config.WECHAT_PAY_MCHID and config.WECHAT_PAY_APIV3_KEY and config.WECHAT_PAY_PRIVATE_KEY_PATH
             and config.WECHAT_PAY_SERIAL_NO and config.WECHAT_PAY_APPID):
         out.append("wechat")
+    if config.WAFFO_MERCHANT_ID and config.WAFFO_PRIVATE_KEY:
+        out.append("waffo")
     return out
 
 
@@ -71,6 +74,11 @@ def checkout(body: dict, user: dict = Depends(resolve_user)):
     if provider == "alipay":
         return {"order_id": order["order_id"], "provider": "alipay",
                 "pay_url": alipay_provider.create_page_pay(order)}
+    if provider == "waffo":
+        # create_checkout is async (httpx); this route is sync (runs in a
+        # threadpool worker with no running loop), so drive it with asyncio.run.
+        return {"order_id": order["order_id"], "provider": "waffo",
+                "pay_url": asyncio.run(waffo_provider.create_checkout(order))}
     return {"order_id": order["order_id"], "provider": "wechat",
             "code_url": wechatpay_provider.create_native(order)}
 
@@ -134,3 +142,12 @@ async def webhook_wechat(request: Request):
     except ValueError:
         return JSONResponse({"code": "FAIL", "message": "bad_json"}, status_code=400)
     return {"code": "SUCCESS", "message": "OK"}
+
+
+@router.post("/webhook/waffo")
+async def webhook_waffo(request: Request):
+    raw = await request.body()
+    # process_webhook raises HTTPException(400) on an invalid/unsigned event;
+    # letting it propagate makes the route answer 400 so Waffo retries.
+    _settle(waffo_provider.process_webhook(raw, request.headers.get("X-Waffo-Signature", "")))
+    return {"received": True}

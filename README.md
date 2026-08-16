@@ -24,7 +24,7 @@ LLM 流量统一经我们的网关转发（**上游 key 永不出服务器**）�
 | `desktop/` | 桌面端 overlay：`upstream.json` pin + `patches/` + `dsh-plugin-cloud/`（登陆墙与网关注入的全部逻辑）+ 装配/升级脚本 |
 | `deploy/` | docker-compose + Caddyfile + `.env.example` |
 | `legal/` | 用户协议 / 隐私政策 / 退款政策 / AUP / 第三方声明（草案，上线前过律师） |
-| `docs/` | [架构](docs/architecture.md) · [上游兼容策略](docs/compatibility.md) · [上线申请清单](docs/applications-checklist.md) · [部署](docs/deploy.md) |
+| `docs/` | [架构](docs/architecture.md) · [上游兼容策略](docs/compatibility.md) · [中国大陆上线清单](docs/中国大陆上线清单.md) · [部署](docs/deploy.md) |
 
 ## 服务端：本地开发
 
@@ -74,7 +74,7 @@ cd dsh-plugin-desktop && yarn build && yarn package:dir   # 或 dist:mac / dist:
 
 ## 上线前必办
 
-见 [docs/applications-checklist.md](docs/applications-checklist.md)：域名+ICP/公安备案、
+见 [docs/中国大陆上线清单.md](docs/中国大陆上线清单.md)：域名+ICP/公安备案、
 支付渠道（Stripe/支付宝/微信商户）、SMTP、上游 key、代码签名（Apple/Windows）等，
 含官方入口、材料与依赖顺序。`legal/` 四份文书为草案，正式发布前请经法律专业人士审阅。
 

@@ -19,7 +19,7 @@ from fastapi import HTTPException
 
 from .. import credits, db, plans
 
-ORDER_PREFIX = {"stripe": "DHS", "alipay": "DHA", "wechat": "DHW"}
+ORDER_PREFIX = {"stripe": "DHS", "alipay": "DHA", "wechat": "DHW", "waffo": "DHF"}
 
 
 def resolve_item(item: str) -> dict:

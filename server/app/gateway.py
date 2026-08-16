@@ -26,7 +26,7 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
-from . import config, credits, model_catalog, plans, rate_limit
+from . import config, credits, model_catalog, plans, rate_limit, zhipu_search
 from .accounts import resolve_user
 
 router = APIRouter(prefix="/llm", tags=["gateway"])
@@ -212,13 +212,37 @@ def _sse_error_bytes(status: int, detail: bytes) -> bytes:
 
 @router.post("/anthropic/v1/messages")
 async def anthropic_messages(request: Request, user: dict = Depends(resolve_user)):
-    _require_upstream()
     rejected = _admit(user)
     if rejected is not None:
         return rejected
 
     raw = await request.body()
     request_id = f"dhc-{uuid.uuid4().hex[:16]}"
+
+    # Zhipu-backed web_search: translate the Anthropic request to a Zhipu
+    # search call and synthesize the native result blocks dsh expects. Avoids
+    # DeepSeek's paid search endpoint entirely.
+    if config.SEARCH_PROVIDER == "zhipu":
+        if not config.ZHIPU_SEARCH_API_KEY:
+            raise HTTPException(503, "search_not_configured")
+        try:
+            body = json.loads(raw)
+        except json.JSONDecodeError:
+            return JSONResponse(status_code=400, content={
+                "type": "error", "error": {"type": "invalid_request_error", "message": "Body must be JSON."}})
+        model = str(body.get("model", "")) or model_catalog.default_model()
+        query = zhipu_search.extract_query(body)
+        with _Slot(user["id"]):
+            try:
+                results = await zhipu_search.search(query, zhipu_search._max_results(body))
+            except (httpx.HTTPError, ValueError):
+                results = []
+        credits.spend(user["id"], config.SEARCH_CALL_CREDITS, kind="search", model="web_search:zhipu",
+                      device_id=user.get("device_id", ""), request_id=request_id)
+        return JSONResponse(content=zhipu_search.to_anthropic_response(query, results, model),
+                            headers={"x-request-id": request_id})
+
+    _require_upstream()
     headers = {
         "x-api-key": config.UPSTREAM_API_KEY,
         "authorization": f"Bearer {config.UPSTREAM_API_KEY}",

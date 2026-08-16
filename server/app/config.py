@@ -54,13 +54,28 @@ DB_PATH = _env("DB_PATH", str(DATA_DIR / "dhc.db"))
 POSTGRES_DSN = _env("POSTGRES_DSN")  # required when DB_BACKEND=postgres
 
 # --- upstream LLM (the money secret: never leaves this process) -------------
-UPSTREAM_BASE_URL = _env("UPSTREAM_BASE_URL", "https://api.deepseek.com")
+# Default points at the Alibaba-hosted qianmian gateway, which is OpenAI-compatible
+# and serves deepseek-v4-flash / deepseek-v4-pro under the same ids dsh sends.
+UPSTREAM_BASE_URL = _env("UPSTREAM_BASE_URL", "https://api.qianmian.ai/v1")
 UPSTREAM_API_KEY = _env("UPSTREAM_API_KEY")
-# dsh's web_search speaks Anthropic Messages; DeepSeek official serves it under /anthropic/v1.
-UPSTREAM_ANTHROPIC_BASE = _env("UPSTREAM_ANTHROPIC_BASE", UPSTREAM_BASE_URL.rstrip("/") + "/anthropic/v1")
 UPSTREAM_TIMEOUT_S = _env_float("UPSTREAM_TIMEOUT_S", 600.0)
 
+# --- web_search backend -----------------------------------------------------
+# dsh's web-search-deepseek speaks Anthropic Messages and expects native
+# web_search result blocks. Two ways to serve it:
+#   SEARCH_PROVIDER=zhipu     translate to Zhipu web_search (open.bigmodel.cn),
+#                             cheap per-call; needs ZHIPU_SEARCH_API_KEY
+#   SEARCH_PROVIDER=upstream  proxy verbatim to UPSTREAM_ANTHROPIC_BASE/messages
+#                             (DeepSeek official — a full billed model turn)
+SEARCH_PROVIDER = _env("SEARCH_PROVIDER", "zhipu").lower()
+ZHIPU_SEARCH_API_KEY = _env("ZHIPU_SEARCH_API_KEY")
+ZHIPU_SEARCH_ENGINE = _env("ZHIPU_SEARCH_ENGINE", "search_pro")
+ZHIPU_SEARCH_BASE = _env("ZHIPU_SEARCH_BASE", "https://open.bigmodel.cn/api/paas/v4")
+UPSTREAM_ANTHROPIC_BASE = _env("UPSTREAM_ANTHROPIC_BASE", "https://api.deepseek.com/anthropic/v1")
+
 # --- pricing / credits ------------------------------------------------------
+# Which price table to serve: pricing.json (CNY) or pricing.usd.json (overseas).
+PRICING_FILE = _env("PRICING_FILE", "pricing.json")
 MODEL_PRICE_MARKUP = _env_float("MODEL_PRICE_MARKUP", 1.2)
 FREE_SIGNUP_CREDITS = _env_int("FREE_SIGNUP_CREDITS", 500)  # 1 credit = ¥0.01 of listed usage
 SEARCH_CALL_CREDITS = _env_int("SEARCH_CALL_CREDITS", 5)  # flat per web_search call, on top of tokens
@@ -84,7 +99,25 @@ MAIL_FROM = _env("MAIL_FROM", MAIL_SMTP_USER)
 # --- registration switches --------------------------------------------------
 ALLOW_REGISTRATION = _env_bool("ALLOW_REGISTRATION", True)
 
+# --- oauth login (Google / GitHub; a provider activates when its pair is set) ---
+GOOGLE_LOGIN_CLIENT_ID = _env("GOOGLE_LOGIN_CLIENT_ID") or _env("AGENT_PLUGIN_GOOGLE_CLIENT_ID")
+GOOGLE_LOGIN_CLIENT_SECRET = _env("GOOGLE_LOGIN_CLIENT_SECRET") or _env("AGENT_PLUGIN_GOOGLE_CLIENT_SECRET")
+GOOGLE_LOGIN_REDIRECT_URI = _env("GOOGLE_LOGIN_REDIRECT_URI") or (PUBLIC_BASE.rstrip("/") + "/api/auth/google/callback")
+GITHUB_LOGIN_CLIENT_ID = _env("GITHUB_LOGIN_CLIENT_ID")
+GITHUB_LOGIN_CLIENT_SECRET = _env("GITHUB_LOGIN_CLIENT_SECRET")
+GITHUB_LOGIN_REDIRECT_URI = _env("GITHUB_LOGIN_REDIRECT_URI") or (PUBLIC_BASE.rstrip("/") + "/api/auth/github/callback")
+OAUTH_AUTO_REGISTER = _env_bool("OAUTH_AUTO_REGISTER", True)
+
 # --- payments (a provider activates when its variables are set) -------------
+# Waffo (overseas merchant of record; see app/payments/waffo_provider.py)
+WAFFO_MERCHANT_ID = _env("WAFFO_MERCHANT_ID")
+WAFFO_PRIVATE_KEY = _env("WAFFO_PRIVATE_KEY")
+WAFFO_WEBHOOK_PUBLIC_KEY = _env("WAFFO_WEBHOOK_PUBLIC_KEY")
+WAFFO_PRODUCT_ID = _env("WAFFO_PRODUCT_ID")
+WAFFO_STORE_ID = _env("WAFFO_STORE_ID")
+WAFFO_ENV = _env("WAFFO_ENV", "test")
+WAFFO_API_BASE = _env("WAFFO_API_BASE", "https://api.waffo.ai")
+
 STRIPE_SECRET_KEY = _env("STRIPE_SECRET_KEY")
 STRIPE_WEBHOOK_SECRET = _env("STRIPE_WEBHOOK_SECRET")
 ALIPAY_APP_ID = _env("ALIPAY_APP_ID")

@@ -1,0 +1,39 @@
+{
+  "_comment": "海外版 (open-search.ai) 价目源，币种 USD，金额单位: 美分。Waffo 收款。1 积分 = $0.001 牌价用量 (= ¥0.01 约当, MODEL_PRICE_MARKUP 控毛利)。上线前按实际成本与市场校准。",
+  "currency": "USD",
+  "tiers": {
+    "free": {
+      "name": "Free",
+      "monthly_cents": 0,
+      "signup_credits": 500,
+      "monthly_credits": 0,
+      "concurrency": 1
+    },
+    "plus": {
+      "name": "Plus",
+      "monthly_cents": 900,
+      "yearly_cents": 9000,
+      "monthly_credits": 3500,
+      "concurrency": 2
+    },
+    "pro": {
+      "name": "Pro",
+      "monthly_cents": 2900,
+      "yearly_cents": 29000,
+      "monthly_credits": 13000,
+      "concurrency": 5
+    },
+    "max": {
+      "name": "Max",
+      "monthly_cents": 7900,
+      "yearly_cents": 79000,
+      "monthly_credits": 42000,
+      "concurrency": 10
+    }
+  },
+  "packs": {
+    "pack1000": { "name": "1,000 credits", "cents": 300, "credits": 1000, "valid_days": 365 },
+    "pack5250": { "name": "5,250 credits", "cents": 1500, "credits": 5250, "valid_days": 365 },
+    "pack11000": { "name": "11,000 credits", "cents": 3000, "credits": 11000, "valid_days": 365 }
+  }
+}

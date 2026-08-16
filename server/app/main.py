@@ -28,10 +28,12 @@ def create_app() -> FastAPI:
     from .desktop_updates import router as updates_router
     from .device_auth import router as device_router
     from .gateway import router as gateway_router
+    from .oauth import router as oauth_router
     from .payments.api import router as payments_router
     from .webpages import router as pages_router
 
     app.include_router(accounts_router)
+    app.include_router(oauth_router)
     app.include_router(device_router)
     app.include_router(gateway_router)
     app.include_router(payments_router)

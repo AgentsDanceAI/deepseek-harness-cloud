@@ -21,10 +21,21 @@ import httpx  # noqa: E402
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
-from app import credits, db, gateway, plans, security  # noqa: E402
+import pytest  # noqa: E402
+
+from app import config, credits, db, gateway, plans, security  # noqa: E402
 from app.main import app  # noqa: E402
 
 client = TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def _pin_gateway_config(monkeypatch):
+    # config freezes env at first import, and test collection order across
+    # modules is not guaranteed — pin the values the gateway tests depend on so
+    # this file passes regardless of which test module imported config first.
+    monkeypatch.setattr(config, "UPSTREAM_API_KEY", "sk-upstream-test")
+    monkeypatch.setattr(config, "UPSTREAM_BASE_URL", "https://api.qianmian.ai/v1")
 
 
 def _register(email: str = "u1@test.local", password: str = "password123") -> dict:
@@ -280,6 +291,8 @@ def test_gateway_blocks_when_credits_exhausted(monkeypatch):
 
 
 def test_gateway_anthropic_search_surface(gw_user, monkeypatch):
+    from app import config as app_config
+    monkeypatch.setattr(app_config, "SEARCH_PROVIDER", "upstream")  # this test covers passthrough
     fresh, uid = gw_user
     before = credits.balance(uid)
     body = {"id": "msg", "content": [], "usage": {"input_tokens": 100, "output_tokens": 50}}

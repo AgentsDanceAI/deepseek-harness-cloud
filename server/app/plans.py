@@ -21,7 +21,7 @@ _cache_mtime: float = 0.0
 
 def pricing() -> dict:
     global _cache, _cache_mtime
-    p = config.CONFIG_DIR / "pricing.json"
+    p = config.CONFIG_DIR / config.PRICING_FILE
     mtime = p.stat().st_mtime
     with _lock:
         if _cache is None or mtime != _cache_mtime:

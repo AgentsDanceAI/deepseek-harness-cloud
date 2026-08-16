@@ -6,3 +6,9 @@ desktop/build/
 node_modules/
 .pytest_cache/
 *.egg-info/
+
+# secrets — never commit
+deploy/**/.env
+.env
+!deploy/**/.env.template
+!deploy/**/.env.example

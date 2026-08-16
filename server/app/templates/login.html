@@ -5,6 +5,15 @@
   <div class="card auth-card">
     <h1 class="auth-title">登录 DSH Cloud</h1>
 
+    {% set oauth_next = request.query_params.get('next', '/console') %}
+    {% set oauth_err = request.query_params.get('google_error') or request.query_params.get('github_error') %}
+    {% if oauth_err %}<p class="form-error center">{{ oauth_err }}</p>{% endif %}
+    <div class="btn-col">
+      <a class="btn btn-ghost btn-block" href="/api/auth/google/start?next={{ oauth_next | urlencode }}">使用 Google 登录</a>
+      <a class="btn btn-ghost btn-block" href="/api/auth/github/start?next={{ oauth_next | urlencode }}">使用 GitHub 登录</a>
+    </div>
+    <div class="auth-divider"><span>或</span></div>
+
     <div class="tabs" role="tablist">
       <button class="tab active" data-tab="pw" type="button">密码登录</button>
       <button class="tab" data-tab="code" type="button">邮箱验证码登录</button>

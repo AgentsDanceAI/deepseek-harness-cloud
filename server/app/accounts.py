@@ -94,6 +94,26 @@ def _create_user(email: str, password: str = "") -> dict:
     return _load_user(uid)
 
 
+def find_or_create_oauth_user(email: str, display_name: str = "") -> dict | None:
+    """Log an OAuth identity (email-ownership verified by the provider) into its
+    account. Email IS the identity — the same namespace as password / email-code
+    logins, so a Google/GitHub login lands on the existing account for that
+    address. Creates the account on first sight when OAUTH_AUTO_REGISTER is on;
+    returns None when the email has no account and auto-register is off."""
+    email = email.strip().lower()
+    row = db.query_one("SELECT * FROM users WHERE email=?", (email,))
+    if row is None:
+        if not config.OAUTH_AUTO_REGISTER:
+            return None
+        row = _create_user(email)
+    user = dict(row)
+    # only seed the display name — never clobber a name the user later changed
+    if display_name and user["display_name"] in ("", email.split("@")[0]):
+        db.query("UPDATE users SET display_name=? WHERE id=?", (display_name, user["id"]))
+        user["display_name"] = display_name
+    return user
+
+
 @router.post("/register")
 def register(body: dict, request: Request, response: Response):
     if not config.ALLOW_REGISTRATION:

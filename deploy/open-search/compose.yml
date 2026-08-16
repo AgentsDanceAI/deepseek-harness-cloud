@@ -1,0 +1,41 @@
+# open-search.ai deployment — DHC server only.
+#
+# The host's 80/443 and open-search.ai's TLS/Cloudflare origin are already owned
+# by the existing `the shared Caddy`. So we do NOT run our own Caddy here:
+# we run just the app on a shared docker network, connect that Caddy to the same
+# network, and point the open-search.ai site block at dhc-server:8100.
+#
+#   docker network create dhc-net 2>/dev/null || true
+#   docker compose -f deploy/open-search/compose.yml --env-file deploy/open-search/.env up -d --build
+#   docker network connect dhc-net the shared Caddy 2>/dev/null || true
+#   # then edit the open-search.ai block in Caddyfile.gpu -> reverse_proxy dhc-server:8100
+#   # and: docker exec the shared Caddy caddy reload --config /etc/caddy/Caddyfile
+services:
+  dhc-server:
+    build:
+      context: ../../server
+    image: dhc-server:latest
+    container_name: dhc-server
+    restart: unless-stopped
+    env_file: [".env"]
+    environment:
+      DHC_DATA_DIR: /app/data
+    volumes:
+      - dhc-data:/app/data
+    networks:
+      - dhc-net
+    expose:
+      - "8100"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8100/api/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+networks:
+  dhc-net:
+    external: true
+    name: dhc-net
+
+volumes:
+  dhc-data:

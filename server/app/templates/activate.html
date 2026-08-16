@@ -36,6 +36,12 @@
           <p class="form-error" id="act-login-error" hidden></p>
           <button class="btn btn-primary btn-block" type="submit">登录</button>
         </form>
+        <div class="auth-divider"><span>或</span></div>
+        {% set act_next = ('/activate?code=' + code) | urlencode %}
+        <div class="btn-col">
+          <a class="btn btn-ghost btn-block" href="/api/auth/google/start?next={{ act_next }}">使用 Google 登录</a>
+          <a class="btn btn-ghost btn-block" href="/api/auth/github/start?next={{ act_next }}">使用 GitHub 登录</a>
+        </div>
         <p class="muted small center"><a id="act-login-full" href="/login">使用邮箱验证码登录 / 注册 →</a></p>
       </div>
 
