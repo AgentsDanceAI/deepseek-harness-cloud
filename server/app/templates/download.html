@@ -5,6 +5,12 @@
   <div class="container">
     <h1>下载 DSH Cloud 桌面应用</h1>
     <p class="muted">安装后在应用内登录，浏览器授权设备，即可开始使用。</p>
+    {% if not url_mac or not url_win %}
+    <p class="muted" style="background:#fff7ed;border:1px solid #fed7aa;border-radius:10px;padding:12px 14px">
+      桌面安装包正在重新构建，暂时无法下载。这段时间可以直接用
+      <a href="/work">浏览器版云工作台</a>，功能一致，手机也能用。
+    </p>
+    {% endif %}
     <div class="dl-grid">
       <div class="card dl-card">
         <div class="dl-icon" aria-hidden="true">
@@ -15,7 +21,7 @@
         {% if url_mac %}
           <a class="btn btn-primary btn-block" href="{{ url_mac }}" rel="noopener">下载 .dmg（Apple Silicon）</a>
         {% else %}
-          <button class="btn btn-ghost btn-block" type="button" disabled>即将上线</button>
+          <button class="btn btn-ghost btn-block" type="button" disabled>重新构建中</button>
         {% endif %}
         {% if download_url_mac_x64 %}
           <a class="btn btn-ghost btn-block" href="{{ download_url_mac_x64 }}" rel="noopener" style="margin-top:10px">下载 .dmg（Intel）</a>
@@ -30,7 +36,7 @@
         {% if url_win %}
           <a class="btn btn-primary btn-block" href="{{ url_win }}" rel="noopener">下载 .exe</a>
         {% else %}
-          <button class="btn btn-ghost btn-block" type="button" disabled>即将上线</button>
+          <button class="btn btn-ghost btn-block" type="button" disabled>重新构建中</button>
         {% endif %}
       </div>
       {% if download_url_android %}
