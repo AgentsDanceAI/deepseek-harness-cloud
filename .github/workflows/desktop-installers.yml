@@ -8,10 +8,17 @@
 name: desktop-installers
 
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      only:
+        description: "which jobs to run"
+        type: choice
+        options: [all, windows, macos]
+        default: all
 
 jobs:
   windows:
+    if: ${{ inputs.only == 'all' || inputs.only == 'windows' }}
     runs-on: windows-latest
     timeout-minutes: 90
     defaults:
@@ -39,9 +46,12 @@ jobs:
         run: corepack yarn build
       - name: Package NSIS installer
         working-directory: desktop/build/upstream/dsh-plugin-desktop
-        # --publish=never: electron-builder's implicit CI publishing wants a GH
-        # token and fails the build after the installer is already produced.
-        run: corepack yarn exec electron-builder -- --win nsis --publish=never
+        # build.publish=null in the throwaway tree: electron-builder's implicit
+        # CI publishing wants a GH token and fails AFTER the installer is built;
+        # the --publish=never CLI flag did not reliably reach it through yarn exec.
+        run: |
+          node -e "const fs=require('fs');const j=JSON.parse(fs.readFileSync('package.json','utf8'));j.build.publish=null;fs.writeFileSync('package.json',JSON.stringify(j,null,2))"
+          corepack yarn exec electron-builder -- --win nsis --publish=never
       - name: Collect artifact
         run: |
           mkdir -p out
@@ -54,6 +64,7 @@ jobs:
           if-no-files-found: error
 
   macos-arm64:
+    if: ${{ inputs.only == 'all' || inputs.only == 'macos' }}
     runs-on: macos-latest
     timeout-minutes: 90
     steps:
