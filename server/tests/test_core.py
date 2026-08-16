@@ -310,3 +310,21 @@ def test_models_listing(gw_user):
     r = fresh.get("/llm/v1/models")
     ids = [m["id"] for m in r.json()["data"]]
     assert "deepseek-v4-flash" in ids and "deepseek-v4-pro" in ids
+
+
+def test_gateway_concurrency_headroom(gw_user, monkeypatch):
+    """One agent task = main stream + short aux calls (title/compaction). The
+    admission limit must be plan concurrency PLUS headroom, or free tier (1)
+    deadlocks against its own session-title request — the exact production bug
+    from session-504bc795: 'Plan allows 1 concurrent request(s)' killing chat."""
+    fresh, uid = gw_user
+    monkeypatch.setitem(gateway._inflight, uid, 1)  # main stream in flight
+    body = {"id": "x", "usage": {"prompt_tokens": 5, "completion_tokens": 5}, "choices": []}
+    monkeypatch.setattr(gateway, "_upstream_client", lambda: _FakeClient(json_body=body))
+    # aux call while the main stream runs must be admitted (free concurrency=1)
+    r = fresh.post("/llm/v1/chat/completions", json={"model": "deepseek-v4-flash", "messages": []})
+    assert r.status_code == 200
+    # but the cap still exists: at limit+headroom, reject
+    monkeypatch.setitem(gateway._inflight, uid, 1 + gateway.AUX_REQUEST_HEADROOM)
+    r2 = fresh.post("/llm/v1/chat/completions", json={"model": "deepseek-v4-flash", "messages": []})
+    assert r2.status_code == 429

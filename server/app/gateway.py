@@ -58,13 +58,22 @@ def _openai_error(status: int, code: str, message: str) -> JSONResponse:
         "error": {"message": message, "type": code, "code": code}})
 
 
+# One agent "task" is a long main stream plus short auxiliary model calls dsh
+# fires alongside it (session titling, compaction). The plan's concurrency
+# number counts TASKS, so the gateway allows that many streams plus headroom
+# for the auxiliaries — without this, free-tier (concurrency 1) deadlocks
+# against its own title request and every chat looks dead.
+AUX_REQUEST_HEADROOM = 2
+
+
 def _admit(user: dict) -> JSONResponse | None:
     """Returns an error response if the request must be rejected, else None."""
     uid = user["id"]
-    limit = plans.concurrency_limit(uid)
+    limit = plans.concurrency_limit(uid) + AUX_REQUEST_HEADROOM
     if _inflight.get(uid, 0) >= limit:
         return _openai_error(429, "concurrency_limit",
-                             f"Plan allows {limit} concurrent request(s). Upgrade for more.")
+                             "Too many simultaneous requests for the current plan. "
+                             "Wait for running tasks or upgrade for more concurrency.")
     if not _qps.take(uid):
         return _openai_error(429, "rate_limit_exceeded", "Too many requests, slow down.")
     reason = plans.check_run_blocked(uid)
