@@ -9,14 +9,20 @@
 <script src="/static/app.js" defer></script>
 {% block head %}{% endblock %}
 </head>
-<body data-page="{{ page }}">
+<body data-page="{{ page }}" data-currency-symbol="{{ currency_symbol }}">
 <header class="site-header">
   <div class="container nav-row">
     <a class="brand" href="/" aria-label="DSH Cloud 首页">
       <svg class="logo" viewBox="0 0 32 32" width="28" height="28" aria-hidden="true">
-        <rect x="2" y="2" width="28" height="28" rx="8" fill="var(--accent)"/>
-        <path d="M9 21.5 15 10.5l3.2 6 2-3.4 3 8.4" fill="none" stroke="#fff" stroke-width="2.4"
+        <defs>
+          <linearGradient id="lg" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stop-color="#3574de"/><stop offset="1" stop-color="#1d52ad"/>
+          </linearGradient>
+        </defs>
+        <rect x="1.5" y="1.5" width="29" height="29" rx="8.5" fill="url(#lg)"/>
+        <path d="M9.5 11 15 16l-5.5 5" fill="none" stroke="#fff" stroke-width="2.6"
               stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M17 21.5h6" stroke="#fff" stroke-width="2.6" stroke-linecap="round"/>
       </svg>
       <span class="brand-name">DSH Cloud</span>
     </a>
@@ -71,6 +77,10 @@
         <a href="https://beian.mps.gov.cn" rel="noopener" target="_blank">{{ psb_number }}</a>
       {% endif %}
     </div>
+    <p class="footer-disclaimer">
+      本产品基于开源 DeepSeek Harness（MIT 协议）构建，独立运营，与 DeepSeek 无隶属或背书关系。
+      “DeepSeek” 为其权利人所有的商标。
+    </p>
   </div>
 </footer>
 <div id="toast" class="toast" hidden></div>

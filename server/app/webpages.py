@@ -38,6 +38,11 @@ def _ctx(request: Request, page: str, **extra) -> dict:
         user = try_resolve_user(request)
     except Exception:
         user = None
+    from . import plans as _plans
+    try:
+        currency = _plans.pricing().get("currency", "CNY")
+    except Exception:
+        currency = "CNY"
     ctx = {
         "request": request,
         "page": page,
@@ -48,6 +53,10 @@ def _ctx(request: Request, page: str, **extra) -> dict:
         "legal_entity_zh": config.LEGAL_ENTITY_ZH,
         "legal_contact_email": config.LEGAL_CONTACT_EMAIL,
         "year": time.localtime().tm_year,
+        "currency": currency,
+        "currency_symbol": {"CNY": "¥", "USD": "$"}.get(currency, currency + " "),
+        "download_url_mac": os.environ.get("DOWNLOAD_URL_MAC", ""),
+        "download_url_win": os.environ.get("DOWNLOAD_URL_WIN", ""),
     }
     ctx.update(extra)
     return ctx

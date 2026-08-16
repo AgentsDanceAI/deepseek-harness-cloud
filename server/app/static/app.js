@@ -76,7 +76,7 @@
     return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate()) + " " + p(d.getHours()) + ":" + p(d.getMinutes());
   }
 
-  function fmtYuan(cents) { return "¥" + (cents / 100).toFixed(2); }
+  function fmtYuan(cents) { var sym = document.body.dataset.currencySymbol || "¥"; return sym + (cents / 100).toFixed(2); }
 
   var TIER_ZH = { plus: "Plus", pro: "Pro", max: "Max", free: "免费版" };
   function itemLabel(item) {

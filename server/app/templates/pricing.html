@@ -4,7 +4,7 @@
 <section class="section">
   <div class="container">
     <h1 class="section-title">定价</h1>
-    <p class="center muted">1 积分 = ¥0.01 牌价模型用量 · 套餐积分当期有效 · 积分包 12 个月有效</p>
+    <p class="center muted">积分按上游模型牌价用量折算，用多少扣多少 · 套餐积分当期有效 · 积分包 12 个月有效</p>
 
     <div class="cycle-toggle center" role="tablist">
       <button class="tab active" data-cycle="monthly" type="button">月付</button>
@@ -18,7 +18,7 @@
           {% if tier == 'pro' %}<div class="ribbon">最受欢迎</div>{% endif %}
           <h3>{{ t.name }}</h3>
           {% if tier == 'free' %}
-            <div class="price"><span class="currency">¥</span>0</div>
+            <div class="price"><span class="currency">{{ currency_symbol }}</span>0</div>
             <ul class="plain">
               <li>注册送 {{ '{:,}'.format(t.signup_credits or 0) }} 积分</li>
               <li>{{ t.concurrency }} 路并发</li>
@@ -27,7 +27,7 @@
             <a class="btn btn-ghost btn-block" href="/login">免费开始</a>
           {% else %}
             <div class="price" data-monthly="{{ t.monthly_cents }}" data-yearly="{{ t.yearly_cents or 0 }}">
-              <span class="currency">¥</span><span class="amount">{{ t.monthly_cents // 100 }}</span><span class="per">/月</span>
+              <span class="currency">{{ currency_symbol }}</span><span class="amount">{{ t.monthly_cents // 100 }}</span><span class="per">/月</span>
             </div>
             <ul class="plain">
               <li>每月 {{ '{:,}'.format(t.monthly_credits) }} 积分</li>
@@ -48,7 +48,7 @@
       {% for pid, p in pricing.packs.items() %}
       <div class="card pack">
         <h3>{{ p.name }}</h3>
-        <div class="price"><span class="currency">¥</span>{{ p.cents // 100 }}</div>
+        <div class="price"><span class="currency">{{ currency_symbol }}</span>{{ p.cents // 100 }}</div>
         <p class="muted">{{ '{:,}'.format(p.credits) }} 积分 · {{ p.valid_days }} 天内有效</p>
         <button class="btn btn-primary btn-block buy-btn" data-item="pack:{{ pid }}" type="button">购买</button>
       </div>
@@ -58,7 +58,7 @@
     <div class="card block faq">
       <h2>常见问题</h2>
       <h3>积分怎么计费？</h3>
-      <p class="muted">按上游模型牌价折算：1 积分 = ¥0.01 牌价用量，按实际输入/输出 tokens 结算，用多少扣多少。</p>
+      <p class="muted">按上游模型牌价折算，按实际输入/输出 tokens 结算，用多少扣多少；明细在控制台逐条可查。</p>
       <h3>套餐积分和积分包积分有什么区别？</h3>
       <p class="muted">套餐积分在订阅周期内有效（月付 31 天 / 年付 366 天）；积分包积分 12 个月内有效。扣费时优先使用先到期的积分。</p>
       <h3>可以退款吗？</h3>

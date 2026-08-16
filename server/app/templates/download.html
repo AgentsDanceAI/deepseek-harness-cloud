@@ -1,29 +1,29 @@
 {% extends "base.html" %}
 {% block title %}下载 — DSH Cloud{% endblock %}
 {% block content %}
-<section class="section">
+<section class="dl-wrap">
   <div class="container">
-    <h1 class="section-title">下载 DSH 桌面应用</h1>
-    <p class="center muted">安装后在应用内登录 DSH Cloud 账号即可使用。</p>
-    <div class="grid grid-2 dl-grid">
-      <div class="card dl-card center">
+    <h1>下载 DSH Cloud 桌面应用</h1>
+    <p class="muted">安装后在应用内登录，浏览器授权设备，即可开始使用。</p>
+    <div class="dl-grid">
+      <div class="card dl-card">
         <div class="dl-icon" aria-hidden="true">
-          <svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a5 5 0 0 1 5 5c0 1-.3 2-.8 2.8C18.9 11 21 13.6 21 17c0 3-2 5-5 5H8c-3 0-5-2-5-5 0-3.4 2.1-6 4.8-7.2A5 5 0 0 1 12 2Z"/></svg>
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M16.7 12.9c0-2.4 2-3.6 2-3.6a4.6 4.6 0 0 0-3.6-1.9c-1.5-.2-3 .9-3.7.9-.8 0-2-.9-3.3-.9A4.9 4.9 0 0 0 4 9.9c-1.8 3-.5 7.5 1.2 10 .8 1.2 1.8 2.5 3.1 2.5 1.3-.1 1.8-.8 3.3-.8s2 .8 3.3.8 2.2-1.2 3-2.4a10 10 0 0 0 1.4-2.8 4.4 4.4 0 0 1-2.6-4.3ZM14.2 5.6A4.5 4.5 0 0 0 15.3 2a4.6 4.6 0 0 0-3 1.5A4.3 4.3 0 0 0 11.2 7a3.8 3.8 0 0 0 3-1.4Z"/></svg>
         </div>
         <h3>macOS</h3>
-        <p class="muted small">Apple Silicon (M 系列) · macOS 12+ · Intel 版即将提供</p>
+        <p class="muted">Apple Silicon（M 系列）· macOS 12+ · Intel 版即将提供</p>
         {% if url_mac %}
           <a class="btn btn-primary btn-block" href="{{ url_mac }}" rel="noopener">下载 .dmg</a>
         {% else %}
           <button class="btn btn-ghost btn-block" type="button" disabled>即将上线</button>
         {% endif %}
       </div>
-      <div class="card dl-card center">
+      <div class="card dl-card">
         <div class="dl-icon" aria-hidden="true">
-          <svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="13" rx="1.5"/><path d="M8 21h8M12 17v4"/></svg>
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 5.5 10.5 4.4v7.1H3zM12 4.2 21 3v8.5h-9zM3 13.5h7.5v7.1L3 19.5zM12 13.5h9V21l-9-1.3z"/></svg>
         </div>
         <h3>Windows</h3>
-        <p class="muted small">Windows 10 / 11 · x64</p>
+        <p class="muted">Windows 10 / 11 · x64</p>
         {% if url_win %}
           <a class="btn btn-primary btn-block" href="{{ url_win }}" rel="noopener">下载 .exe</a>
         {% else %}
@@ -31,7 +31,16 @@
         {% endif %}
       </div>
     </div>
-    <p class="center muted small">安装遇到问题？联系 <a href="mailto:{{ legal_contact_email }}">{{ legal_contact_email }}</a></p>
+
+    <details class="dl-tips">
+      <summary>首次打开的安全提示（当前安装包未签名）</summary>
+      <p><strong>macOS</strong>：首次打开若提示"无法验证开发者"，请在应用图标上<strong>右键 → 打开</strong>，
+        或在终端执行 <code>xattr -cr "/Applications/DSH Cloud Desktop.app"</code> 后再打开。</p>
+      <p><strong>Windows</strong>：SmartScreen 提示时点击<strong>「更多信息」→「仍要运行」</strong>。</p>
+      <p>正式的代码签名与公证版本将在后续更新中提供。</p>
+    </details>
+
+    <p class="muted small" style="margin-top:26px">安装遇到问题？联系 <a href="mailto:{{ legal_contact_email }}">{{ legal_contact_email }}</a></p>
   </div>
 </section>
 {% endblock %}
