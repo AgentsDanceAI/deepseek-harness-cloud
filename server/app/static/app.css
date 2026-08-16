@@ -837,3 +837,11 @@ body[data-page="landing"] .nav-menu a { color: var(--fg); }
 .section .card.feature { padding: 28px 30px; text-align: left; }
 .section .card.feature h2 { font-size: clamp(20px, 2.4vw, 26px); letter-spacing: -.3px; margin-bottom: 10px; }
 .section .card.feature > p { color: var(--muted); font-size: 15px; line-height: 1.75; }
+
+/* inline text button (invite flow, table row actions) — reads as a link, not a control */
+.link-btn {
+  border: 0; background: none; padding: 0; cursor: pointer;
+  color: var(--brand); font: inherit; text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.link-btn:hover { color: var(--brand-strong); }
