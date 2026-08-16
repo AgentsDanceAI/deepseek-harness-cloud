@@ -10,6 +10,19 @@
       <span class="muted">{{ user.email }}</span>
     </div>
 
+    {% if work_enabled %}
+    <div class="card section-card work-banner">
+      <div class="card-row">
+        <div>
+          <h2 style="margin-bottom:4px">☁️ 云工作台</h2>
+          <p class="muted small">无需安装，直接在浏览器（含手机）里使用 DSH。按活跃分钟计费，
+            每分钟 {{ work_credits_per_min }} 积分，闲置 {{ work_idle_stop_min }} 分钟自动暂停。</p>
+        </div>
+        <a class="btn btn-primary" href="/work" target="_blank" rel="noopener">进入云工作台 →</a>
+      </div>
+    </div>
+    {% endif %}
+
     <div class="grid grid-3 stat-grid">
       <div class="card stat">
         <div class="stat-label">积分余额</div>

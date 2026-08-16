@@ -16,14 +16,16 @@ CADDY_CTR="the shared Caddy"
 
 [ -f "$ENVFILE" ] || { echo "missing $ENVFILE (copy .env.template and fill secrets)"; exit 1; }
 
-echo "==> 1/6 ensure dhc-net exists"
+echo "==> 1/6 ensure docker networks exist"
 docker network create dhc-net 2>/dev/null || echo "    dhc-net already exists"
+docker network create dshwork-net 2>/dev/null || echo "    dshwork-net already exists"
 
-echo "==> 2/6 build + start dhc-server"
+echo "==> 2/6 build + start dhc-server + docker-proxy"
 docker compose -f "$COMPOSE" --env-file "$ENVFILE" up -d --build
 
-echo "==> 3/6 attach the shared Caddy to dhc-net"
-docker network connect dhc-net "$CADDY_CTR" 2>/dev/null || echo "    already connected"
+echo "==> 3/6 attach the shared Caddy to dhc-net (+dshwork-net for work UI proxy)"
+docker network connect dhc-net "$CADDY_CTR" 2>/dev/null || echo "    dhc-net already connected"
+docker network connect dshwork-net "$CADDY_CTR" 2>/dev/null || echo "    dshwork-net already connected"
 
 echo "==> 4/6 wait for dhc-server health"
 for i in $(seq 1 30); do
@@ -58,9 +60,42 @@ print("    Caddyfile.gpu open-search.ai block replaced")
 PY
 fi
 
-echo "==> 5b/6 validate + reload Caddy"
-docker exec "$CADDY_CTR" caddy validate --config /etc/caddy/Caddyfile
-docker exec "$CADDY_CTR" caddy reload --config /etc/caddy/Caddyfile
+echo "==> 5c/6 ensure work.<domain> Caddy block (cloud workspaces)"
+WORK_HOST="${WORK_DOMAIN:-work.open-search.ai}"
+if grep -q "^${WORK_HOST} {" "$CADDYFILE"; then
+  echo "    work block already present"
+else
+  # forward_auth: EVERY request (incl. WS upgrade) first hits /api/work/route on
+  # dhc-server, which ensures the user's container is up and returns the upstream
+  # in X-Work-Upstream; Caddy then reverse-proxies there with a loopback Host so
+  # dsh's reachability fence trusts it. Anonymous/among-broke users are 302'd.
+  cat >> "$CADDYFILE" <<EOF
+
+# ── DSH Cloud workspaces (dshwork) — per-user dsh containers ──
+${WORK_HOST} {
+	@auth {
+		not path /api/work/route
+	}
+	forward_auth @auth dhc-server:8100 {
+		uri /api/work/route
+		copy_headers X-Work-Upstream
+	}
+	reverse_proxy {http.request.header.X-Work-Upstream} {
+		header_up Host 127.0.0.1:3080
+		header_up Origin http://127.0.0.1:3080
+		flush_interval -1
+	}
+}
+EOF
+  echo "    appended ${WORK_HOST} block"
+fi
+
+echo "==> 5d/6 sync Caddyfile into the running container + reload"
+# single-file bind mounts can go stale in a long-running container; push the
+# authoritative host file into a container-local path and reload from it.
+docker cp "$CADDYFILE" "$CADDY_CTR:/tmp/Caddyfile.dhc"
+docker exec "$CADDY_CTR" caddy validate --config /tmp/Caddyfile.dhc --adapter caddyfile
+docker exec "$CADDY_CTR" caddy reload --config /tmp/Caddyfile.dhc --adapter caddyfile
 
 echo "==> 6/6 stop the old dsh container"
 docker stop dsh 2>/dev/null && echo "    dsh stopped" || echo "    dsh not running"
@@ -68,3 +103,4 @@ docker stop dsh 2>/dev/null && echo "    dsh stopped" || echo "    dsh not runni
 echo
 echo "cutover done. Verify:"
 echo "  curl -s https://open-search.ai/api/health"
+echo "  (work.<domain> also needs a Cloudflare DNS record → this origin)"
