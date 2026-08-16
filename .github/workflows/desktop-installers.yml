@@ -39,7 +39,9 @@ jobs:
         run: corepack yarn build
       - name: Package NSIS installer
         working-directory: desktop/build/upstream/dsh-plugin-desktop
-        run: corepack yarn dist:win || corepack yarn exec electron-builder -- --win nsis
+        # --publish=never: electron-builder's implicit CI publishing wants a GH
+        # token and fails the build after the installer is already produced.
+        run: corepack yarn exec electron-builder -- --win nsis --publish=never
       - name: Collect artifact
         run: |
           mkdir -p out
