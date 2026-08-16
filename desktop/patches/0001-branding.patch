@@ -61,3 +61,60 @@ index 48cd4da..1c9ed61 100644
    if (app.isPackaged && process.cwd() === '/') process.chdir(app.getPath('home'))
  
    const failLoudProcess: FailLoudProcess = {
+diff --git a/dsh-plugin-desktop/tests/package.spec.ts b/dsh-plugin-desktop/tests/package.spec.ts
+index 404e5e2..f20487f 100644
+--- a/dsh-plugin-desktop/tests/package.spec.ts
++++ b/dsh-plugin-desktop/tests/package.spec.ts
+@@ -134,8 +134,8 @@ describe('published package surface', () => {
+ 
+   it('fixes the installed application identity', () => {
+     expect(manifest.version).toBe(workspaceManifest.version)
+-    expect(manifest.build?.productName).toBe('DSH Desktop')
+-    expect(manifest.build?.appId).toBe('ai.deepseek.dsh.desktop')
++    expect(manifest.build?.productName).toBe('DSH Cloud Desktop')
++    expect(manifest.build?.appId).toBe('ai.agentsdance.dshcloud.desktop')
+     expect(manifest.build?.asarUnpack).toEqual([
+       'package.json',
+       'cordis.patch.yml',
+@@ -173,8 +173,8 @@ describe('published package surface', () => {
+       allowToChangeInstallationDirectory: true,
+       createDesktopShortcut: true,
+       createStartMenuShortcut: true,
+-      shortcutName: 'DSH Desktop',
+-      artifactName: 'DSH-Desktop-${version}-${arch}-Setup.${ext}',
++      shortcutName: 'DSH Cloud Desktop',
++      artifactName: 'DSH-Cloud-Desktop-${version}-${arch}-Setup.${ext}',
+     })
+     expect(manifest.build?.linux?.icon).toBe('build/app-icon.png')
+   })
+diff --git a/dsh-plugin-desktop/tests/update-download.spec.ts b/dsh-plugin-desktop/tests/update-download.spec.ts
+index be5a76b..17c70be 100644
+--- a/dsh-plugin-desktop/tests/update-download.spec.ts
++++ b/dsh-plugin-desktop/tests/update-download.spec.ts
+@@ -85,7 +85,7 @@ describe('desktop update installer download', () => {
+       request,
+     })
+ 
+-    expect(result).toBe(join(userDataPath, 'updates', '2.1.0', 'DSH-Desktop-2.1.0-mac.dmg'))
++    expect(result).toBe(join(userDataPath, 'updates', '2.1.0', 'DSH-Cloud-Desktop-2.1.0-mac.dmg'))
+     expect(await readFile(result)).toEqual(Buffer.from(artifact))
+     expect(calls).toHaveLength(1)
+     expect(calls[0]?.url).toBe(DESKTOP_DOWNLOAD_URLS.darwin)
+@@ -106,7 +106,7 @@ describe('desktop update installer download', () => {
+       },
+     })
+ 
+-    expect(result).toBe(join(userDataPath, 'updates', '2.2.0', 'DSH-Desktop-2.2.0-windows.exe'))
++    expect(result).toBe(join(userDataPath, 'updates', '2.2.0', 'DSH-Cloud-Desktop-2.2.0-windows.exe'))
+     expect(await readFile(result)).toEqual(Buffer.from(artifact))
+     await expectNoPartialFiles(userDataPath, '2.2.0')
+   })
+@@ -124,7 +124,7 @@ describe('desktop update installer download', () => {
+       userDataPath,
+       'updates',
+       '2.8.0+build',
+-      'DSH-Desktop-2.8.0+build-mac.dmg',
++      'DSH-Cloud-Desktop-2.8.0+build-mac.dmg',
+     ))
+   })
+ 
