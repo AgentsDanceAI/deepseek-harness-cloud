@@ -1,0 +1,99 @@
+# Build unsigned desktop installers on real macOS / Windows runners.
+# Trigger manually (workflow_dispatch); download the artifacts and publish them
+# under https://open-search.ai/releases/ (see deploy/open-search/DEPLOY_STATE.md).
+#
+# Unsigned: macOS users right-click-open on first launch (or `xattr -cr`),
+# Windows shows SmartScreen "more info -> run anyway". Proper signing needs the
+# Apple Developer / Windows code-signing certs from the launch checklist.
+name: desktop-installers
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Assemble upstream + overlay
+        run: node desktop/scripts/assemble.mjs --no-submodule
+      - name: Install dependencies
+        working-directory: desktop/build/upstream
+        run: |
+          corepack enable
+          corepack yarn install
+      - name: Add tsdown config loader helper
+        working-directory: desktop/build/upstream/dsh-plugin-desktop
+        run: corepack yarn add -D unrun
+      - name: Verify upstream contract
+        run: node desktop/scripts/verify-contract.mjs desktop/build/upstream
+      - name: Build
+        working-directory: desktop/build/upstream/dsh-plugin-desktop
+        run: corepack yarn build
+      - name: Package NSIS installer
+        working-directory: desktop/build/upstream/dsh-plugin-desktop
+        run: corepack yarn dist:win || corepack yarn exec electron-builder -- --win nsis
+      - name: Collect artifact
+        run: |
+          mkdir -p out
+          cp desktop/build/upstream/dsh-plugin-desktop/dist/*Setup.exe out/
+          ls -la out/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: out/*.exe
+          if-no-files-found: error
+
+  macos-arm64:
+    runs-on: macos-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Assemble upstream + overlay
+        run: node desktop/scripts/assemble.mjs --no-submodule
+      - name: Install dependencies
+        working-directory: desktop/build/upstream
+        run: |
+          corepack enable
+          corepack yarn install
+      - name: Add tsdown config loader helper
+        working-directory: desktop/build/upstream/dsh-plugin-desktop
+        run: corepack yarn add -D unrun
+      - name: Verify upstream contract
+        run: node desktop/scripts/verify-contract.mjs desktop/build/upstream
+      - name: Build
+        working-directory: desktop/build/upstream/dsh-plugin-desktop
+        run: corepack yarn build
+      - name: Package .app (unsigned)
+        working-directory: desktop/build/upstream/dsh-plugin-desktop
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+        run: corepack yarn package:dir
+      - name: Wrap DMG
+        working-directory: desktop/build/upstream/dsh-plugin-desktop
+        run: |
+          APP=$(find dist -maxdepth 2 -name "*.app" -type d | head -1)
+          echo "app: $APP"
+          test -n "$APP"
+          VERSION=$(node -p "require('./package.json').version")
+          mkdir -p ../out && STAGE=$(mktemp -d)
+          cp -R "$APP" "$STAGE/"
+          ln -s /Applications "$STAGE/Applications"
+          hdiutil create -volname "DSH Cloud Desktop" -srcfolder "$STAGE" -ov -format UDZO \
+            "../out/DSH-Cloud-Desktop-${VERSION}-mac-arm64.dmg"
+          ls -la ../out/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-arm64-dmg
+          path: desktop/build/out/*.dmg
+          if-no-files-found: error

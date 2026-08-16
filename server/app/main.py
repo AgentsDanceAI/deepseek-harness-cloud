@@ -43,6 +43,15 @@ def create_app() -> FastAPI:
     static_dir = Path(__file__).parent / "static"
     if static_dir.is_dir():
         app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+
+    # Desktop installers, served from the data volume (drop files into
+    # $DHC_DATA_DIR/releases and point DOWNLOAD_URL_* at /releases/<file>).
+    releases_dir = config.DATA_DIR / "releases"
+    try:
+        releases_dir.mkdir(parents=True, exist_ok=True)
+        app.mount("/releases", StaticFiles(directory=str(releases_dir)), name="releases")
+    except OSError:
+        log.warning("releases dir unavailable at %s", releases_dir)
     app.include_router(pages_router)  # last: contains catch-all-ish page routes
 
     @app.get("/api/health")
