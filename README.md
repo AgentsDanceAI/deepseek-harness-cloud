@@ -1,86 +1,208 @@
-# deepseek-harness-cloud
+<div align="center">
 
-给 [deepseek-harness-desktop](https://github.com/anywhere-labs/deepseek-harness-desktop)
-套上账号体系与登陆墙的商业化云服务：用户登录即用，无需自购 API Key；
-LLM 流量统一经我们的网关转发（**上游 key 永不出服务器**）；
-免费额度起步，套餐 + 积分变现。
+# DSH Cloud
 
-```
-桌面端 (Electron, 上游 pin + 3 个小补丁 + 自包含 cloud 目录)
-   │  登陆墙 → 设备授权/邮箱登录 → token 注入 dsh (env 凭据源, 最高优先级)
-   ▼
-服务端 (FastAPI):  账号 · 设备授权 · LLM 网关(OpenAI+Anthropic 兼容双面) ·
-                   积分账本 · 套餐 · 支付(Stripe/支付宝/微信) · Web 控制台
-   │  Bearer <用户token> 进, Bearer <我们的上游key> 出, usage 精确计量扣积分
-   ▼
-上游模型 (DeepSeek 官方 API 或任意 OpenAI 兼容端点)
-```
+**Turn [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) into a hosted product — accounts, credits, and a browser-based agent workspace.**
 
-## 仓库布局
+给 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 套上账号、积分与云端工作台，
+把它变成一个可运营、可私有化的产品。
 
-| 目录 | 内容 |
+[English](#english) · [中文](#中文) · [Live demo](https://dshcloud.online) · [Self-host in 5 min](deploy/selfhost/README.md)
+
+</div>
+
+---
+
+## English
+
+DeepSeek Harness is an excellent agent runtime, but shipping it to people who are
+not you means solving the boring half: who is allowed in, whose API key pays for
+the tokens, what happens when someone leaves a tab open, and where the agent runs
+if the user is on a phone. This repository is that half.
+
+**Two ways to use it.**
+
+1. **Run it as a business.** Users sign in, get free credits, and pay for more.
+   Your upstream model key never leaves the server — clients hold a revocable
+   device token instead.
+2. **Run it for your company.** Deploy it internally and you have a private agent
+   platform: your own accounts, your own model upstream, your data inside your
+   own network.
+
+### What you get
+
+| | |
 |---|---|
-| `server/` | FastAPI 服务端（账号/网关/积分/支付/控制台），pytest 测试 |
-| `desktop/` | 桌面端 overlay：`upstream.json` pin + `patches/` + `dsh-plugin-cloud/`（登陆墙与网关注入的全部逻辑）+ 装配/升级脚本 |
-| `deploy/` | docker-compose + Caddyfile + `.env.example` |
-| `legal/` | 用户协议 / 隐私政策 / 退款政策 / AUP / 第三方声明（草案，上线前过律师） |
-| `docs/` | [架构](docs/architecture.md) · [上游兼容策略](docs/compatibility.md) · [中国大陆上线清单](docs/中国大陆上线清单.md) · [部署](docs/deploy.md) |
+| **Login wall** | Email code, Google, GitHub. Desktop apps authorise via a device flow. |
+| **Unified model gateway** | OpenAI- and Anthropic-compatible surfaces. The upstream key stays server-side; every call is metered and billed to credits. |
+| **Cloud workspace** | One isolated container per user, driven from the browser or a phone. Free machine-time allowance, then a paid pass. |
+| **Port preview** | The agent builds a web app; the user opens it on a real public URL instead of an unreachable `localhost`. |
+| **Credits & plans** | Bucketed ledger with expiry, subscriptions, credit packs, per-request usage log. |
+| **Teams** | Seats plus one shared credit pool; spend is attributed to the member who incurred it. |
+| **Payments** | Stripe, Alipay, WeChat Pay, Waffo. Amounts always resolved server-side. |
+| **Desktop clients** | macOS / Windows builds of the upstream app with the login wall layered on — no fork, three small patches. |
 
-## 服务端：本地开发
+### Quick start
+
+```bash
+git clone https://github.com/AgentsDanceAI/deepseek-harness-cloud
+cd deepseek-harness-cloud
+bash scripts/quickstart.sh --domain localhost --admin-email you@example.com
+```
+
+That copies the env template, generates a signing secret, brings the stack up and
+waits for health. Then open <http://localhost> and sign in — in local mode the
+email code is printed to the logs.
+
+For a real deployment, see **[deploy/selfhost/README.md](deploy/selfhost/README.md)**.
+
+### The keys you actually need
+
+Only one is mandatory to get a working system:
+
+| Variable | Required? | What it is |
+|---|---|---|
+| `AUTH_SECRET` | **yes** | Signs sessions and device tokens. `openssl rand -hex 32` (quickstart generates it). |
+| `UPSTREAM_BASE_URL` + `UPSTREAM_API_KEY` | **yes** | Any OpenAI-compatible endpoint — DeepSeek's own API, a gateway, or your self-hosted inference. This is the key that must never reach a client. |
+| `MAIL_SMTP_*` | for real sign-ups | Delivers login codes. Without it, codes only appear in the logs (fine locally). |
+| `ZHIPU_SEARCH_API_KEY` | optional | Enables the agent's web search. Without it, search returns empty. |
+| `WORK_ENABLED` + `WORK_DOMAIN` | optional | Turns on the cloud workspace (needs Docker access and a subdomain). |
+| `GOOGLE_LOGIN_*` / `GITHUB_LOGIN_*` | optional | Social sign-in buttons; they degrade gracefully when unset. |
+| Payment provider vars | optional | Until one is set, purchases are recorded as intents so you can see demand. |
+
+Every variable is documented inline in
+[`deploy/selfhost/.env.example`](deploy/selfhost/.env.example).
+
+> **Model ids.** `server/config/models.json` ships with the ids our own upstream
+> serves. If yours exposes different names, edit that file (it is mounted
+> read-only, so no rebuild is needed) or requests will 404 with `model_not_found`.
+
+### How it fits together
+
+```
+ browser / phone ─┐
+ desktop app ─────┤
+                  ▼
+        ┌──────────────────────┐     Bearer <user device token>
+        │  DSH Cloud server    │
+        │  accounts · credits  │────▶ upstream model API
+        │  gateway · billing   │      Bearer <YOUR key, server-side only>
+        └──────────┬───────────┘
+                   │ scoped docker socket proxy
+                   ▼
+        per-user dsh container  ──▶  port preview on a public URL
+```
+
+The desktop client is not a fork: we pin an upstream commit, apply three small
+patches, and drop in a self-contained plugin. `desktop/scripts/verify-contract.mjs`
+asserts the upstream seams we depend on still exist, so upgrades fail loudly
+rather than silently.
+
+### Development
 
 ```bash
 cd server
-uv venv --python 3.11 && uv pip install -e '.[dev]'
-DHC_DEV=1 AUTH_SECRET=dev UPSTREAM_API_KEY=sk-xxx .venv/bin/uvicorn app.main:app --port 8100
-# 测试
-.venv/bin/python -m pytest -q
+python -m venv .venv && .venv/bin/pip install -e .
+DHC_DEV=1 AUTH_SECRET=dev .venv/bin/python -m uvicorn app.main:app --reload
+.venv/bin/python -m pytest tests -q      # 103 tests
 ```
 
-`DHC_DEV=1` 下邮件验证码打印到控制台、cookie 不要求 https。
+### Licence and attribution
 
-## 服务端：生产部署
+MIT. Built on DeepSeek Harness (MIT). This is an independent project — not
+affiliated with, nor endorsed by, DeepSeek. "DeepSeek" belongs to its owner.
+
+---
+
+## 中文
+
+DeepSeek Harness 是很好的智能体运行时，但要把它交到别人手上，就得解决无趣的另一半：
+谁能进来、token 花谁的钱、有人开着页面走开怎么办、用户只有手机时智能体在哪跑。
+这个仓库就是那另一半。
+
+**两种用法：**
+
+1. **拿它做生意。** 用户登录即用、送免费额度、用超了付费。你的上游模型密钥
+   永远不出服务器——客户端拿到的是可随时吊销的设备令牌。
+2. **给自己公司用。** 部署到内网就是一套私有智能体平台：自己的账号体系、
+   自己的模型上游、数据不出内网。
+
+### 能得到什么
+
+| | |
+|---|---|
+| **登录墙** | 邮箱验证码、Google、GitHub；桌面端走设备授权流程 |
+| **统一模型网关** | 同时兼容 OpenAI 与 Anthropic 协议；上游密钥只在服务端，每次调用按积分实时计量 |
+| **云工作台** | 每用户一个隔离容器，浏览器与手机直接用；免费机时用完转付费通行证 |
+| **端口预览** | 智能体做出的网页，用户能用真实公网地址打开，而不是够不着的 `localhost` |
+| **积分与套餐** | 带过期的分桶账本、订阅、积分包、逐条用量记录 |
+| **团队** | 席位 + 组织共享积分池，用量仍归属到具体成员 |
+| **支付** | Stripe、支付宝、微信支付、Waffo；金额一律服务端裁定 |
+| **桌面客户端** | 在上游应用外面套登录墙的 macOS / Windows 安装包——零 fork，只有三个小补丁 |
+
+### 5 分钟跑起来
 
 ```bash
-cp deploy/.env.example deploy/.env    # 填 AUTH_SECRET / UPSTREAM_API_KEY / 域名等
-docker compose -f deploy/docker-compose.yml --env-file deploy/.env up -d --build
+git clone https://github.com/AgentsDanceAI/deepseek-harness-cloud
+cd deepseek-harness-cloud
+bash scripts/quickstart.sh --domain localhost --admin-email you@example.com
 ```
 
-Caddy 自动 HTTPS，唯一公网入口；应用只绑 loopback。详见 [docs/deploy.md](docs/deploy.md)。
+脚本会拷贝配置模板、生成签名密钥、拉起全栈并等待健康检查。然后打开
+<http://localhost> 登录——本地模式下验证码直接打在日志里。
 
-## 桌面端：装配与打包
+正式部署见 **[deploy/selfhost/README.md](deploy/selfhost/README.md)**。
+
+### 到底要配哪几个 key
+
+真正必填的只有一组：
+
+| 变量 | 必填？ | 说明 |
+|---|---|---|
+| `AUTH_SECRET` | **是** | 给会话与设备令牌签名。`openssl rand -hex 32`（快速脚本会自动生成） |
+| `UPSTREAM_BASE_URL` + `UPSTREAM_API_KEY` | **是** | 任意 OpenAI 兼容端点：DeepSeek 官方 API、某个网关，或你自建的推理服务。这就是那把绝不能给到客户端的钥匙 |
+| `MAIL_SMTP_*` | 正式注册需要 | 发登录验证码。不配则验证码只打进日志（本地够用） |
+| `ZHIPU_SEARCH_API_KEY` | 可选 | 开启智能体联网搜索；不配则搜索返回空 |
+| `WORK_ENABLED` + `WORK_DOMAIN` | 可选 | 开启云工作台（需要 Docker 权限与一个子域名） |
+| `GOOGLE_LOGIN_*` / `GITHUB_LOGIN_*` | 可选 | 社交登录按钮；不配时优雅降级，不报错 |
+| 支付相关变量 | 可选 | 一个都没配时，下单会记成「意向单」，方便你先看需求量 |
+
+每个变量在 [`deploy/selfhost/.env.example`](deploy/selfhost/.env.example) 里都有逐行注释。
+
+> **模型 id 提醒**：`server/config/models.json` 里预置的是我们自己上游的模型名。
+> 如果你的上游用别的名字，改这个文件即可（它是只读挂载，不用重新构建镜像），
+> 否则请求会以 `model_not_found` 404。
+
+### 私有化部署能得到什么
+
+部署完这套代码，你就拥有一份**完全属于自己的 dsh 云平台**：
+
+- 内部同事用邮箱登录，不需要给每个人发模型密钥
+- 额度按人或按部门发放，不会有人不小心刷爆账单
+- 云工作台跑在你自己的机器上，代码与数据不出内网
+- 模型上游换成你自己的（自建推理、专属网关、公有云都行）
+
+### 开发
 
 ```bash
-node desktop/scripts/assemble.mjs        # clone 上游 pin → 应用补丁 → 拷入 cloud 目录
-cd desktop/build/upstream && corepack enable && yarn install
-node ../../scripts/verify-contract.mjs "$PWD"   # 断言上游契约点
-cd dsh-plugin-desktop && yarn build && yarn package:dir   # 或 dist:mac / dist:win
+cd server
+python -m venv .venv && .venv/bin/pip install -e .
+DHC_DEV=1 AUTH_SECRET=dev .venv/bin/python -m uvicorn app.main:app --reload
+.venv/bin/python -m pytest tests -q      # 103 个测试
 ```
 
-上游发新版后的升级流程见 [docs/compatibility.md](docs/compatibility.md)——
-定制面只有 3 个补丁 + 1 个自包含目录，升级是机械操作，装配脚本会守住
-所有契约点（包括不得再分发 `@anthropic-ai/claude-agent-sdk` 的许可红线）。
+### 仓库布局
 
-## 商业模式与安全要点
+| 目录 | 内容 |
+|---|---|
+| `server/` | FastAPI 服务端：账号、网关、积分、支付、云工作台、网页 |
+| `desktop/` | 桌面端叠加层：上游 pin + 3 个补丁 + 自包含 cloud 插件 + 装配脚本 |
+| `deploy/selfhost/` | **自部署编排**（docker compose + Caddy + .env 模板） |
+| `deploy/open-search/` | 我们自己生产环境的编排，可作为进阶参考 |
+| `mobile/` `miniprogram/` | Capacitor 移动壳与微信小程序脚手架 |
+| `docs/` | 架构、上游兼容性、上线合规清单 |
 
-- **key 隔离**：上游 API key 仅存在于服务端进程环境；客户端只持有可吊销的用户
-  token（设备级、随 epoch 一键全灭）。dsh 自身会把该 token 从所有子进程环境擦除。
-- **计量**：dsh 恒为流式 + `include_usage`，网关从 usage chunk 拿精确三段 token
-  入账；`1 积分 = ¥0.01 牌价用量`，牌价见 `server/config/models.json`（上线前按官
-  方价目校准），毛利率 `MODEL_PRICE_MARKUP` 控制。
-- **套餐**：`server/config/pricing.json` 是唯一价目源（免费 500 积分起，
-  Plus/Pro/Max 月/年付 + 加油包）。金额绝不信客户端。
-- **原则**：额度闸门只拦新请求，绝不掐进行中的流；支付 webhook 先验签再回查
-  才发货，幂等唯一迁移。
+### 许可与声明
 
-## 上线前必办
-
-见 [docs/中国大陆上线清单.md](docs/中国大陆上线清单.md)：域名+ICP/公安备案、
-支付渠道（Stripe/支付宝/微信商户）、SMTP、上游 key、代码签名（Apple/Windows）等，
-含官方入口、材料与依赖顺序。`legal/` 四份文书为草案，正式发布前请经法律专业人士审阅。
-
-## 许可
-
-- 本仓库自有代码：© 跃迁效应，专有（见 LICENSE）。
-- 上游 deepseek-harness / deepseek-harness-desktop 均为 MIT，声明见
-  [legal/THIRD_PARTY_NOTICES.md](legal/THIRD_PARTY_NOTICES.md)；“DeepSeek” 为第三方商标，
-  本产品独立运营，与 DeepSeek 无隶属或背书关系。
+MIT。基于 DeepSeek Harness（MIT）构建。本项目独立运营，与 DeepSeek
+无隶属或背书关系，「DeepSeek」为其权利人所有的商标。
