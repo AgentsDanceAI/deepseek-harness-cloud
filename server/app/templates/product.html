@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block title %}产品 — DSH Cloud{% endblock %}
+{% block content %}
+<section class="section">
+  <div class="container">
+    <span class="eyebrow">产品</span>
+    <h1 class="section-title">一套账号，四种用法</h1>
+    <p class="section-lede">
+      同一个账号、同一份额度，在云端、桌面、手机之间通用。底层是开源的 DeepSeek Harness，
+      我们把密钥托管、计费与运维那部分补齐。
+    </p>
+
+    <div id="workspace" class="card feature" style="margin-top:32px">
+      <span class="eyebrow">云工作台</span>
+      <h2>不装任何东西，浏览器就能开工</h2>
+      <p>
+        每个人一个隔离的云端容器，智能体在里面读写文件、跑命令、装依赖。手机上也能用——
+        把网页添加到主屏，就是一个 App。做出来的网页可以通过端口预览直接公网打开。
+      </p>
+      <ul class="check-list">
+        <li>每人 {{ (work_free_minutes // 60) }} 小时免费机时，只按智能体<b>实际干活</b>的分钟计</li>
+        <li>文件与会话持久保留，关掉浏览器再回来还在</li>
+        <li>闲置 {{ work_idle_stop_min }} 分钟自动暂停，不产生费用</li>
+      </ul>
+      <a class="btn btn-primary" href="/work" style="margin-top:16px">进入云工作台 →</a>
+    </div>
+
+    <div id="desktop" class="card feature" style="margin-top:20px">
+      <span class="eyebrow">桌面客户端</span>
+      <h2>本机跑，不占云端机时</h2>
+      <p>
+        macOS 与 Windows 原生应用，应用内登录、浏览器确认设备即可开工。任务跑在你自己的机器上，
+        只有模型调用走我们的网关按积分计费。
+      </p>
+      <a class="btn btn-ghost" href="/download" style="margin-top:16px">下载客户端</a>
+    </div>
+
+    <div id="gateway" class="card feature" style="margin-top:20px">
+      <span class="eyebrow">统一模型网关</span>
+      <h2>OpenAI 兼容接口，密钥不落客户端</h2>
+      <p>
+        上游模型密钥只存在服务端，客户端拿到的是可随时吊销的设备令牌——改密码即全端下线。
+        用量按积分实时计费，控制台里每一笔都看得到。
+      </p>
+      <ul class="check-list">
+        <li>OpenAI 与 Anthropic 两套协议均可对接</li>
+        <li>并发按套餐限制，超出排队而非报错</li>
+        <li>失败与空结果不计费</li>
+      </ul>
+    </div>
+
+    <div id="search" class="card feature" style="margin-top:20px">
+      <span class="eyebrow">联网搜索</span>
+      <h2>让智能体查得到今天的事</h2>
+      <p>
+        内置实时网页检索，结果带来源链接，写进回答里可追溯。无需你再单独申请搜索服务的密钥。
+      </p>
+    </div>
+  </div>
+</section>
+
+<section class="section section-alt">
+  <div class="container center">
+    <h2 class="section-title">先跑一个任务试试？</h2>
+    <p class="section-lede">注册即送免费积分与 {{ (work_free_minutes // 60) }} 小时机时，不用绑卡。</p>
+    <a class="btn btn-primary" href="/login">立即体验</a>
+  </div>
+</section>
+{% endblock %}

@@ -28,12 +28,13 @@ import asyncio
 import logging
 import re
 import time
+from urllib.parse import quote
 
 import httpx
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 
-from . import config, credits, db, security
+from . import config, credits, db, security, work_access
 from .accounts import resolve_user, try_resolve_user
 
 log = logging.getLogger("dhc.work")
@@ -48,6 +49,14 @@ _starting: dict[str, float] = {}
 # here too, so resuming a container whose last agent call is ancient gets a full
 # grace window instead of being reaped before the user can type
 _started_at: dict[str, float] = {}
+
+
+def _work_url(path: str = "/") -> str:
+    """Public URL of the workspace host. The scheme follows PUBLIC_BASE so a
+    self-hosted deployment on plain HTTP (or localhost) is not redirected to an
+    https origin it does not serve."""
+    scheme = "http" if config.PUBLIC_BASE.startswith("http://") else "https"
+    return f"{scheme}://{config.WORK_DOMAIN}{path}"
 
 
 def _cname(user_id: str) -> str:
@@ -429,11 +438,18 @@ async def work_route(request: Request):
         return RedirectResponse(f"{site}/pricing?reason=credits", status_code=302)
 
     now = time.time()
-    # Fast path: recently seen as running -> answer instantly (this endpoint
-    # gates every asset/WS request; only re-probe after a quiet gap).
+    # Fast path first: this endpoint gates EVERY asset and WebSocket frame, so
+    # the quota lookup must not run per request. A session already in flight
+    # keeps its workspace to the end of the minute; the gate below catches it
+    # on the next cold check, which is where a new task would land anyway.
     if now - _last_seen.get(user["id"], 0) < 30 and user["id"] not in _starting:
         _last_seen[user["id"]] = now
         return Response(status_code=200, headers={"X-Work-Upstream": _upstream(user["id"])})
+
+    # Cold check: the free hours are spent and no pass is open -> the paywall,
+    # not a silent credit drain.
+    if work_access.blocked_reason(user["id"]):
+        return RedirectResponse(f"{site}/work/upgrade", status_code=302)
 
     try:
         state = await ensure_workspace(user)
@@ -457,7 +473,9 @@ _PWA_INJECT = """
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="apple-touch-icon" href="/pwa/icon-180.png">
 <link rel="stylesheet" href="/pwa/mobile.css">
+<link rel="stylesheet" href="/pwa/workspace-chrome.css">
 <script>if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catch(function(){})}</script>
+<script defer src="/pwa/workspace-chrome.js"></script>
 """
 
 
@@ -474,6 +492,8 @@ async def work_shell(request: Request):
         return RedirectResponse(f"{site}/login?next=/work", status_code=302)
     if credits.balance(user["id"]) <= 0:
         return RedirectResponse(f"{site}/pricing?reason=credits", status_code=302)
+    if work_access.blocked_reason(user["id"]):
+        return RedirectResponse(f"{site}/work/upgrade", status_code=302)
     try:
         state = await ensure_workspace(user)
     except RuntimeError as e:
@@ -526,7 +546,9 @@ async def pwa_asset(name: str):
     path = _pwa_path(safe)
     if not path.is_file():
         return JSONResponse(status_code=404, content={"detail": "not_found"})
-    media = "text/css" if safe.endswith(".css") else "image/png"
+    media = ("text/css" if safe.endswith(".css")
+             else "text/javascript" if safe.endswith(".js")
+             else "image/png")
     return FileResponse(path, media_type=media,
                         headers={"cache-control": "public, max-age=86400"})
 
@@ -543,10 +565,13 @@ async def work_status(request: Request):
     info = await _inspect(user["id"])
     state = (info.get("State") or {}).get("Status", "none") if info else "none"
     ready = state == "running" and await _ready(user["id"])
-    return {"enabled": True, "state": "running" if ready else ("starting" if state == "running" else state),
-            "url": f"https://{config.WORK_DOMAIN}/",
-            "credits_per_min": config.WORK_CREDITS_PER_MIN,
-            "idle_stop_min": config.WORK_IDLE_STOP_MIN}
+    out = {"enabled": True, "state": "running" if ready else ("starting" if state == "running" else state),
+           "url": _work_url("/"),
+           "credits_per_min": config.WORK_CREDITS_PER_MIN,
+           "idle_stop_min": config.WORK_IDLE_STOP_MIN,
+           "balance": credits.balance(user["id"])}
+    out.update(work_access.state(user["id"]))
+    return out
 
 
 @router.post("/api/work/stop")
@@ -570,14 +595,20 @@ async def work_entry(request: Request):
         return RedirectResponse(f"{site}/login?next=/work", status_code=302)
     if credits.balance(user["id"]) <= 0:
         return RedirectResponse(f"{site}/pricing?reason=credits", status_code=302)
+    if work_access.blocked_reason(user["id"]):
+        return RedirectResponse(f"{site}/work/upgrade", status_code=302)
+    # Carry the homepage composer's task across the redirect; workspace-chrome.js
+    # types it into dsh so the first prompt is not retyped.
+    task = (request.query_params.get("task") or "").strip()
+    suffix = ("?task=" + quote(task[:2000], safe="")) if task else ""
     try:
         state = await ensure_workspace(user)
     except RuntimeError as e:
         kind = "busy" if str(e) == "capacity" else "error"
         return RedirectResponse(f"{site}/work/starting?state={kind}", status_code=302)
     if state == "running":
-        return RedirectResponse(f"https://{config.WORK_DOMAIN}/", status_code=302)
-    return RedirectResponse(f"{site}/work/starting", status_code=302)
+        return RedirectResponse(_work_url("/" + suffix), status_code=302)
+    return RedirectResponse(f"{site}/work/starting{suffix}", status_code=302)
 
 
 @router.get("/work/starting")
@@ -605,7 +636,12 @@ if ({poll}) {{
     try {{
       const r = await fetch('/api/work/status');
       const s = await r.json();
-      if (s.state === 'running') {{ location.href = s.url; return; }}
+      // carry the composer task through the boot wait, so it still lands in dsh
+      if (s.state === 'running') {{
+        const t = new URLSearchParams(location.search).get('task');
+        location.href = s.url + (t ? '?task=' + encodeURIComponent(t) : '');
+        return;
+      }}
     }} catch (e) {{}}
     setTimeout(poll, 2000);
   }})();

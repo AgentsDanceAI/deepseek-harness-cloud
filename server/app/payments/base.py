@@ -17,7 +17,7 @@ import time
 
 from fastapi import HTTPException
 
-from .. import credits, db, plans
+from .. import config, credits, db, plans, teams, work_access
 
 ORDER_PREFIX = {"stripe": "DHS", "alipay": "DHA", "wechat": "DHW", "waffo": "DHF"}
 
@@ -45,11 +45,40 @@ def resolve_item(item: str) -> dict:
         return {"kind": "pack", "pack": parts[1], "credits": int(pdef["credits"]),
                 "valid_days": int(pdef.get("valid_days", 365)), "amount_cents": int(pdef["cents"]),
                 "currency": p.get("currency", "CNY"), "description": f"DSH Cloud {pdef['name']}"}
+    # Cloud-workspace pass: a period of machine time, priced per period so the
+    # bill is predictable. The amount is NOT taken from the request — the intro
+    # price applies only to someone who has never bought one (server-side check).
+    # Team seats: N seats for a month. The pool credits scale with the seat
+    # count, so a bigger team gets a bigger shared balance, not just more logins.
+    if parts[0] == "seats" and len(parts) == 2 and parts[1].isdigit():
+        n = max(1, min(int(parts[1]), 500))
+        return {"kind": "seats", "seats": n, "cycle": "monthly",
+                "amount_cents": config.TEAM_SEAT_PRICE * n,
+                "credits": config.TEAM_SEAT_CREDITS * n,
+                "currency": p.get("currency", "CNY"),
+                "description": f"DSH Cloud 团队席位 × {n}（月付）"}
+    if parts[0] == "workpass" and len(parts) == 2 and parts[1] == "week":
+        return {"kind": "workpass", "days": config.WORK_PASS_DAYS,
+                "amount_cents": config.WORK_PASS_INTRO_PRICE,
+                "standard_cents": config.WORK_PASS_PRICE,
+                "currency": p.get("currency", "CNY"),
+                "description": f"DSH Cloud 云工作台 {config.WORK_PASS_DAYS} 天通行证"}
     raise HTTPException(400, "unknown_item")
+
+
+def price_for(user_id: str, info: dict) -> int:
+    """The amount this user actually owes. Only the workspace pass varies: the
+    intro price is a first-purchase offer, so it is decided here from stored
+    history — never from anything the client sent."""
+    if info.get("kind") != "workpass":
+        return int(info["amount_cents"])
+    price, _kind = work_access.next_price(user_id)
+    return int(price)
 
 
 def create_order(user_id: str, provider: str, item: str) -> dict:
     info = resolve_item(item)
+    info["amount_cents"] = price_for(user_id, info)
     order_id = ORDER_PREFIX[provider] + time.strftime("%y%m%d") + secrets.token_hex(5).upper()
     now = time.time()
     with db.tx() as conn:
@@ -84,6 +113,23 @@ def fulfil(order_id: str) -> None:
     info = resolve_item(order["item"])
     if info["kind"] == "plan":
         plans.apply_plan(order["user_id"], info["tier"], info["cycle"], order_id=order_id)
+    elif info["kind"] == "seats":
+        # Seats are org-scoped: create the org on first purchase so the buyer
+        # never lands on "you bought seats but have nowhere to put them".
+        org = teams.org_of(order["user_id"])
+        if org is None:
+            org_id = teams.create_org(order["user_id"], "我的团队", seats=info["seats"])
+        else:
+            org_id = org["id"]
+        teams.set_seats(org_id, info["seats"], time.time() + 31 * 86400)
+        teams.grant_pool(org_id, info["credits"], 31 * 86400, ref=order_id)
+    elif info["kind"] == "workpass":
+        work_access.grant_pass(
+            order["user_id"],
+            kind=work_access.PASS_INTRO if order["amount_cents"] <= config.WORK_PASS_INTRO_PRICE
+            else work_access.PASS_STANDARD,
+            days=info["days"], price=order["amount_cents"],
+            currency=order["currency"], ref=order_id)
     else:
         credits.grant(order["user_id"], info["credits"], info["valid_days"] * 86400,
                       kind="grant_topup", ref=order_id)

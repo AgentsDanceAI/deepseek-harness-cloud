@@ -42,7 +42,57 @@
       {% endfor %}
     </div>
 
-    <h2 class="section-title" id="packs">积分包</h2>
+    {# The workspace is metered separately from tokens: a plan buys model usage,
+       a pass buys machine time. Keeping them visually distinct stops people
+       expecting a subscription to cover the container. #}
+    <h2 class="section-title" id="workspace" style="margin-top:64px">云工作台机时</h2>
+    <p class="center muted">
+      浏览器里直接跑智能体。每人 {{ (work_free_minutes // 60) }} 小时免费机时，
+      只算智能体<b>实际干活</b>的分钟——读回复、开着页面走开都不计费。
+    </p>
+    <div class="grid grid-2" style="max-width:720px;margin:22px auto 0">
+      <div class="card pack">
+        <h3>免费机时</h3>
+        <div class="price"><span class="currency">{{ currency_symbol }}</span>0</div>
+        <p class="muted">{{ (work_free_minutes // 60) }} 小时活跃机时 · 注册即得</p>
+        <a class="btn btn-ghost btn-block" href="/work">直接开始</a>
+      </div>
+      <div class="card pack plan-popular">
+        <div class="plan-flag">用完之后</div>
+        <div class="plan-body">
+          <h3>{{ work_pass_days }} 天通行证</h3>
+          <div class="price">
+            <span class="currency">{{ currency_symbol }}</span>{{ '%.2f'|format(work_pass_intro_price / 100) }}
+          </div>
+          <p class="muted">
+            首张特价<span class="price-was">{{ currency_symbol }}{{ '%.2f'|format(work_pass_price / 100) }}</span><br>
+            之后按标准价 {{ currency_symbol }}{{ '%.2f'|format(work_pass_price / 100) }} / {{ work_pass_days }} 天，不自动续费
+          </p>
+          <button class="btn btn-primary btn-block buy-btn" data-item="workpass:week" type="button">开通</button>
+        </div>
+      </div>
+    </div>
+
+    {# Seats and a shared pool: the thing an organisation buys is not N personal
+       accounts, it is one balance several people draw from. #}
+    <h2 class="section-title" id="team" style="margin-top:64px">团队与企业</h2>
+    <p class="center muted">按席位订阅，积分在组织内共享；或把开源代码部署到自己的机器上。</p>
+    <div class="grid grid-2" style="max-width:720px;margin:22px auto 0">
+      <div class="card pack">
+        <h3>团队席位</h3>
+        <div class="price"><span class="currency">{{ currency_symbol }}</span>{{ team_seat_price_display }}<span class="per">/席位/月</span></div>
+        <p class="muted">共享积分池 · 成员用量可见 · 席位随时增减</p>
+        <a class="btn btn-primary btn-block" href="/console/team">创建团队</a>
+      </div>
+      <div class="card pack">
+        <h3>企业私有化</h3>
+        <div class="price" style="font-size:26px;letter-spacing:-.3px">部署即拥有</div>
+        <p class="muted">开源代码部署到你的服务器，数据不出内网，模型上游换成你自己的</p>
+        <a class="btn btn-ghost btn-block" href="/resources#selfhost">自部署指南</a>
+      </div>
+    </div>
+
+    <h2 class="section-title" id="packs" style="margin-top:64px">积分包</h2>
     <p class="center muted">不想订阅？按量购买积分包，12 个月内有效。</p>
     <div class="grid grid-3 pack-grid">
       {% for pid, p in pricing.packs.items() %}

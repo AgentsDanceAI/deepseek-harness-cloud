@@ -137,7 +137,7 @@ WECHAT_PAY_APPID = _env("WECHAT_PAY_APPID")
 
 # --- cloud workspaces (dshwork: per-user dsh containers, phone-usable) ------
 WORK_ENABLED = _env_bool("WORK_ENABLED", False)
-WORK_DOMAIN = _env("WORK_DOMAIN", "work.dshcloud.online")  # dsh UI host (own site block in Caddy)
+WORK_DOMAIN = _env("WORK_DOMAIN", "")  # dsh UI host; empty = workspace off (self-host safe default)
 WORK_IMAGE = _env("WORK_IMAGE", "dsh-local:rc6")
 WORK_NETWORK = _env("WORK_NETWORK", "dshwork-net")
 DOCKER_PROXY_URL = _env("DOCKER_PROXY_URL", "http://dhc-docker-proxy:2375")
@@ -149,6 +149,24 @@ WORK_IDLE_STOP_MIN = _env_int("WORK_IDLE_STOP_MIN", 15)      # no browser traffi
 # Capacity backstop: idle minutes are free, RAM is not. A tab left open with the
 # agent doing nothing this long is stopped too (volumes persist, resume is fast).
 WORK_AGENT_IDLE_STOP_MIN = _env_int("WORK_AGENT_IDLE_STOP_MIN", 30)
+
+# --- cloud workspace paywall ------------------------------------------------
+# Everyone gets this many ACTIVE agent minutes on the house; when they run out,
+# the next task hits the paywall instead of silently draining credits. Active
+# minutes are the same meter that bills (see workspace.reaper_tick).
+WORK_FREE_MINUTES = _env_int("WORK_FREE_MINUTES", 120)  # 2 hours
+# The intro offer that unlocks it again: cheap for the first period, then the
+# standard price. Amounts are minor units (cents / 分) in PRICING_CURRENCY.
+WORK_PASS_DAYS = _env_int("WORK_PASS_DAYS", 7)
+WORK_PASS_INTRO_PRICE = _env_int("WORK_PASS_INTRO_PRICE", 200)     # $2.00 / ¥9.90 (CN file)
+WORK_PASS_PRICE = _env_int("WORK_PASS_PRICE", 900)                 # standard weekly price
+WORK_PASS_CREDITS = _env_int("WORK_PASS_CREDITS", 0)  # 0 = pass grants time, not credits
+
+# --- teams ------------------------------------------------------------------
+# Seats bound how many people may share an organisation's credit pool. Price is
+# minor units per seat per month, in PRICING_CURRENCY.
+TEAM_SEAT_PRICE = _env_int("TEAM_SEAT_PRICE", 1500)      # $15 / ¥ per seat, monthly
+TEAM_SEAT_CREDITS = _env_int("TEAM_SEAT_CREDITS", 3500)  # pool credits added per seat per cycle
 WORK_MAX_CONCURRENT = _env_int("WORK_MAX_CONCURRENT", 40)    # global running-container cap
 WORK_MEM_LIMIT_MB = _env_int("WORK_MEM_LIMIT_MB", 512)
 WORK_CPUS = _env_float("WORK_CPUS", 1.0)
@@ -162,8 +180,8 @@ COOKIE_DOMAIN = _env("COOKIE_DOMAIN", "")
 ADMIN_EMAILS = [e.strip().lower() for e in _env("ADMIN_EMAILS").split(",") if e.strip()]
 
 # --- legal entity (rendered into legal pages; replace with your company) ----
-LEGAL_ENTITY_ZH = _env("LEGAL_ENTITY_ZH", "北京跃迁效应人工智能科技有限公司")
-LEGAL_ENTITY_EN = _env("LEGAL_ENTITY_EN", "Beijing AgentsDance AI Technology Co., Ltd.")
-LEGAL_CONTACT_EMAIL = _env("LEGAL_CONTACT_EMAIL", "support@agentsdance.ai")
+LEGAL_ENTITY_ZH = _env("LEGAL_ENTITY_ZH", "")
+LEGAL_ENTITY_EN = _env("LEGAL_ENTITY_EN", "")
+LEGAL_CONTACT_EMAIL = _env("LEGAL_CONTACT_EMAIL", "")
 ICP_NUMBER = _env("ICP_NUMBER", "")  # e.g. 京ICP备XXXXXXXX号-X
 PSB_NUMBER = _env("PSB_NUMBER", "")  # e.g. 京公网安备XXXXXXXXXXXXX号

@@ -1,0 +1,93 @@
+/* DSH Cloud workspace chrome — the only thing we add on top of dsh's own UI.
+   dsh renders full-screen with no way back to our console, which left people
+   stranded in the workspace. This is a deliberately small floating control:
+   one dot that opens a sheet, so it never competes with dsh's chrome. */
+
+:root {
+  --dhc-brand: #2663c9;
+  --dhc-ink: #16233a;
+  --dhc-line: #e4ebf5;
+}
+
+#dhc-exit-root {
+  position: fixed;
+  z-index: 2147483000; /* above dsh's own overlays */
+  left: max(12px, env(safe-area-inset-left));
+  bottom: max(12px, env(safe-area-inset-bottom));
+  font: 500 13px/1.4 system-ui, -apple-system, "PingFang SC", sans-serif;
+}
+
+#dhc-exit-btn {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 34px;
+  padding: 0 13px 0 10px;
+  border: 1px solid var(--dhc-line);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, .92);
+  backdrop-filter: blur(10px);
+  color: var(--dhc-ink);
+  cursor: pointer;
+  box-shadow: 0 2px 10px rgba(16, 32, 64, .10);
+  transition: transform .15s ease, box-shadow .15s ease;
+}
+
+#dhc-exit-btn:hover { transform: translateY(-1px); box-shadow: 0 4px 16px rgba(16, 32, 64, .16); }
+#dhc-exit-btn:focus-visible { outline: 2px solid var(--dhc-brand); outline-offset: 2px; }
+
+#dhc-exit-btn .dhc-dot {
+  width: 16px; height: 16px; border-radius: 5px; flex: none;
+  background: linear-gradient(135deg, #3d7bdd, #1b4fa8);
+}
+
+#dhc-sheet {
+  position: absolute;
+  left: 0;
+  bottom: 42px;
+  width: 232px;
+  padding: 6px;
+  border: 1px solid var(--dhc-line);
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 12px 34px rgba(16, 32, 64, .18);
+}
+
+#dhc-sheet[hidden] { display: none; }
+
+#dhc-sheet .dhc-meta {
+  padding: 9px 10px 8px;
+  border-bottom: 1px solid var(--dhc-line);
+  margin-bottom: 5px;
+  color: #66748c;
+  font-size: 12px;
+}
+#dhc-sheet .dhc-meta b { color: var(--dhc-ink); font-weight: 600; }
+
+#dhc-sheet a, #dhc-sheet button {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 9px 10px;
+  border: 0;
+  border-radius: 9px;
+  background: none;
+  color: var(--dhc-ink);
+  font: inherit;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+#dhc-sheet a:hover, #dhc-sheet button:hover { background: #f2f6fc; }
+#dhc-sheet .dhc-danger { color: #b42318; }
+#dhc-sheet .dhc-danger:hover { background: #fef3f2; }
+
+@media (prefers-color-scheme: dark) {
+  #dhc-exit-btn { background: rgba(22, 30, 45, .92); border-color: #2b3648; color: #e8eef8; }
+  #dhc-sheet { background: #161e2d; border-color: #2b3648; }
+  #dhc-sheet a, #dhc-sheet button { color: #e8eef8; }
+  #dhc-sheet a:hover, #dhc-sheet button:hover { background: #1e293b; }
+  #dhc-sheet .dhc-meta { color: #94a3b8; border-color: #2b3648; }
+  #dhc-sheet .dhc-meta b { color: #e8eef8; }
+}

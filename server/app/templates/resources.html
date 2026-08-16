@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}资源 — DSH Cloud{% endblock %}
+{% block content %}
+<section class="section">
+  <div class="container">
+    <span class="eyebrow">资源</span>
+    <h1 class="section-title">上手、自部署、参与开源</h1>
+
+    <div id="quickstart" class="card feature" style="margin-top:32px">
+      <h2>快速上手</h2>
+      <ol class="step-list">
+        <li><b>登录</b>——邮箱验证码即可，未注册会自动建号，注册送免费积分。</li>
+        <li><b>写下任务</b>——在首页输入框描述你要做的事，回车。</li>
+        <li><b>拿结果</b>——智能体在云端容器里执行；做出的网页可直接公网预览。</li>
+      </ol>
+      <a class="btn btn-primary" href="/login" style="margin-top:14px">开始使用</a>
+    </div>
+
+    <div id="selfhost" class="card feature" style="margin-top:20px">
+      <h2>自部署指南</h2>
+      <p>
+        本项目代码开源，可部署到你自己的服务器。部署完成后你会得到一套完整的私有 dsh 云平台。
+      </p>
+      <p class="muted small" style="margin-top:12px">最少只需准备三样：</p>
+      <ul class="check-list">
+        <li>一台装了 Docker 的机器（2 核 4G 起步）</li>
+        <li>一个域名（本地试用可以不要）</li>
+        <li>一个 OpenAI 兼容的模型上游地址与密钥</li>
+      </ul>
+      <pre class="code-block"><code>git clone https://github.com/AgentsDanceAI/deepseek-harness-cloud
+cd deepseek-harness-cloud
+cp deploy/selfhost/.env.example deploy/selfhost/.env   # 按注释填 key
+docker compose -f deploy/selfhost/docker-compose.yml up -d</code></pre>
+      <a class="btn btn-ghost" href="https://github.com/AgentsDanceAI/deepseek-harness-cloud#readme"
+         rel="noopener" target="_blank" style="margin-top:14px">完整文档（GitHub）</a>
+    </div>
+
+    <div id="opensource" class="card feature" style="margin-top:20px">
+      <h2>开源仓库</h2>
+      <p>
+        服务端、桌面端补丁与部署编排都在仓库里。欢迎自部署、提 issue 与 PR。
+        底层的 DeepSeek Harness 为 MIT 协议，本项目独立运营，与 DeepSeek 无隶属关系。
+      </p>
+      <a class="btn btn-ghost" href="https://github.com/AgentsDanceAI/deepseek-harness-cloud"
+         rel="noopener" target="_blank" style="margin-top:14px">GitHub 仓库</a>
+    </div>
+
+    <div class="card feature" style="margin-top:20px">
+      <h2>下载客户端</h2>
+      <p>macOS、Windows 桌面应用与 Android APK；iOS 用 Safari 打开网页版并添加到主屏即可。</p>
+      <a class="btn btn-ghost" href="/download" style="margin-top:14px">前往下载页</a>
+    </div>
+  </div>
+</section>
+{% endblock %}

@@ -1,0 +1,151 @@
+# =============================================================================
+#  DSH Cloud (deepseek-harness-cloud) — one-command self-host stack
+#  自部署编排：一条命令起全栈（Caddy + 服务端 + 可选云工作台）
+#
+#    cd deploy/selfhost
+#    cp .env.example .env && $EDITOR .env        # or: scripts/quickstart.sh
+#    docker compose --env-file .env up -d --build
+#
+#  What runs here / 本编排包含:
+#    dhc-caddy         public listener, automatic HTTPS (Let's Encrypt)
+#    dhc-server        the FastAPI app (accounts, LLM gateway, credits, console)
+#    dhc-docker-proxy  scoped docker API for cloud workspaces — only started
+#                      when COMPOSE_PROFILES=work (see .env)
+#
+#  The app is never published on a host port: Caddy is the only way in.
+#  应用不暴露宿主端口，唯一入口是 Caddy。
+# =============================================================================
+name: dsh-selfhost
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  # ---------------------------------------------------------------------------
+  # The application. Built from ../../server (Dockerfile pins deps, runs uvicorn
+  # on :8100 with a single worker — the rate/concurrency guards are per-process).
+  # ---------------------------------------------------------------------------
+  dhc-server:
+    build:
+      context: ../../server
+    image: dsh-cloud-server:selfhost
+    restart: unless-stopped
+    env_file: [".env"]
+    environment:
+      DHC_DATA_DIR: /app/data
+      # Single source of truth for the public origin: whatever Caddy serves is
+      # exactly what the app believes it is reachable at (OAuth callbacks,
+      # payment return URLs and the workspace gateway URL are derived from it).
+      # Set PUBLIC_BASE in .env only when you front this stack with another
+      # proxy or use a non-standard port.
+      PUBLIC_BASE: ${PUBLIC_BASE:-${SITE_SCHEME:-https}://${DOMAIN:-localhost}}
+    volumes:
+      # SQLite lives here (/app/data/dhc.db, WAL). Back this volume up.
+      # Desktop installers dropped into /app/data/releases are served at
+      # /releases/<file> by the app itself.
+      - dhc-data:/app/data
+      # Price tables, editable without rebuilding the image:
+      #   server/config/models.json   which model ids you offer + list prices
+      #   server/config/pricing.json  plans and credit packs (PRICING_FILE)
+      # models.json hot-reloads on mtime; after editing pricing.json restart.
+      - ../../server/config:/srv/dhc/config:ro
+      # Legal pages (/legal/terms ...) render "待发布" until you provide your own
+      # documents. The drafts in ../../legal name the original operator, so they
+      # are NOT mounted by default — write your own, then uncomment:
+      # - ../../legal:/srv/legal:ro
+    networks:
+      - dhc-net
+      - dshwork-net # reach per-user dsh containers (readiness probe + /preview)
+    expose:
+      - "8100"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8100/api/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    security_opt: ["no-new-privileges:true"]
+    logging: *logging
+
+  # ---------------------------------------------------------------------------
+  # TLS termination + reverse proxy. Certificates are obtained automatically for
+  # any site address that starts with https:// and resolves to this host;
+  # http://localhost serves plain HTTP with no certificate at all.
+  # ---------------------------------------------------------------------------
+  dhc-caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on: [dhc-server]
+    ports:
+      # Host port == container port on purpose: the site address below may carry
+      # a port, and Caddy then listens on exactly that port.
+      - "${HTTP_PORT:-80}:${HTTP_PORT:-80}"
+      - "${HTTPS_PORT:-443}:${HTTPS_PORT:-443}"
+      - "${HTTPS_PORT:-443}:${HTTPS_PORT:-443}/udp" # HTTP/3
+    environment:
+      # Main site. Same expression as PUBLIC_BASE above — they cannot drift.
+      DSH_SITE: ${PUBLIC_BASE:-${SITE_SCHEME:-https}://${DOMAIN:-localhost}}
+      # Cloud-workspace site. Empty WORK_DOMAIN (workspaces off) falls back to
+      # work.localhost, which Caddy serves from its internal CA — so a disabled
+      # workspace never triggers a certificate request for a domain you do not
+      # own. 关闭云工作台时留空 WORK_DOMAIN，不会去申请证书。
+      DSH_WORK_SITE: https://${WORK_DOMAIN:-work.localhost}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data # issued certificates — persist or you will re-issue
+      - caddy-config:/config
+    networks:
+      - dhc-net
+      - dshwork-net # reverse_proxy target of the workspace forward_auth
+    security_opt: ["no-new-privileges:true"]
+    logging: *logging
+
+  # ---------------------------------------------------------------------------
+  # Cloud workspaces only: a scoped view of the docker engine API.
+  # Started only when COMPOSE_PROFILES=work — with workspaces off, no container
+  # in this stack sees the docker socket at all.
+  #
+  # SECURITY: do NOT widen these flags. The app must create/start/stop
+  # containers and read the image/network/info endpoints — nothing else.
+  #   EXEC=0     every /exec/* call is refused (403), so an exec instance can
+  #              never be STARTED: no command ever runs in another container
+  #   VOLUMES=0  the volume API is refused; the app can still get the named
+  #              volumes it declares at container-create time, and nothing else
+  # 权限不得放宽：这两个 0 是「应用被攻破也不能在别的容器里执行命令、不能翻卷」的边界。
+  # ---------------------------------------------------------------------------
+  dhc-docker-proxy:
+    image: tecnativa/docker-socket-proxy
+    profiles: ["work"]
+    restart: unless-stopped
+    environment:
+      CONTAINERS: 1
+      NETWORKS: 1
+      IMAGES: 1
+      INFO: 1
+      POST: 1
+      EXEC: 0
+      VOLUMES: 0
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - dhc-net # reachable by the app as http://dhc-docker-proxy:2375
+    security_opt: ["no-new-privileges:true"]
+    logging: *logging
+
+networks:
+  # Internal network (app <-> caddy <-> docker proxy); compose names it
+  # dsh-selfhost_dhc-net and service names resolve on it.
+  dhc-net:
+  # The workspace network keeps its literal name on purpose: the app passes
+  # WORK_NETWORK to the docker API when it creates a user's container, so the
+  # network compose creates and the name the app uses must be the same string.
+  dshwork-net:
+    name: ${WORK_NETWORK:-dshwork-net}
+
+volumes:
+  dhc-data:
+  caddy-data:
+  caddy-config:

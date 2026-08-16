@@ -114,11 +114,54 @@ SCHEMA = [
         k TEXT PRIMARY KEY,
         v TEXT NOT NULL
     )""",
+    # Organisations. Seats are what a company buys; the shared credit pool is
+    # stored in credit_grants under the ORG id, so the bucket/expiry logic is
+    # the same code that serves individuals (see credits._pools).
+    """CREATE TABLE IF NOT EXISTS orgs (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        owner_id TEXT NOT NULL,
+        seats INTEGER NOT NULL DEFAULT 1,
+        seats_expires REAL NOT NULL DEFAULT 0,
+        created REAL NOT NULL
+    )""",
+    """CREATE TABLE IF NOT EXISTS org_members (
+        org_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        role TEXT NOT NULL DEFAULT 'member',
+        joined REAL NOT NULL,
+        PRIMARY KEY (org_id, user_id)
+    )""",
+    """CREATE TABLE IF NOT EXISTS org_invites (
+        code TEXT PRIMARY KEY,
+        org_id TEXT NOT NULL,
+        email TEXT NOT NULL DEFAULT '',
+        expires REAL NOT NULL,
+        used_by TEXT NOT NULL DEFAULT '',
+        created REAL NOT NULL
+    )""",
+    # Cloud-workspace passes. The free allowance is derived from usage_log, so
+    # only the purchased windows need storing; several may overlap (a renewal
+    # bought early), and the latest `expires` wins.
+    """CREATE TABLE IF NOT EXISTS work_passes (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        started REAL NOT NULL,
+        expires REAL NOT NULL,
+        price INTEGER NOT NULL DEFAULT 0,
+        currency TEXT NOT NULL DEFAULT '',
+        ref TEXT NOT NULL DEFAULT '',
+        created REAL NOT NULL
+    )""",
     "CREATE INDEX IF NOT EXISTS idx_grants_user ON credit_grants(user_id, expires)",
     "CREATE INDEX IF NOT EXISTS idx_usage_user ON usage_log(user_id, created)",
     "CREATE INDEX IF NOT EXISTS idx_orders_user ON orders(user_id, created)",
     "CREATE INDEX IF NOT EXISTS idx_devices_user ON devices(user_id)",
     "CREATE INDEX IF NOT EXISTS idx_email_codes ON email_codes(email, purpose)",
+    "CREATE INDEX IF NOT EXISTS idx_passes_user ON work_passes(user_id, expires)",
+    "CREATE INDEX IF NOT EXISTS idx_org_members_user ON org_members(user_id)",
+    "CREATE INDEX IF NOT EXISTS idx_org_invites_org ON org_invites(org_id)",
 ]
 
 

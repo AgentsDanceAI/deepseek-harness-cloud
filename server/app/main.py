@@ -23,6 +23,21 @@ def create_app() -> FastAPI:
 
     db.ensure_schema()
 
+    # The workspace runs on its own subdomain and its injected chrome asks this
+    # origin for quota/sign-out. Same site (so the session cookie is sent), but
+    # a different origin, so it needs an explicit CORS grant — scoped to exactly
+    # that host, never a wildcard, because these endpoints act with the session.
+    if config.WORK_DOMAIN:
+        from fastapi.middleware.cors import CORSMiddleware
+        scheme = "http" if config.PUBLIC_BASE.startswith("http://") else "https"
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=[f"{scheme}://{config.WORK_DOMAIN}"],
+            allow_credentials=True,
+            allow_methods=["GET", "POST", "OPTIONS"],
+            allow_headers=["content-type"],
+        )
+
     from .accounts import router as accounts_router
     from .admin import router as admin_router
     from .desktop_updates import router as updates_router
@@ -31,6 +46,7 @@ def create_app() -> FastAPI:
     from .oauth import router as oauth_router
     from .payments.api import router as payments_router
     from .webpages import router as pages_router
+    from .teams import router as teams_router
     from .workspace import preview_fallback as workspace_preview_fallback
     from .workspace import router as workspace_router
 
@@ -42,6 +58,7 @@ def create_app() -> FastAPI:
     app.include_router(admin_router)
     app.include_router(updates_router)
     app.include_router(workspace_router)
+    app.include_router(teams_router)
 
     if config.WORK_ENABLED:
         from .workspace import billing_reaper_loop

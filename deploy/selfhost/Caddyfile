@@ -1,0 +1,68 @@
+# =============================================================================
+#  DSH Cloud self-host — Caddy configuration
+#
+#  Both site addresses come from docker-compose.yml (which derives them from
+#  .env), so nothing in this file needs editing for a normal deployment:
+#
+#    DSH_SITE       https://dsh.example.com   -> automatic Let's Encrypt cert
+#                   http://localhost          -> local mode, no TLS
+#    DSH_WORK_SITE  https://work.example.com  -> cloud workspaces
+#                   https://work.localhost    -> workspaces off (internal CA,
+#                                                no public certificate request)
+#
+#  Optional: to receive certificate-expiry notices from the CA, add a global
+#  options block as the FIRST thing in this file:
+#      {
+#          email you@example.com
+#      }
+# =============================================================================
+
+# --- main site: console, LLM gateway, payments, /releases, /preview ----------
+{$DSH_SITE:http://localhost} {
+	# flush_interval -1 disables response buffering: the gateway streams SSE
+	# (every dsh request is stream:true) and buffering would stall replies.
+	reverse_proxy dhc-server:8100 {
+		flush_interval -1
+	}
+}
+
+# --- cloud workspaces: per-user dsh containers + PWA shell -------------------
+# Routing is identical to the production deployment (deploy/open-search/
+# cutover.sh, "DHC sites v3"). The three header_up lines are load-bearing:
+#   header_up -Upgrade      on the AUTH subrequest only — dsh's chat uses
+#     WebSocket upgrades (/api/events.mux, /api/events.host). With Upgrade
+#     present, uvicorn routes the /api/work/route subrequest as a WS handshake
+#     against an HTTP-only path -> 403 -> forward_auth fails -> the chat socket
+#     is killed (the page loads but replies never arrive).
+#   header_up Host 127.0.0.1:3080
+#   header_up Origin http://127.0.0.1:3080
+#     dsh only trusts requests that look like they came from its own loopback
+#     (reachability fence + CSRF origin check). Drop either line and the
+#     workspace answers 403 to everything.
+{$DSH_WORK_SITE:https://work.localhost} {
+	# "/" and the PWA assets are served by the app: it fetches the container's
+	# index document and injects the manifest/service-worker/mobile CSS layers.
+	@pwa path / /index.html /manifest.webmanifest /sw.js /pwa/*
+	handle @pwa {
+		@rootdoc path / /index.html
+		rewrite @rootdoc /api/work/shell
+		reverse_proxy dhc-server:8100
+	}
+
+	# Everything else: the session cookie decides which container answers.
+	# /api/work/route ensures the user's container is running and replies
+	# 200 + "X-Work-Upstream: dshwork-<uid>:3081" (or a redirect to login /
+	# pricing / the starting page).
+	handle {
+		forward_auth dhc-server:8100 {
+			uri /api/work/route
+			copy_headers X-Work-Upstream
+			header_up -Upgrade
+		}
+		reverse_proxy {http.request.header.X-Work-Upstream} {
+			header_up Host 127.0.0.1:3080
+			header_up Origin http://127.0.0.1:3080
+			flush_interval -1
+		}
+	}
+}

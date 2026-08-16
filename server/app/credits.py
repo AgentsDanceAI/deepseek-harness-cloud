@@ -26,7 +26,33 @@ def grant(user_id: str, amount: int, ttl_s: float, kind: str, ref: str = "") -> 
     return gid
 
 
+def _pools(user_id: str) -> list[str]:
+    """Ledger holders this person draws on, in spend order.
+
+    An organisation's shared credits live in the same table under the ORG id,
+    so one bucket implementation serves both. The org pool is drawn FIRST: the
+    company bought it for work like this, and a member's own top-up should be
+    what is left over, not what subsidises the team.
+    """
+    row = db.query_one("SELECT org_id FROM org_members WHERE user_id=? LIMIT 1", (user_id,))
+    org_id = row["org_id"] if row is not None else None
+    return [org_id, user_id] if org_id else [user_id]
+
+
 def balance(user_id: str) -> int:
+    """Spendable total: the org pool (if any) plus this person's own credits."""
+    now = time.time()
+    total = 0
+    for holder in _pools(user_id):
+        row = db.query_one(
+            "SELECT COALESCE(SUM(remaining),0) AS bal FROM credit_grants WHERE user_id=? AND expires>?",
+            (holder, now))
+        total += int(row["bal"]) if row else 0
+    return total
+
+
+def personal_balance(user_id: str) -> int:
+    """This person's own credits only — what the console shows beside the pool."""
     row = db.query_one(
         "SELECT COALESCE(SUM(remaining),0) AS bal FROM credit_grants WHERE user_id=? AND expires>?",
         (user_id, time.time()))
@@ -41,17 +67,22 @@ def spend(user_id: str, amount: int, *, kind: str, model: str = "", device_id: s
     if amount < 0:
         raise ValueError("spend amount must be >= 0")
     now = time.time()
+    holders = _pools(user_id)
     with db.tx() as conn:
         left = amount
-        rows = conn.execute(
-            "SELECT id, remaining FROM credit_grants WHERE user_id=? AND expires>? AND remaining>0 "
-            "ORDER BY expires ASC", (user_id, now)).fetchall()
-        for row in rows:
+        # org pool first, then personal; soonest-expiry bucket first within each
+        for holder in holders:
             if left <= 0:
                 break
-            take = min(int(row["remaining"]), left)
-            conn.execute("UPDATE credit_grants SET remaining=remaining-? WHERE id=?", (take, row["id"]))
-            left -= take
+            rows = conn.execute(
+                "SELECT id, remaining FROM credit_grants WHERE user_id=? AND expires>? AND remaining>0 "
+                "ORDER BY expires ASC", (holder, now)).fetchall()
+            for row in rows:
+                if left <= 0:
+                    break
+                take = min(int(row["remaining"]), left)
+                conn.execute("UPDATE credit_grants SET remaining=remaining-? WHERE id=?", (take, row["id"]))
+                left -= take
         if left > 0:
             # Overdraft: pin the shortfall on the most recent bucket (or a zero
             # bucket if none exists) so balance() goes negative and gates close.

@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block title %}解决方案 — DSH Cloud{% endblock %}
+{% block content %}
+<section class="section">
+  <div class="container">
+    <span class="eyebrow">解决方案</span>
+    <h1 class="section-title">按你的组织形态选一种</h1>
+    <p class="section-lede">
+      同一套系统，既可以直接用我们托管的版本，也可以把代码部署到你自己的机器上。
+    </p>
+
+    <div id="teams" class="card feature" style="margin-top:32px">
+      <span class="eyebrow">团队协作</span>
+      <h2>按席位订阅，积分组织内共享</h2>
+      <p>
+        管理员购买席位并邀请成员，全员共用一个积分池，谁用了多少在后台一目了然。
+        不用给每个人单独申请模型密钥，也不用各自报销。
+      </p>
+      <ul class="check-list">
+        <li>席位按月/年订阅，可随时增减</li>
+        <li>共享积分池，用完统一充值</li>
+        <li>成员用量明细与导出</li>
+      </ul>
+      <a class="btn btn-primary" href="/pricing#team" style="margin-top:16px">查看团队方案</a>
+    </div>
+
+    <div id="enterprise" class="card feature" style="margin-top:20px">
+      <span class="eyebrow">企业私有化</span>
+      <h2>部署一份，得到内部专用的 dsh 云平台</h2>
+      <p>
+        代码开源。把它部署到你自己的服务器或私有云上，就得到一套完整的内部智能体平台：
+        账号体系、额度管理、云工作台、模型网关全都在你的边界内，数据不出内网。
+      </p>
+      <ul class="check-list">
+        <li>docker compose 一条命令起全栈</li>
+        <li>模型上游换成你自己的（自建、专属网关或公有云均可）</li>
+        <li>可对接内部账号体系，用量按部门核算</li>
+      </ul>
+      <a class="btn btn-ghost" href="/resources#selfhost" style="margin-top:16px">自部署指南</a>
+    </div>
+
+    <div id="developers" class="card feature" style="margin-top:20px">
+      <span class="eyebrow">开发者</span>
+      <h2>接进你现有的工具链</h2>
+      <p>
+        网关提供 OpenAI 兼容接口，现有代码改一个 base_url 就能跑。也可以直接用开源仓库做二次开发，
+        把 dsh 的插件体系接到自己的系统里。
+      </p>
+    </div>
+
+    <div id="education" class="card feature" style="margin-top:20px">
+      <span class="eyebrow">教学与研究</span>
+      <h2>按人发额度，不用发密钥</h2>
+      <p>
+        给每位学生或研究者一个账号和一份额度，用完即止，不会产生意外账单；
+        也不需要把机构的模型密钥分发出去。
+      </p>
+    </div>
+  </div>
+</section>
+
+<section class="section section-alt">
+  <div class="container center">
+    <h2 class="section-title">要私有化部署或团队席位？</h2>
+    <p class="section-lede">告诉我们规模与场景，我们给出配置建议。</p>
+    <a class="btn btn-primary" href="mailto:{{ legal_contact_email }}">联系我们</a>
+  </div>
+</section>
+{% endblock %}

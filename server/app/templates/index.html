@@ -6,53 +6,64 @@
   <canvas id="hero-waves" aria-hidden="true"></canvas>
   <div class="hero-grid" aria-hidden="true"></div>
   <div class="hero-dots" aria-hidden="true"></div>
-  <div class="container hero-dark-inner">
-    <div class="hero-copy">
-      <div class="hero-badge-dark">
-        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.5 19a4.5 4.5 0 1 0-.9-8.9 6 6 0 1 0-11.1 3.4"/><path d="M6 19h11.5"/></svg>
-        云端账号版 · 登录即用
-      </div>
-      <h1>DSH Cloud<br>桌面 AI 编程助手</h1>
-      <p class="hero-sub-dark">
-        基于开源 DeepSeek Harness 构建：账号、积分与统一模型网关都在云端备好，
-        无需自购 API Key，内置联网搜索，免费额度起步。
-      </p>
-      <p class="hero-note-dark">
-        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v4h1"/></svg>
-        独立运营的商业服务，并非 DeepSeek 官方产品。
-      </p>
-      <div class="hero-actions-dark">
-        {% if work_enabled %}
-        <a class="btn btn-hero" href="/work">
-          <span class="btn-icon"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 10a6 6 0 1 0-12 0 4.5 4.5 0 0 0 .5 9H17a4 4 0 0 0 1-7.9z"/><path d="m9 13 2 2 4-4"/></svg></span>
-          在线使用（含手机）
-        </a>
-        <a class="btn btn-hero-ghost" href="/download">下载桌面版</a>
-        {% else %}
-        {% if download_url_mac %}
-        <a class="btn btn-hero" href="{{ download_url_mac }}">
-          <span class="btn-icon"><svg viewBox="0 0 24 24" width="17" height="17" fill="currentColor" aria-hidden="true"><path d="M16.7 12.9c0-2.4 2-3.6 2-3.6a4.6 4.6 0 0 0-3.6-1.9c-1.5-.2-3 .9-3.7.9-.8 0-2-.9-3.3-.9A4.9 4.9 0 0 0 4 9.9c-1.8 3-.5 7.5 1.2 10 .8 1.2 1.8 2.5 3.1 2.5 1.3-.1 1.8-.8 3.3-.8s2 .8 3.3.8 2.2-1.2 3-2.4a10 10 0 0 0 1.4-2.8 4.4 4.4 0 0 1-2.6-4.3ZM14.2 5.6A4.5 4.5 0 0 0 15.3 2a4.6 4.6 0 0 0-3 1.5A4.3 4.3 0 0 0 11.2 7a3.8 3.8 0 0 0 3-1.4Z"/></svg></span>
-          下载 Mac 版
-        </a>
-        {% else %}
-        <a class="btn btn-hero" href="/download">下载桌面应用</a>
-        {% endif %}
-        {% if download_url_win %}
-        <a class="btn btn-hero" href="{{ download_url_win }}">
-          <span class="btn-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M3 5.5 10.5 4.4v7.1H3zM12 4.2 21 3v8.5h-9zM3 13.5h7.5v7.1L3 19.5zM12 13.5h9V21l-9-1.3z"/></svg></span>
-          下载 Windows 版
-        </a>
-        {% endif %}
-        {% endif %}
-      </div>
-      <div class="hero-actions-sub">
-        {% if not user %}<a class="btn btn-hero-ghost" href="/login">登录 / 注册</a>{% endif %}
-        <span class="hero-free-note">注册即送免费积分 · 无需绑定信用卡</span>
-      </div>
+  <div class="container hero-dark-inner hero-center">
+    <div class="hero-badge-dark" style="margin-inline:auto">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.5 19a4.5 4.5 0 1 0-.9-8.9 6 6 0 1 0-11.1 3.4"/><path d="M6 19h11.5"/></svg>
+      云端账号版 · 登录即用
     </div>
-    <div class="hero-shot" aria-hidden="true">
-      <img src="/static/img/desktop-preview.png" alt="" width="2654" height="1838" loading="eager">
+    <h1>今天要交给 AI 做什么？</h1>
+    <p class="hero-sub-dark">
+      把任务写下来，云端的智能体自己规划、执行、交付——写代码、查资料、跑命令、出结果。
+      账号、额度与模型网关都已备好，不用自己申请 API Key。
+    </p>
+
+    <form id="hero-composer" class="composer" data-authed="{{ '1' if user else '0' }}">
+      <label class="sr-only" for="hero-task">描述你的任务</label>
+      <textarea id="hero-task" rows="2" placeholder="描述一个任务，或直接提问……"></textarea>
+      <div class="composer-row">
+        <span class="composer-hint">{% if user %}回车发送，将在云工作台执行{% else %}回车继续，登录后立即开始{% endif %}</span>
+        <button type="button" class="composer-send" aria-label="开始执行">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5"/><path d="m5 12 7-7 7 7"/></svg>
+        </button>
+      </div>
+    </form>
+
+    {# icons are inline SVG, not emoji: emoji fall back to tofu boxes wherever
+       the platform ships no colour font, which is exactly where our users are #}
+    <div class="chips">
+      <button type="button" class="chip" data-chip="做一个贪吃蛇网页游戏，用键盘控制，并起服务给我预览地址">
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="7" width="20" height="12" rx="4"/><path d="M7 11v4M5 13h4M15.5 12.5h.01M18 15h.01"/></svg>
+        做个小游戏
+      </button>
+      <button type="button" class="chip" data-chip="帮我调研一下这个方向的最新进展，给我 5 条要点并附来源链接">
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+        联网调研
+      </button>
+      <button type="button" class="chip" data-chip="把这个 CSV 读进来做数据分析，输出图表和结论">
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>
+        数据分析
+      </button>
+      <button type="button" class="chip" data-chip="给我搭一个带登录的网站原型，跑起来给我预览地址">
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a15 15 0 0 1 0 18a15 15 0 0 1 0-18"/></svg>
+        搭个网站
+      </button>
+      <button type="button" class="chip" data-chip="解释这段代码在做什么，并指出潜在 bug">
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m8 8-4 4 4 4M16 8l4 4-4 4"/></svg>
+        读代码
+      </button>
     </div>
+
+    <div class="hero-checks">
+      <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 13 4 4L19 7"/></svg>无需自购 API Key</span>
+      <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 13 4 4L19 7"/></svg>浏览器与手机直接用</span>
+      <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 13 4 4L19 7"/></svg>每人 {{ (work_free_minutes // 60) }} 小时免费机时</span>
+      <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 13 4 4L19 7"/></svg>代码开源，可私有化部署</span>
+    </div>
+
+    <p class="hero-note-dark" style="justify-content:center;margin-top:22px">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v4h1"/></svg>
+      独立运营的商业服务，并非 DeepSeek 官方产品。
+    </p>
   </div>
 </section>
 

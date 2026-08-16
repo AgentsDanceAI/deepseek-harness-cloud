@@ -70,6 +70,10 @@ def _ctx(request: Request, page: str, **extra) -> dict:
         "work_enabled": config.WORK_ENABLED,
         "work_credits_per_min": config.WORK_CREDITS_PER_MIN,
         "work_idle_stop_min": config.WORK_IDLE_STOP_MIN,
+        "work_free_minutes": config.WORK_FREE_MINUTES,
+        "work_pass_days": config.WORK_PASS_DAYS,
+        "work_pass_intro_price": config.WORK_PASS_INTRO_PRICE,
+        "work_pass_price": config.WORK_PASS_PRICE,
     }
     ctx.update(extra)
     return ctx
@@ -236,6 +240,68 @@ def activate_page(request: Request, code: str = ""):
     return _render(request, "activate.html", "activate", code=code.strip().upper())
 
 
+# --- marketing sections (the nav's Product / Solutions / Resources) ----------
+
+@router.get("/product")
+def product_page(request: Request):
+    return _render(request, "product.html", "product")
+
+
+@router.get("/solutions")
+def solutions_page(request: Request):
+    return _render(request, "solutions.html", "solutions")
+
+
+@router.get("/resources")
+def resources_page(request: Request):
+    return _render(request, "resources.html", "resources")
+
+
+@router.get("/console/team")
+def team_page(request: Request):
+    user = try_resolve_user(request)
+    if user is None:
+        return RedirectResponse("/login?next=/console/team", status_code=303)
+    return _render(request, "team.html", "team",
+                   team_seat_price=config.TEAM_SEAT_PRICE,
+                   team_seat_credits=config.TEAM_SEAT_CREDITS)
+
+
+@router.get("/team/join")
+def team_join_page(request: Request):
+    """Invite links land here; sign-in first, then the code is applied."""
+    code = request.query_params.get("code", "")
+    user = try_resolve_user(request)
+    if user is None:
+        return RedirectResponse(f"/login?next=/team/join%3Fcode%3D{code}", status_code=303)
+    return _render(request, "team.html", "team",
+                   team_seat_price=config.TEAM_SEAT_PRICE,
+                   team_seat_credits=config.TEAM_SEAT_CREDITS,
+                   auto_join_code=code)
+
+
+# --- cloud workspace paywall --------------------------------------------------
+
+@router.get("/work/upgrade")
+def work_upgrade_page(request: Request):
+    """Shown when the free machine-time allowance is spent. Deliberately a page
+    rather than a modal: it is a purchase decision, and it needs a way back."""
+    user = try_resolve_user(request)
+    if user is None:
+        return RedirectResponse("/login?next=/work/upgrade", status_code=303)
+    from . import work_access
+    st = work_access.state(user["id"])
+    return _render(
+        request, "work_upgrade.html", "work_upgrade",
+        pass_active=st["pass_active"],
+        pass_expires_text=_fmt_date(st["pass_expires"]) if st["pass_expires"] else "",
+        next_price=st["next_price"],
+        next_price_kind=st["next_price_kind"],
+        standard_price=st["standard_price"],
+        free_minutes_left=st["free_minutes_left"],
+    )
+
+
 # --- console -----------------------------------------------------------------
 
 @router.get("/console")
@@ -254,10 +320,18 @@ def console_page(request: Request):
         r = dict(row)
         r["created_str"] = _fmt_ts(r.get("created"))
         recent.append(r)
+    from . import teams, work_access
+    wa = work_access.state(uid)
+    org = teams.org_of(uid)
     return _render(
         request, "console.html", "console",
         balance=balance,
         balance_yuan=f"{balance / 100:.2f}",
+        work_free_left=wa["free_minutes_left"],
+        work_pass_active=wa["pass_active"],
+        work_pass_expires_text=_fmt_date(wa["pass_expires"]) if wa["pass_expires"] else "",
+        org=org,
+        org_pool=teams.pool_balance(org["id"]) if org else 0,
         plan=plan,
         plan_expires_str=_fmt_date(plan.get("expires")) if plan.get("tier") != "free" else "",
         usage=usage,

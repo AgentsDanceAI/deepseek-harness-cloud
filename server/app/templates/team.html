@@ -1,0 +1,140 @@
+{% extends "base.html" %}
+{% block title %}团队 — DSH Cloud{% endblock %}
+{% block content %}
+<section class="section">
+  <div class="container">
+    <span class="eyebrow">团队</span>
+    <h1 class="section-title" style="text-align:left">团队与共享积分</h1>
+
+    <div id="team-none" hidden>
+      <div class="card block">
+        <h2>还没有团队</h2>
+        <p class="muted">
+          创建团队后，成员共用一个积分池：谁都不用单独充值，用量按人可查。
+          席位 {{ currency_symbol }}{{ '%.2f'|format(team_seat_price / 100) }} / 席 / 月，含
+          {{ '{:,}'.format(team_seat_credits) }} 积分入池。
+        </p>
+        <div class="form-row" style="margin-top:16px">
+          <input type="text" id="team-name" placeholder="团队名称" style="max-width:280px">
+          <button class="btn btn-primary" id="btn-create-team" type="button">创建团队</button>
+        </div>
+        <p class="form-error" id="team-error" hidden></p>
+        <p class="muted small" style="margin-top:18px">
+          收到邀请码？<button class="link-btn" id="btn-show-join" type="button">用邀请码加入</button>
+        </p>
+        <div id="join-row" hidden class="form-row" style="margin-top:10px">
+          <input type="text" id="join-code" placeholder="邀请码" style="max-width:200px">
+          <button class="btn btn-ghost" id="btn-join" type="button">加入</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="team-view" hidden>
+      <div class="grid grid-3" style="margin-bottom:22px">
+        <div class="card stat"><div class="stat-label">共享积分池</div><div class="stat-value" id="t-pool">—</div></div>
+        <div class="card stat"><div class="stat-label">席位</div><div class="stat-value" id="t-seats">—</div></div>
+        <div class="card stat"><div class="stat-label">团队</div><div class="stat-value" id="t-name" style="font-size:20px">—</div></div>
+      </div>
+
+      <div class="card block" id="owner-tools" hidden>
+        <h2>成员</h2>
+        <table class="table" id="t-members"><thead><tr><th>成员</th><th>角色</th><th>本月用量</th><th></th></tr></thead><tbody></tbody></table>
+        <div class="form-row" style="margin-top:16px">
+          <button class="btn btn-primary" id="btn-invite" type="button">生成邀请链接</button>
+          <button class="btn btn-ghost" id="btn-buy-seats" type="button">增购席位</button>
+        </div>
+        <p class="muted small" id="invite-out" hidden style="margin-top:12px"></p>
+      </div>
+
+      <p class="muted small" style="margin-top:18px">
+        消费顺序：先扣团队共享池，池子空了才用个人积分。每笔用量都记在使用者名下。
+      </p>
+    </div>
+
+    <p class="auth-back" style="margin-top:24px;text-align:left"><a href="/console">← 返回控制台</a></p>
+  </div>
+</section>
+{% endblock %}
+{% block scripts %}
+<script>
+(function () {
+  var $ = function (s) { return document.querySelector(s); };
+  function post(url, body) {
+    return fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' },
+                        body: JSON.stringify(body || {}) })
+      .then(function (r) { return r.json().then(function (d) {
+        if (!r.ok) throw new Error(d.detail || '操作失败'); return d; }); });
+  }
+  function err(msg) { var e = $('#team-error'); if (e) { e.textContent = msg; e.hidden = false; } }
+
+  function render(s) {
+    if (!s.in_org) { $('#team-none').hidden = false; $('#team-view').hidden = true; return; }
+    $('#team-none').hidden = true;
+    $('#team-view').hidden = false;
+    $('#t-pool').textContent = (s.pool_balance || 0).toLocaleString();
+    $('#t-seats').textContent = s.seats_used + ' / ' + s.seats;
+    $('#t-name').textContent = s.name;
+    if (s.role === 'owner') {
+      $('#owner-tools').hidden = false;
+      var usage = {};
+      (s.usage || []).forEach(function (u) { usage[u.email] = u.credits; });
+      var tb = $('#t-members tbody');
+      tb.innerHTML = '';
+      (s.members || []).forEach(function (m) {
+        var tr = document.createElement('tr');
+        tr.innerHTML = '<td>' + m.email + '</td><td>' + (m.role === 'owner' ? '所有者' : '成员') +
+          '</td><td>' + (usage[m.email] || 0).toLocaleString() + '</td><td></td>';
+        if (m.role !== 'owner') {
+          var b = document.createElement('button');
+          b.className = 'link-btn'; b.textContent = '移除';
+          b.onclick = function () {
+            post('/api/team/remove', { user_id: m.user_id }).then(load).catch(function (e) { alert(e.message); });
+          };
+          tr.lastElementChild.appendChild(b);
+        }
+        tb.appendChild(tr);
+      });
+    }
+  }
+
+  function load() {
+    fetch('/api/team/me').then(function (r) { return r.json(); }).then(render).catch(function () {});
+  }
+
+  $('#btn-create-team').addEventListener('click', function () {
+    post('/api/team/create', { name: $('#team-name').value.trim() })
+      .then(load).catch(function (e) { err(e.message); });
+  });
+  $('#btn-show-join').addEventListener('click', function () { $('#join-row').hidden = false; });
+  $('#btn-join').addEventListener('click', function () {
+    post('/api/team/join', { code: $('#join-code').value.trim() })
+      .then(load).catch(function (e) { err(e.message); });
+  });
+  $('#btn-invite').addEventListener('click', function () {
+    post('/api/team/invite', {}).then(function (d) {
+      var out = $('#invite-out');
+      out.textContent = '邀请链接（14 天内有效）：' + d.url;
+      out.hidden = false;
+    }).catch(function (e) { alert(e.message); });
+  });
+  $('#btn-buy-seats').addEventListener('click', function () {
+    var n = prompt('购买多少个席位？', '5');
+    if (!n || !/^\d+$/.test(n)) return;
+    post('/api/pay/checkout', { item: 'seats:' + n }).then(function (d) {
+      if (d.pay_url) { location.href = d.pay_url; return; }
+      location.href = '/orders';
+    }).catch(function (e) { alert(e.message); });
+  });
+
+  // an invite link carries the code; apply it once sign-in has happened
+  var auto = {{ (auto_join_code or '') | tojson }};
+  if (auto) {
+    post('/api/team/join', { code: auto })
+      .then(function () { history.replaceState(null, '', '/console/team'); load(); })
+      .catch(function (e) { err(e.message); load(); });
+  } else {
+    load();
+  }
+})();
+</script>
+{% endblock %}

@@ -1,66 +1,115 @@
 {% extends "base.html" %}
 {% block title %}登录 — DSH Cloud{% endblock %}
+{% block head %}<script src="/static/hero-waves.js?v={{ asset_v }}" defer></script>{% endblock %}
 {% block content %}
-<section class="auth-wrap">
-  <div class="card auth-card">
-    <h1 class="auth-title">登录 DSH Cloud</h1>
+{# Split layout after the AgentsDance reference: value proposition on a dark
+   panel, the form alone on the right. The panel runs our ripple canvas, so the
+   brand's one strong visual carries into sign-in instead of a blank slab. #}
+<section class="auth-split">
+  <aside class="auth-aside">
+    <canvas id="hero-waves" aria-hidden="true"></canvas>
+    <a class="brand" href="/" style="color:#fff">
+      <svg class="logo" viewBox="0 0 32 32" width="28" height="28" aria-hidden="true">
+        <defs><linearGradient id="lgl" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stop-color="#5b93f0"/><stop offset="1" stop-color="#2663c9"/>
+        </linearGradient></defs>
+        <rect x="1.5" y="1.5" width="29" height="29" rx="8.5" fill="url(#lgl)"/>
+        <path d="M9.5 11 15 16l-5.5 5" fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M17 21.5h6" stroke="#fff" stroke-width="2.6" stroke-linecap="round"/>
+      </svg>
+      <span class="brand-name" style="color:#fff">DSH Cloud</span>
+    </a>
 
-    {% set oauth_next = request.query_params.get('next', '/console') %}
-    {% set oauth_err = request.query_params.get('google_error') or request.query_params.get('github_error') %}
-    {% if oauth_err %}<p class="form-error center">{{ oauth_err }}</p>{% endif %}
-    <div class="btn-col">
-      <a class="btn btn-ghost btn-block" href="/api/auth/google/start?next={{ oauth_next | urlencode }}">使用 Google 登录</a>
-      <a class="btn btn-ghost btn-block" href="/api/auth/github/start?next={{ oauth_next | urlencode }}">使用 GitHub 登录</a>
+    <div>
+      <h2>把任务交给 AI，<br>结果直接拿走</h2>
+      <div class="auth-points">
+        <div class="auth-point">
+          <span class="tick"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 13 4 4L19 7"/></svg></span>
+          <div><b>登录即用，无需自购 API Key</b><span>账号、额度与模型网关都在云端备好</span></div>
+        </div>
+        <div class="auth-point">
+          <span class="tick"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 13 4 4L19 7"/></svg></span>
+          <div><b>云工作台，手机也能开工</b><span>每人 {{ (work_free_minutes // 60) }} 小时免费机时，浏览器打开就用</span></div>
+        </div>
+        <div class="auth-point">
+          <span class="tick"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 13 4 4L19 7"/></svg></span>
+          <div><b>代码开源，可私有化部署</b><span>企业部署一份，即得内部专用的 dsh 云平台</span></div>
+        </div>
+      </div>
     </div>
-    <div class="auth-divider"><span>或</span></div>
 
-    <div class="tabs" role="tablist">
-      <button class="tab active" data-tab="pw" type="button">密码登录</button>
-      <button class="tab" data-tab="code" type="button">邮箱验证码登录</button>
+    <footer>dshcloud.online · © {{ year }} DSH Cloud</footer>
+  </aside>
+
+  <main class="auth-main">
+    <div class="auth-panel">
+      <div class="card">
+        <h1 class="auth-title" style="margin-bottom:4px">登录 DSH Cloud</h1>
+        <p class="muted small">欢迎回来，把活交给智能体</p>
+
+        {% set oauth_next = request.query_params.get('next', '/console') %}
+        {% set oauth_err = request.query_params.get('google_error') or request.query_params.get('github_error') %}
+        {% if oauth_err %}<p class="form-error center">{{ oauth_err }}</p>{% endif %}
+
+        <div class="auth-tabs" role="tablist">
+          <button class="tab" data-tab="code" type="button" role="tab" aria-selected="true">邮箱验证码</button>
+          <button class="tab" data-tab="pw" type="button" role="tab" aria-selected="false">密码登录</button>
+        </div>
+
+        <form id="form-code" class="tab-panel" autocomplete="on">
+          <label>邮箱
+            <input type="email" name="email" required placeholder="you@example.com" autocomplete="email">
+          </label>
+          <label>验证码
+            <span class="code-row">
+              <input type="text" name="code" required pattern="\d{6}" maxlength="6" inputmode="numeric" placeholder="6 位数字">
+              <button class="btn btn-ghost" type="button" id="btn-send-code">获取验证码</button>
+            </span>
+          </label>
+          <p class="form-error" id="code-error" hidden></p>
+          <button class="btn btn-primary btn-block" type="submit">登录 / 注册</button>
+          <p class="muted small">未注册的邮箱验证后将自动创建账号。</p>
+        </form>
+
+        <form id="form-pw" class="tab-panel" hidden autocomplete="on">
+          <label>邮箱
+            <input type="email" name="email" required placeholder="you@example.com" autocomplete="email">
+          </label>
+          <label>密码
+            <input type="password" name="password" required minlength="8" placeholder="至少 8 位" autocomplete="current-password">
+          </label>
+          <p class="form-error" id="pw-error" hidden></p>
+          <button class="btn btn-primary btn-block" type="submit">登录</button>
+        </form>
+
+        <div class="auth-or">或</div>
+        <div class="btn-col">
+          <a class="btn btn-ghost btn-block" href="/api/auth/google/start?next={{ oauth_next | urlencode }}">使用 Google 登录</a>
+          <a class="btn btn-ghost btn-block" href="/api/auth/github/start?next={{ oauth_next | urlencode }}">使用 GitHub 登录</a>
+        </div>
+
+        <p class="muted small" style="margin-top:18px;text-align:center">
+          登录即表示同意 <a href="/legal/terms">服务条款</a> 与 <a href="/legal/privacy">隐私政策</a>。
+        </p>
+
+        <form id="form-reg" autocomplete="on" style="margin-top:10px">
+          <details>
+            <summary class="reg-link">改用邮箱 + 密码注册</summary>
+            <label>邮箱
+              <input type="email" name="email" required placeholder="you@example.com" autocomplete="email">
+            </label>
+            <label>密码
+              <input type="password" name="password" required minlength="8" placeholder="设置密码（至少 8 位）" autocomplete="new-password">
+            </label>
+            <p class="form-error" id="reg-error" hidden></p>
+            <button class="btn btn-primary btn-block" type="submit">注册</button>
+          </details>
+        </form>
+      </div>
+
+      {# an explicit way out: sign-in used to be a dead end with no route back #}
+      <p class="auth-back"><a href="/">← 返回首页</a></p>
     </div>
-
-    <form id="form-pw" class="tab-panel" autocomplete="on">
-      <label>邮箱
-        <input type="email" name="email" required placeholder="you@example.com" autocomplete="email">
-      </label>
-      <label>密码
-        <input type="password" name="password" required minlength="8" placeholder="至少 8 位" autocomplete="current-password">
-      </label>
-      <p class="form-error" id="pw-error" hidden></p>
-      <button class="btn btn-primary btn-block" type="submit">登录</button>
-    </form>
-
-    <form id="form-code" class="tab-panel" hidden autocomplete="on">
-      <label>邮箱
-        <input type="email" name="email" required placeholder="you@example.com" autocomplete="email">
-      </label>
-      <label>验证码
-        <span class="code-row">
-          <input type="text" name="code" required pattern="\d{6}" maxlength="6" inputmode="numeric" placeholder="6 位数字">
-          <button class="btn btn-ghost" type="button" id="btn-send-code">发送验证码</button>
-        </span>
-      </label>
-      <p class="form-error" id="code-error" hidden></p>
-      <button class="btn btn-primary btn-block" type="submit">登录 / 注册</button>
-      <p class="muted small">未注册的邮箱通过验证码登录后将自动创建账号。</p>
-    </form>
-
-    <div class="auth-divider"><span>还没有账号？</span></div>
-
-    <form id="form-reg" autocomplete="on">
-      <details>
-        <summary class="reg-link">使用邮箱 + 密码注册</summary>
-        <label>邮箱
-          <input type="email" name="email" required placeholder="you@example.com" autocomplete="email">
-        </label>
-        <label>密码
-          <input type="password" name="password" required minlength="8" placeholder="设置密码（至少 8 位）" autocomplete="new-password">
-        </label>
-        <p class="form-error" id="reg-error" hidden></p>
-        <p class="muted small">注册即表示同意 <a href="/legal/terms">服务条款</a> 与 <a href="/legal/privacy">隐私政策</a>。</p>
-        <button class="btn btn-primary btn-block" type="submit">注册</button>
-      </details>
-    </form>
-  </div>
+  </main>
 </section>
 {% endblock %}

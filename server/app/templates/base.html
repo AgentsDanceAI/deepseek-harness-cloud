@@ -10,6 +10,9 @@
 {% block head %}{% endblock %}
 </head>
 <body data-page="{{ page }}" data-currency-symbol="{{ currency_symbol }}">
+{# The auth pages own the full viewport (split layout), so they opt out of the
+   site chrome and carry their own brand mark and way back. #}
+{% if page not in ('login', 'activate') %}
 <header class="site-header">
   <div class="container nav-row">
     <a class="brand" href="/" aria-label="DSH Cloud 首页">
@@ -27,22 +30,56 @@
       <span class="brand-name">DSH Cloud</span>
     </a>
     <nav class="site-nav">
+      <div class="nav-group" data-nav-group>
+        <button type="button" aria-expanded="false">产品
+          <svg viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M3 4.5 6 7.5 9 4.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <div class="nav-menu" hidden>
+          <a href="/product#workspace"><strong>云工作台</strong><span>浏览器和手机直接用，免安装，任务跑在云端容器里</span></a>
+          <a href="/product#desktop"><strong>桌面客户端</strong><span>macOS / Windows 原生应用，登录即用，无需配 key</span></a>
+          <a href="/product#gateway"><strong>统一模型网关</strong><span>OpenAI 兼容接口，用量按积分计费，密钥不落客户端</span></a>
+          <a href="/product#search"><strong>联网搜索</strong><span>给智能体接上实时网页检索，带来源引用</span></a>
+        </div>
+      </div>
+      <div class="nav-group" data-nav-group>
+        <button type="button" aria-expanded="false">解决方案
+          <svg viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M3 4.5 6 7.5 9 4.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <div class="nav-menu" hidden>
+          <a href="/solutions#teams"><strong>团队协作</strong><span>席位订阅，积分在组织内共享，用量集中可见</span></a>
+          <a href="/solutions#enterprise"><strong>企业私有化</strong><span>部署本开源项目，得到一套自己的 dsh 云平台</span></a>
+          <a href="/solutions#developers"><strong>开发者</strong><span>自带模型上游，把 dsh 接进现有工具链</span></a>
+          <a href="/solutions#education"><strong>教学与研究</strong><span>按人发额度，无需给每个人配模型密钥</span></a>
+        </div>
+      </div>
+      <div class="nav-group" data-nav-group>
+        <button type="button" aria-expanded="false">资源
+          <svg viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M3 4.5 6 7.5 9 4.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <div class="nav-menu" hidden>
+          <a href="/resources#quickstart"><strong>快速上手</strong><span>三步开始：登录、领额度、把任务交给智能体</span></a>
+          <a href="/resources#selfhost"><strong>自部署指南</strong><span>docker compose 一条命令，含需要配哪几个 key</span></a>
+          <a href="/download"><strong>下载客户端</strong><span>macOS、Windows、Android，以及可装到主屏的 PWA</span></a>
+          <a href="/resources#opensource"><strong>开源仓库</strong><span>代码在 GitHub，欢迎自部署与二次开发</span></a>
+        </div>
+      </div>
       <a href="/pricing" {% if page == 'pricing' %}class="active"{% endif %}>定价</a>
-      <a href="/download" {% if page == 'download' %}class="active"{% endif %}>下载</a>
       {% if user %}
         <a href="/console" {% if page == 'console' %}class="active"{% endif %}>控制台</a>
         <a href="#" id="nav-logout" data-action="logout">退出</a>
       {% else %}
-        <a href="/login" class="btn btn-primary btn-sm">登录 / 注册</a>
+        <a href="/login" class="btn btn-primary btn-sm">立即体验</a>
       {% endif %}
     </nav>
   </div>
 </header>
+{% endif %}
 
 <main>
 {% block content %}{% endblock %}
 </main>
 
+{% if page not in ('login', 'activate') %}
 <footer class="site-footer">
   <div class="container">
     <div class="footer-cols">
@@ -83,6 +120,7 @@
     </p>
   </div>
 </footer>
+{% endif %}
 <div id="toast" class="toast" hidden></div>
 {% block scripts %}{% endblock %}
 </body>

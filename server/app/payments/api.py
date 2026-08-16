@@ -58,6 +58,7 @@ def checkout(body: dict, user: dict = Depends(resolve_user)):
         # No payment channel configured yet: record the intent so demand is
         # visible; the frontend shows "支付即将开通".
         info = base.resolve_item(item)
+        info["amount_cents"] = base.price_for(user["id"], info)
         order_id = "DHI" + time.strftime("%y%m%d") + secrets.token_hex(5).upper()
         with db.tx() as conn:
             conn.execute(

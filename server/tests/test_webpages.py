@@ -59,11 +59,20 @@ def test_landing_no_icp_when_unset(client):
 
 
 def test_login_page_renders(client):
+    """Assert the sign-in AFFORDANCES, not their wording — the copy moves with
+    design work and pinning it turned every visual change into a red suite."""
     r = client.get("/login")
     assert r.status_code == 200
-    assert "密码登录" in r.text
-    assert "邮箱验证码登录" in r.text
-    assert "注册" in r.text
+    assert 'data-tab="pw"' in r.text and 'data-tab="code"' in r.text
+    assert 'id="form-code"' in r.text and 'id="form-pw"' in r.text
+    assert "/api/auth/google/start" in r.text and "/api/auth/github/start" in r.text
+
+
+def test_login_page_offers_a_way_out(client):
+    """Sign-in used to be a dead end: no header, no link home. Anyone who lands
+    here by accident must be able to leave."""
+    r = client.get("/login")
+    assert 'href="/"' in r.text
 
 
 def test_pricing_page_renders(client):
@@ -86,9 +95,11 @@ def test_activate_page_renders(client):
 
 
 def test_download_page_placeholder(client):
+    """With no DOWNLOAD_URL_* set, the buttons must be inert rather than linking
+    somewhere broken."""
     r = client.get("/download")
     assert r.status_code == 200
-    assert "即将上线" in r.text
+    assert "disabled" in r.text
 
 
 def test_download_page_with_urls(client):

@@ -100,11 +100,108 @@
       .then(function () { location.href = "/"; });
   });
 
+  // --- global: nav dropdowns -------------------------------------------------
+  (function initNavGroups() {
+    var groups = $$("[data-nav-group]");
+    if (!groups.length) return;
+    function closeAll(except) {
+      groups.forEach(function (g) {
+        if (g === except) return;
+        g.dataset.open = "false";
+        g.querySelector(".nav-menu").hidden = true;
+        g.querySelector("button").setAttribute("aria-expanded", "false");
+      });
+    }
+    groups.forEach(function (g) {
+      var btn = g.querySelector("button");
+      var menu = g.querySelector(".nav-menu");
+      function setOpen(open) {
+        g.dataset.open = open ? "true" : "false";
+        menu.hidden = !open;
+        btn.setAttribute("aria-expanded", open ? "true" : "false");
+        if (open) closeAll(g);
+      }
+      btn.addEventListener("click", function (ev) {
+        ev.stopPropagation();
+        setOpen(menu.hidden);
+      });
+      // pointer users expect hover; keyboard/touch users get the click above
+      g.addEventListener("mouseenter", function () { setOpen(true); });
+      g.addEventListener("mouseleave", function () { setOpen(false); });
+    });
+    document.addEventListener("click", function () { closeAll(null); });
+    document.addEventListener("keydown", function (ev) {
+      if (ev.key === "Escape") closeAll(null);
+    });
+  })();
+
+  // --- global: hero composer -------------------------------------------------
+  // The task someone types on the marketing page must survive the login
+  // round-trip, so it is stashed before we send them anywhere.
+  (function initComposer() {
+    var form = $("#hero-composer");
+    if (!form) return;
+    var box = form.querySelector("textarea");
+    var send = form.querySelector(".composer-send");
+    var TASK_KEY = "dhc.pending_task";
+
+    function submit() {
+      var task = (box.value || "").trim();
+      try {
+        if (task) sessionStorage.setItem(TASK_KEY, task);
+        else sessionStorage.removeItem(TASK_KEY);
+      } catch (e) {}
+      var next = "/work" + (task ? "?task=" + encodeURIComponent(task.slice(0, 2000)) : "");
+      location.href = form.dataset.authed === "1"
+        ? next
+        : "/login?next=" + encodeURIComponent(next);
+    }
+
+    form.addEventListener("submit", function (ev) { ev.preventDefault(); submit(); });
+    if (send) send.addEventListener("click", submit);
+    box.addEventListener("keydown", function (ev) {
+      if (ev.key === "Enter" && !ev.shiftKey) { ev.preventDefault(); submit(); }
+    });
+    box.addEventListener("input", function () {
+      box.style.height = "auto";
+      box.style.height = Math.min(box.scrollHeight, 200) + "px";
+    });
+    $$("[data-chip]").forEach(function (chip) {
+      chip.addEventListener("click", function () {
+        box.value = chip.dataset.chip;
+        box.focus();
+        box.dispatchEvent(new Event("input"));
+      });
+    });
+  })();
+
+  // --- global: pricing period switch ----------------------------------------
+  (function initPeriodSwitch() {
+    var sw = $("#period-switch");
+    if (!sw) return;
+    sw.addEventListener("click", function (ev) {
+      var btn = ev.target.closest("button[data-period]");
+      if (!btn) return;
+      var period = btn.dataset.period;
+      $$("#period-switch button").forEach(function (b) {
+        b.setAttribute("aria-pressed", b === btn ? "true" : "false");
+      });
+      $$("[data-period-view]").forEach(function (el) {
+        el.hidden = el.dataset.periodView !== period;
+      });
+    });
+  })();
+
   // --- page: login -----------------------------------------------------------
   function initLogin() {
-    $$(".tabs .tab").forEach(function (tab) {
+    // `.auth-tabs` is the split-layout login; `.tabs` remains for other pages.
+    var tabs = $$(".auth-tabs .tab, .tabs .tab");
+    tabs.forEach(function (tab) {
       tab.addEventListener("click", function () {
-        $$(".tabs .tab").forEach(function (t) { t.classList.toggle("active", t === tab); });
+        tabs.forEach(function (t) {
+          t.classList.toggle("active", t === tab);
+          t.setAttribute("aria-selected", t === tab ? "true" : "false");
+        });
         $("#form-pw").hidden = tab.dataset.tab !== "pw";
         $("#form-code").hidden = tab.dataset.tab !== "code";
       });
