@@ -11,11 +11,14 @@
           <svg viewBox="0 0 24 24" fill="currentColor"><path d="M16.7 12.9c0-2.4 2-3.6 2-3.6a4.6 4.6 0 0 0-3.6-1.9c-1.5-.2-3 .9-3.7.9-.8 0-2-.9-3.3-.9A4.9 4.9 0 0 0 4 9.9c-1.8 3-.5 7.5 1.2 10 .8 1.2 1.8 2.5 3.1 2.5 1.3-.1 1.8-.8 3.3-.8s2 .8 3.3.8 2.2-1.2 3-2.4a10 10 0 0 0 1.4-2.8 4.4 4.4 0 0 1-2.6-4.3ZM14.2 5.6A4.5 4.5 0 0 0 15.3 2a4.6 4.6 0 0 0-3 1.5A4.3 4.3 0 0 0 11.2 7a3.8 3.8 0 0 0 3-1.4Z"/></svg>
         </div>
         <h3>macOS</h3>
-        <p class="muted">Apple Silicon（M 系列）· macOS 12+ · Intel 版即将提供</p>
+        <p class="muted">Apple Silicon（M 系列）与 Intel · macOS 12+</p>
         {% if url_mac %}
-          <a class="btn btn-primary btn-block" href="{{ url_mac }}" rel="noopener">下载 .dmg</a>
+          <a class="btn btn-primary btn-block" href="{{ url_mac }}" rel="noopener">下载 .dmg（Apple Silicon）</a>
         {% else %}
           <button class="btn btn-ghost btn-block" type="button" disabled>即将上线</button>
+        {% endif %}
+        {% if download_url_mac_x64 %}
+          <a class="btn btn-ghost btn-block" href="{{ download_url_mac_x64 }}" rel="noopener" style="margin-top:10px">下载 .dmg（Intel）</a>
         {% endif %}
       </div>
       <div class="card dl-card">
@@ -29,6 +32,24 @@
         {% else %}
           <button class="btn btn-ghost btn-block" type="button" disabled>即将上线</button>
         {% endif %}
+      </div>
+      {% if download_url_android %}
+      <div class="card dl-card">
+        <div class="dl-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M7.2 8.6h9.6c.4 0 .7.3.7.7v7.2a2 2 0 0 1-2 2h-.5v2.3a1 1 0 1 1-2 0v-2.3h-2v2.3a1 1 0 1 1-2 0v-2.3H8.5a2 2 0 0 1-2-2V9.3c0-.4.3-.7.7-.7Zm-3 .7a1 1 0 0 1 1 1v4.6a1 1 0 1 1-2 0v-4.6a1 1 0 0 1 1-1Zm15.6 0a1 1 0 0 1 1 1v4.6a1 1 0 1 1-2 0v-4.6a1 1 0 0 1 1-1ZM15.9 3.6l1-1.5a.4.4 0 0 0-.6-.4l-1.1 1.6a6.7 6.7 0 0 0-6.4 0L7.7 1.7a.4.4 0 1 0-.6.4l1 1.5A6 6 0 0 0 6.5 7.8h11a6 6 0 0 0-1.6-4.2ZM9.6 6a.7.7 0 1 1 0-1.4.7.7 0 0 1 0 1.4Zm4.8 0a.7.7 0 1 1 0-1.4.7.7 0 0 1 0 1.4Z"/></svg>
+        </div>
+        <h3>Android</h3>
+        <p class="muted">Android 8+ · APK 直装（需允许安装未知来源应用）</p>
+        <a class="btn btn-primary btn-block" href="{{ download_url_android }}" rel="noopener">下载 .apk</a>
+      </div>
+      {% endif %}
+      <div class="card dl-card">
+        <div class="dl-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="2.5" width="12" height="19" rx="2.5"/><path d="M10.5 5h3M12 18.5h.01"/></svg>
+        </div>
+        <h3>iPhone / iPad</h3>
+        <p class="muted">无需安装：Safari 打开云工作台，「分享」→「添加到主屏幕」即可当 App 使用</p>
+        <a class="btn btn-ghost btn-block" href="/work" rel="noopener">打开云工作台</a>
       </div>
     </div>
 

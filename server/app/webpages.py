@@ -65,6 +65,8 @@ def _ctx(request: Request, page: str, **extra) -> dict:
         "currency_symbol": {"CNY": "¥", "USD": "$"}.get(currency, currency + " "),
         "download_url_mac": os.environ.get("DOWNLOAD_URL_MAC", ""),
         "download_url_win": os.environ.get("DOWNLOAD_URL_WIN", ""),
+        "download_url_mac_x64": os.environ.get("DOWNLOAD_URL_MAC_X64", ""),
+        "download_url_android": os.environ.get("DOWNLOAD_URL_ANDROID", ""),
         "work_enabled": config.WORK_ENABLED,
         "work_credits_per_min": config.WORK_CREDITS_PER_MIN,
         "work_idle_stop_min": config.WORK_IDLE_STOP_MIN,
