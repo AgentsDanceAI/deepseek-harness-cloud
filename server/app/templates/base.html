@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{% block title %}DSH Cloud{% endblock %}</title>
 <meta name="description" content="DSH Cloud — 桌面 AI 编程助手 DSH 的云服务：登录即用，无需自购 API Key，免费额度起步。">
-<link rel="stylesheet" href="/static/app.css">
-<script src="/static/app.js" defer></script>
+<link rel="stylesheet" href="/static/app.css?v={{ asset_v }}">
+<script src="/static/app.js?v={{ asset_v }}" defer></script>
 {% block head %}{% endblock %}
 </head>
 <body data-page="{{ page }}" data-currency-symbol="{{ currency_symbol }}">

@@ -23,6 +23,13 @@ from .accounts import try_resolve_user
 router = APIRouter(include_in_schema=False)
 
 TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
+# Cache-buster for static assets: CDN edges (Cloudflare) cache /static/* — a
+# version query derived from file mtimes makes every deploy a fresh URL.
+_STATIC_DIR = Path(__file__).resolve().parent / "static"
+try:
+    ASSET_V = str(int(max(f.stat().st_mtime for f in _STATIC_DIR.rglob("*") if f.is_file())))
+except ValueError:
+    ASSET_V = "0"
 # repo-root legal/ documents (terms.zh.md, ...). Overridable for tests/deploys.
 def _legal_dir() -> Path:
     # resolved per request so tests/deploys can repoint via env at any time
@@ -53,6 +60,7 @@ def _ctx(request: Request, page: str, **extra) -> dict:
         "legal_entity_zh": config.LEGAL_ENTITY_ZH,
         "legal_contact_email": config.LEGAL_CONTACT_EMAIL,
         "year": time.localtime().tm_year,
+        "asset_v": ASSET_V,
         "currency": currency,
         "currency_symbol": {"CNY": "¥", "USD": "$"}.get(currency, currency + " "),
         "download_url_mac": os.environ.get("DOWNLOAD_URL_MAC", ""),

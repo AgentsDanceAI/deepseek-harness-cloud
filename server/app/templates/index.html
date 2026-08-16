@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block title %}DSH Cloud — 桌面 AI 编程助手，登录即用{% endblock %}
-{% block head %}<script src="/static/hero-waves.js" defer></script>{% endblock %}
+{% block head %}<script src="/static/hero-waves.js?v={{ asset_v }}" defer></script>{% endblock %}
 {% block content %}
 <section class="hero-dark">
   <canvas id="hero-waves" aria-hidden="true"></canvas>
