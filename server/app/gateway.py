@@ -246,8 +246,14 @@ async def anthropic_messages(request: Request, user: dict = Depends(resolve_user
                 results = await zhipu_search.search(query, zhipu_search._max_results(body))
             except (httpx.HTTPError, ValueError):
                 results = []
-        credits.spend(user["id"], config.SEARCH_CALL_CREDITS, kind="search", model="web_search:zhipu",
-                      device_id=user.get("device_id", ""), request_id=request_id)
+        # Only a search that actually produced results is billable. A failed or
+        # empty search makes the agent retry, and charging each retry drained
+        # real balances for zero value (2026-08-16: an engine returning rows
+        # without links yielded nothing usable yet billed every attempt).
+        if results:
+            credits.spend(user["id"], config.SEARCH_CALL_CREDITS, kind="search",
+                          model="web_search:zhipu",
+                          device_id=user.get("device_id", ""), request_id=request_id)
         return JSONResponse(content=zhipu_search.to_anthropic_response(query, results, model),
                             headers={"x-request-id": request_id})
 

@@ -69,7 +69,13 @@ UPSTREAM_TIMEOUT_S = _env_float("UPSTREAM_TIMEOUT_S", 600.0)
 #                             (DeepSeek official — a full billed model turn)
 SEARCH_PROVIDER = _env("SEARCH_PROVIDER", "zhipu").lower()
 ZHIPU_SEARCH_API_KEY = _env("ZHIPU_SEARCH_API_KEY")
-ZHIPU_SEARCH_ENGINE = _env("ZHIPU_SEARCH_ENGINE", "search_pro")
+# Engine ladder. dsh discards any result without a url, and as of 2026-08-16
+# Zhipu's search_pro/search_std answer 200 with rich content but an EMPTY link
+# on every row — so the default leads with an engine that carries real links
+# and falls back through the others (each may have its own quota).
+ZHIPU_SEARCH_ENGINE = _env("ZHIPU_SEARCH_ENGINE", "search_pro_sogou")
+ZHIPU_SEARCH_FALLBACKS = [e.strip() for e in _env(
+    "ZHIPU_SEARCH_FALLBACKS", "search_pro,search_std").split(",") if e.strip()]
 ZHIPU_SEARCH_BASE = _env("ZHIPU_SEARCH_BASE", "https://open.bigmodel.cn/api/paas/v4")
 UPSTREAM_ANTHROPIC_BASE = _env("UPSTREAM_ANTHROPIC_BASE", "https://api.deepseek.com/anthropic/v1")
 

@@ -1,5 +1,6 @@
 """web_search via Zhipu: query extraction, result synthesis, and the gateway
 endpoint returning the exact Anthropic shape dsh's mapAnthropicResponse parses."""
+import asyncio
 import os
 import tempfile
 
@@ -116,3 +117,88 @@ def test_gateway_search_zhipu_failure_returns_empty(monkeypatch):
     # graceful: a valid (empty) search result, not a 5xx that dsh would surface as an error
     assert r.status_code == 200
     assert any(b["type"] == "web_search_tool_result" for b in r.json()["content"])
+
+
+def test_gateway_does_not_bill_empty_search(monkeypatch):
+    """A search that yields nothing is free: the agent retries on empty results,
+    and charging each retry drained real balances for zero value."""
+    c, uid = _login()
+
+    async def empty(query, count):
+        return []
+
+    monkeypatch.setattr(zhipu_search, "search", empty)
+    before = credits.balance(uid)
+    r = c.post("/llm/anthropic/v1/messages", json={
+        "model": "deepseek-v4-flash",
+        "messages": [{"role": "user", "content": [
+            {"type": "text", "text": "Perform a web search for the query: nothing here"}]}],
+    })
+    assert r.status_code == 200
+    assert credits.balance(uid) == before
+
+
+def test_search_falls_back_when_engine_returns_linkless_rows(monkeypatch):
+    """Zhipu's search_pro/search_std answer 200 with content but an empty link
+    on every row; dsh discards url-less results, so we must fall through to an
+    engine that carries links instead of reporting "no results"."""
+    calls: list[str] = []
+
+    async def fake_one(engine, query, count):
+        calls.append(engine)
+        if engine == "linkless":
+            return []  # rows existed upstream but all lacked a url
+        return [{"url": "https://ok.example/a", "title": "A", "content": "c", "page_age": ""}]
+
+    monkeypatch.setattr(config, "ZHIPU_SEARCH_ENGINE", "linkless")
+    monkeypatch.setattr(config, "ZHIPU_SEARCH_FALLBACKS", ["with_links"])
+    monkeypatch.setattr(zhipu_search, "_search_one", fake_one)
+    results = asyncio.run(zhipu_search.search("anything", 10))
+    assert calls == ["linkless", "with_links"]
+    assert [r["url"] for r in results] == ["https://ok.example/a"]
+
+
+def test_search_skips_engine_that_errors(monkeypatch):
+    """A per-engine quota rejection (429 余额不足) must not fail the whole search."""
+    import httpx
+
+    async def fake_one(engine, query, count):
+        if engine == "broke":
+            raise httpx.HTTPError("429 余额不足")
+        return [{"url": "https://ok.example/b", "title": "B", "content": "c", "page_age": ""}]
+
+    monkeypatch.setattr(config, "ZHIPU_SEARCH_ENGINE", "broke")
+    monkeypatch.setattr(config, "ZHIPU_SEARCH_FALLBACKS", ["good"])
+    monkeypatch.setattr(zhipu_search, "_search_one", fake_one)
+    assert [r["url"] for r in asyncio.run(zhipu_search.search("q", 5))] == ["https://ok.example/b"]
+
+
+def test_search_drops_linkless_rows(monkeypatch):
+    """_search_one maps Zhipu rows and drops the url-less ones dsh cannot use."""
+    class FakeResponse:
+        status_code = 200
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"search_result": [
+                {"link": "", "title": "no link", "content": "x"},
+                {"link": "https://ok.example/c", "title": "ok", "content": "y",
+                 "publish_date": "2026-08-16"},
+            ]}
+
+    class FakeClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        async def post(self, *a, **kw):
+            return FakeResponse()
+
+    monkeypatch.setattr(zhipu_search.httpx, "AsyncClient", lambda **kw: FakeClient())
+    rows = asyncio.run(zhipu_search._search_one("any", "q", 10))
+    assert [r["url"] for r in rows] == ["https://ok.example/c"]
+    assert rows[0]["page_age"] == "2026-08-16"

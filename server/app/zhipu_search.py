@@ -54,17 +54,15 @@ def _max_results(body: dict) -> int:
     return 10
 
 
-async def search(query: str, count: int) -> list[dict]:
-    """Call Zhipu web_search. Returns [{title, url, content, page_age}]. []=no results."""
-    if not config.ZHIPU_SEARCH_API_KEY or not query.strip():
-        return []
+async def _search_one(engine: str, query: str, count: int) -> list[dict]:
+    """One Zhipu call against a named engine; maps its rows to our shape."""
     async with httpx.AsyncClient(timeout=15.0) as http:
         r = await http.post(
             f"{config.ZHIPU_SEARCH_BASE.rstrip('/')}/web_search",
             headers={"Authorization": f"Bearer {config.ZHIPU_SEARCH_API_KEY}"},
             json={
                 "search_query": query[:70],
-                "search_engine": config.ZHIPU_SEARCH_ENGINE,
+                "search_engine": engine,
                 "search_intent": False,
                 "count": max(1, min(int(count or 10), 50)),
                 "content_size": "medium",
@@ -74,6 +72,9 @@ async def search(query: str, count: int) -> list[dict]:
         data = r.json()
     out = []
     for item in (data.get("search_result") or []):
+        # dsh's parser drops any web_search_result whose url is empty and dedupes
+        # by url, so a link-less row is worthless downstream — skip it here and
+        # let the caller fall back to an engine that carries links.
         url = str(item.get("link") or "").strip()
         if not url:
             continue
@@ -84,6 +85,34 @@ async def search(query: str, count: int) -> list[dict]:
             "page_age": str(item.get("publish_date") or "").strip(),
         })
     return out
+
+
+async def search(query: str, count: int) -> list[dict]:
+    """Call Zhipu web_search. Returns [{title, url, content, page_age}]. []=no results.
+
+    Engines are tried in order because they differ in whether they return a
+    `link` at all: as of 2026-08-16 `search_pro`/`search_std` answer HTTP 200
+    with rich `content` but an EMPTY `link` on every row, which dsh discards
+    (its parser requires a non-empty url) — the user-visible symptom was
+    "web_search 没有返回搜索结果" while credits were still being spent.
+    `search_pro_sogou` carries real links, so it leads the ladder; the
+    configured engine still gets a turn in case it recovers or is overridden.
+    """
+    if not config.ZHIPU_SEARCH_API_KEY or not query.strip():
+        return []
+    engines: list[str] = []
+    for engine in (config.ZHIPU_SEARCH_ENGINE, *config.ZHIPU_SEARCH_FALLBACKS):
+        engine = (engine or "").strip()
+        if engine and engine not in engines:
+            engines.append(engine)
+    for engine in engines:
+        try:
+            results = await _search_one(engine, query, count)
+        except (httpx.HTTPError, ValueError):
+            continue  # e.g. 429 "余额不足" on one engine's quota — try the next
+        if results:
+            return results
+    return []
 
 
 def to_anthropic_response(query: str, results: list[dict], model: str) -> dict:
