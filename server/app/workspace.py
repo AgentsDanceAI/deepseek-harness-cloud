@@ -93,16 +93,42 @@ async def _create(user: dict) -> None:
     gateway = config.PUBLIC_BASE.rstrip("/")
     token = _mint_workspace_token(user)
     hexid = _cname(user["id"])[len("dshwork-"):]
+    # Chat goes through dsh's pi-ai adapter (openai-completions protocol), NOT
+    # the llm-deepseek adapter: our upstream speaks standard OpenAI streaming,
+    # and llm-deepseek's DeepSeek-flavored tool-call parsing assembles empty
+    # tool names from it (every tool call died with UNKNOWN_TOOL — the exact
+    # combination proven to work is pi-ai + openai-completions against this
+    # upstream). web_search stays on the deepseek search row via env.
+    settings_yaml = (
+        "llm-pi-ai:\n"
+        "  providers:\n"
+        "    dshcloud:\n"
+        "      displayName: DSH Cloud\n"
+        "      apiKeyEnv: DSH_CLOUD_TOKEN\n"
+        "      api: openai-completions\n"
+        f"      baseURL: {gateway}/llm/v1\n"
+        "      models:\n"
+        "        - id: deepseek-v4-flash\n"
+        "        - id: deepseek-v4-pro\n"
+        "agent-default-model:\n"
+        "  provider: dshcloud\n"
+        "  model: deepseek-v4-flash\n"
+    )
+    boot = (
+        "mkdir -p /root/.dsh && cat > /root/.dsh/settings.yaml <<'DHCEOF'\n"
+        + settings_yaml +
+        "DHCEOF\n"
+        "socat TCP-LISTEN:3081,fork,reuseaddr TCP:127.0.0.1:3080 & "
+        "exec dsh web --host 127.0.0.1 --port 3080"
+    )
     body = {
         "Image": config.WORK_IMAGE,
-        "Cmd": ["sh", "-c",
-                "socat TCP-LISTEN:3081,fork,reuseaddr TCP:127.0.0.1:3080 & "
-                "exec dsh web --host 127.0.0.1 --port 3080"],
+        "Cmd": ["sh", "-c", boot],
         "WorkingDir": "/workspace",
         "Labels": {_LABEL: user["id"]},
         "Env": [
+            f"DSH_CLOUD_TOKEN={token}",
             f"DEEPSEEK_API_KEY={token}",
-            f"DEEPSEEK_BASE_URL={gateway}/llm/v1",
             f"DEEPSEEK_SEARCH_BASE_URL={gateway}/llm/anthropic/v1",
             "DSH_TELEMETRY_DISABLED=1",
         ],
