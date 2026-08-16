@@ -13,7 +13,7 @@ on:
       only:
         description: "which jobs to run"
         type: choice
-        options: [all, windows, macos]
+        options: [all, windows, macos, macos-intel]
         default: all
 
 jobs:
@@ -103,10 +103,60 @@ jobs:
           cp -R "$APP" "$STAGE/"
           ln -s /Applications "$STAGE/Applications"
           hdiutil create -volname "DSH Cloud Desktop" -srcfolder "$STAGE" -ov -format UDZO \
-            "../out/DSH-Cloud-Desktop-${VERSION}-mac-arm64.dmg"
+            "../out/DSH-Cloud-Desktop-${VERSION}-mac-${ARCH_LABEL:-arm64}.dmg"
           ls -la ../out/
       - uses: actions/upload-artifact@v4
         with:
           name: macos-arm64-dmg
+          path: desktop/build/upstream/out/*.dmg
+          if-no-files-found: error
+
+  macos-x64:
+    if: ${{ inputs.only == 'all' || inputs.only == 'macos-intel' }}
+    runs-on: macos-13   # Intel x64 runner
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Assemble upstream + overlay
+        run: node desktop/scripts/assemble.mjs --no-submodule
+      - name: Install dependencies
+        working-directory: desktop/build/upstream
+        run: |
+          corepack enable
+          corepack yarn install
+      - name: Add tsdown config loader helper
+        working-directory: desktop/build/upstream/dsh-plugin-desktop
+        run: corepack yarn add -D unrun
+      - name: Verify upstream contract
+        run: node desktop/scripts/verify-contract.mjs desktop/build/upstream
+      - name: Build
+        working-directory: desktop/build/upstream/dsh-plugin-desktop
+        run: corepack yarn build
+      - name: Package .app (unsigned)
+        working-directory: desktop/build/upstream/dsh-plugin-desktop
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+        run: corepack yarn package:dir
+      - name: Wrap DMG
+        env:
+          ARCH_LABEL: x64
+        working-directory: desktop/build/upstream/dsh-plugin-desktop
+        run: |
+          APP=$(find dist -maxdepth 2 -name "*.app" -type d | head -1)
+          echo "app: $APP"
+          test -n "$APP"
+          VERSION=$(node -p "require('./package.json').version")
+          mkdir -p ../out && STAGE=$(mktemp -d)
+          cp -R "$APP" "$STAGE/"
+          ln -s /Applications "$STAGE/Applications"
+          hdiutil create -volname "DSH Cloud Desktop" -srcfolder "$STAGE" -ov -format UDZO \
+            "../out/DSH-Cloud-Desktop-${VERSION}-mac-${ARCH_LABEL:-arm64}.dmg"
+          ls -la ../out/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-x64-dmg
           path: desktop/build/upstream/out/*.dmg
           if-no-files-found: error
