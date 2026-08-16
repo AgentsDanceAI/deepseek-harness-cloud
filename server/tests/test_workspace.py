@@ -3,8 +3,10 @@
 The docker socket proxy and the dsh container's :3081 are stubbed at the
 httpx boundary so the whole ensure/route/bill flow runs without Docker.
 """
+import asyncio
 import os
 import tempfile
+import time
 
 _TMP = tempfile.mkdtemp(prefix="dhc-work-")
 os.environ.update({
@@ -45,11 +47,13 @@ class FakeDocker:
         if path == "/containers/create":
             self.creates += 1
             cname = params["name"]
+            # carry the caller's labels verbatim: the real _LABEL value is the
+            # user id, and the reaper bills whoever that label names
             self.containers[cname] = {"State": {"Status": "created"},
-                                      "Config": {"Labels": {workspace._LABEL: cname}}}
+                                      "Config": {"Labels": (json_body or {}).get("Labels", {})}}
             return resp(201, {"Id": cname})
         if path == "/containers/json":   # list — must precede the inspect pattern
-            out = [{"Names": ["/" + n], "Labels": {workspace._LABEL: uid_of(n)}}
+            out = [{"Names": ["/" + n], "Labels": c["Config"]["Labels"]}
                    for n, c in self.containers.items()
                    if c["State"]["Status"] == "running"]
             return resp(200, out)
@@ -72,11 +76,6 @@ class FakeDocker:
             self.ready.discard(cname)
             return resp(204)
         return resp(500)
-
-
-def uid_of(cname):
-    # reverse the _cname transform for the label in list responses
-    return cname.lstrip("/")
 
 
 @pytest.fixture(autouse=True)
@@ -148,29 +147,65 @@ def test_capacity_cap(fake, monkeypatch):
     assert r.status_code == 302 and "state=busy" in r.headers["location"]
 
 
-def test_billing_and_idle_reap(fake, monkeypatch):
-    import asyncio
+def _mark_agent_active(uid, ago_s=0.0):
+    """Move the workspace device's last_seen — the 'agent worked' signal."""
+    db.query("UPDATE devices SET last_seen=? WHERE user_id=? AND platform='cloud'",
+             (time.time() - ago_s, uid))
+
+
+def test_bills_only_minutes_the_agent_worked(fake):
+    """An open tab must be free: only a minute with a real gateway call bills."""
     c, uid = _user("bill@test.local")
     c.get("/api/work/route"); c.get("/api/work/route")
+
+    # agent just called the gateway -> this minute is billable
+    _mark_agent_active(uid, ago_s=5)
     before = credits.balance(uid)
+    asyncio.run(workspace.reaper_tick(time.time()))
+    assert credits.balance(uid) == before - config.WORK_CREDITS_PER_MIN
 
-    # one reaper tick: bills a minute, keeps running (recently seen)
-    async def one_tick():
-        containers = await workspace._running_workspaces()
-        import time
-        now = time.time()
-        for ct in containers:
-            u = (ct.get("Labels") or {}).get(workspace._LABEL, "")
-            # label carries cname in the stub; map back to uid via last_seen keys
-        return containers
-    # exercise the real billing math directly (loop body is guarded/infinite)
-    credits.spend(uid, config.WORK_CREDITS_PER_MIN, kind="workspace", model="dshwork")
-    assert credits.balance(uid) == before - 2
+    # tab still open, agent quiet for 5 minutes -> free, container stays up
+    _mark_agent_active(uid, ago_s=300)
+    workspace._last_seen[uid] = time.time()
+    before = credits.balance(uid)
+    stops_before = fake.stops
+    asyncio.run(workspace.reaper_tick(time.time()))
+    assert credits.balance(uid) == before
+    assert fake.stops == stops_before
 
-    # idle stop: force last_seen far in the past, verify _stop path
-    workspace._last_seen[uid] = 0
-    asyncio.get_event_loop().run_until_complete(workspace._stop(uid))
-    assert fake.stops >= 1
+
+def test_agent_last_active_ignores_browser_polling(fake):
+    """Browser traffic hits /api/work/route with the session cookie (no device),
+    so it must not register as agent work."""
+    c, uid = _user("idlebill@test.local")
+    c.get("/api/work/route"); c.get("/api/work/route")
+    _mark_agent_active(uid, ago_s=600)
+    stale = workspace.agent_last_active(uid)
+    for _ in range(3):
+        c.get("/api/work/route")
+    assert workspace.agent_last_active(uid) == stale
+
+
+def test_abandoned_open_tab_is_reaped(fake, monkeypatch):
+    """Free idle minutes must not let an open tab hold RAM forever."""
+    c, uid = _user("abandon@test.local")
+    c.get("/api/work/route"); c.get("/api/work/route")
+    monkeypatch.setattr(config, "WORK_AGENT_IDLE_STOP_MIN", 30)
+    _mark_agent_active(uid, ago_s=31 * 60)     # agent quiet past the backstop
+    workspace._last_seen[uid] = time.time()    # …but the tab is still polling
+    stops_before = fake.stops
+    asyncio.run(workspace.reaper_tick(time.time()))
+    assert fake.stops == stops_before + 1
+
+
+def test_user_gone_still_reaps(fake, monkeypatch):
+    c, uid = _user("gone@test.local")
+    c.get("/api/work/route"); c.get("/api/work/route")
+    _mark_agent_active(uid, ago_s=10)
+    workspace._last_seen[uid] = time.time() - (config.WORK_IDLE_STOP_MIN + 1) * 60
+    stops_before = fake.stops
+    asyncio.run(workspace.reaper_tick(time.time()))
+    assert fake.stops == stops_before + 1
 
 
 def test_stop_endpoint(fake):

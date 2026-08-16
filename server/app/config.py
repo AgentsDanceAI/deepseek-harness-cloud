@@ -141,8 +141,14 @@ WORK_DOMAIN = _env("WORK_DOMAIN", "work.dshcloud.online")  # dsh UI host (own si
 WORK_IMAGE = _env("WORK_IMAGE", "dsh-local:rc6")
 WORK_NETWORK = _env("WORK_NETWORK", "dshwork-net")
 DOCKER_PROXY_URL = _env("DOCKER_PROXY_URL", "http://dhc-docker-proxy:2375")
-WORK_CREDITS_PER_MIN = _env_int("WORK_CREDITS_PER_MIN", 2)   # billed per running minute
-WORK_IDLE_STOP_MIN = _env_int("WORK_IDLE_STOP_MIN", 15)      # no traffic -> container stopped
+# Billed per ACTIVE minute — a minute in which the agent actually called our
+# gateway. Reading a reply or leaving a tab open is free (an open tab polls
+# /api/work/route forever, so wall-clock billing charged people for nothing).
+WORK_CREDITS_PER_MIN = _env_int("WORK_CREDITS_PER_MIN", 2)
+WORK_IDLE_STOP_MIN = _env_int("WORK_IDLE_STOP_MIN", 15)      # no browser traffic -> stop
+# Capacity backstop: idle minutes are free, RAM is not. A tab left open with the
+# agent doing nothing this long is stopped too (volumes persist, resume is fast).
+WORK_AGENT_IDLE_STOP_MIN = _env_int("WORK_AGENT_IDLE_STOP_MIN", 30)
 WORK_MAX_CONCURRENT = _env_int("WORK_MAX_CONCURRENT", 40)    # global running-container cap
 WORK_MEM_LIMIT_MB = _env_int("WORK_MEM_LIMIT_MB", 512)
 WORK_CPUS = _env_float("WORK_CPUS", 1.0)

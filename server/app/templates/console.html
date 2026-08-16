@@ -15,8 +15,10 @@
       <div class="card-row">
         <div>
           <h2 style="margin-bottom:4px">☁️ 云工作台</h2>
-          <p class="muted small">无需安装，直接在浏览器（含手机）里使用 DSH。按活跃分钟计费，
-            每分钟 {{ work_credits_per_min }} 积分，闲置 {{ work_idle_stop_min }} 分钟自动暂停。</p>
+          <p class="muted small">无需安装，直接在浏览器（含手机）里使用 DSH。
+            <strong>只在 AI 实际干活的分钟计费</strong>（每分钟 {{ work_credits_per_min }} 积分）——
+            你读回复、想问题、开着页面走开，都不花钱；闲置 {{ work_idle_stop_min }} 分钟自动暂停，
+            文件保留，下次秒开。</p>
         </div>
         <a class="btn btn-primary" href="/work" target="_blank" rel="noopener">进入云工作台 →</a>
       </div>

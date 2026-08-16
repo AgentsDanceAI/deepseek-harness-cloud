@@ -78,6 +78,22 @@ def _mint_workspace_token(user: dict) -> str:
     return token
 
 
+def agent_last_active(user_id: str) -> float:
+    """When this user's workspace agent last called our gateway (epoch seconds).
+
+    The workspace device token is used for exactly one thing — the container's
+    LLM and web_search calls — and `accounts.resolve_user` stamps
+    `devices.last_seen` on every authenticated gateway request. So the newest
+    "cloud" device's `last_seen` is a precise, restart-durable record of the
+    agent doing real work, and it does NOT move while a tab merely sits open.
+    Returns 0.0 when the user has never had a workspace device.
+    """
+    row = db.query_one(
+        "SELECT MAX(last_seen) AS ts FROM devices WHERE user_id=? AND platform='cloud'",
+        (user_id,))
+    return float((row["ts"] if row is not None else None) or 0.0)
+
+
 async def _inspect(user_id: str) -> dict | None:
     r = await _docker("GET", f"/containers/{_cname(user_id)}/json")
     return r.json() if r.status_code == 200 else None
@@ -414,30 +430,47 @@ if ({poll}) {{
 
 # --- billing + idle reaper (one asyncio task, started from main.py) ----------
 
+async def reaper_tick(now: float) -> None:
+    """One meter/reaper pass over every running workspace."""
+    for container in await _running_workspaces():
+        uid = (container.get("Labels") or {}).get(_LABEL, "")
+        if not uid:
+            continue
+        # Bill only minutes the agent actually worked. An open tab keeps polling
+        # /api/work/route, so wall-clock billing charged people for reading a
+        # reply and for walking away; agent work is the honest meter.
+        # `agent_idle_s` is time since the container last called our gateway
+        # (LLM or search) — the only thing its device token is ever used for.
+        agent_idle_s = now - agent_last_active(uid)
+        if agent_idle_s < 60:
+            credits.spend(uid, config.WORK_CREDITS_PER_MIN, kind="workspace",
+                          model="dshwork", request_id=f"ws-{int(now // 60)}")
+        last = _last_seen.setdefault(uid, now)  # re-seed after restart
+        # Two stop rules, because idle minutes are now free and RAM is not:
+        #   - the user left (no browser traffic) — the original rule;
+        #   - the tab was abandoned open with the agent doing nothing for a
+        #     longer window (capacity backstop). Volumes persist, so a stopped
+        #     workspace resumes in seconds on the next message.
+        gone = now - last > config.WORK_IDLE_STOP_MIN * 60
+        agent_gone = agent_idle_s > config.WORK_AGENT_IDLE_STOP_MIN * 60
+        broke = credits.balance(uid) <= -config.OVERDRAFT_LIMIT_CREDITS
+        if gone or agent_gone or broke:
+            reason = ("user idle" if gone else
+                      "agent idle" if agent_gone else "credits exhausted")
+            log.info("stopping workspace %s (%s)", uid, reason)
+            await _stop(uid)
+            _last_seen.pop(uid, None)
+
+
 async def billing_reaper_loop() -> None:
-    log.info("workspace billing/reaper loop started (%s credits/min, idle-stop %s min)",
-             config.WORK_CREDITS_PER_MIN, config.WORK_IDLE_STOP_MIN)
+    log.info("workspace billing/reaper loop started (%s credits per ACTIVE min, "
+             "idle-stop %s min, agent-idle-stop %s min)",
+             config.WORK_CREDITS_PER_MIN, config.WORK_IDLE_STOP_MIN,
+             config.WORK_AGENT_IDLE_STOP_MIN)
     while True:
         try:
             await asyncio.sleep(60)
-            containers = await _running_workspaces()
-            now = time.time()
-            for c in containers:
-                uid = (c.get("Labels") or {}).get(_LABEL, "")
-                if not uid:
-                    continue
-                # a running workspace bills whether or not the tab is focused;
-                # the reaper is what caps the meter
-                credits.spend(uid, config.WORK_CREDITS_PER_MIN, kind="workspace",
-                              model="dshwork", request_id=f"ws-{int(now // 60)}")
-                last = _last_seen.setdefault(uid, now)  # re-seed after restart
-                idle_out = now - last > config.WORK_IDLE_STOP_MIN * 60
-                broke = credits.balance(uid) <= -config.OVERDRAFT_LIMIT_CREDITS
-                if idle_out or broke:
-                    log.info("stopping workspace %s (%s)", uid,
-                             "idle" if idle_out else "credits exhausted")
-                    await _stop(uid)
-                    _last_seen.pop(uid, None)
+            await reaper_tick(time.time())
         except asyncio.CancelledError:
             raise
         except Exception:
