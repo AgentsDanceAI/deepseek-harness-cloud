@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">DSH Cloud</string>
+    <string name="title_activity_main">DSH Cloud</string>
+    <string name="package_name">ai.agentsdance.dshcloud.app</string>
+    <string name="custom_url_scheme">ai.agentsdance.dshcloud.app</string>
+</resources>

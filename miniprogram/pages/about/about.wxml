@@ -1,0 +1,31 @@
+<view class="page">
+  <view class="card">
+    <view class="card-title">产品介绍</view>
+    <view class="body">
+      DSH Cloud 是桌面 AI 编程助手的云服务。桌面端登录后即可使用,
+      无需自备模型 API Key; 模型流量由云端网关统一转发。
+    </view>
+    <view class="body">
+      本小程序内嵌网页版云工作台, 可查看和管理账号、设备授权与用量,
+      与电脑浏览器里的工作台功能一致。
+    </view>
+  </view>
+
+  <view class="card">
+    <view class="card-title">官网</view>
+    <view class="row" hover-class="tap" bindtap="copySite">
+      <text class="mono">https://open-search.ai</text>
+      <text class="copy-hint">点按复制</text>
+    </view>
+  </view>
+
+  <view class="card">
+    <view class="card-title">客服邮箱</view>
+    <view class="row" hover-class="tap" bindtap="copyMail">
+      <text class="mono">***REDACTED-EMAIL***</text>
+      <text class="copy-hint">点按复制</text>
+    </view>
+  </view>
+
+  <view class="version muted">DSH Cloud 小程序 · v0.1.0</view>
+</view>

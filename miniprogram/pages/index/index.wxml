@@ -1,0 +1,27 @@
+<view class="page hero">
+  <!-- logo: wxss 画的圆角方块 + 白色 ">" (终端提示符), 不依赖图片资源 -->
+  <view class="logo">
+    <text class="logo-glyph">></text>
+  </view>
+
+  <view class="brand">DSH Cloud</view>
+  <view class="slogan">桌面 AI 编程助手的云服务</view>
+  <view class="desc">
+    登录即用, 无需自备 API Key。在云工作台管理你的账号、设备授权与用量,
+    随时随地查看编程助手的工作进展。
+  </view>
+
+  <view class="actions">
+    <button class="btn btn-primary" hover-class="tap" bindtap="openWork">打开云工作台</button>
+    <button class="btn btn-ghost" hover-class="tap" bindtap="openAbout">了解更多</button>
+  </view>
+
+  <!-- 兜底提示: webview 打开失败 (业务域名未在微信公众平台配置) 后显示 -->
+  <view wx:if="{{webviewFailed}}" class="fallback">
+    云工作台暂时无法打开: 业务域名尚未配置。请在微信公众平台
+    「设置 → 开发设置 → 业务域名」完成配置后重试;
+    也可先在电脑浏览器访问 open-search.ai 使用。
+  </view>
+
+  <view class="footnote">open-search.ai</view>
+</view>

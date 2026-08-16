@@ -1,0 +1,80 @@
+.hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding-top: 120rpx;
+  text-align: center;
+}
+
+/* 圆角方块 + 白色 ">" — 终端提示符, 与"编程助手"的产品气质一致 */
+.logo {
+  width: 168rpx;
+  height: 168rpx;
+  border-radius: 40rpx;
+  background: linear-gradient(135deg, #3a7ade, #2663c9);
+  box-shadow: 0 12rpx 32rpx rgba(38, 99, 201, 0.28);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.logo-glyph {
+  color: #ffffff;
+  font-family: monospace;
+  font-size: 96rpx;
+  font-weight: 700;
+  line-height: 1;
+  /* ">" 字形重心偏左, 手动右移一点做光学居中 */
+  margin-left: 8rpx;
+  margin-top: -8rpx;
+}
+
+.brand {
+  margin-top: 44rpx;
+  font-size: 48rpx;
+  font-weight: 700;
+  letter-spacing: 2rpx;
+  color: #1b2430;
+}
+
+.slogan {
+  margin-top: 12rpx;
+  font-size: 30rpx;
+  color: #2663c9;
+  font-weight: 500;
+}
+
+.desc {
+  margin-top: 28rpx;
+  padding: 0 24rpx;
+  font-size: 26rpx;
+  line-height: 1.8;
+  color: #6b7684;
+}
+
+.actions {
+  margin-top: 72rpx;
+  width: 100%;
+  padding: 0 40rpx;
+  box-sizing: border-box;
+}
+
+/* webview 打开失败后的兜底提示条 */
+.fallback {
+  margin-top: 8rpx;
+  padding: 22rpx 26rpx;
+  border-radius: 18rpx;
+  background: #fdf6ec;
+  border: 1rpx solid #f3e3c3;
+  color: #8a6d3b;
+  font-size: 24rpx;
+  line-height: 1.7;
+  text-align: left;
+}
+
+.footnote {
+  margin-top: 64rpx;
+  font-size: 24rpx;
+  color: #9aa5b1;
+  font-family: monospace;
+}

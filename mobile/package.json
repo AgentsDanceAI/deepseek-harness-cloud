@@ -1,0 +1,23 @@
+{
+  "name": "dsh-cloud-mobile",
+  "version": "1.0.0",
+  "private": true,
+  "description": "DSH Cloud mobile shells (Capacitor WebView wrappers for https://open-search.ai)",
+  "scripts": {
+    "sync": "cap sync",
+    "sync:android": "cap sync android",
+    "sync:ios": "cap sync ios",
+    "open:android": "cap open android",
+    "open:ios": "cap open ios",
+    "icons": "python3 scripts/gen_icons.py"
+  },
+  "dependencies": {
+    "@capacitor/android": "^6.2.1",
+    "@capacitor/core": "^6.2.1",
+    "@capacitor/ios": "^6.2.1"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^6.2.1",
+    "typescript": "^5.5.4"
+  }
+}

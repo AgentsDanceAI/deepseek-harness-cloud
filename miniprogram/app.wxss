@@ -1,0 +1,71 @@
+/* DSH Cloud 小程序视觉基线 — 对齐 open-search.ai 站点的设计语言:
+   品牌蓝 #2663c9 · 页面底 #f5f7fb · 卡片纯白 + #e3e8f0 描边 ·
+   主文字 #1b2430 · 次要 #6b7684。
+
+   刻意不用 CSS 变量: 字面色值在所有基础库版本和渲染引擎上都成立,
+   不赌变量继承行为 (同 AgentsDance 小程序的经验)。 */
+page {
+  background: #f5f7fb;
+  font-size: 28rpx;
+  line-height: 1.6;
+  color: #1b2430;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* 微信 button 自带 ::after 伪元素画 1px 边框, 不清掉做不出实心/描边两种按钮 */
+button::after {
+  border: none;
+}
+
+/* 可点区域的按压反馈 — 小程序没有 :hover, 统一用 hover-class="tap" */
+.tap {
+  opacity: 0.62;
+}
+
+/* ── 通用容器 ─────────────────────────────────────────────────────── */
+.page {
+  padding: 24rpx 32rpx calc(48rpx + env(safe-area-inset-bottom));
+  box-sizing: border-box;
+}
+
+.card {
+  background: #ffffff;
+  border: 1rpx solid #e3e8f0;
+  border-radius: 24rpx;
+  padding: 30rpx;
+  margin-bottom: 20rpx;
+  box-shadow: 0 2rpx 10rpx rgba(38, 99, 201, 0.04);
+}
+
+.card-title {
+  font-size: 26rpx;
+  font-weight: 600;
+  color: #1b2430;
+  margin-bottom: 14rpx;
+}
+
+.muted {
+  color: #6b7684;
+}
+
+/* ── 按钮 ─────────────────────────────────────────────────────────── */
+.btn {
+  margin: 0 0 20rpx;
+  height: 92rpx;
+  line-height: 92rpx;
+  padding: 0 32rpx;
+  font-size: 30rpx;
+  font-weight: 500;
+  border-radius: 20rpx;
+}
+
+.btn-primary {
+  background: #2663c9;
+  color: #ffffff;
+}
+
+.btn-ghost {
+  background: #ffffff;
+  color: #2663c9;
+  border: 1rpx solid #c6d5ee;
+}

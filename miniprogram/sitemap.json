@@ -1,0 +1,4 @@
+{
+  "desc": "工作台需登录, 页面不收录",
+  "rules": [{ "action": "disallow", "page": "*" }]
+}

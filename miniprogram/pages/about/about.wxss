@@ -1,0 +1,35 @@
+.body {
+  font-size: 27rpx;
+  line-height: 1.8;
+  color: #3c4654;
+}
+
+.body + .body {
+  margin-top: 14rpx;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.mono {
+  font-family: monospace;
+  font-size: 27rpx;
+  color: #2663c9;
+  word-break: break-all;
+}
+
+.copy-hint {
+  flex: none;
+  margin-left: 20rpx;
+  font-size: 22rpx;
+  color: #9aa5b1;
+}
+
+.version {
+  margin-top: 40rpx;
+  text-align: center;
+  font-size: 24rpx;
+}

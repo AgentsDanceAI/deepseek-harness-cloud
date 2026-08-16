@@ -1,0 +1,21 @@
+{
+  "description": "DSH Cloud 微信小程序 — 网页工作台的 web-view 壳",
+  "miniprogramRoot": ".",
+  "compileType": "miniprogram",
+  "appid": "wx0000000000000000",
+  "projectname": "dsh-cloud",
+  "libVersion": "3.4.3",
+  "setting": {
+    "es6": true,
+    "enhance": true,
+    "minified": true,
+    "postcss": true,
+    "urlCheck": true,
+    "ignoreDevUnusedFiles": false,
+    "ignoreUploadUnusedFiles": true
+  },
+  "editorSetting": {
+    "tabIndent": "insertSpaces",
+    "tabSize": 2
+  }
+}
