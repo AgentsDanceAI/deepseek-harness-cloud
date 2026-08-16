@@ -8,7 +8,7 @@ set -euo pipefail
 RUN_ID="${1:?usage: publish-installers.sh <workflow-run-id>}"
 REPO_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 ENVFILE="$REPO_DIR/deploy/open-search/.env"
-BASE="https://open-search.ai"
+BASE="https://dshcloud.online"
 
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT

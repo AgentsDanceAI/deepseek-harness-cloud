@@ -3,7 +3,7 @@
 Page({
   copySite() {
     wx.setClipboardData({
-      data: 'https://open-search.ai',
+      data: 'https://dshcloud.online',
       success() { wx.showToast({ title: '官网地址已复制', icon: 'none' }) },
     })
   },

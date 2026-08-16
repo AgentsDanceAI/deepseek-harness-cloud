@@ -1,9 +1,12 @@
-# open-search.ai deployment — DHC server + scoped docker proxy (cloud workspaces).
+# dshcloud.online deployment — DHC server + scoped docker proxy (cloud workspaces).
+# (Directory keeps its historical "open-search" name: the compose project name —
+#  and therefore the data volume open-search_dhc-data — derives from it.)
 #
-# The host's 80/443 and open-search.ai's TLS/Cloudflare origin are already owned
+# The host's 80/443 and the domains' TLS/Cloudflare origin are already owned
 # by the existing `the shared Caddy`. So we do NOT run our own Caddy here:
 # we run the app on shared docker networks, connect that Caddy to them, and
-# point the open-search.ai / work.open-search.ai site blocks at us.
+# point the dshcloud.online / work.dshcloud.online site blocks at us
+# (legacy open-search.ai keeps /api /llm /releases passthrough + page redirects).
 #
 #   docker network create dhc-net 2>/dev/null || true
 #   docker network create dshwork-net 2>/dev/null || true

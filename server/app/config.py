@@ -131,7 +131,7 @@ WECHAT_PAY_APPID = _env("WECHAT_PAY_APPID")
 
 # --- cloud workspaces (dshwork: per-user dsh containers, phone-usable) ------
 WORK_ENABLED = _env_bool("WORK_ENABLED", False)
-WORK_DOMAIN = _env("WORK_DOMAIN", "work.open-search.ai")  # dsh UI host (own site block in Caddy)
+WORK_DOMAIN = _env("WORK_DOMAIN", "work.dshcloud.online")  # dsh UI host (own site block in Caddy)
 WORK_IMAGE = _env("WORK_IMAGE", "dsh-local:rc6")
 WORK_NETWORK = _env("WORK_NETWORK", "dshwork-net")
 DOCKER_PROXY_URL = _env("DOCKER_PROXY_URL", "http://dhc-docker-proxy:2375")
@@ -142,7 +142,7 @@ WORK_MEM_LIMIT_MB = _env_int("WORK_MEM_LIMIT_MB", 512)
 WORK_CPUS = _env_float("WORK_CPUS", 1.0)
 WORK_START_TIMEOUT_S = _env_float("WORK_START_TIMEOUT_S", 45.0)
 
-# Session cookie domain: set to ".open-search.ai" so the browser sends the
+# Session cookie domain: set to ".dshcloud.online" so the browser sends the
 # session to the work subdomain too. Empty = host-only (single-domain deploys).
 COOKIE_DOMAIN = _env("COOKIE_DOMAIN", "")
 

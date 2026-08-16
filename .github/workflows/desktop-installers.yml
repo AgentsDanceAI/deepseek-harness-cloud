@@ -1,6 +1,6 @@
 # Build unsigned desktop installers on real macOS / Windows runners.
 # Trigger manually (workflow_dispatch); download the artifacts and publish them
-# under https://open-search.ai/releases/ (see deploy/open-search/DEPLOY_STATE.md).
+# under https://dshcloud.online/releases/ (see deploy/open-search/DEPLOY_STATE.md).
 #
 # Unsigned: macOS users right-click-open on first launch (or `xattr -cr`),
 # Windows shows SmartScreen "more info -> run anyway". Proper signing needs the

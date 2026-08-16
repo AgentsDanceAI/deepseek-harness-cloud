@@ -3,8 +3,8 @@
 原生小程序工程 (无构建步骤), 用微信开发者工具「导入项目」本目录即可。
 
 定位: **web-view 壳** — 首页/关于页是原生静态页, 云工作台内嵌
-`https://open-search.ai/work` 网页版。因为业务域名必须是 ICP 备案域名
-(见下), 而 open-search.ai 是境外域名无备案, **本工程目前是可提交的
+`https://dshcloud.online/work` 网页版。因为业务域名必须是 ICP 备案域名
+(见下), 而 dshcloud.online 是境外域名无备案, **本工程目前是可提交的
 脚手架, 待国内域名 + 备案就绪后才能真机可用**。
 
 ## 页面
@@ -32,7 +32,7 @@
 web-view 只能加载「业务域名」白名单内的页面, 且域名必须:
 
 - **已 ICP 备案** — 所以必须先有国内域名 + 备案 (见
-  `docs/中国大陆上线清单.md`), open-search.ai 用不了;
+  `docs/中国大陆上线清单.md`), dshcloud.online 用不了;
 - **备案主体与小程序主体一致**;
 - 通过**校验文件**验证归属: 在微信公众平台下载校验文件
   (形如 `WxxxxxxxT.txt`), 放到域名**根路径**下可直接访问 —
@@ -40,7 +40,7 @@ web-view 只能加载「业务域名」白名单内的页面, 且域名必须:
 
 配置位置: 微信公众平台 → **设置 → 开发设置 → 业务域名** (每自然年可
 修改 50 次)。配置完成后把 `pages/index/index.js` 与
-`pages/webview/webview.js` 里的 `https://open-search.ai/work` 换成国内
+`pages/webview/webview.js` 里的 `https://dshcloud.online/work` 换成国内
 域名地址。
 
 ### c. web-view 内登录态
@@ -69,6 +69,6 @@ web-view 只能加载「业务域名」白名单内的页面, 且域名必须:
 - 脚手架可在**微信开发者工具**中直接导入预览: index / about 页正常;
 - webview 页需在开发者工具「详情 → 本地设置」勾选
   **「不校验合法域名、web-view (业务域名)、TLS 版本以及 HTTPS 证书」**
-  后可预览 open-search.ai 页面;
+  后可预览 dshcloud.online 页面;
 - 真机上 webview 页会因业务域名未配置而失败 → 已有兜底提示
   (弹窗 + 首页提示条), 不会白屏。

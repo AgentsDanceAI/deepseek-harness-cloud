@@ -1,7 +1,7 @@
 // 品牌首页 — 纯静态入口, 不依赖网络。
 // 「打开云工作台」跳 webview 壳页; 业务域名未配置时 webview 页 binderror
 // 会把失败记到 globalData.webviewFailed, 返回本页后显示兜底提示。
-const WORK_URL = 'https://open-search.ai/work'
+const WORK_URL = 'https://dshcloud.online/work'
 
 Page({
   data: {

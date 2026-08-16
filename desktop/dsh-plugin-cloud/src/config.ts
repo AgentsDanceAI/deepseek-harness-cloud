@@ -5,7 +5,7 @@
  * DSH_ prefix is bootstrap-only, .env files cannot set it) overrides for
  * staging/self-hosted deployments.
  */
-export const CLOUD_BASE: string = (process.env.DSH_CLOUD_BASE ?? 'https://open-search.ai')
+export const CLOUD_BASE: string = (process.env.DSH_CLOUD_BASE ?? 'https://dshcloud.online')
   .replace(/\/+$/, '')
 
 /**

@@ -2,7 +2,7 @@
   "name": "dsh-cloud-mobile",
   "version": "1.0.0",
   "private": true,
-  "description": "DSH Cloud mobile shells (Capacitor WebView wrappers for https://open-search.ai)",
+  "description": "DSH Cloud mobile shells (Capacitor WebView wrappers for https://dshcloud.online)",
   "scripts": {
     "sync": "cap sync",
     "sync:android": "cap sync android",

@@ -14,7 +14,7 @@
   <view class="card">
     <view class="card-title">官网</view>
     <view class="row" hover-class="tap" bindtap="copySite">
-      <text class="mono">https://open-search.ai</text>
+      <text class="mono">https://dshcloud.online</text>
       <text class="copy-hint">点按复制</text>
     </view>
   </view>

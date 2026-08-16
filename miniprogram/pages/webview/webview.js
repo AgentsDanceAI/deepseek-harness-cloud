@@ -2,13 +2,13 @@
 //
 // 前置条件 (详见 miniprogram/README.md):
 //   业务域名必须是与小程序主体一致的 ICP 备案域名, 并已在微信公众平台
-//   「设置 → 开发设置 → 业务域名」配置。open-search.ai 目前不满足
+//   「设置 → 开发设置 → 业务域名」配置。dshcloud.online 目前不满足
 //   (境外域名, 无备案), 真机上会触发 binderror → 这里给兜底提示。
 //   开发者工具勾选「不校验合法域名」即可预览。
 //
 // 登录态: 站点的 dhc_session cookie 属于 web-view 内的浏览器会话,
 // 用户在内嵌页登录一次即持续有效, 无需小程序侧桥接。
-const DEFAULT_URL = 'https://open-search.ai/work'
+const DEFAULT_URL = 'https://dshcloud.online/work'
 
 Page({
   data: { url: '' },

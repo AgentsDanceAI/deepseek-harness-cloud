@@ -20,8 +20,8 @@
   <view wx:if="{{webviewFailed}}" class="fallback">
     云工作台暂时无法打开: 业务域名尚未配置。请在微信公众平台
     「设置 → 开发设置 → 业务域名」完成配置后重试;
-    也可先在电脑浏览器访问 open-search.ai 使用。
+    也可先在电脑浏览器访问 dshcloud.online 使用。
   </view>
 
-  <view class="footnote">open-search.ai</view>
+  <view class="footnote">dshcloud.online</view>
 </view>

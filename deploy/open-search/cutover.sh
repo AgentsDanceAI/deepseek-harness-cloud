@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
-# open-search.ai cutover: bring up DHC and repoint the shared Caddy from the old
-# dsh container to it. Idempotent; safe to re-run. Run from the repo root.
+# dshcloud.online cutover: bring up DHC and (re)write the DHC site blocks in the
+# shared Caddy (primary dshcloud.online + legacy open-search.ai compat layer).
+# Idempotent; safe to re-run. Run from the repo root.
 #
 #   bash deploy/open-search/cutover.sh
 #
 # Prereqs: deploy/open-search/.env filled in; the the shared Caddy container
-# running (it owns 80/443 and open-search.ai's TLS + Cloudflare origin).
+# running (it owns 80/443 and the domains' TLS + Cloudflare origin).
 set -euo pipefail
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -36,75 +37,88 @@ for i in $(seq 1 30); do
   sleep 2
 done
 
-echo "==> 5/6 repoint open-search.ai in Caddyfile.gpu (backup kept)"
-if grep -q "reverse_proxy dhc-server:8100" "$CADDYFILE"; then
-  echo "    already repointed"
-else
-  cp "$CADDYFILE" "$CADDYFILE.bak.$(date +%s 2>/dev/null || echo bak)"
-  # Replace the whole open-search.ai { ... } block with a clean DHC proxy block.
-  python3 - "$CADDYFILE" <<'PY'
+echo "==> 5/6 ensure DHC site blocks in Caddyfile.gpu (dshcloud-v3, backup kept)"
+# Declarative + idempotent: strip every previously managed block (all
+# generations), then append the current set:
+#   dshcloud.online        -> dhc-server (primary console/site)
+#   www.dshcloud.online    -> 308 to apex
+#   work.dshcloud.online   -> dshwork-v2 routing (PWA shell + forward_auth)
+#   open-search.ai         -> /api /llm /releases passthrough (published
+#                             installers keep working), pages 308 to primary
+#   work.open-search.ai    -> 308 to work.dshcloud.online
+PRIMARY_HOST="${PRIMARY_DOMAIN:-dshcloud.online}"
+LEGACY_HOST="${LEGACY_DOMAIN:-open-search.ai}"
+WORK_HOST="${WORK_DOMAIN:-work.dshcloud.online}"
+cp "$CADDYFILE" "$CADDYFILE.bak.$(date +%s 2>/dev/null || echo bak)"
+python3 - "$CADDYFILE" "$PRIMARY_HOST" "$LEGACY_HOST" "$WORK_HOST" <<'PY'
 import re, sys
-p = sys.argv[1]
+p, primary, legacy, work = sys.argv[1:5]
 s = open(p, encoding="utf-8").read()
-block = '''open-search.ai {
-\treverse_proxy dhc-server:8100 {
+# 1) strip the marker-wrapped v3 section from previous runs (must run first so
+#    the host-pattern strips below never touch v3-managed content)
+s = re.sub(r"\n?# ── DHC sites v3 BEGIN ──.*?# ── DHC sites v3 END ──\n?", "\n",
+           s, flags=re.DOTALL)
+# 2) strip the pre-v3 work block (comment + block)
+s = re.sub(r"\n?# ── DSH Cloud workspaces[^\n]*\nwork\.[^\s{]+\s*\{.*?\n\}\n?",
+           "\n", s, flags=re.DOTALL)
+# 3) strip the pre-v3 legacy-domain proxy block
+s = re.sub(r"(?ms)^" + re.escape(legacy) + r"\s*\{.*?\n\}\n?", "", s)
+s = s.rstrip("\n") + "\n"
+block = f"""
+# ── DHC sites v3 BEGIN ── (managed by deepseek-harness-cloud cutover.sh; do not hand-edit)
+{primary} {{
+\treverse_proxy dhc-server:8100 {{
 \t\tflush_interval -1
-\t}
-}'''
-# match "open-search.ai {" ... matching closing brace at column 0
-new = re.sub(r"open-search\.ai\s*\{.*?\n\}", block, s, count=1, flags=re.DOTALL)
-if new == s:
-    sys.exit("could not find open-search.ai block to replace")
-open(p, "w", encoding="utf-8").write(new)
-print("    Caddyfile.gpu open-search.ai block replaced")
+\t}}
+}}
+www.{primary} {{
+\tredir https://{primary}{{uri}} 308
+}}
+# per-user dsh containers + PWA shell (dshwork-v2 routing):
+#  - "/" (+PWA assets) -> dhc-server, which serves the container document with
+#    the mobile/PWA layers injected (manifest, icons, service worker, CSS);
+#  - everything else passes forward_auth (session -> container upstream) and is
+#    reverse-proxied with a loopback Host so dsh's fence trusts it.
+{work} {{
+\t@pwa path / /index.html /manifest.webmanifest /sw.js /pwa/*
+\thandle @pwa {{
+\t\t@rootdoc path / /index.html
+\t\trewrite @rootdoc /api/work/shell
+\t\treverse_proxy dhc-server:8100
+\t}}
+\thandle {{
+\t\tforward_auth dhc-server:8100 {{
+\t\t\turi /api/work/route
+\t\t\tcopy_headers X-Work-Upstream
+\t\t}}
+\t\treverse_proxy {{http.request.header.X-Work-Upstream}} {{
+\t\t\theader_up Host 127.0.0.1:3080
+\t\t\theader_up Origin http://127.0.0.1:3080
+\t\t\tflush_interval -1
+\t\t}}
+\t}}
+}}
+# legacy domain: APIs/downloads keep serving (already-shipped desktop builds,
+# device tokens, webhooks), everything else redirects to the primary domain.
+{legacy} {{
+\t@passthrough path /api/* /llm/* /releases/*
+\thandle @passthrough {{
+\t\treverse_proxy dhc-server:8100 {{
+\t\t\tflush_interval -1
+\t\t}}
+\t}}
+\thandle {{
+\t\tredir https://{primary}{{uri}} 308
+\t}}
+}}
+work.{legacy} {{
+\tredir https://{work}{{uri}} 308
+}}
+# ── DHC sites v3 END ──
+"""
+open(p, "w", encoding="utf-8").write(s + block)
+print("    DHC site blocks (v3) written")
 PY
-fi
-
-echo "==> 5c/6 ensure work.<domain> Caddy block (cloud workspaces, v2 PWA shell)"
-WORK_HOST="${WORK_DOMAIN:-work.open-search.ai}"
-if grep -q "dshwork-v2" "$CADDYFILE"; then
-  echo "    work v2 block already present"
-else
-  # drop any previous version of the work block first
-  python3 - "$CADDYFILE" "$WORK_HOST" <<'PY'
-import re, sys
-p, host = sys.argv[1], sys.argv[2]
-s = open(p, encoding="utf-8").read()
-s2 = re.sub(r"\n# ── DSH Cloud workspaces[^\n]*\n" + re.escape(host) + r"\s*\{.*?\n\}\n?",
-            "\n", s, flags=re.DOTALL)
-open(p, "w", encoding="utf-8").write(s2)
-print("    removed old work block" if s2 != s else "    no old work block")
-PY
-  # Routing (dshwork-v2):
-  #  - "/" (+PWA assets) go to dhc-server, which serves the container's document
-  #    with mobile/PWA layers injected (manifest, icons, service worker, CSS);
-  #  - everything else passes forward_auth (session -> container upstream) and
-  #    is reverse-proxied with a loopback Host so dsh's fence trusts it.
-  cat >> "$CADDYFILE" <<EOF
-
-# ── DSH Cloud workspaces (dshwork-v2) — per-user dsh containers + PWA shell ──
-${WORK_HOST} {
-	@pwa path / /index.html /manifest.webmanifest /sw.js /pwa/*
-	handle @pwa {
-		@rootdoc path / /index.html
-		rewrite @rootdoc /api/work/shell
-		reverse_proxy dhc-server:8100
-	}
-	handle {
-		forward_auth dhc-server:8100 {
-			uri /api/work/route
-			copy_headers X-Work-Upstream
-		}
-		reverse_proxy {http.request.header.X-Work-Upstream} {
-			header_up Host 127.0.0.1:3080
-			header_up Origin http://127.0.0.1:3080
-			flush_interval -1
-		}
-	}
-}
-EOF
-  echo "    appended ${WORK_HOST} v2 block"
-fi
 
 echo "==> 5d/6 sync Caddyfile into the running container + reload"
 # single-file bind mounts can go stale in a long-running container; push the
@@ -118,5 +132,6 @@ docker stop dsh 2>/dev/null && echo "    dsh stopped" || echo "    dsh not runni
 
 echo
 echo "cutover done. Verify:"
-echo "  curl -s https://open-search.ai/api/health"
-echo "  (work.<domain> also needs a Cloudflare DNS record → this origin)"
+echo "  curl -s https://dshcloud.online/api/health"
+echo "  curl -sI https://open-search.ai/ | grep -i location   # 308 -> dshcloud.online"
+echo "  (dshcloud.online / www / work DNS records must point at this origin via Cloudflare)"

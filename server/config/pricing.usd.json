@@ -1,5 +1,5 @@
 {
-  "_comment": "海外版 (open-search.ai) 价目源，币种 USD，金额单位: 美分。Waffo 收款。1 积分 = $0.001 牌价用量 (= ¥0.01 约当, MODEL_PRICE_MARKUP 控毛利)。上线前按实际成本与市场校准。",
+  "_comment": "海外版 (dshcloud.online) 价目源，币种 USD，金额单位: 美分。Waffo 收款。1 积分 = $0.001 牌价用量 (= ¥0.01 约当, MODEL_PRICE_MARKUP 控毛利)。上线前按实际成本与市场校准。",
   "currency": "USD",
   "tiers": {
     "free": {

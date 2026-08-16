@@ -1,15 +1,15 @@
 # DSH Cloud 移动端 (Android / iOS)
 
 DSH Cloud 的手机 App 采用 **Capacitor 远程壳** 方案（与 AgentsDance 的做法一致）：
-原生 App 只是一层 WebView，启动后直接加载线上站点 `https://open-search.ai`，
-登录态走 `.open-search.ai` 域下的会话 Cookie，与浏览器端完全同源。
+原生 App 只是一层 WebView，启动后直接加载线上站点 `https://dshcloud.online`，
+登录态走 `.dshcloud.online` 域下的会话 Cookie，与浏览器端完全同源。
 网页发版即 App 更新，原生工程几乎不需要迭代。
 
 - appId: `ai.agentsdance.dshcloud.app`
 - appName: `DSH Cloud`，版本 `1.0.0`
 - `www/index.html` 只是离线/首帧兜底页（"正在连接 DSH Cloud…" 并跳转线上站点）
 - `capacitor.config.ts` 中 `server.url` 指向线上站点；`allowNavigation` 限定在
-  `open-search.ai` 及其子域，其余链接交给系统浏览器
+  `dshcloud.online` 及其子域，其余链接交给系统浏览器
 - Android 明确关闭明文流量（`usesCleartextTraffic="false"`、`allowMixedContent: false`）
 
 ## 目录结构
@@ -71,7 +71,7 @@ python3 scripts/gen_icons.py   # 依赖 Pillow: pip install pillow
 | Google Play 上架 | Google Play Console 账号（$25 一次性） | 需注册账号、创建应用、配置正式签名 keystore（`assembleRelease` + 签名），再走商店审核。当前 CI 仅出 debug APK，供侧载/内测。 |
 | iOS 真机运行 / TestFlight / App Store | Apple Developer 账号（$99/年） | 未注册前 iOS 工程只能在自己的 Mac 上用 Xcode 跑**模拟器**（免费 Apple ID 也可短期真机签名，7 天过期）。上架需账号 + 证书 + App Store 审核。 |
 
-**未上架期间给 iOS 用户的替代方案**：用 Safari 打开 `https://open-search.ai`，
+**未上架期间给 iOS 用户的替代方案**：用 Safari 打开 `https://dshcloud.online`，
 分享菜单 → "添加到主屏幕"（PWA），即可获得接近原生的全屏体验，登录态与
 App 方案完全一致。Android 用户则可直接安装 CI 产出的 debug APK。
 
