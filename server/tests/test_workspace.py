@@ -101,6 +101,7 @@ def fake(monkeypatch):
     # fresh in-process state each test
     workspace._last_seen.clear()
     workspace._starting.clear()
+    workspace._started_at.clear()
     return fd
 
 
@@ -191,9 +192,29 @@ def test_abandoned_open_tab_is_reaped(fake, monkeypatch):
     c, uid = _user("abandon@test.local")
     c.get("/api/work/route"); c.get("/api/work/route")
     monkeypatch.setattr(config, "WORK_AGENT_IDLE_STOP_MIN", 30)
-    _mark_agent_active(uid, ago_s=31 * 60)     # agent quiet past the backstop
-    workspace._last_seen[uid] = time.time()    # …but the tab is still polling
+    _mark_agent_active(uid, ago_s=31 * 60)             # agent quiet past the backstop
+    workspace._started_at[uid] = time.time() - 31 * 60  # and running that long
+    workspace._last_seen[uid] = time.time()            # …but the tab is still polling
     stops_before = fake.stops
+    asyncio.run(workspace.reaper_tick(time.time()))
+    assert fake.stops == stops_before + 1
+
+
+def test_resumed_workspace_gets_a_grace_window(fake, monkeypatch):
+    """Resuming a workspace whose last agent call is older than the backstop must
+    not reap it before the user can type — otherwise returning after a long break
+    starts a start/stop loop."""
+    c, uid = _user("resume@test.local")
+    c.get("/api/work/route"); c.get("/api/work/route")
+    monkeypatch.setattr(config, "WORK_AGENT_IDLE_STOP_MIN", 30)
+    _mark_agent_active(uid, ago_s=6 * 3600)     # last worked hours ago
+    workspace._started_at[uid] = time.time()    # …but just started now
+    workspace._last_seen[uid] = time.time()
+    stops_before = fake.stops
+    asyncio.run(workspace.reaper_tick(time.time()))
+    assert fake.stops == stops_before           # still alive
+    # and the grace window is not infinite: once it lapses, the backstop fires
+    workspace._started_at[uid] = time.time() - 31 * 60
     asyncio.run(workspace.reaper_tick(time.time()))
     assert fake.stops == stops_before + 1
 

@@ -44,6 +44,10 @@ _LABEL = "dshwork.user"
 # rest of the gateway guards; the reaper re-seeds after a server restart)
 _last_seen: dict[str, float] = {}
 _starting: dict[str, float] = {}
+# when each workspace was last started — the agent-idle backstop measures from
+# here too, so resuming a container whose last agent call is ancient gets a full
+# grace window instead of being reaped before the user can type
+_started_at: dict[str, float] = {}
 
 
 def _cname(user_id: str) -> str:
@@ -184,6 +188,7 @@ async def _start(user_id: str) -> None:
     r = await _docker("POST", f"/containers/{_cname(user_id)}/start")
     if r.status_code not in (204, 304):
         raise RuntimeError(f"container start failed: {r.status_code} {r.text[:200]}")
+    _started_at[user_id] = time.time()
 
 
 async def _stop(user_id: str) -> None:
@@ -370,6 +375,7 @@ async def work_stop(request: Request):
     await _stop(user["id"])
     _last_seen.pop(user["id"], None)
     _starting.pop(user["id"], None)
+    _started_at.pop(user["id"], None)
     return {"ok": True}
 
 
@@ -451,8 +457,13 @@ async def reaper_tick(now: float) -> None:
         #   - the tab was abandoned open with the agent doing nothing for a
         #     longer window (capacity backstop). Volumes persist, so a stopped
         #     workspace resumes in seconds on the next message.
+        # The backstop measures from the later of "agent worked" and "container
+        # started": resuming a workspace whose last agent call is older than the
+        # backstop must not be reaped before the user can type into it.
+        started = _started_at.setdefault(uid, now)  # re-seed after restart
         gone = now - last > config.WORK_IDLE_STOP_MIN * 60
-        agent_gone = agent_idle_s > config.WORK_AGENT_IDLE_STOP_MIN * 60
+        agent_gone = (now - max(agent_last_active(uid), started)
+                      > config.WORK_AGENT_IDLE_STOP_MIN * 60)
         broke = credits.balance(uid) <= -config.OVERDRAFT_LIMIT_CREDITS
         if gone or agent_gone or broke:
             reason = ("user idle" if gone else
@@ -460,6 +471,7 @@ async def reaper_tick(now: float) -> None:
             log.info("stopping workspace %s (%s)", uid, reason)
             await _stop(uid)
             _last_seen.pop(uid, None)
+            _started_at.pop(uid, None)
 
 
 async def billing_reaper_loop() -> None:
