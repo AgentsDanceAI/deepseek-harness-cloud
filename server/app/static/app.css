@@ -925,7 +925,9 @@ body[data-page="landing"] .site-header {
 }
 .nav-menu a > strong { flex: 1; }
 .nav-menu-1col a { display: grid; grid-template-columns: 26px 1fr; grid-template-rows: auto auto; column-gap: 10px; }
-.nav-menu-1col .nav-ico { grid-row: 1 / span 2; }
+/* the icon needs BOTH coordinates: strong/span claim column 2 explicitly, so
+   auto-placement pushed the icon out of column 1 and it stacked above. */
+.nav-menu-1col .nav-ico { grid-column: 1; grid-row: 1 / span 2; align-self: start; }
 .nav-menu-1col strong { grid-column: 2; }
 .nav-menu-1col span { grid-column: 2; margin-top: 2px; }
 .nav-menu-more {
