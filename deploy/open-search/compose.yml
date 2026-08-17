@@ -13,6 +13,27 @@
 #   docker compose -f deploy/open-search/compose.yml --env-file deploy/open-search/.env up -d --build
 #   bash deploy/open-search/cutover.sh   # idempotent: networks + caddy blocks
 services:
+  # Our own instance: the host also runs an unrelated postgres for a different
+  # stack, and sharing it would couple two products' upgrade windows.
+  dhc-postgres:
+    image: postgres:18-alpine
+    container_name: dhc-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-dshcloud}
+      POSTGRES_USER: ${POSTGRES_USER:-dshcloud}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    volumes:
+      # postgres:18+ expects the mount at /var/lib/postgresql (not .../data),
+      # so a future pg_upgrade --link does not cross a mount boundary.
+      - dhc-pgdata:/var/lib/postgresql
+    networks: [dhc-net]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-dshcloud} -d ${POSTGRES_DB:-dshcloud}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
   dhc-server:
     build:
       context: ../..
@@ -31,7 +52,10 @@ services:
     expose:
       - "8100"
     depends_on:
-      - dhc-docker-proxy
+      dhc-docker-proxy:
+        condition: service_started
+      dhc-postgres:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8100/api/health')"]
       interval: 30s
@@ -67,3 +91,4 @@ networks:
 
 volumes:
   dhc-data:
+  dhc-pgdata:

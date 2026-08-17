@@ -9,7 +9,8 @@ WORKDIR /srv/dhc
 COPY server/pyproject.toml ./
 RUN pip install --no-cache-dir \
         "fastapi>=0.115" "uvicorn[standard]>=0.30" "httpx>=0.27" "jinja2>=3.1" \
-        "python-multipart>=0.0.9" "itsdangerous>=2.2" "cryptography>=42"
+        "python-multipart>=0.0.9" "itsdangerous>=2.2" "cryptography>=42" \
+        "psycopg[binary,pool]>=3.2"
 
 COPY server/app ./app
 COPY server/config ./config
