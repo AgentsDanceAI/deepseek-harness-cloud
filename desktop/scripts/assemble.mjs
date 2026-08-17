@@ -26,6 +26,7 @@ const opt = (name, fallback) => {
 const dest = resolve(opt('--dest', join(desktopDir, 'build', 'upstream')))
 /** Packaging glob for the login-wall assets; asserted by verify-contract. */
 export const CLOUD_ASSET_GLOB = 'build/cloud/**'
+export const WIN_ARCHES = ['x64', 'arm64']
 
 const run = (command, cmdArgs, cwd) => execFileSync(command, cmdArgs, { cwd, stdio: 'inherit' })
 const capture = (command, cmdArgs, cwd) =>
@@ -87,6 +88,33 @@ console.log('assemble: copied dsh-plugin-cloud sources and assets')
     writeFileSync(manifestPath, `${JSON.stringify(pkg, null, 2)}\n`)
   }
   console.log(`assemble: registered ${CLOUD_ASSET_GLOB} in build.files`)
+}
+
+// 4c. Windows arm64. Upstream targets x64 only, which is correct for them but
+// leaves every Surface / Snapdragon laptop running our x64 build under emulation
+// — slower, and it cannot load native modules built for arm64. Registered here
+// for the same reason as build.files above: an upstream edit to package.json
+// must not be able to silently drop it.
+{
+  const manifestPath = join(dest, 'dsh-plugin-desktop', 'package.json')
+  const pkg = JSON.parse(readFileSync(manifestPath, 'utf8'))
+  const targets = pkg.build?.win?.target
+  if (!Array.isArray(targets)) {
+    throw new Error('assemble: upstream build.win.target is not an array — the '
+      + 'arm64 target can no longer be registered; re-check the packaging contract')
+  }
+  let changed = false
+  for (const entry of targets) {
+    if (entry?.target !== 'nsis' || !Array.isArray(entry.arch)) continue
+    for (const arch of WIN_ARCHES) {
+      if (!entry.arch.includes(arch)) {
+        entry.arch.push(arch)
+        changed = true
+      }
+    }
+  }
+  if (changed) writeFileSync(manifestPath, `${JSON.stringify(pkg, null, 2)}\n`)
+  console.log(`assemble: windows targets ${JSON.stringify(targets)}`)
 }
 
 // 5. redistribution guard: the identity-scoped @anthropic-ai/claude-agent-sdk

@@ -26,6 +26,23 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
+ENVFILE=".env"
+
+# Credentials live in .env alongside the other deployment secrets (it is
+# gitignored and already holds the gateway keys). An explicit export still wins,
+# so a one-off run with a rotated token needs no file edit.
+if [ -f "$ENVFILE" ]; then
+  while IFS= read -r line; do
+    case "$line" in
+      R2_*=*)
+        name="${line%%=*}"
+        eval "current=\${$name:-}"
+        [ -n "$current" ] || export "${name}=${line#*=}"
+        ;;
+    esac
+  done < "$ENVFILE"
+fi
+
 : "${R2_ACCOUNT_ID:?set R2_ACCOUNT_ID}"
 : "${R2_ACCESS_KEY_ID:?set R2_ACCESS_KEY_ID}"
 : "${R2_SECRET_ACCESS_KEY:?set R2_SECRET_ACCESS_KEY}"
@@ -33,7 +50,6 @@ cd "$(dirname "$0")"
 : "${R2_PUBLIC_BASE:?set R2_PUBLIC_BASE to the bucket public custom domain}"
 
 ENDPOINT="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
-ENVFILE=".env"
 SRC_CONTAINER="dhc-server"
 SRC_DIR="/app/data/releases"
 STAGE="$(mktemp -d)"
@@ -70,7 +86,14 @@ for f in "$STAGE"/*; do
   name="$(basename "$f")"
   url="$R2_PUBLIC_BASE/$name"
   # Range-request the first KB: proves public reachability without pulling 282MB.
-  code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 30 -r 0-1023 "$url" || true)
+  #
+  # The cache buster is load-bearing. Probing the bare URL right after upload can
+  # reach an edge that has not seen the object yet; Cloudflare then caches that
+  # 404 for four hours (max-age=14400) and every later check — and every real
+  # user on that edge — gets the cached miss. The verification step was creating
+  # the very failure it reported. A unique query bypasses the cache without
+  # poisoning it, and R2 ignores unknown query parameters when resolving keys.
+  code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 30 -r 0-1023 "$url?verify=$$-$RANDOM" || true)
   if [ "$code" = "206" ] || [ "$code" = "200" ]; then
     echo "    OK  $name"
   else
@@ -89,6 +112,7 @@ declare -A MAP=(
   [DOWNLOAD_URL_MAC]="mac-arm64.dmg"
   [DOWNLOAD_URL_MAC_X64]="mac-x64.zip"
   [DOWNLOAD_URL_WIN]="win-x64.exe"
+  [DOWNLOAD_URL_WIN_ARM]="win-arm64.exe"
   [DOWNLOAD_URL_ANDROID]="android.apk"
 )
 for var in "${!MAP[@]}"; do
@@ -96,7 +120,8 @@ for var in "${!MAP[@]}"; do
   case "${MAP[$var]}" in
     mac-arm64.dmg) pat="*mac-arm64.dmg" ;;
     mac-x64.zip)   pat="*mac-x64.zip" ;;
-    win-x64.exe)   pat="*x64-Setup.exe" ;;
+    win-x64.exe)   pat="*-x64-Setup.exe" ;;
+    win-arm64.exe) pat="*-arm64-Setup.exe" ;;
     android.apk)   pat="*.apk" ;;
   esac
   # shellcheck disable=SC2086

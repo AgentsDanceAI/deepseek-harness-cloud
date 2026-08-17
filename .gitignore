@@ -12,3 +12,7 @@ deploy/**/.env
 .env
 !deploy/**/.env.template
 !deploy/**/.env.example
+
+# electron-builder downloads ~150MB of Electron/NSIS/winCodeSign per build;
+# build-win.sh keeps it here so rebuilds are fast, but it is a cache, not source.
+desktop/.cache-electron/
