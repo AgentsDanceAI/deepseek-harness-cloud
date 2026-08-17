@@ -229,3 +229,50 @@ def test_static_assets_served(client):
     for path in ("/static/app.css", "/static/app.js", "/static/qr.js"):
         r = client.get(path)
         assert r.status_code == 200, path
+
+
+def test_release_downloads_are_capped_per_ip(client):
+    """Installers are 100-280MB and share this machine with the model gateway.
+    Two concurrent transfers per address is the budget; the third is told to
+    come back rather than being served a trickle that pins a worker."""
+    from app.release_throttle import ReleaseThrottle
+    mw = ReleaseThrottle(None)
+    import time
+    now = time.time()
+    mw._active["1.2.3.4"] = [now, now]
+    assert mw._prune(now) == 2
+    # a slot older than the stale window is a leaked one, not a live transfer
+    mw._active["1.2.3.4"] = [now - 99999]
+    assert mw._prune(now) == 0
+
+
+def test_release_throttle_holds_the_slot_until_the_body_ends():
+    """The whole point of the raw-ASGI form. BaseHTTPMiddleware released the
+    slot when the response STARTED, so a 282MB transfer occupied the limiter
+    for microseconds and nothing was ever rejected."""
+    import asyncio
+    from app.release_throttle import ReleaseThrottle
+
+    started = asyncio.Event()
+    finish = asyncio.Event()
+
+    async def slow_app(scope, receive, send):
+        await send({"type": "http.response.start", "status": 200, "headers": []})
+        started.set()
+        await finish.wait()            # body still streaming
+        await send({"type": "http.response.body", "body": b"x", "more_body": False})
+
+    mw = ReleaseThrottle(slow_app)
+    scope = {"type": "http", "path": "/releases/big.dmg", "headers": [], "client": ("9.9.9.9", 1)}
+
+    async def run():
+        sent = []
+        task = asyncio.create_task(mw(scope, None, lambda m: sent.append(m) or asyncio.sleep(0)))
+        await started.wait()
+        # mid-transfer the slot must still be held
+        assert mw._prune(__import__("time").time()) == 1
+        finish.set()
+        await task
+        assert mw._prune(__import__("time").time()) == 0
+
+    asyncio.run(run())

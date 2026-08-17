@@ -78,6 +78,11 @@ def create_app() -> FastAPI:
     try:
         releases_dir.mkdir(parents=True, exist_ok=True)
         app.mount("/releases", StaticFiles(directory=str(releases_dir)), name="releases")
+        # Whatever hosts the bytes long-term, this path stays as the fallback
+        # (and is the only path a self-hoster has). Bound it so a few large
+        # transfers cannot starve the gateway and the workspaces beside it.
+        from .release_throttle import ReleaseThrottle
+        app.add_middleware(ReleaseThrottle)  # raw ASGI: holds the slot until the body ends
     except OSError:
         log.warning("releases dir unavailable at %s", releases_dir)
     app.include_router(pages_router)  # last: contains catch-all-ish page routes
