@@ -30,24 +30,39 @@
     </div>
 
     <div id="team-view" hidden>
-      <div class="grid grid-3" style="margin-bottom:22px">
-        <div class="card stat"><div class="stat-label">共享积分池</div><div class="stat-value" id="t-pool">—</div></div>
+      {# two pools, shown apart: credits buy tokens, minutes buy the machine #}
+      <div class="grid grid-4" style="margin-bottom:22px">
+        <div class="card stat"><div class="stat-label">共享积分池</div><div class="stat-value" id="t-pool">—</div>
+          <div class="muted small">模型 / 搜索</div></div>
+        <div class="card stat"><div class="stat-label">共享机时池</div><div class="stat-value" id="t-minutes">—</div>
+          <div class="muted small">云工作台运行</div></div>
         <div class="card stat"><div class="stat-label">席位</div><div class="stat-value" id="t-seats">—</div></div>
         <div class="card stat"><div class="stat-label">团队</div><div class="stat-value" id="t-name" style="font-size:20px">—</div></div>
       </div>
 
       <div class="card block" id="owner-tools" hidden>
-        <h2>成员</h2>
-        <table class="table" id="t-members"><thead><tr><th>成员</th><th>角色</th><th>本月用量</th><th></th></tr></thead><tbody></tbody></table>
-        <div class="form-row" style="margin-top:16px">
+        <h2>成员用量与上限</h2>
+        <p class="muted small">
+          本月每人用了多少一目了然。给成员设上限后，触限的<b>只有该成员</b>会被暂停，
+          其他人照常工作；设为 0 即暂停该成员。留空 = 用团队默认值。
+        </p>
+        <div class="table-wrap">
+          <table class="table" id="t-members">
+            <thead><tr><th>成员</th><th>角色</th><th>本月积分</th><th>本月机时</th><th>积分上限</th><th>机时上限</th><th></th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div class="form-row" style="margin-top:18px;flex-wrap:wrap;gap:8px">
           <button class="btn btn-primary" id="btn-invite" type="button">生成邀请链接</button>
           <button class="btn btn-ghost" id="btn-buy-seats" type="button">增购席位</button>
+          <button class="btn btn-ghost" id="btn-defaults" type="button">设团队默认上限</button>
         </div>
         <p class="muted small" id="invite-out" hidden style="margin-top:12px"></p>
       </div>
 
       <p class="muted small" style="margin-top:18px">
-        消费顺序：先扣团队共享池，池子空了才用个人积分。每笔用量都记在使用者名下。
+        消费顺序：先扣团队共享池，池子空了才用成员自己的额度。每笔用量都记在使用者名下，
+        所以「谁花了多少」永远可查。
       </p>
     </div>
 
@@ -72,29 +87,54 @@
     $('#team-none').hidden = true;
     $('#team-view').hidden = false;
     $('#t-pool').textContent = (s.pool_balance || 0).toLocaleString();
+    var mins = s.minute_pool || 0;
+    $('#t-minutes').textContent = Math.floor(mins / 60) + ' 小时' + (mins % 60 ? ' ' + (mins % 60) + ' 分' : '');
     $('#t-seats').textContent = s.seats_used + ' / ' + s.seats;
     $('#t-name').textContent = s.name;
-    if (s.role === 'owner') {
-      $('#owner-tools').hidden = false;
-      var usage = {};
-      (s.usage || []).forEach(function (u) { usage[u.email] = u.credits; });
-      var tb = $('#t-members tbody');
-      tb.innerHTML = '';
-      (s.members || []).forEach(function (m) {
-        var tr = document.createElement('tr');
-        tr.innerHTML = '<td>' + m.email + '</td><td>' + (m.role === 'owner' ? '所有者' : '成员') +
-          '</td><td>' + (usage[m.email] || 0).toLocaleString() + '</td><td></td>';
-        if (m.role !== 'owner') {
-          var b = document.createElement('button');
-          b.className = 'link-btn'; b.textContent = '移除';
-          b.onclick = function () {
-            post('/api/team/remove', { user_id: m.user_id }).then(load).catch(function (e) { alert(e.message); });
-          };
-          tr.lastElementChild.appendChild(b);
-        }
-        tb.appendChild(tr);
-      });
-    }
+    if (s.role !== 'owner') return;
+
+    $('#owner-tools').hidden = false;
+    var tb = $('#t-members tbody');
+    tb.innerHTML = '';
+    (s.usage || []).forEach(function (u) {
+      var tr = document.createElement('tr');
+      var hrs = Math.floor((u.minutes || 0) / 60), mm = (u.minutes || 0) % 60;
+      tr.innerHTML =
+        '<td>' + u.email + '</td>' +
+        '<td>' + (u.role === 'owner' ? '所有者' : '成员') + '</td>' +
+        '<td class="num">' + (u.credits || 0).toLocaleString() + '</td>' +
+        '<td class="num">' + (hrs ? hrs + 'h ' : '') + mm + 'm</td>' +
+        '<td></td><td></td><td></td>';
+      var cells = tr.querySelectorAll('td');
+
+      // caps are editable inline: an admin sizing next month should not have to
+      // leave the page they are reading the numbers on
+      function capCell(cell, field, value) {
+        var input = document.createElement('input');
+        input.type = 'number'; input.min = '0'; input.className = 'cap-input';
+        input.placeholder = '默认';
+        if (value !== null && value !== undefined) input.value = value;
+        input.onchange = function () {
+          var body = { user_id: u.user_id };
+          body[field] = input.value === '' ? null : parseInt(input.value, 10);
+          post('/api/team/member-caps', body).then(load).catch(function (e) { alert(e.message); });
+        };
+        cell.appendChild(input);
+      }
+      capCell(cells[4], 'credit_cap', u.credit_cap);
+      capCell(cells[5], 'minute_cap', u.minute_cap);
+
+      if (u.role !== 'owner') {
+        var b = document.createElement('button');
+        b.className = 'link-btn'; b.textContent = '移除';
+        b.onclick = function () {
+          if (!confirm('移除 ' + u.email + '？该成员将立即失去共享池权限。')) return;
+          post('/api/team/remove', { user_id: u.user_id }).then(load).catch(function (e) { alert(e.message); });
+        };
+        cells[6].appendChild(b);
+      }
+      tb.appendChild(tr);
+    });
   }
 
   function load() {
@@ -116,6 +156,16 @@
       out.textContent = '邀请链接（14 天内有效）：' + d.url;
       out.hidden = false;
     }).catch(function (e) { alert(e.message); });
+  });
+  $('#btn-defaults').addEventListener('click', function () {
+    var c = prompt('团队默认「每人每月积分上限」（留空 = 不限）', '');
+    if (c === null) return;
+    var m = prompt('团队默认「每人每月机时上限（分钟）」（留空 = 不限）', '');
+    if (m === null) return;
+    post('/api/team/defaults', {
+      credit_cap: c === '' ? null : parseInt(c, 10),
+      minute_cap: m === '' ? null : parseInt(m, 10),
+    }).then(load).catch(function (e) { alert(e.message); });
   });
   $('#btn-buy-seats').addEventListener('click', function () {
     var n = prompt('购买多少个席位？', '5');

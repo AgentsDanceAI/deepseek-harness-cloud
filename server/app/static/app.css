@@ -857,3 +857,12 @@ body[data-page="landing"] .nav-menu a { color: var(--fg); }
   transition: width .3s ease;
 }
 .meter.is-full > span { background: var(--warn); }
+
+/* inline cap editor in the team table — reads as a field, stays compact */
+.cap-input {
+  width: 88px; padding: 5px 8px; border: 1px solid var(--border-strong);
+  border-radius: 7px; background: var(--card); color: var(--fg);
+  font: 13px var(--mono); font-variant-numeric: tabular-nums;
+}
+.cap-input:focus { border-color: var(--brand); outline: none; }
+.table-wrap { overflow-x: auto; }

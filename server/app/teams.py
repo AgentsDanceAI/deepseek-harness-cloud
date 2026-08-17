@@ -296,7 +296,12 @@ def team_me(user: dict = Depends(resolve_user)):
         "seats": org["seats"],
         "seats_used": seats_used(org["id"]),
         "pool_balance": pool_balance(org["id"]),
+        "minute_pool": minute_pool(org["id"]),
+        "default_credit_cap": org.get("default_credit_cap"),
+        "default_minute_cap": org.get("default_minute_cap"),
         "members": members(org["id"]) if org["role"] == "owner" else [],
+        # the usage view carries caps too, so the admin edits them where the
+        # numbers that justify them are shown
         "usage": member_usage(org["id"], month_start) if org["role"] == "owner" else [],
         "seat_price": config.TEAM_SEAT_PRICE,
     }
@@ -329,4 +334,40 @@ def team_join(body: dict, user: dict = Depends(resolve_user)):
 def team_remove(body: dict, user: dict = Depends(resolve_user)):
     org = _require_owner(user)
     remove_member(org["id"], str(body.get("user_id", "")))
+    return {"ok": True}
+
+
+def _cap_arg(body: dict, key: str):
+    """Absent = leave alone; null = follow the org default; a number = that cap."""
+    if key not in body:
+        return ...
+    raw = body[key]
+    if raw is None or raw == "":
+        return None
+    try:
+        return max(0, int(raw))
+    except (TypeError, ValueError):
+        raise HTTPException(400, "invalid_cap") from None
+
+
+@router.post("/member-caps")
+def team_member_caps(body: dict, user: dict = Depends(resolve_user)):
+    """Per-member ceilings on the shared pools. Only the owner may set them."""
+    org = _require_owner(user)
+    target = str(body.get("user_id", ""))
+    if member_row(org["id"], target) is None:
+        raise HTTPException(404, "not_a_member")
+    set_member_caps(org["id"], target,
+                    credit_cap=_cap_arg(body, "credit_cap"),
+                    minute_cap=_cap_arg(body, "minute_cap"))
+    return {"ok": True}
+
+
+@router.post("/defaults")
+def team_defaults(body: dict, user: dict = Depends(resolve_user)):
+    """Org-wide ceilings for members without their own override."""
+    org = _require_owner(user)
+    set_default_caps(org["id"],
+                     credit_cap=_cap_arg(body, "credit_cap"),
+                     minute_cap=_cap_arg(body, "minute_cap"))
     return {"ok": True}

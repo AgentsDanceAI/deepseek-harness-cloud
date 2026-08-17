@@ -249,3 +249,56 @@ def test_joining_a_team_never_removes_your_own_allowance():
     st = work_access.state(member)
     assert st["minutes_left"] == 120          # their own free allowance survives
     assert work_access.blocked_reason(member) is None
+
+
+# --- API surface: these endpoints move money, so authorisation is the test ----
+
+def _client_for(uid, email):
+    """A TestClient carrying a session for an existing user id."""
+    from fastapi.testclient import TestClient
+    from app import security
+    from app.main import app
+    c = TestClient(app)
+    c.cookies.set("dhc_session", security.sign_token(uid, ttl=3600))
+    return c
+
+
+def test_only_the_owner_may_set_caps():
+    owner = _user("u_t_api_o")
+    member = _user("u_t_api_m")
+    org_id = teams.create_org(owner, "ApiCo")
+    teams.set_seats(org_id, 5, time.time() + 86400)
+    teams.accept_invite(teams.create_invite(org_id), member)
+
+    as_member = _client_for(member, "u_t_api_m@t.local")
+    r = as_member.post("/api/team/member-caps", json={"user_id": member, "credit_cap": 999999})
+    assert r.status_code == 403                      # a member cannot lift their own cap
+
+    as_owner = _client_for(owner, "u_t_api_o@t.local")
+    r = as_owner.post("/api/team/member-caps", json={"user_id": member, "credit_cap": 250})
+    assert r.status_code == 200
+    assert teams.effective_caps(teams.org_of(member), member)[0] == 250
+
+
+def test_caps_accept_null_to_fall_back_to_the_default():
+    owner = _user("u_t_api2_o")
+    member = _user("u_t_api2_m")
+    org_id = teams.create_org(owner, "ApiCo2")
+    teams.set_seats(org_id, 5, time.time() + 86400)
+    teams.accept_invite(teams.create_invite(org_id), member)
+    teams.set_default_caps(org_id, credit_cap=100)
+
+    c = _client_for(owner, "u_t_api2_o@t.local")
+    c.post("/api/team/member-caps", json={"user_id": member, "credit_cap": 900})
+    assert teams.effective_caps(teams.org_of(member), member)[0] == 900
+    c.post("/api/team/member-caps", json={"user_id": member, "credit_cap": None})
+    assert teams.effective_caps(teams.org_of(member), member)[0] == 100   # back to default
+
+
+def test_caps_cannot_target_someone_outside_the_org():
+    owner = _user("u_t_api3_o")
+    outsider = _user("u_t_api3_x")
+    teams.create_org(owner, "ApiCo3")
+    c = _client_for(owner, "u_t_api3_o@t.local")
+    r = c.post("/api/team/member-caps", json={"user_id": outsider, "credit_cap": 10})
+    assert r.status_code == 404
