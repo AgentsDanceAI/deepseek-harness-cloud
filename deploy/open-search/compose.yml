@@ -35,6 +35,14 @@ services:
       retries: 10
 
   dhc-server:
+    # Access logs are named in the privacy policy with a retention figure, and
+    # the default json-file driver keeps them forever — the stated period has to
+    # be enforced by something. 5 x 20MB is roughly a quarter at current volume.
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
     build:
       context: ../..
       dockerfile: server/Dockerfile

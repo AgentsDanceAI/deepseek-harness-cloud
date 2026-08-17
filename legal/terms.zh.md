@@ -13,9 +13,9 @@
 | 法律实体 | 北京跃迁效应人工智能科技有限公司（Beijing AgentsDance AI Technology Co., Ltd.） |
 | 统一社会信用代码 | 91110108MAKL3PHR6X |
 | 注册地址 | 中国北京市海淀区西北旺东路 10 号院东区 15 号楼 1 层 01-1922 |
-| 服务与账单支持 | support@dshcloud.online |
-| 法务与隐私 | legal@dshcloud.online |
-| 安全漏洞报告 | security@dshcloud.online |
+| 服务与账单支持 | support@agentsdance.ai |
+| 法务与隐私 | legal@agentsdance.ai |
+| 安全漏洞报告 | security@agentsdance.ai |
 
 以上邮箱均由真人处理，工作日 24 小时内首次回复。
 
@@ -33,7 +33,7 @@
 
 3.1 您需年满 18 周岁方可注册。若您代表企业注册，您声明已获得该企业的相应授权。
 
-3.2 您应对账号下的一切活动负责，并妥善保管登录凭证与设备授权令牌。发现未授权使用，请立即通知 security@dshcloud.online。
+3.2 您应对账号下的一切活动负责，并妥善保管登录凭证与设备授权令牌。发现未授权使用，请立即通知 security@agentsdance.ai。
 
 3.3 我们可能因您违反本条款或第 8 条《可接受使用政策》而暂停或终止账号，详见第 6 条。
 
@@ -96,7 +96,7 @@
 
 6.5 除上述情形外，已发放的积分与机时一经使用即不可退。未使用的额度不结转至下一周期，亦不可提现或转让。
 
-退款申请发送至 support@dshcloud.online，我们在 5 个工作日内答复；获准的退款由 Waffo Pancake 原路退回，到账时间取决于您的发卡行。
+退款申请发送至 support@agentsdance.ai，我们在 5 个工作日内答复；获准的退款由 Waffo Pancake 原路退回，到账时间取决于您的发卡行。
 
 ## 7. 您的内容与我们的使用限制
 

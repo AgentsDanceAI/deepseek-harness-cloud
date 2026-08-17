@@ -60,7 +60,7 @@
 
 ## 6. 举报与执行
 
-发现违规请发送邮件至 **security@dshcloud.online**（安全问题）或 **support@dshcloud.online**（其他）。
+发现违规请发送邮件至 **security@agentsdance.ai**（安全问题）或 **support@agentsdance.ai**（其他）。
 
 我们的处理方式视严重程度而定：
 
@@ -78,4 +78,4 @@
 
 ---
 
-*最后更新：2026 年 8 月 17 日 · 版本 1.0 · 联系：support@dshcloud.online*
+*最后更新：2026 年 8 月 17 日 · 版本 1.0 · 联系：support@agentsdance.ai*

@@ -457,3 +457,29 @@ def test_smtp_transport_failure_is_503():
             raise AssertionError("expected HTTPException")
         except HTTPException as e:
             assert e.status_code == 503
+
+
+def test_account_deletion_actually_erases_personal_data():
+    """The privacy policy promises erasure. A status flag beside an intact
+    display name and password hash is not erasure, and would make the published
+    policy untrue."""
+    from app import accounts, db, security
+    import time
+    uid = security.new_id("u_")
+    email = "erase-me@example.test"
+    with db.tx() as c:
+        c.execute("INSERT INTO users (id,email,display_name,password_hash,role,session_epoch,created) "
+                  "VALUES (?,?,?,?,?,?,?)", (uid, email, "要删的人", "hash", "user", 1, time.time()))
+        c.execute("INSERT INTO email_codes (email,code_hash,purpose,expires,created) VALUES (?,?,?,?,?)",
+                  (email, "h", "login", time.time() + 600, time.time()))
+
+    user = dict(db.query_one("SELECT * FROM users WHERE id=?", (uid,)))
+    accounts.delete_account({"confirm": email}, user=user)
+
+    row = db.query_one("SELECT * FROM users WHERE id=?", (uid,))
+    assert row["status"] == "deleted"
+    assert email not in (row["email"] or "")
+    assert not row["display_name"], "display name must not survive deletion"
+    assert not row["password_hash"], "password hash must not survive deletion"
+    assert db.query("SELECT 1 FROM email_codes WHERE email=?", (email,)) == []
+    assert db.query("SELECT 1 FROM devices WHERE user_id=?", (uid,)) == []

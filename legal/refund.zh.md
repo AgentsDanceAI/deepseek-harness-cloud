@@ -49,7 +49,7 @@
 
 ## 6. 怎么申请
 
-发送邮件至 **support@dshcloud.online**，写明：
+发送邮件至 **support@agentsdance.ai**，写明：
 
 1. 注册邮箱；
 2. 订单号（可在控制台「订单」页查到）；
@@ -63,4 +63,4 @@
 
 ---
 
-*最后更新：2026 年 8 月 17 日 · 版本 1.0 · 联系：support@dshcloud.online*
+*最后更新：2026 年 8 月 17 日 · 版本 1.0 · 联系：support@agentsdance.ai*

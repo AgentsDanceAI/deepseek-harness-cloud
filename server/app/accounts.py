@@ -322,8 +322,21 @@ def revoke_device(body: dict, user: dict = Depends(resolve_user)):
 def delete_account(body: dict, user: dict = Depends(resolve_user)):
     if str(body.get("confirm", "")) != user["email"]:
         raise HTTPException(400, "confirm_mismatch")
+    uid, email = user["id"], user["email"]
     with db.tx() as conn:
-        conn.execute("UPDATE users SET status='deleted', session_epoch=session_epoch+1, email=? WHERE id=?",
-                     (f"deleted+{user['id']}@invalid.local", user["id"]))
-        conn.execute("UPDATE devices SET revoked=1 WHERE user_id=?", (user["id"],))
+        # Erasure, not a status flag. The privacy policy promises deletion of
+        # personal data, so this has to actually remove it — an anonymised email
+        # on a row still carrying the display name, password hash and every
+        # session artefact is not what a data-subject request asks for.
+        conn.execute(
+            "UPDATE users SET status='deleted', session_epoch=session_epoch+1, "
+            "email=?, display_name='', password_hash='' WHERE id=?",
+            (f"deleted+{uid}@invalid.local", uid))
+        conn.execute("DELETE FROM devices WHERE user_id=?", (uid,))
+        conn.execute("DELETE FROM email_codes WHERE email=?", (email,))
+        conn.execute("DELETE FROM org_invites WHERE email=?", (email,))
+        conn.execute("DELETE FROM org_members WHERE user_id=?", (uid,))
+        # orders / usage_log / credit_grants are deliberately KEPT: tax law
+        # requires retaining payment records and the privacy policy says so
+        # (5 years). Those rows carry a user id, not contact details.
     return {"ok": True}
