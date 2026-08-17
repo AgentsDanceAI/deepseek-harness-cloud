@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import re
 import secrets
+import logging
 import smtplib
 import time
 from email.header import Header
@@ -19,6 +20,7 @@ from fastapi.responses import RedirectResponse
 
 from . import config, credits, db, rate_limit, security
 
+log = logging.getLogger("dhc.accounts")
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -166,10 +168,27 @@ def _send_mail(to: str, subject: str, text: str) -> None:
     msg["Subject"] = Header(subject, "utf-8")
     msg["From"] = config.MAIL_FROM
     msg["To"] = to
-    with smtplib.SMTP_SSL(config.MAIL_SMTP_HOST, config.MAIL_SMTP_PORT, timeout=15) as smtp:
-        if config.MAIL_SMTP_USER:
-            smtp.login(config.MAIL_SMTP_USER, config.MAIL_SMTP_PASS)
-        smtp.sendmail(config.MAIL_FROM, [to], msg.as_string())
+    try:
+        with smtplib.SMTP_SSL(config.MAIL_SMTP_HOST, config.MAIL_SMTP_PORT, timeout=15) as smtp:
+            if config.MAIL_SMTP_USER:
+                smtp.login(config.MAIL_SMTP_USER, config.MAIL_SMTP_PASS)
+            smtp.sendmail(config.MAIL_FROM, [to], msg.as_string())
+    except smtplib.SMTPRecipientsRefused:
+        # The address parses but the provider will not deliver to it.
+        raise HTTPException(400, "undeliverable_email") from None
+    except smtplib.SMTPResponseException as exc:
+        # 5xx here is about THIS message (a rejected recipient domain, a
+        # suppression-list hit); 4xx is transient. Either way it is not a bug in
+        # our code, and surfacing it as a 500 told the user "请求失败 (500)" on
+        # the only sign-in path we have — with no hint that the address was the
+        # problem. Log the provider's text, show the user something actionable.
+        log.warning("smtp rejected message to %s: %s %s", to, exc.smtp_code, exc.smtp_error)
+        if 500 <= int(exc.smtp_code or 0) < 600:
+            raise HTTPException(400, "undeliverable_email") from None
+        raise HTTPException(503, "mail_temporarily_unavailable") from None
+    except OSError as exc:
+        log.warning("smtp transport failure for %s: %s", to, exc)
+        raise HTTPException(503, "mail_temporarily_unavailable") from None
 
 
 @router.post("/email/send")

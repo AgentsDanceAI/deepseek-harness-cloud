@@ -419,3 +419,41 @@ def test_boot_fingerprint_tracks_configuration_not_the_user():
     assert a == b
     assert workspace._boot_is_stale({"Config": {"Labels": {}}}) is True
     assert workspace._boot_is_stale({"Config": {"Labels": {workspace._CFG_LABEL: a}}}) is False
+
+
+def test_smtp_rejection_is_a_client_error_not_a_500():
+    """Email codes are the primary sign-in path. A provider rejecting the
+    recipient (bad domain, suppression list) is not a bug in our code, and
+    surfacing it as 500 showed users "请求失败 (500)" with no hint that the
+    address was the problem."""
+    import smtplib
+    from unittest.mock import patch
+    from fastapi import HTTPException
+    from app import accounts
+
+    def reject(code, text):
+        exc = smtplib.SMTPDataError(code, text)
+        # without a host configured _send_mail short-circuits to the dev printer
+        with patch.object(accounts.config, "MAIL_SMTP_HOST", "smtp.test"), \
+                patch("smtplib.SMTP_SSL", side_effect=exc):
+            try:
+                accounts._send_mail("someone@nowhere.invalid", "s", "t")
+            except HTTPException as e:
+                return e.status_code
+        return None
+
+    assert reject(550, b"Invalid `to` field") == 400      # permanent -> user fixes the address
+    assert reject(451, b"try again later") == 503         # transient -> not the user's fault
+
+
+def test_smtp_transport_failure_is_503():
+    from unittest.mock import patch
+    from fastapi import HTTPException
+    from app import accounts
+    with patch.object(accounts.config, "MAIL_SMTP_HOST", "smtp.test"), \
+            patch("smtplib.SMTP_SSL", side_effect=OSError("connection refused")):
+        try:
+            accounts._send_mail("a@b.com", "s", "t")
+            raise AssertionError("expected HTTPException")
+        except HTTPException as e:
+            assert e.status_code == 503

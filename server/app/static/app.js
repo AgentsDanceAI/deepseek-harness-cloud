@@ -20,6 +20,8 @@
     already_handled: "该授权码已处理过",
     confirm_mismatch: "输入的邮箱与账号不一致",
     mail_not_configured: "邮件服务未配置，请稍后再试",
+    undeliverable_email: "这个邮箱收不到信，请检查是否拼错或换一个",
+    mail_temporarily_unavailable: "邮件服务暂时不可用，请稍后再试",
     not_authenticated: "请先登录",
     unknown_item: "商品不存在",
     slow_down: "请求过于频繁，请稍后再试"
