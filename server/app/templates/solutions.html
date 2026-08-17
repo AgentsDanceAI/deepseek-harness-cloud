@@ -1,31 +1,20 @@
 {% extends "base.html" %}
 {% block title %}解决方案 — DSH Cloud{% endblock %}
 {% block content %}
+{# The four sections here are exactly the four entries in the 解决方案 dropdown,
+   in the same order and under the same names. A menu that promises four things
+   and lands on a page describing different ones is worse than no menu. #}
 <section class="section">
   <div class="container">
     <span class="eyebrow">解决方案</span>
     <h1 class="section-title">按你的组织形态选一种</h1>
     <p class="section-lede">
-      同一套系统，既可以直接用我们托管的版本，也可以把代码部署到你自己的机器上。
+      前两种决定<b>系统装在哪</b>，后两种决定<b>额度怎么买</b>。可以组合：
+      自部署一套，同时在我们这里买积分包给外部协作者用。
     </p>
 
-    <div id="teams" class="card feature" style="margin-top:32px">
-      <span class="eyebrow">团队协作</span>
-      <h2>按席位订阅，积分组织内共享</h2>
-      <p>
-        管理员购买席位并邀请成员，全员共用一个积分池，谁用了多少在后台一目了然。
-        不用给每个人单独申请模型密钥，也不用各自报销。
-      </p>
-      <ul class="check-list">
-        <li>席位按月/年订阅，可随时增减</li>
-        <li>共享积分池，用完统一充值</li>
-        <li>成员用量明细与导出</li>
-      </ul>
-      <a class="btn btn-primary" href="/pricing#team" style="margin-top:16px">查看团队方案</a>
-    </div>
-
-    <div id="enterprise" class="card feature" style="margin-top:20px">
-      <span class="eyebrow">企业私有化</span>
+    <div id="enterprise" class="card feature" style="margin-top:32px">
+      <span class="eyebrow">企业部署</span>
       <h2>部署一份，得到内部专用的 dsh 云平台</h2>
       <p>
         代码开源。把它部署到你自己的服务器或私有云上，就得到一套完整的内部智能体平台：
@@ -34,27 +23,56 @@
       <ul class="check-list">
         <li>docker compose 一条命令起全栈</li>
         <li>模型上游换成你自己的（自建、专属网关或公有云均可）</li>
+        <li>网关是 OpenAI 兼容接口，现有代码改一个 base_url 就能接进来</li>
         <li>可对接内部账号体系，用量按部门核算</li>
       </ul>
       <a class="btn btn-ghost" href="/resources#selfhost" style="margin-top:16px">自部署指南</a>
     </div>
 
-    <div id="developers" class="card feature" style="margin-top:20px">
-      <span class="eyebrow">开发者</span>
-      <h2>接进你现有的工具链</h2>
+    <div id="teams" class="card feature" style="margin-top:20px">
+      <span class="eyebrow">按席付费</span>
+      <h2>按席位订阅，积分与机时组织内共享</h2>
       <p>
-        网关提供 OpenAI 兼容接口，现有代码改一个 base_url 就能跑。也可以直接用开源仓库做二次开发，
-        把 dsh 的插件体系接到自己的系统里。
+        管理员购买席位并邀请成员，全员共用一个积分池和机时池，谁用了多少在后台一目了然。
+        不用给每个人单独申请模型密钥，也不用各自报销。
       </p>
+      <ul class="check-list">
+        <li>席位按月/年订阅，可随时增减，{{ team_seat_min }} 席起</li>
+        <li>共享池叠加在个人额度之上，成员不会因为入组而变少</li>
+        <li>可给单个成员设上限，防止一个人用光全组</li>
+        <li>适合按人发额度的场景（教学、研究、外包协作）：给账号不给密钥，用完即止</li>
+      </ul>
+      <a class="btn btn-primary" href="/pricing#team" style="margin-top:16px">查看团队方案</a>
     </div>
 
-    <div id="education" class="card feature" style="margin-top:20px">
-      <span class="eyebrow">教学与研究</span>
-      <h2>按人发额度，不用发密钥</h2>
+    <div id="payg" class="card feature" style="margin-top:20px">
+      <span class="eyebrow">按量付费</span>
+      <h2>买积分包，用多少扣多少</h2>
       <p>
-        给每位学生或研究者一个账号和一份额度，用完即止，不会产生意外账单；
-        也不需要把机构的模型密钥分发出去。
+        不订阅也能用。积分不按月清零，适合用量起伏大、或者只是偶尔跑几个任务的情况。
+        所有模型都能用——积分是唯一闸门，不存在「买了高档套餐才能用高档模型」。
       </p>
+      <ul class="check-list">
+        <li>一次性购买，余额长期有效</li>
+        <li>倍率以 Claude Sonnet 为 1.00x 基准，最低 0.044x</li>
+        <li>桌面版与云端版共用同一份积分</li>
+      </ul>
+      <a class="btn btn-ghost" href="/pricing#packs" style="margin-top:16px">查看积分包价格</a>
+    </div>
+
+    <div id="subscription" class="card feature" style="margin-top:20px">
+      <span class="eyebrow">包年包月</span>
+      <h2>月付或年付，含每月积分与云端机时</h2>
+      <p>
+        稳定用量最划算的一种。每月发放积分，另外单独发放云端工作台的机时——
+        两者互不占用，机时只算智能体<b>实际干活</b>的分钟。
+      </p>
+      <ul class="check-list">
+        <li>Free / Plus / Pro / Max 四档，机时 {{ (work_free_minutes // 60) }} 小时起</li>
+        <li>年付比月付便宜，可随时升降档</li>
+        <li>桌面版不占机时，重度使用可以只用桌面版省机时</li>
+      </ul>
+      <a class="btn btn-ghost" href="/pricing#plans" style="margin-top:16px">查看套餐价格</a>
     </div>
   </div>
 </section>

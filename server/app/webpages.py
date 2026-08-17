@@ -14,7 +14,7 @@ import time
 from pathlib import Path
 
 from fastapi import APIRouter, Request
-from fastapi.responses import RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from . import config, credits, plans
@@ -63,11 +63,14 @@ def _ctx(request: Request, page: str, **extra) -> dict:
         "asset_v": ASSET_V,
         "currency": currency,
         "currency_symbol": {"CNY": "¥", "USD": "$"}.get(currency, currency + " "),
-        "download_url_mac": os.environ.get("DOWNLOAD_URL_MAC", ""),
-        "download_url_win": os.environ.get("DOWNLOAD_URL_WIN", ""),
-        "download_url_mac_x64": os.environ.get("DOWNLOAD_URL_MAC_X64", ""),
-        "download_url_android": os.environ.get("DOWNLOAD_URL_ANDROID", ""),
-        "download_url_win_arm": os.environ.get("DOWNLOAD_URL_WIN_ARM", ""),
+        # Templates link to /dl/<key>; these flags only say whether a build
+        # exists, so a platform with no artifact is shown as unavailable rather
+        # than as a link that 404s.
+        "has_mac_arm64": bool(download_url("mac-arm64")),
+        "has_mac_x64": bool(download_url("mac-x64")),
+        "has_win_x64": bool(download_url("win-x64")),
+        "has_win_arm64": bool(download_url("win-arm64")),
+        "has_android": bool(download_url("android")),
         "work_enabled": config.WORK_ENABLED,
         "work_credits_per_min": config.WORK_CREDITS_PER_MIN,
         "work_idle_stop_min": config.WORK_IDLE_STOP_MIN,
@@ -375,6 +378,46 @@ def console_page(request: Request):
 
 # --- pricing / orders --------------------------------------------------------
 
+# Every advertised installer is reached through here rather than linked
+# directly. Two reasons: the download count becomes a real number instead of a
+# decoration (nothing was incrementing kv.downloads_total, so the homepage
+# proudly displayed the base constant), and the actual bytes can move to GitHub
+# Releases or object storage by editing one env var — no frontend change, and
+# the counter keeps working across the move.
+DOWNLOAD_TARGETS = {
+    "mac-arm64": ("DOWNLOAD_URL_MAC", "Apple 芯片"),
+    "mac-x64": ("DOWNLOAD_URL_MAC_X64", "Intel 芯片"),
+    "win-x64": ("DOWNLOAD_URL_WIN", "Windows x64"),
+    "win-arm64": ("DOWNLOAD_URL_WIN_ARM", "Windows ARM"),
+    "android": ("DOWNLOAD_URL_ANDROID", "Android"),
+}
+
+
+def download_url(key: str) -> str:
+    env, _ = DOWNLOAD_TARGETS.get(key, ("", ""))
+    return os.environ.get(env, "").strip() if env else ""
+
+
+@router.get("/dl/{key}")
+def download_redirect(key: str):
+    """Count the download, then hand off to wherever the file actually lives."""
+    url = download_url(key)
+    if not url:
+        return JSONResponse(status_code=404, content={"detail": "not_available"})
+    from . import db
+    with db.tx() as conn:
+        # UPSERT keeps this one statement on both backends; a read-modify-write
+        # would lose counts whenever two people download at the same moment.
+        conn.execute(
+            "INSERT INTO kv (k, v) VALUES (?, ?) "
+            "ON CONFLICT (k) DO UPDATE SET v = CAST(CAST(kv.v AS INTEGER) + 1 AS TEXT)",
+            (f"dl_{key}", "1"))
+        conn.execute(
+            "INSERT INTO kv (k, v) VALUES ('downloads_total', '1') "
+            "ON CONFLICT (k) DO UPDATE SET v = CAST(CAST(kv.v AS INTEGER) + 1 AS TEXT)")
+    return RedirectResponse(url, status_code=302)
+
+
 @router.get("/api/public/stats")
 def public_stats():
     """Numbers the homepage shows. Real counts, not decoration: downloads are
@@ -461,8 +504,6 @@ def terms_redirect():
 
 @router.get("/download")
 def download_page(request: Request):
-    return _render(
-        request, "download.html", "download",
-        url_mac=os.environ.get("DOWNLOAD_URL_MAC", "").strip(),
-        url_win=os.environ.get("DOWNLOAD_URL_WIN", "").strip(),
-    )
+    # Availability comes from the shared context (has_* flags); the page links
+    # to /dl/<key> so downloads from here are counted like any other.
+    return _render(request, "download.html", "download")

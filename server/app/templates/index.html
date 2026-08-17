@@ -60,24 +60,48 @@
       <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 13 4 4L19 7"/></svg>代码开源，可私有化部署</span>
     </div>
 
-    {# The desktop app is the other half of the product, and it is the one that
-       still works when cloud capacity runs out — so it gets equal billing here
-       rather than being buried in a nav menu. #}
-    <div class="hero-doors">
-      <a class="hero-door" href="{{ download_url_mac or '/download' }}"{% if download_url_mac %} download{% endif %}>
-        <span class="door-ico">
-          <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true"><path d="M16.7 12.9c0-2.4 2-3.6 2-3.6a4.6 4.6 0 0 0-3.6-1.9c-1.5-.2-3 .9-3.7.9-.8 0-2-.9-3.3-.9A4.9 4.9 0 0 0 4 9.9c-1.8 3-.5 7.5 1.2 10 .8 1.2 1.8 2.5 3.1 2.5 1.3-.1 1.8-.8 3.3-.8s2 .8 3.3.8 2.2-1.2 3-2.4a10 10 0 0 0 1.4-2.8 4.4 4.4 0 0 1-2.6-4.3ZM14.2 5.6A4.5 4.5 0 0 0 15.3 2a4.6 4.6 0 0 0-3 1.5A4.3 4.3 0 0 0 11.2 7a3.8 3.8 0 0 0 3-1.4Z"/></svg>
+    {# The desktop app is the other half of the product, and the one that still
+       works when cloud capacity runs out — so every build gets a real button
+       here rather than being buried one nav level down. Links go through
+       /dl/<key> so the counter below is a fact, not a decoration. #}
+    <div class="hero-dl">
+      <div class="hero-dl-row">
+        {% if has_mac_arm64 %}
+        <a class="dl-btn" href="/dl/mac-arm64">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16.7 12.9c0-2.4 2-3.6 2-3.6a4.6 4.6 0 0 0-3.6-1.9c-1.5-.2-3 .9-3.7.9-.8 0-2-.9-3.3-.9A4.9 4.9 0 0 0 4 9.9c-1.8 3-.5 7.5 1.2 10 .8 1.2 1.8 2.5 3.1 2.5 1.3-.1 1.8-.8 3.3-.8s2 .8 3.3.8 2.2-1.2 3-2.4a10 10 0 0 0 1.4-2.8 4.4 4.4 0 0 1-2.6-4.3ZM14.2 5.6A4.5 4.5 0 0 0 15.3 2a4.6 4.6 0 0 0-3 1.5A4.3 4.3 0 0 0 11.2 7a3.8 3.8 0 0 0 3-1.4Z"/></svg>
+          <span><b>下载 Mac 版</b><i>Apple 芯片</i></span>
+        </a>
+        {% endif %}
+        {% if has_mac_x64 %}
+        <a class="dl-btn" href="/dl/mac-x64">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16.7 12.9c0-2.4 2-3.6 2-3.6a4.6 4.6 0 0 0-3.6-1.9c-1.5-.2-3 .9-3.7.9-.8 0-2-.9-3.3-.9A4.9 4.9 0 0 0 4 9.9c-1.8 3-.5 7.5 1.2 10 .8 1.2 1.8 2.5 3.1 2.5 1.3-.1 1.8-.8 3.3-.8s2 .8 3.3.8 2.2-1.2 3-2.4a10 10 0 0 0 1.4-2.8 4.4 4.4 0 0 1-2.6-4.3ZM14.2 5.6A4.5 4.5 0 0 0 15.3 2a4.6 4.6 0 0 0-3 1.5A4.3 4.3 0 0 0 11.2 7a3.8 3.8 0 0 0 3-1.4Z"/></svg>
+          <span><b>下载 Mac 版</b><i>Intel 芯片</i></span>
+        </a>
+        {% endif %}
+        {% if has_win_x64 %}
+        <a class="dl-btn" href="/dl/win-x64">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M3 5.5 10.5 4.4v7.1H3zM12 4.2 21 3v8.5h-9zM3 13.5h7.5v7.1L3 19.5zM12 13.5h9V21l-9-1.3z"/></svg>
+          <span><b>下载 Windows 版</b><i>x64</i></span>
+        </a>
+        {% endif %}
+        {% if has_win_arm64 %}
+        <a class="dl-btn" href="/dl/win-arm64">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M3 5.5 10.5 4.4v7.1H3zM12 4.2 21 3v8.5h-9zM3 13.5h7.5v7.1L3 19.5zM12 13.5h9V21l-9-1.3z"/></svg>
+          <span><b>下载 Windows 版</b><i>ARM64</i></span>
+        </a>
+        {% endif %}
+      </div>
+      <div class="hero-dl-foot">
+        <a class="dl-link" href="https://github.com/AgentsDanceAI/deepseek-harness-cloud" target="_blank" rel="noopener">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor" aria-hidden="true"><path d="M12 2a10 10 0 0 0-3.16 19.49c.5.09.68-.22.68-.48l-.01-1.7c-2.78.6-3.37-1.34-3.37-1.34-.45-1.16-1.11-1.47-1.11-1.47-.91-.62.07-.6.07-.6 1 .07 1.53 1.03 1.53 1.03.89 1.53 2.34 1.09 2.91.83.09-.65.35-1.09.63-1.34-2.22-.25-4.56-1.11-4.56-4.94 0-1.09.39-1.98 1.03-2.68-.1-.25-.45-1.27.1-2.65 0 0 .84-.27 2.75 1.02a9.5 9.5 0 0 1 5 0c1.91-1.29 2.75-1.02 2.75-1.02.55 1.38.2 2.4.1 2.65.64.7 1.03 1.59 1.03 2.68 0 3.84-2.34 4.68-4.57 4.93.36.31.68.92.68 1.85l-.01 2.75c0 .27.18.58.69.48A10 10 0 0 0 12 2Z"/></svg>
+          在 GitHub 上查看
+        </a>
+        <span class="dl-count">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7.5 10.5 12 15l4.5-4.5M4 20h16"/></svg>
+          累计下载 <b class="num" id="stat-downloads">—</b> 次
         </span>
-        <b>免 Key 桌面版</b>
-        <span class="door-sub">装在自己电脑上 · 不占云端机时 · 同一套积分</span>
-      </a>
-      <a class="hero-door" href="/download">
-        <span class="door-ico">
-          <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true"><path d="M3 5.5 10.5 4.4v7.1H3zM12 4.2 21 3v8.5h-9zM3 13.5h7.5v7.1L3 19.5zM12 13.5h9V21l-9-1.3z"/></svg>
-        </span>
-        <b>Windows / 更多平台</b>
-        <span class="door-sub">Windows · Android · iOS 添加到主屏</span>
-      </a>
+        <a class="dl-link" href="/download">全部平台与安装说明 →</a>
+      </div>
     </div>
 
     <p class="hero-note-dark" style="justify-content:center;margin-top:22px">
@@ -147,7 +171,6 @@
       <a class="btn btn-ghost" href="/resources#selfhost">自部署指南</a>
     </div>
     <p class="muted small" style="margin-top:22px">
-      桌面端累计下载 <b class="num" id="stat-downloads">—</b> 次 ·
       云端版累计登录 <b class="num" id="stat-logins">—</b> 次
     </p>
   </div>

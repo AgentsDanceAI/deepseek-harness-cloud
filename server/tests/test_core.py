@@ -394,13 +394,28 @@ def test_workspace_offers_exactly_the_sellable_catalog():
     it. A hardcoded list drifts: the workspace offered two models while twenty
     were priced and advertised, so nineteen of them were unreachable in the
     product we actually ship."""
-    import inspect
     from app import model_catalog, workspace
 
-    src = inspect.getsource(workspace._create)
-    assert "model_catalog.catalog()" in src, "workspace must read the live catalog"
-    assert "deepseek-v4-flash\\n" not in src, "no hardcoded model ids in the settings template"
-
+    boot = workspace._boot_script()
     ids = list(model_catalog.catalog())
     assert len(ids) == 20, f"curated catalog should be 20 models, got {len(ids)}"
-    assert model_catalog.default_model() in ids
+    for mid in ids:
+        assert f"- id: {mid}\n" in boot, f"{mid} is sellable but not offered in the workspace"
+    assert f"model: {model_catalog.default_model()}\n" in boot
+
+    # dsh ships its own DeepSeek provider. Left alone it renders a second group
+    # in the picker whose entries resolve to the public api.deepseek.com with
+    # our device token as the key — broken, and a credential sent off-platform.
+    assert "llm-deepseek:" in boot and "models: []" in boot
+    assert "api.deepseek.com" not in boot
+
+
+def test_boot_fingerprint_tracks_configuration_not_the_user():
+    """Recreating stale containers hinges on this: if the digest moved per user
+    (or per call) every workspace would be rebuilt on every visit."""
+    from app import workspace
+    a = workspace._boot_fingerprint(workspace._boot_script())
+    b = workspace._boot_fingerprint(workspace._boot_script())
+    assert a == b
+    assert workspace._boot_is_stale({"Config": {"Labels": {}}}) is True
+    assert workspace._boot_is_stale({"Config": {"Labels": {workspace._CFG_LABEL: a}}}) is False

@@ -25,10 +25,11 @@ Security model:
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import re
 import time
-from urllib.parse import quote
+from urllib.parse import quote, unquote
 
 import httpx
 from fastapi import APIRouter, Request
@@ -41,6 +42,13 @@ log = logging.getLogger("dhc.work")
 router = APIRouter(tags=["workspace"])
 
 _LABEL = "dshwork.user"
+# The boot script is baked into the container's Cmd at CREATE time, so an
+# existing container keeps rewriting the settings.yaml it was born with — the
+# catalog grew from 2 models to 20 and every already-provisioned workspace
+# stayed on the old two. Stamping the script's digest lets ensure_workspace spot
+# a stale container and rebuild it; the /root and /workspace volumes are named
+# and survive, so nothing the user made is lost.
+_CFG_LABEL = "dshwork.bootcfg"
 # in-process activity + start-state tracking (single-worker semantics, like the
 # rest of the gateway guards; the reaper re-seeds after a server restart)
 _last_seen: dict[str, float] = {}
@@ -57,6 +65,10 @@ def _work_url(path: str = "/") -> str:
     https origin it does not serve."""
     scheme = "http" if config.PUBLIC_BASE.startswith("http://") else "https"
     return f"{scheme}://{config.WORK_DOMAIN}{path}"
+
+
+def _boot_fingerprint(boot: str) -> str:
+    return hashlib.sha256(boot.encode()).hexdigest()[:16]
 
 
 def _cname(user_id: str) -> str:
@@ -133,10 +145,14 @@ async def _running_workspaces() -> list[dict]:
     return r.json() if r.status_code == 200 else []
 
 
-async def _create(user: dict) -> None:
+def _boot_script() -> str:
+    """The container's entrypoint script.
+
+    Deliberately free of per-user values (the credential arrives through env),
+    so its digest identifies the CONFIGURATION rather than the user — that is
+    what lets a running container be recognised as out of date.
+    """
     gateway = config.PUBLIC_BASE.rstrip("/")
-    token = _mint_workspace_token(user)
-    hexid = _cname(user["id"])[len("dshwork-"):]
     # Chat goes through dsh's pi-ai adapter (openai-completions protocol), NOT
     # the llm-deepseek adapter: our upstream speaks standard OpenAI streaming,
     # and llm-deepseek's DeepSeek-flavored tool-call parsing assembles empty
@@ -153,6 +169,16 @@ async def _create(user: dict) -> None:
         for m in model_catalog.catalog().values()
     )
     settings_yaml = (
+        # dsh registers its own DeepSeek provider, which showed up in the model
+        # picker as a second "DeepSeek" group offering V4-Flash/V4-Pro. Those
+        # entries were broken twice over: the adapter mis-parses our upstream's
+        # tool-call deltas (see above), and with no DEEPSEEK_BASE_URL set they
+        # resolved to the PUBLIC api.deepseek.com — sending the user's device
+        # token to a third party. An explicit empty catalog removes them from
+        # the picker; baseURL keeps anything that still resolves on-platform.
+        "llm-deepseek:\n"
+        f"  baseURL: {gateway}/llm/v1\n"
+        "  models: []\n"
         "llm-pi-ai:\n"
         "  providers:\n"
         "    dshcloud:\n"
@@ -216,14 +242,23 @@ async def _create(user: dict) -> None:
         "socat TCP-LISTEN:3081,fork,reuseaddr TCP:127.0.0.1:3080 & "
         "exec dsh web --host 127.0.0.1 --port 3080"
     )
+    return boot
+
+
+async def _create(user: dict) -> None:
+    token = _mint_workspace_token(user)
+    gateway = config.PUBLIC_BASE.rstrip("/")
+    hexid = _cname(user["id"])[len("dshwork-"):]
+    boot = _boot_script()
     body = {
         "Image": config.WORK_IMAGE,
         "Cmd": ["sh", "-c", boot],
         "WorkingDir": "/workspace",
-        "Labels": {_LABEL: user["id"]},
+        "Labels": {_LABEL: user["id"], _CFG_LABEL: _boot_fingerprint(boot)},
         "Env": [
             f"DSH_CLOUD_TOKEN={token}",
             f"DEEPSEEK_API_KEY={token}",
+            f"DEEPSEEK_BASE_URL={gateway}/llm/v1",
             f"DEEPSEEK_SEARCH_BASE_URL={gateway}/llm/anthropic/v1",
             "DSH_TELEMETRY_DISABLED=1",
             # The per-user container IS the sandbox boundary (512MB/1CPU/pids512,
@@ -281,11 +316,28 @@ async def _ready(user_id: str) -> bool:
         return False
 
 
+def _boot_is_stale(info: dict) -> bool:
+    """True when the container was built from a different boot configuration.
+
+    A container with no stamp at all predates the mechanism, so it is stale by
+    definition — that is exactly the population stuck on the old 2-model list.
+    """
+    labels = ((info.get("Config") or {}).get("Labels") or {})
+    return labels.get(_CFG_LABEL) != _boot_fingerprint(_boot_script())
+
+
 async def ensure_workspace(user: dict) -> str:
     """Idempotent create+start; returns 'running' | 'starting'. Raises on
     hard failures (cap reached, engine down)."""
     uid = user["id"]
     info = await _inspect(uid)
+    if info is not None and _boot_is_stale(info):
+        # Rebuild rather than restart: the settings the user would get are baked
+        # into the old Cmd. Volumes are named, so files and history persist.
+        log.info("workspace %s has stale boot config; recreating", uid)
+        await _docker("POST", f"/containers/{_cname(uid)}/stop", params={"t": "5"})
+        await _docker("DELETE", f"/containers/{_cname(uid)}")
+        info = None
     if info is None:
         running = await _running_workspaces()
         if len(running) >= config.WORK_MAX_CONCURRENT:
@@ -395,9 +447,66 @@ def _inject_base(body: bytes, prefix: str) -> bytes:
     return tag + body
 
 
+# How a workspace file is presented: a glyph, a tile colour, and a human type
+# name. Keyed by extension because that is all the container's directory index
+# gives us — no stat, no mime (the docker socket proxy denies exec, and that
+# restriction is worth more than richer metadata).
+_ICON_PAGE = ('<svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" '
+              'stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+              '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M7 6.5h.01"/></svg>')
+_ICON_DOC = ('<svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" '
+             'stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+             '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/>'
+             '<path d="M14 3v5h5M9 13h6M9 17h4"/></svg>')
+_ICON_IMG = ('<svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" '
+             'stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+             '<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="1.6"/>'
+             '<path d="m4 18 5-4 4 3 3-2 4 3"/></svg>')
+_ICON_DECK = ('<svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" '
+              'stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+              '<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M12 16v4M8 20h8"/></svg>')
+_ICON_CODE = ('<svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" '
+              'stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+              '<path d="m8 8-4 4 4 4M16 8l4 4-4 4"/></svg>')
+_ICON_DIR = ('<svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" '
+             'stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+             '<path d="M4 19V7.5A1.5 1.5 0 0 1 5.5 6h3.8l2 2.5h7.2A1.5 1.5 0 0 1 20 10v9z"/></svg>')
+
+_KINDS = {
+    ".html": ("page", _ICON_PAGE, "网页"), ".htm": ("page", _ICON_PAGE, "网页"),
+    ".pdf": ("doc", _ICON_DOC, "PDF"), ".md": ("doc", _ICON_DOC, "Markdown"),
+    ".txt": ("doc", _ICON_DOC, "文本"), ".csv": ("doc", _ICON_DOC, "表格"),
+    ".docx": ("doc", _ICON_DOC, "Word"), ".xlsx": ("doc", _ICON_DOC, "Excel"),
+    ".pptx": ("deck", _ICON_DECK, "演示文稿"), ".ppt": ("deck", _ICON_DECK, "演示文稿"),
+    ".png": ("img", _ICON_IMG, "图片"), ".jpg": ("img", _ICON_IMG, "图片"),
+    ".jpeg": ("img", _ICON_IMG, "图片"), ".gif": ("img", _ICON_IMG, "图片"),
+    ".svg": ("img", _ICON_IMG, "矢量图"), ".webp": ("img", _ICON_IMG, "图片"),
+    ".js": ("code", _ICON_CODE, "脚本"), ".mjs": ("code", _ICON_CODE, "脚本"),
+    ".ts": ("code", _ICON_CODE, "脚本"), ".py": ("code", _ICON_CODE, "脚本"),
+    ".json": ("code", _ICON_CODE, "JSON"), ".css": ("code", _ICON_CODE, "样式"),
+}
+
+
+def _describe(name: str) -> dict:
+    """Presentation facts for one workspace entry."""
+    if name.endswith("/"):
+        return {"name": name, "label": name.rstrip("/"), "kind": "dir",
+                "glyph": _ICON_DIR, "type_label": "文件夹"}
+    ext = ("." + name.rsplit(".", 1)[1].lower()) if "." in name else ""
+    kind, glyph, type_label = _KINDS.get(ext, ("file", _ICON_CODE, ext.lstrip(".").upper() or "文件"))
+    # Names arrive percent-encoded from the directory index; a card reading
+    # "AI-Agent-%E5%87%BA%E6%B5%B7.pptx" is not a product, it is a leak of how
+    # the list is fetched. The href keeps the encoded form.
+    try:
+        label = unquote(name)
+    except Exception:  # noqa: BLE001 - a malformed name must not blank the page
+        label = name
+    return {"name": name, "label": label, "kind": kind, "glyph": glyph, "type_label": type_label}
+
+
 @router.get("/preview")
 async def preview_index(request: Request):
-    """What the agent made, ready to open.
+    """个人成品 — what the agent made, ready to open.
 
     Two things live here: the files in /workspace (served by the container's
     always-on static server, so nothing needs starting) and any dev server the
@@ -413,37 +522,13 @@ async def preview_index(request: Request):
 
     files, ports = [], []
     if running:
-        files = await _workspace_files(user["id"])
+        files = [_describe(f) for f in await _workspace_files(user["id"])]
         ports = [p for p in await _open_ports(user["id"]) if p != PREVIEW_STATIC_PORT]
 
-    if not running:
-        body = '<p>云工作台未在运行。<a href="/work">先进入云工作台 →</a></p>'
-    else:
-        parts = []
-        if files:
-            rows = "".join(
-                f'<li><a href="/preview/{PREVIEW_STATIC_PORT}/{f}" target="_blank" rel="noopener">{f}</a></li>'
-                for f in files)
-            parts.append(f"<h2>工作区文件</h2><p class=muted>智能体生成的文件，点开即看。</p><ul>{rows}</ul>")
-        else:
-            parts.append("<h2>工作区文件</h2><p class=muted>工作区还是空的——让智能体做点东西，"
-                         "生成的文件会出现在这里。</p>")
-        if ports:
-            rows = "".join(f'<li><a href="/preview/{p}/" target="_blank" rel="noopener">'
-                           f'端口 {p}</a></li>' for p in ports)
-            parts.append(f"<h2>正在运行的服务</h2><ul>{rows}</ul>")
-        body = "".join(parts)
-
-    return HTMLResponse(
-        "<!doctype html><meta charset=utf-8><title>预览 · DSH Cloud</title>"
-        "<style>body{font:15px/1.7 system-ui,-apple-system,'PingFang SC',sans-serif;"
-        "max-width:640px;margin:56px auto;padding:0 20px;color:#16233a}"
-        "h1{font-size:26px;margin-bottom:6px}h2{font-size:15px;margin:26px 0 6px}"
-        "a{color:#2663c9}ul{padding-left:20px;margin:8px 0}li{margin:5px 0}"
-        ".muted{color:#66748c;font-size:13.5px;margin:0}"
-        "code{background:#f0f4fa;padding:2px 6px;border-radius:4px}</style>"
-        "<h1>预览</h1>" + body +
-        '<p style="margin-top:32px"><a href="/work">← 返回云工作台</a></p>')
+    from .webpages import _render
+    return _render(request, "works.html", "works",
+                   running=running, files=files, ports=ports,
+                   static_port=PREVIEW_STATIC_PORT)
 
 
 @router.api_route("/preview/{port}/{path:path}",

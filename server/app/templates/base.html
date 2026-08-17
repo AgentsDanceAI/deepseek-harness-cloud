@@ -56,14 +56,19 @@
             <strong>企业部署</strong><span>部署开源代码，得到内部专用的 dsh 云平台</span></a>
           <a href="/solutions#teams"><span class="nav-ico"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3"/><path d="M3.5 20a5.5 5.5 0 0 1 11 0"/><path d="M17 11.5a2.5 2.5 0 1 0 0-5"/><path d="M17.5 20a5 5 0 0 0-3-4.6"/></svg></span>
             <strong>按席付费</strong><span>席位订阅，积分与机时在组织内共享</span></a>
-          <a href="/pricing#packs"><span class="nav-ico"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg></span>
+          <a href="/solutions#payg"><span class="nav-ico"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg></span>
             <strong>按量付费</strong><span>买积分包，用多少扣多少，不订阅也能用</span></a>
-          <a href="/pricing#plans"><span class="nav-ico"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg></span>
+          <a href="/solutions#subscription"><span class="nav-ico"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg></span>
             <strong>包年包月</strong><span>月付或年付，含每月积分与云端机时</span></a>
         </div>
       </div>
       <a href="/pricing" {% if page == 'pricing' %}class="active"{% endif %}>定价</a>
       <a href="/download" {% if page == 'download' %}class="active"{% endif %}>桌面下载</a>
+      {% if user %}
+        <a class="btn btn-primary btn-sm" href="/work" target="_blank" rel="noopener">云端体验</a>
+      {% else %}
+        <a class="btn btn-primary btn-sm" href="/login?next=%2Fwork">云端体验</a>
+      {% endif %}
     </nav>
     {# The main nav row is identical logged in or out — account state lives here,
        on the right, so a signed-in visitor reaches the cloud in one click rather
@@ -81,14 +86,15 @@
               <span>{{ user.email }}</span>
             </div>
             <a href="/console"><strong>控制台</strong><span>额度、订阅与用量</span></a>
-            <a href="/team"><strong>团队</strong><span>席位、成员与共享额度</span></a>
+            {% if user.is_admin %}
+            <a href="/console/admin"><strong>超管管理</strong><span>用户额度、套餐与全站用量</span></a>
+            {% endif %}
+            <a href="/console/team"><strong>团队</strong><span>席位、成员与共享额度</span></a>
             <a href="/logout" class="nav-menu-quiet"><strong>退出登录</strong></a>
           </div>
         </div>
-        <a class="btn btn-primary btn-sm" href="/work" target="_blank" rel="noopener">云端体验</a>
       {% else %}
         <a class="nav-signin" href="/login">登录</a>
-        <a class="btn btn-primary btn-sm" href="/login?next=%2Fwork">云端体验</a>
       {% endif %}
     </div>
   </div>

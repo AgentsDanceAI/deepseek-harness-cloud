@@ -102,13 +102,37 @@ def test_download_page_placeholder(client):
     assert "disabled" in r.text
 
 
-def test_download_page_with_urls(client):
+def test_download_page_links_through_the_counter(client):
+    """Installers are linked as /dl/<key>, never as the storage URL: that is what
+    makes the advertised download count a real number, and what lets the bytes
+    move to another host without touching a template."""
     os.environ["DOWNLOAD_URL_MAC"] = "https://example.com/dsh.dmg"
     try:
         r = client.get("/download")
-        assert "https://example.com/dsh.dmg" in r.text
+        assert "/dl/mac-arm64" in r.text
+        assert "https://example.com/dsh.dmg" not in r.text
     finally:
         os.environ.pop("DOWNLOAD_URL_MAC", None)
+
+
+def test_download_redirect_counts_then_forwards(client):
+    os.environ["DOWNLOAD_URL_MAC"] = "https://example.com/dsh.dmg"
+    try:
+        from app import db
+        before = db.query_one("SELECT v FROM kv WHERE k='downloads_total'")
+        before = int((before["v"] if before else 0) or 0)
+        r = client.get("/dl/mac-arm64", follow_redirects=False)
+        assert r.status_code == 302
+        assert r.headers["location"] == "https://example.com/dsh.dmg"
+        after = db.query_one("SELECT v FROM kv WHERE k='downloads_total'")
+        assert int(after["v"]) == before + 1
+    finally:
+        os.environ.pop("DOWNLOAD_URL_MAC", None)
+
+
+def test_download_redirect_404s_for_a_platform_we_do_not_ship(client):
+    os.environ.pop("DOWNLOAD_URL_WIN_ARM", None)
+    assert client.get("/dl/win-arm64", follow_redirects=False).status_code == 404
 
 
 # --- legal pages -------------------------------------------------------------

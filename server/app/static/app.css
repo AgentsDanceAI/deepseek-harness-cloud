@@ -731,7 +731,10 @@ body[data-page="landing"] .nav-menu-head strong { color: var(--fg); }
    than left to fight the new layout. */
 .hero-dark-inner.hero-center {
   display: block; max-width: 820px; margin: 0 auto; text-align: center;
-  padding-top: 104px; padding-bottom: 104px;
+  /* Trimmed from 104px: with the download row added, the closing line landed
+     exactly on the fold and read as a rendering fault rather than as content
+     continuing below. */
+  padding-top: 76px; padding-bottom: 64px;
 }
 .hero-center { text-align: center; }
 .hero-center h1 {
@@ -977,24 +980,30 @@ body[data-page="landing"] .site-header {
 .model-row span { color: var(--faint); font-variant-numeric: tabular-nums; flex: none; }
 
 /* ---------- hero: the two doors (cloud above, desktop here) ---------- */
-.hero-doors {
-  display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-  gap: 12px; max-width: 640px; margin: 26px auto 0;
+/* ---------- hero download row (every build, one click) ----------
+   Modelled on the reference desktop site: solid light buttons on the dark hero,
+   platform mark + build name, with the GitHub link and the real download count
+   sitting quietly underneath. */
+.hero-dl { margin: 28px auto 0; max-width: 760px; }
+.hero-dl-row { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; }
+.dl-btn {
+  display: inline-flex; align-items: center; gap: 10px; text-align: left;
+  padding: 11px 18px; border-radius: 12px;
+  background: #fff; color: #14213d; border: 1px solid rgba(255, 255, 255, .6);
+  transition: transform .15s ease, box-shadow .15s ease;
 }
-.hero-door {
-  display: grid; grid-template-columns: 34px 1fr; grid-template-rows: auto auto;
-  column-gap: 12px; align-items: center; text-align: left;
-  padding: 14px 16px; border-radius: 14px;
-  background: rgba(255, 255, 255, .07); border: 1px solid rgba(255, 255, 255, .18);
-  color: #e9f0fb; transition: background .15s ease, border-color .15s ease, transform .15s ease;
+.dl-btn:hover { color: #14213d; transform: translateY(-1px); box-shadow: 0 12px 28px -12px rgba(4, 14, 32, .8); }
+.dl-btn span { display: flex; flex-direction: column; line-height: 1.25; }
+.dl-btn b { font-size: 14px; font-weight: 650; }
+.dl-btn i { font-style: normal; font-size: 11.5px; color: #5c6673; margin-top: 1px; }
+.hero-dl-foot {
+  margin-top: 16px; display: flex; flex-wrap: wrap; justify-content: center;
+  align-items: center; gap: 8px 22px; font-size: 12.5px; color: rgba(214, 227, 245, .72);
 }
-.hero-door:hover {
-  background: rgba(255, 255, 255, .14); border-color: rgba(255, 255, 255, .4);
-  color: #fff; transform: translateY(-1px);
-}
-.hero-door .door-ico { grid-row: 1 / span 2; display: grid; place-items: center; color: #cfe0fa; }
-.hero-door b { font-size: 14.5px; font-weight: 600; }
-.hero-door .door-sub { color: rgba(214, 227, 245, .7); font-size: 12.5px; line-height: 1.5; }
+.dl-link, .dl-count { display: inline-flex; align-items: center; gap: 6px; }
+.dl-link { color: rgba(214, 227, 245, .82); }
+.dl-link:hover { color: #fff; }
+.dl-count b { color: #fff; font-weight: 650; }
 
 /* ---------- model strip on the homepage ---------- */
 .model-strip {
@@ -1003,3 +1012,48 @@ body[data-page="landing"] .site-header {
   padding: 16px 18px; background: var(--card);
   border: 1px solid var(--border); border-radius: var(--radius-lg);
 }
+
+/* ---------- 个人成品 (what the agent built) ----------
+   Cards, not a bullet list: these are finished things the user asked for, and a
+   list of blue underlined filenames reads like a directory index — which is
+   literally what it was. The tile colour encodes type so a deck, a page and a
+   script are separable at a glance. */
+.works-grid {
+  margin-top: 26px; display: grid; gap: 10px;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+}
+.work-card {
+  display: grid; grid-template-columns: 40px 1fr auto; align-items: center; gap: 13px;
+  padding: 14px 15px; border: 1px solid var(--border); border-radius: 14px;
+  background: var(--card); color: var(--fg);
+  transition: border-color .15s ease, box-shadow .15s ease, transform .15s ease;
+}
+.work-card:hover {
+  color: var(--fg); border-color: var(--border-strong);
+  box-shadow: var(--shadow-md); transform: translateY(-1px);
+}
+.work-ico {
+  width: 40px; height: 40px; border-radius: 11px; display: grid; place-items: center;
+  background: color-mix(in srgb, var(--brand) 9%, var(--card)); color: var(--brand);
+}
+.work-ico-deck { background: color-mix(in srgb, #d97706 12%, var(--card)); color: #b45309; }
+.work-ico-doc  { background: color-mix(in srgb, #0891b2 12%, var(--card)); color: #0e7490; }
+.work-ico-img  { background: color-mix(in srgb, #7c3aed 12%, var(--card)); color: #6d28d9; }
+.work-ico-dir  { background: color-mix(in srgb, var(--muted) 14%, var(--card)); color: var(--muted); }
+.work-body { min-width: 0; }
+.work-body strong {
+  display: block; font-size: 14px; font-weight: 600; line-height: 1.35;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.work-meta { display: block; margin-top: 2px; font-size: 12px; color: var(--faint); }
+.work-go { color: var(--faint); flex: none; }
+.work-card:hover .work-go { color: var(--brand); }
+.works-sub { margin-top: 38px; font-size: 17px; font-weight: 650; }
+
+.works-empty {
+  border: 1px dashed var(--border-strong); border-radius: 16px;
+  padding: 46px 24px; text-align: center; color: var(--muted);
+}
+.works-empty svg { color: var(--faint); }
+.works-empty h3 { margin-top: 12px; font-size: 17px; font-weight: 650; color: var(--fg); }
+.works-empty p { margin: 6px 0 18px; font-size: 13.5px; }
