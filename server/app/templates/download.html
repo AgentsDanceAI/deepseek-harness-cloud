@@ -1,9 +1,9 @@
 {% extends "base.html" %}
-{% block title %}下载 — DSH Cloud{% endblock %}
+{% block title %}下载 — deepseek-harness-cloud{% endblock %}
 {% block content %}
 <section class="dl-wrap">
   <div class="container">
-    <h1>下载 DSH Cloud 桌面应用</h1>
+    <h1>下载 deepseek-harness-cloud 桌面应用</h1>
     <p class="muted">安装后在应用内登录，浏览器授权设备，即可开始使用。</p>
     {% if not has_mac_arm64 or not has_win_x64 %}
     <p class="muted" style="background:#fff7ed;border:1px solid #fed7aa;border-radius:10px;padding:12px 14px">
@@ -64,7 +64,7 @@
     <details class="dl-tips">
       <summary>首次打开的安全提示（当前安装包未签名）</summary>
       <p><strong>macOS</strong>：首次打开若提示"无法验证开发者"，请在应用图标上<strong>右键 → 打开</strong>，
-        或在终端执行 <code>xattr -cr "/Applications/DSH Cloud Desktop.app"</code> 后再打开。</p>
+        或在终端执行 <code>xattr -cr "/Applications/deepseek-harness-cloud Desktop.app"</code> 后再打开。</p>
       <p><strong>Windows</strong>：SmartScreen 提示时点击<strong>「更多信息」→「仍要运行」</strong>。</p>
       <p>正式的代码签名与公证版本将在后续更新中提供。</p>
     </details>

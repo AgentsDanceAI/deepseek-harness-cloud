@@ -1,4 +1,4 @@
-/* DSH Cloud workspace chrome — the only thing we add on top of dsh's own UI.
+/* deepseek-harness-cloud workspace chrome — the only thing we add on top of dsh's own UI.
    dsh renders full-screen with no way back to our console, which left people
    stranded in the workspace. This is a deliberately small floating control:
    one dot that opens a sheet, so it never competes with dsh's chrome. */

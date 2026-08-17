@@ -74,7 +74,16 @@ docker run --rm \
 echo
 echo "==> artifacts"
 dist="$tree/dsh-plugin-desktop/dist"
-ls -lh "$dist"/*.exe 2>/dev/null || { echo "no .exe produced" >&2; exit 1; }
+# Building two arches also produces a combined dual-arch installer (~291MB).
+# Name the two we actually ship rather than globbing *.exe: the glob neither
+# verified nor excluded the combined build, so "some .exe exists" was passing
+# for a success check even if a per-arch one was missing.
+x64_exe="$dist/DSH-Cloud-Desktop-2.0.0-x64-Setup.exe"
+arm_exe="$dist/DSH-Cloud-Desktop-2.0.0-arm64-Setup.exe"
+for exe in "$x64_exe" "$arm_exe"; do
+  [ -f "$exe" ] || { echo "missing expected artifact: $exe" >&2; exit 1; }
+  ls -lh "$exe"
+done
 
 echo
 echo "==> verify each packaged tree carries the cloud login assets"
@@ -110,6 +119,23 @@ done
   echo "expected an unpacked tree per arch, found $found" >&2
   exit 1
 }
+
+# publish-r2.sh uploads whatever sits in the server's data volume, NOT this
+# dist/ directory. Without this step a fresh build stays local and the publisher
+# silently re-uploads the previous release: that is exactly how win-x64 shipped
+# a build 17 commits behind while win-arm64 was current, both under 2.0.0.
+if docker inspect dhc-server >/dev/null 2>&1; then
+  echo
+  echo "==> stage into the server data volume (what publish-r2.sh reads)"
+  for exe in "$x64_exe" "$arm_exe"; do
+    docker cp "$exe" dhc-server:/app/data/releases/
+    echo "    staged $(basename "$exe")"
+  done
+else
+  echo
+  echo "NOTE: dhc-server not running; artifacts left in $dist."
+  echo "      Stage them into /app/data/releases before publishing."
+fi
 
 echo
 echo "Done. Publish with:"

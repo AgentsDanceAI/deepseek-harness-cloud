@@ -9,6 +9,11 @@ node_modules/
 
 # secrets — never commit
 deploy/**/.env
+# Any sidecar of it too. A timestamped backup holds the same gateway keys,
+# payment private key and database password as the original, and `git add -A`
+# would have swept one straight into the repo.
+.env.*
+!.env.example
 .env
 !deploy/**/.env.template
 !deploy/**/.env.example

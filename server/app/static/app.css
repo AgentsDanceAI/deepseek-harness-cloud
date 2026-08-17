@@ -1,4 +1,4 @@
-/* DSH Cloud design system.
+/* deepseek-harness-cloud design system.
    Kinship with the upstream desktop site (dshdesktop.cn): brand blue #2663c9,
    blue-tinted near-white ground, 10px radius, quiet borders, Noto Sans SC.
    Tokens on :root; dark via prefers-color-scheme redefining tokens only. */
@@ -97,17 +97,16 @@ h1, h2, h3, h4 { line-height: 1.3; text-wrap: balance; font-weight: 600; }
 :focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; border-radius: 4px; }
 
 /* ---------- header ---------- */
-
 .site-header {
   position: sticky; top: 0; z-index: 50;
-  background: var(--nav-bg);
-  backdrop-filter: blur(12px) saturate(1.4);
-  -webkit-backdrop-filter: blur(12px) saturate(1.4);
-  border-bottom: 1px solid var(--border);
+  background: linear-gradient(180deg, rgba(11, 28, 56, .94), rgba(11, 28, 56, .74));
+  border-bottom: 1px solid rgba(122, 165, 240, .18);
+  backdrop-filter: blur(14px) saturate(1.5);
+  -webkit-backdrop-filter: blur(14px) saturate(1.5);
 }
+
 .nav-row { display: flex; align-items: center; gap: 32px; height: 64px; }
-.brand { display: flex; align-items: center; gap: 10px; color: var(--fg); flex: none; }
-.brand:hover { color: var(--fg); }
+.brand { display: flex; align-items: center; gap: 10px; flex: none; }
 .brand-name { font-size: 16.5px; font-weight: 650; letter-spacing: .1px; }
 /* Top-level items are padded pills, not bare text, so the hover target matches
    the dropdown trigger beside it and the row reads as one control strip. */
@@ -612,17 +611,14 @@ form .btn-block { margin-top: 16px; }
 .faq p { color: var(--muted); font-size: 14px; margin-top: 8px; }
 
 /* homepage: dark glass nav so the bar sits naturally on the ripple hero */
-body[data-page="landing"] .site-header {
-  background: rgba(9, 22, 44, .72);
-  border-bottom-color: rgba(255, 255, 255, .08);
-}
-body[data-page="landing"] .brand,
-body[data-page="landing"] .brand:hover { color: #fff; }
+
+.brand,
+.brand:hover { color: #fff; }
 /* Direct child only. As a descendant selector this outranked the dropdown's own
    colours and painted the menu's text near-white on its white card. */
-body[data-page="landing"] .site-nav > a:not(.btn) { color: rgba(220, 231, 247, .78); }
-body[data-page="landing"] .site-nav > a:not(.btn):hover { color: #fff; background: rgba(255, 255, 255, .12); }
-body[data-page="landing"] .site-nav > a.active { color: #fff; }
+.site-nav > a:not(.btn) { color: rgba(220, 231, 247, .78); }
+.site-nav > a:not(.btn):hover { color: #fff; background: rgba(255, 255, 255, .12); }
+.site-nav > a.active { color: #fff; }
 
 /* ---------- workspace starting spinner ---------- */
 .spinner {
@@ -692,12 +688,12 @@ body[data-page="landing"] .site-nav > a.active { color: #fff; }
 
 /* The landing page paints nav text near-white for the dark hero; the panel is
    its own light surface, so it takes the normal ink back. */
-body[data-page="landing"] .nav-group > button { color: rgba(220, 231, 247, .78); }
-body[data-page="landing"] .nav-group > button:hover,
-body[data-page="landing"] .nav-group[data-open="true"] > button { color: #fff; background: rgba(255, 255, 255, .12); }
-body[data-page="landing"] .nav-menu a,
-body[data-page="landing"] .nav-menu strong { color: var(--fg); }
-body[data-page="landing"] .nav-menu span:not(.nav-ico) { color: var(--faint); }
+.nav-group > button { color: rgba(220, 231, 247, .78); }
+.nav-group > button:hover,
+.nav-group[data-open="true"] > button { color: #fff; background: rgba(255, 255, 255, .12); }
+.nav-menu a,
+.nav-menu strong { color: var(--fg); }
+.nav-menu span:not(.nav-ico) { color: var(--faint); }
 @media (max-width: 860px) { .nav-group { display: none; } }
 
 /* ---------- right-hand account control ----------
@@ -719,9 +715,9 @@ body[data-page="landing"] .nav-menu span:not(.nav-ico) { color: var(--faint); }
 .nav-menu-head strong { display: block; font-size: 13.5px; font-weight: 600; color: var(--fg); }
 .nav-menu-head span { display: block; margin-top: 2px; font-size: 12px; color: var(--faint); }
 .nav-menu-quiet strong { color: var(--muted) !important; font-weight: 500 !important; }
-body[data-page="landing"] .nav-signin { color: rgba(220, 231, 247, .78); }
-body[data-page="landing"] .nav-signin:hover { color: #fff; }
-body[data-page="landing"] .nav-menu-head strong { color: var(--fg); }
+.nav-signin { color: rgba(220, 231, 247, .78); }
+.nav-signin:hover { color: #fff; }
+.nav-menu-head strong { color: var(--fg); }
 @media (max-width: 860px) { .nav-signin { display: none; } }
 
 
@@ -935,15 +931,6 @@ body[data-page="landing"] .nav-menu-head strong { color: var(--fg); }
 .table-wrap { overflow-x: auto; }
 
 
-/* ---------- header over the ripple hero ----------
-   A flat grey slab across the top of a deep-blue hero reads as a seam. Tint it
-   with the hero's own blue and let the page show through instead. */
-body[data-page="landing"] .site-header {
-  background: linear-gradient(180deg, rgba(11, 28, 56, .92), rgba(11, 28, 56, .68));
-  border-bottom-color: rgba(122, 165, 240, .18);
-  backdrop-filter: blur(14px) saturate(1.5);
-  -webkit-backdrop-filter: blur(14px) saturate(1.5);
-}
 
 /* ---------- pricing cards (structure mirrors the AgentsDance reference so
    entitlements and copy stay portable between the two products) ---------- */
@@ -1057,3 +1044,47 @@ body[data-page="landing"] .site-header {
 .works-empty svg { color: var(--faint); }
 .works-empty h3 { margin-top: 12px; font-size: 17px; font-weight: 650; color: var(--fg); }
 .works-empty p { margin: 6px 0 18px; font-size: 13.5px; }
+
+/* ---------- GitHub star badge ----------
+   Sits beside the wordmark, reads as metadata rather than as a control. Only
+   rendered when the repo is publicly visible (see app/github_stars.py). */
+.star-badge {
+  display: inline-flex; align-items: center; gap: 5px; flex: none;
+  margin-left: 2px; padding: 3px 9px; border-radius: 999px;
+  border: 1px solid var(--border); background: var(--card);
+  color: var(--muted); font-size: 12px; line-height: 1.6;
+}
+.star-badge:hover { color: var(--fg); border-color: var(--border-strong); }
+.star-badge b { font-weight: 650; color: var(--fg); font-variant-numeric: tabular-nums; }
+.star-badge {
+  border-color: rgba(255, 255, 255, .22); background: rgba(255, 255, 255, .08);
+  color: rgba(220, 231, 247, .8);
+}
+.star-badge:hover { color: #fff; border-color: rgba(255, 255, 255, .4); }
+.star-badge b { color: #fff; }
+
+/* ---------- anchor landing ----------
+   The header is sticky, so an in-page jump put the target's first line under
+   it: clicking 「云端 Harness」 landed with the card's own label hidden behind
+   the bar. scroll-margin-top reserves the header height plus breathing room so
+   the whole card starts below it. Applied to every jump target, not just the
+   ones reported — every dropdown entry had the same fault. */
+:target,
+[id]:target,
+.card[id], section[id], div[id].feature {
+  scroll-margin-top: 88px;
+}
+html { scroll-behavior: smooth; }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+
+/* ---------- consistent chrome on every page ----------
+   The ripple blue used to live only on the homepage, so every inner page read
+   as a different product. The header now carries it everywhere, with a short
+   gradient beneath so the dark bar resolves into the page instead of ending in
+   a hard seam. The homepage's own canvas sits on top of this and hides it. */
+body:not([data-page="landing"]) .site-header::after {
+  content: ""; position: absolute; left: 0; right: 0; top: 100%; height: 140px;
+  pointer-events: none;
+  background: linear-gradient(180deg, rgba(11, 28, 56, .40), rgba(11, 28, 56, 0));
+}
+body:not([data-page="landing"]) .section:first-of-type { position: relative; z-index: 1; }

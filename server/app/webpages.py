@@ -78,10 +78,26 @@ def _ctx(request: Request, page: str, **extra) -> dict:
         "work_pass_days": config.WORK_PASS_DAYS,
         "work_pass_intro_price": config.WORK_PASS_INTRO_PRICE,
         "work_pass_price": config.WORK_PASS_PRICE,
+        **_stars_ctx(),
         **_team_terms_ctx(),
     }
     ctx.update(extra)
     return ctx
+
+
+def _stars_ctx() -> dict:
+    """Star badge inputs. Absent until the repo is public — see github_stars."""
+    try:
+        from . import github_stars
+        n = github_stars.stars()
+    except Exception:  # noqa: BLE001 — the badge must never break a page
+        n = None
+    return {
+        "github_stars": n,
+        "github_stars_text": None if n is None else __import__(
+            "app.github_stars", fromlist=["x"]).format_count(n),
+        "github_repo_url": "https://github.com/AgentsDanceAI/deepseek-harness-cloud",
+    }
 
 
 def _team_terms_ctx() -> dict:
@@ -501,6 +517,22 @@ def terms_redirect():
 
 
 # --- download ----------------------------------------------------------------
+
+@router.get("/logout")
+def logout_alias():
+    """Top-level sign-out.
+
+    The account menu linked here while the handler lived at /api/auth/logout, so
+    the link 404'd — and a 404 on sign-out is the same trap as a broken logout
+    button: the person cannot get out. Kept as its own route rather than fixing
+    the one link, because /logout is what people type and what any future
+    template will reach for.
+    """
+    from .accounts import clear_session_cookie
+    response = RedirectResponse(config.PUBLIC_BASE.rstrip("/") + "/", status_code=303)
+    clear_session_cookie(response)
+    return response
+
 
 @router.get("/download")
 def download_page(request: Request):

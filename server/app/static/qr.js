@@ -1,6 +1,6 @@
 /* tinyQR — minimal self-contained QR code generator (byte mode, EC level M,
  * versions 1-10, all 8 masks with penalty selection). No external deps.
- * Written for DSH Cloud to render WeChat Pay code_url on a canvas.
+ * Written for deepseek-harness-cloud to render WeChat Pay code_url on a canvas.
  * Usage: window.tinyQR.draw(canvasEl, "weixin://wxpay/...", 220)
  */
 (function () {

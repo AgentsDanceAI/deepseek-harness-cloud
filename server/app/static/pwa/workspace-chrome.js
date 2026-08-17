@@ -1,4 +1,4 @@
-/* DSH Cloud workspace chrome.
+/* deepseek-harness-cloud workspace chrome.
  *
  * Two jobs, both about the seam between our site and dsh's full-screen UI:
  *
@@ -29,7 +29,7 @@
     var root = document.createElement('div');
     root.id = 'dhc-exit-root';
     root.innerHTML =
-      '<div id="dhc-sheet" hidden role="menu" aria-label="DSH Cloud">' +
+      '<div id="dhc-sheet" hidden role="menu" aria-label="deepseek-harness-cloud">' +
         '<div class="dhc-meta" id="dhc-meta">云工作台</div>' +
         '<a href="' + SITE + '/console" role="menuitem">← 返回控制台</a>' +
         '<a href="' + SITE + '/console/admin" id="dhc-admin" hidden role="menuitem">用户与额度管理</a>' +
@@ -38,7 +38,7 @@
         '<button type="button" id="dhc-signout" class="dhc-danger" role="menuitem">退出登录</button>' +
       '</div>' +
       '<button type="button" id="dhc-exit-btn" aria-haspopup="menu" aria-expanded="false">' +
-        '<span class="dhc-dot" aria-hidden="true"></span><span>DSH Cloud</span>' +
+        '<span class="dhc-dot" aria-hidden="true"></span><span>deepseek-harness-cloud</span>' +
       '</button>';
     document.body.appendChild(root);
 

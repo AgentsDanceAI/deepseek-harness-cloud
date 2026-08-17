@@ -1,6 +1,6 @@
 {
-  "name": "DSH Cloud 云工作台",
-  "short_name": "DSH Cloud",
+  "name": "deepseek-harness-cloud 云工作台",
+  "short_name": "deepseek-harness-cloud",
   "description": "桌面 AI 编程助手的云工作台，手机也能办公",
   "start_url": "/",
   "scope": "/",

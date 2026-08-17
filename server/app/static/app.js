@@ -1,4 +1,4 @@
-/* DSH Cloud console — shared vanilla JS. Dispatches per-page logic via <body data-page>. */
+/* deepseek-harness-cloud console — shared vanilla JS. Dispatches per-page logic via <body data-page>. */
 (function () {
   "use strict";
 

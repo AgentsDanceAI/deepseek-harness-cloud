@@ -1,4 +1,4 @@
-/* DSH Cloud workspace service worker: minimal, network-first.
+/* deepseek-harness-cloud workspace service worker: minimal, network-first.
    The workspace is a live agent UI — never serve it stale. The SW exists for
    PWA installability plus icon caching only. */
 const ICON_CACHE = "dshc-icons-v1";

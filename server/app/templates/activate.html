@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}设备授权 — DSH Cloud{% endblock %}
+{% block title %}设备授权 — deepseek-harness-cloud{% endblock %}
 {% block content %}
 <section class="auth-wrap">
   <div class="card auth-card" id="activate-card" data-code="{{ code }}" data-authed="{{ '1' if user else '' }}">
@@ -16,7 +16,7 @@
     </div>
 
     <div id="act-info" hidden>
-      <p class="muted">以下设备请求访问您的 DSH Cloud 账号：</p>
+      <p class="muted">以下设备请求访问您的 deepseek-harness-cloud 账号：</p>
       <div class="device-box">
         <div class="device-line"><span class="muted">设备名称</span><strong id="act-device-name">—</strong></div>
         <div class="device-line"><span class="muted">操作系统</span><span id="act-device-platform">—</span></div>

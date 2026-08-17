@@ -77,14 +77,34 @@ export RCLONE_CONFIG_R2_SECRET_ACCESS_KEY="$R2_SECRET_ACCESS_KEY"
 export RCLONE_CONFIG_R2_ENDPOINT="$ENDPOINT"
 export RCLONE_CONFIG_R2_NO_CHECK_BUCKET=true
 
+# Content-addressed prefixes. Overwriting an object at the same key does NOT
+# invalidate Cloudflare's cache: republishing win-x64 under its original name
+# left the edge serving the previous build for the rest of its four-hour TTL,
+# so users kept downloading a stale installer while R2 held the new one.
+# Giving each build its own path makes every release a fresh URL that no cache
+# can shadow, keeps the download filename clean, and leaves unchanged files at
+# their existing path so they are neither re-uploaded nor re-downloaded.
+echo "==> address each artifact by content hash"
+KEYED="$(mktemp -d)"
+trap 'rm -rf "$STAGE" "$KEYED"' EXIT
+declare -A KEY_OF
+for f in "$STAGE"/*; do
+  name="$(basename "$f")"
+  sha="$(sha256sum "$f" | cut -c1-8)"
+  mkdir -p "$KEYED/$sha"
+  ln "$f" "$KEYED/$sha/$name" 2>/dev/null || cp "$f" "$KEYED/$sha/$name"
+  KEY_OF["$name"]="$sha/$name"
+  echo "    $name -> $sha/"
+done
+
 echo "==> upload to r2://$R2_BUCKET"
-rclone copy "$STAGE" "R2:$R2_BUCKET" --progress --s3-chunk-size 32M --transfers 2
+rclone copy "$KEYED" "R2:$R2_BUCKET" --progress --s3-chunk-size 32M --transfers 2
 
 echo "==> verify each object is publicly readable over $R2_PUBLIC_BASE"
 fail=0
 for f in "$STAGE"/*; do
   name="$(basename "$f")"
-  url="$R2_PUBLIC_BASE/$name"
+  url="$R2_PUBLIC_BASE/${KEY_OF[$name]}"
   # Range-request the first KB: proves public reachability without pulling 282MB.
   #
   # The cache buster is load-bearing. Probing the bare URL right after upload can
@@ -128,8 +148,8 @@ for var in "${!MAP[@]}"; do
   found="$(cd "$STAGE" && ls -1 $pat 2>/dev/null | head -1 || true)"
   [ -n "$found" ] || { echo "    skip $var (no artifact)"; continue; }
   sed -i "/^${var}=/d" "$ENVFILE"
-  echo "${var}=${R2_PUBLIC_BASE}/${found}" >> "$ENVFILE"
-  echo "    $var -> $R2_PUBLIC_BASE/$found"
+  echo "${var}=${R2_PUBLIC_BASE}/${KEY_OF[$found]}" >> "$ENVFILE"
+  echo "    $var -> $R2_PUBLIC_BASE/${KEY_OF[$found]}"
 done
 
 echo "==> restart the app so it picks up the new targets"

@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}登录 — DSH Cloud{% endblock %}
+{% block title %}登录 — deepseek-harness-cloud{% endblock %}
 {% block head %}<script src="/static/hero-waves.js?v={{ asset_v }}" defer></script>{% endblock %}
 {% block content %}
 {# Split layout after the AgentsDance reference: value proposition on a dark
@@ -22,7 +22,7 @@
         <path d="M26 6a14 14 0 0 1 0 20" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" opacity=".45"/>
         <path d="M6 26a14 14 0 0 1 0-20" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" opacity=".45"/>
       </svg>
-      <span class="brand-name" style="color:#fff">DSH Cloud</span>
+      <span class="brand-name" style="color:#fff">deepseek-harness-cloud</span>
     </a>
 
     <div>
@@ -43,13 +43,13 @@
       </div>
     </div>
 
-    <footer>dshcloud.online · © {{ year }} DSH Cloud</footer>
+    <footer>dshcloud.online · © {{ year }} deepseek-harness-cloud</footer>
   </aside>
 
   <main class="auth-main">
     <div class="auth-panel">
       <div class="card">
-        <h1 class="auth-title" style="margin-bottom:4px">登录 DSH Cloud</h1>
+        <h1 class="auth-title" style="margin-bottom:4px">登录 deepseek-harness-cloud</h1>
         <p class="muted small">欢迎回来，把活交给智能体</p>
 
         {% set oauth_next = request.query_params.get('next', '/console') %}
