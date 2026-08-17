@@ -190,7 +190,13 @@ def test_checkout_creates_pending_order_usd(monkeypatch):
     p = sent["payload"]
     assert p["productId"] == "PROD_test"
     assert p["currency"] == "USD"
-    assert p["priceSnapshot"]["amount"] == plans.pricing()["tiers"]["plus"]["monthly_cents"] / 100
+    # A STRING, not a number. This assertion used to demand a float, which
+    # locked in exactly the shape the live API rejects with a fieldless
+    # {"message":"Invalid input","layer":"order"} — every real checkout
+    # failed against production while the suite stayed green.
+    expected = f'{plans.pricing()["tiers"]["plus"]["monthly_cents"] / 100:.2f}'
+    assert p["priceSnapshot"]["amount"] == expected
+    assert isinstance(p["priceSnapshot"]["amount"], str)
     assert p["orderMerchantExternalId"] == oid
     assert f"order={oid}" in p["successUrl"]
     assert "card" in p["includePaymentMethods"]

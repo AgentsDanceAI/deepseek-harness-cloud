@@ -206,7 +206,10 @@ async def ensure_product_id(item: str) -> str:
     info = base.resolve_item(item)
     name = info["description"]
     currency = info["currency"]
-    amount = round(info["amount_cents"] / 100, 2)  # catalog placeholder (2-decimal)
+    # A STRING, not a number. The API documents amount as "display format string"
+    # and rejects a JSON number with a bare {"message":"Invalid input"} that names
+    # no field — every create-product call failed this way until it was traced.
+    amount = f"{info['amount_cents'] / 100:.2f}"  # catalog placeholder
     store_id = await ensure_store_id()
     # Reuse an existing product with the same name — a lost cache / a parse
     # failure on create must not spawn duplicate catalog products.
@@ -239,10 +242,24 @@ async def ensure_product_id(item: str) -> str:
     if status >= 300 or not pid:
         logger.error("[waffo] create-product failed item=%s status=%s resp=%s", item, status, data)
         raise HTTPException(502, "waffo_product_failed")
-    st2, d2 = await _waffo_request("/v1/actions/onetime-product/publish-product", {"productId": pid})
+    # The field is "id", not "productId" — the docs are explicit and the API
+    # answers a fieldless "Invalid input" to anything else. Publishing is
+    # one-way test -> production and only works once per product.
+    # publish-product copies a TEST-environment version into production. Our API
+    # key writes straight to production, so there is no test version to copy and
+    # the call answers "No test version found" — for us that is the normal path,
+    # not a failure. Treat it as success when the product is already active, and
+    # only escalate a publish error that leaves the product unusable.
+    st2, d2 = await _waffo_request("/v1/actions/onetime-product/publish-product", {"id": pid})
     if st2 >= 300:
-        logger.error("[waffo] publish-product failed item=%s status=%s resp=%s", item, st2, d2)
-        raise HTTPException(502, "waffo_publish_failed")
+        msg = ""
+        if isinstance(d2, dict):
+            msg = " ".join(str(e.get("message", "")) for e in (d2.get("errors") or []))
+        if "no test version" in msg.lower():
+            logger.info("[waffo] product %s already lives in production; publish not needed", pid)
+        else:
+            logger.error("[waffo] publish-product failed item=%s status=%s resp=%s", item, st2, d2)
+            raise HTTPException(502, "waffo_publish_failed")
     _kv_set(cache_key, pid)
     logger.info("[waffo] auto-created product item=%s id=%s name=%s", item, pid, name)
     return pid
@@ -273,9 +290,19 @@ def payment_methods_for(currency: str, amount: float) -> list[str]:
 # ── checkout ────────────────────────────────────────────────────────────────
 
 def _item_of(order: dict) -> str:
-    """Reconstruct the item id from a base.create_order() output row."""
-    if order.get("kind") == "plan":
+    """Reconstruct the item id from a base.create_order() output row.
+
+    Every kind resolve_item accepts has to round-trip here. Seats and the
+    workspace pass used to fall through to order['pack'] and raise KeyError,
+    so neither could ever reach checkout.
+    """
+    kind = order.get("kind")
+    if kind == "plan":
         return f"plan:{order['tier']}:{order['cycle']}"
+    if kind == "seats":
+        return f"seats:{order['seats']}"
+    if kind == "workpass":
+        return "workpass:week"
     return f"pack:{order['pack']}"
 
 
@@ -286,7 +313,10 @@ async def create_checkout(order: dict) -> str:
     currency = (order["currency"] or "USD").upper()
     # Waffo priceSnapshot.amount is the currency's normal decimal (29.00 for
     # $29), so amount_cents / 100 for 2-decimal currencies like USD.
-    amount = round(order["amount_cents"] / 100, 2)
+    # A STRING here too — priceSnapshot.amount is documented the same way as the
+    # catalog price, and a JSON number is rejected with a fieldless
+    # {"message":"Invalid input","layer":"order"}.
+    amount = f"{order['amount_cents'] / 100:.2f}"
     methods = payment_methods_for(currency, float(amount))
     if not methods:
         raise HTTPException(400, "waffo_no_payment_method")

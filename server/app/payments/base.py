@@ -67,14 +67,14 @@ def resolve_item(item: str) -> dict:
             raise HTTPException(400, "unknown_item")
         return {"kind": "plan", "tier": tier, "cycle": cycle, "amount_cents": int(cents),
                 "currency": p.get("currency", "CNY"),
-                "description": f"DSH Cloud {tdef['name']} ({'年付' if cycle == 'yearly' else '月付'})"}
+                "description": f"deepseek-harness-cloud {tdef['name']} ({'年付' if cycle == 'yearly' else '月付'})"}
     if parts[0] == "pack" and len(parts) == 2:
         pdef = p["packs"].get(parts[1])
         if not pdef:
             raise HTTPException(400, "unknown_item")
         return {"kind": "pack", "pack": parts[1], "credits": int(pdef["credits"]),
                 "valid_days": int(pdef.get("valid_days", 365)), "amount_cents": int(pdef["cents"]),
-                "currency": p.get("currency", "CNY"), "description": f"DSH Cloud {pdef['name']}"}
+                "currency": p.get("currency", "CNY"), "description": f"deepseek-harness-cloud {pdef['name']}"}
     # Cloud-workspace pass: a period of machine time, priced per period so the
     # bill is predictable. The amount is NOT taken from the request — the intro
     # price applies only to someone who has never bought one (server-side check).
@@ -93,13 +93,13 @@ def resolve_item(item: str) -> dict:
                 "credits": int(terms["seat_credits"]) * n,
                 "minutes": int(terms["seat_minutes"]) * n,
                 "currency": p.get("currency", "CNY"),
-                "description": f"DSH Cloud 团队席位 × {n}（月付）"}
+                "description": f"deepseek-harness-cloud 团队席位 × {n}（月付）"}
     if parts[0] == "workpass" and len(parts) == 2 and parts[1] == "week":
         return {"kind": "workpass", "days": config.WORK_PASS_DAYS,
                 "amount_cents": config.WORK_PASS_INTRO_PRICE,
                 "standard_cents": config.WORK_PASS_PRICE,
                 "currency": p.get("currency", "CNY"),
-                "description": f"DSH Cloud 云工作台 {config.WORK_PASS_DAYS} 天通行证"}
+                "description": f"deepseek-harness-cloud 云工作台 {config.WORK_PASS_DAYS} 天通行证"}
     raise HTTPException(400, "unknown_item")
 
 

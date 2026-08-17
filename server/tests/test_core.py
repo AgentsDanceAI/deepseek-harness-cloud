@@ -483,3 +483,24 @@ def test_account_deletion_actually_erases_personal_data():
     assert not row["password_hash"], "password hash must not survive deletion"
     assert db.query("SELECT 1 FROM email_codes WHERE email=?", (email,)) == []
     assert db.query("SELECT 1 FROM devices WHERE user_id=?", (uid,)) == []
+
+
+def test_waffo_product_amount_is_a_display_string():
+    """Waffo documents prices[CUR].amount as a display-format STRING. Sending a
+    JSON number gets {"message":"Invalid input"} with no field named, which is
+    almost impossible to diagnose from the response alone."""
+    import inspect
+    from app.payments import waffo_provider
+    src = inspect.getsource(waffo_provider.ensure_product_id)
+    assert 'f"{info[\'amount_cents\'] / 100:.2f}"' in src
+    assert "round(info[\"amount_cents\"]" not in src
+
+
+def test_item_of_round_trips_every_sellable_kind():
+    """resolve_item accepts plan / pack / seats / workpass; _item_of has to
+    rebuild all four. It knew only two, so seats and the workspace pass raised
+    KeyError on the way to checkout and could never be bought."""
+    from app.payments import base, waffo_provider
+    for item in ("plan:pro:yearly", "pack:pack1000", "seats:3", "workpass:week"):
+        info = dict(base.resolve_item(item))
+        assert waffo_provider._item_of(info) == item, item
