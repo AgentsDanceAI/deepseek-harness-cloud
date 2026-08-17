@@ -165,8 +165,21 @@ WORK_PASS_CREDITS = _env_int("WORK_PASS_CREDITS", 0)  # 0 = pass grants time, no
 # --- teams ------------------------------------------------------------------
 # Seats bound how many people may share an organisation's credit pool. Price is
 # minor units per seat per month, in PRICING_CURRENCY.
-TEAM_SEAT_PRICE = _env_int("TEAM_SEAT_PRICE", 1500)      # $15 / ¥ per seat, monthly
+TEAM_SEAT_PRICE = _env_int("TEAM_SEAT_PRICE", 1500)      # per seat, monthly (minor units)
 TEAM_SEAT_CREDITS = _env_int("TEAM_SEAT_CREDITS", 3500)  # pool credits added per seat per cycle
+TEAM_SEAT_MINUTES = _env_int("TEAM_SEAT_MINUTES", 1200)  # pool workspace minutes per seat
+TEAM_SEAT_MIN = _env_int("TEAM_SEAT_MIN", 3)             # below this it is an individual plan
+# Volume bands as "minSeats:percentOff,..." — the discount applies to the seat
+# fee only, never to the included credits/minutes (those are real cost).
+TEAM_SEAT_TIERS = [
+    (int(b.split(":")[0]), int(b.split(":")[1]))
+    for b in _env("TEAM_SEAT_TIERS", "10:10,25:15,50:20").split(",") if ":" in b
+]
+# Default per-member ceilings on the shared pools (None = unlimited). Sized as a
+# multiple of one seat's contribution so a single person cannot spend the team's
+# month, while a normally-heavy user is never nagged.
+TEAM_DEFAULT_CREDIT_CAP_X = _env_float("TEAM_DEFAULT_CREDIT_CAP_X", 3.0)
+TEAM_DEFAULT_MINUTE_CAP_X = _env_float("TEAM_DEFAULT_MINUTE_CAP_X", 3.0)
 WORK_MAX_CONCURRENT = _env_int("WORK_MAX_CONCURRENT", 40)    # global running-container cap
 WORK_MEM_LIMIT_MB = _env_int("WORK_MEM_LIMIT_MB", 512)
 WORK_CPUS = _env_float("WORK_CPUS", 1.0)

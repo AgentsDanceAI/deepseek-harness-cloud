@@ -658,15 +658,21 @@ async def reaper_tick(now: float) -> None:
         uid = (container.get("Labels") or {}).get(_LABEL, "")
         if not uid:
             continue
-        # Bill only minutes the agent actually worked. An open tab keeps polling
-        # /api/work/route, so wall-clock billing charged people for reading a
+        # Meter only minutes the agent actually worked. An open tab keeps polling
+        # /api/work/route, so wall-clock metering charged people for reading a
         # reply and for walking away; agent work is the honest meter.
         # `agent_idle_s` is time since the container last called our gateway
         # (LLM or search) — the only thing its device token is ever used for.
+        #
+        # Machine time costs MINUTES, never credits: the plan includes an
+        # allowance (GitHub-Actions style) and credits stay for tokens. The row
+        # is still written to usage_log — it is what work_access counts — but
+        # with credits=0 so a workspace minute can never drain a token balance.
         agent_idle_s = now - agent_last_active(uid)
         if agent_idle_s < 60:
-            credits.spend(uid, config.WORK_CREDITS_PER_MIN, kind="workspace",
+            credits.spend(uid, 0, kind=work_access.MINUTE_KIND,
                           model="dshwork", request_id=f"ws-{int(now // 60)}")
+            work_access.consume_minute(uid)
         last = _last_seen.setdefault(uid, now)  # re-seed after restart
         # Two stop rules, because idle minutes are now free and RAM is not:
         #   - the user left (no browser traffic) — the original rule;

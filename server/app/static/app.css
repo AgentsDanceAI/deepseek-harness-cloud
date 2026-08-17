@@ -845,3 +845,15 @@ body[data-page="landing"] .nav-menu a { color: var(--fg); }
   text-underline-offset: 2px;
 }
 .link-btn:hover { color: var(--brand-strong); }
+
+/* usage meter — machine time reads like CI minutes, not like money */
+.meter {
+  display: block; height: 6px; margin-top: 8px; border-radius: 999px;
+  background: var(--bg-soft); overflow: hidden;
+}
+.meter > span {
+  display: block; height: 100%; border-radius: 999px;
+  background: linear-gradient(90deg, var(--brand), #4d8ae8);
+  transition: width .3s ease;
+}
+.meter.is-full > span { background: var(--warn); }

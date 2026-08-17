@@ -3,7 +3,7 @@
 {% block content %}
 <section class="section">
   <div class="container">
-    <h1 class="section-title">定价</h1>
+    <h1 class="section-title" id="plans">定价</h1>
     <p class="center muted">积分按上游模型牌价用量折算，用多少扣多少 · 套餐积分当期有效 · 积分包 12 个月有效</p>
 
     <div class="cycle-toggle center" role="tablist">
@@ -21,6 +21,7 @@
             <div class="price"><span class="currency">{{ currency_symbol }}</span>0</div>
             <ul class="plain">
               <li>注册送 {{ '{:,}'.format(t.signup_credits or 0) }} 积分</li>
+              <li>云工作台 {{ (t.work_minutes or 0) // 60 }} 小时 / 月</li>
               <li>{{ t.concurrency }} 路并发</li>
               <li>全部模型可用</li>
             </ul>
@@ -30,7 +31,8 @@
               <span class="currency">{{ currency_symbol }}</span><span class="amount">{{ t.monthly_cents // 100 }}</span><span class="per">/月</span>
             </div>
             <ul class="plain">
-              <li>每月 {{ '{:,}'.format(t.monthly_credits) }} 积分</li>
+              <li>每月 {{ '{:,}'.format(t.monthly_credits) }} 积分<span class="muted small">（模型 / 搜索）</span></li>
+              <li>云工作台 <b>{{ (t.work_minutes or 0) // 60 }} 小时 / 月</b><span class="muted small">（机时另计，不扣积分）</span></li>
               <li>{{ t.concurrency }} 路并发</li>
               <li>全部模型可用</li>
             </ul>
@@ -42,34 +44,40 @@
       {% endfor %}
     </div>
 
-    {# The workspace is metered separately from tokens: a plan buys model usage,
-       a pass buys machine time. Keeping them visually distinct stops people
-       expecting a subscription to cover the container. #}
+    {# Two meters, deliberately kept apart: credits pay for tokens, minutes pay
+       for the machine. One number covering both made the bill unreadable. #}
     <h2 class="section-title" id="workspace" style="margin-top:64px">云工作台机时</h2>
-    <p class="center muted">
-      浏览器里直接跑智能体。每人 {{ (work_free_minutes // 60) }} 小时免费机时，
-      只算智能体<b>实际干活</b>的分钟——读回复、开着页面走开都不计费。
+    <p class="center muted" style="max-width:640px;margin-inline:auto">
+      机时和积分是<b>两本账</b>：积分用于模型与搜索，机时用于容器运行——就像 CI 的构建分钟数。
+      每档套餐含不同机时（见上表），且只算智能体<b>实际干活</b>的分钟，
+      读回复、开着页面走开都不计。
     </p>
-    <div class="grid grid-2" style="max-width:720px;margin:22px auto 0">
+    <div class="grid grid-3" style="max-width:900px;margin:22px auto 0">
       <div class="card pack">
-        <h3>免费机时</h3>
+        <h3>免费额度</h3>
         <div class="price"><span class="currency">{{ currency_symbol }}</span>0</div>
-        <p class="muted">{{ (work_free_minutes // 60) }} 小时活跃机时 · 注册即得</p>
+        <p class="muted">{{ (work_free_minutes // 60) }} 小时 / 月 · 注册即得</p>
         <a class="btn btn-ghost btn-block" href="/work">直接开始</a>
       </div>
       <div class="card pack plan-popular">
-        <div class="plan-flag">用完之后</div>
+        <div class="plan-flag">机时不够用</div>
         <div class="plan-body">
-          <h3>{{ work_pass_days }} 天通行证</h3>
-          <div class="price">
-            <span class="currency">{{ currency_symbol }}</span>{{ '%.2f'|format(work_pass_intro_price / 100) }}
-          </div>
-          <p class="muted">
-            首张特价<span class="price-was">{{ currency_symbol }}{{ '%.2f'|format(work_pass_price / 100) }}</span><br>
-            之后按标准价 {{ currency_symbol }}{{ '%.2f'|format(work_pass_price / 100) }} / {{ work_pass_days }} 天，不自动续费
-          </p>
-          <button class="btn btn-primary btn-block buy-btn" data-item="workpass:week" type="button">开通</button>
+          <h3>升级套餐</h3>
+          <div class="price" style="font-size:26px;letter-spacing:-.3px">最多 200 小时 / 月</div>
+          <p class="muted">机时随套餐档次提升，同时含更多积分与并发</p>
+          <a class="btn btn-primary btn-block" href="#plans">查看套餐</a>
         </div>
+      </div>
+      <div class="card pack">
+        <h3>{{ work_pass_days }} 天通行证</h3>
+        <div class="price">
+          <span class="currency">{{ currency_symbol }}</span>{{ '%.2f'|format(work_pass_intro_price / 100) }}
+        </div>
+        <p class="muted">
+          不想订阅就买这个。首张特价<span class="price-was">{{ currency_symbol }}{{ '%.2f'|format(work_pass_price / 100) }}</span><br>
+          期间机时不限，到期自动失效不续费
+        </p>
+        <button class="btn btn-ghost btn-block buy-btn" data-item="workpass:week" type="button">开通</button>
       </div>
     </div>
 
@@ -80,8 +88,12 @@
     <div class="grid grid-2" style="max-width:720px;margin:22px auto 0">
       <div class="card pack">
         <h3>团队席位</h3>
-        <div class="price"><span class="currency">{{ currency_symbol }}</span>{{ team_seat_price_display }}<span class="per">/席位/月</span></div>
-        <p class="muted">共享积分池 · 成员用量可见 · 席位随时增减</p>
+        <div class="price"><span class="currency">{{ currency_symbol }}</span>{{ '%.2f'|format(team_seat_price / 100) }}<span class="per">/席位/月</span></div>
+        <p class="muted">
+          每席含 {{ '{:,}'.format(team_seat_credits) }} 积分 + {{ team_seat_minutes // 60 }} 小时机时，统一进组织池共享<br>
+          {{ team_seat_min }} 席起 · 满 10 席 9 折、25 席 85 折、50 席 8 折<br>
+          成员用量可见 · 可给每人设上限
+        </p>
         <a class="btn btn-primary btn-block" href="/console/team">创建团队</a>
       </div>
       <div class="card pack">
@@ -111,6 +123,17 @@
       <p class="muted">按上游模型牌价折算，按实际输入/输出 tokens 结算，用多少扣多少；明细在控制台逐条可查。</p>
       <h3>套餐积分和积分包积分有什么区别？</h3>
       <p class="muted">套餐积分在订阅周期内有效（月付 31 天 / 年付 366 天）；积分包积分 12 个月内有效。扣费时优先使用先到期的积分。</p>
+      <h3>积分和机时有什么区别？</h3>
+      <p class="muted">
+        两本账，互不挪用：<b>积分</b>用于模型调用与联网搜索，按 token 用量扣；
+        <b>机时</b>用于云工作台容器运行，按分钟计，像 CI 的构建分钟数。
+        跑一个不怎么调模型的长任务只消耗机时，不扣积分；在桌面端用模型只扣积分，不占机时。
+      </p>
+      <h3>机时用完了会怎样？</h3>
+      <p class="muted">
+        当前任务不会被打断，下一个任务会提示升级。可以升级套餐（每档含更多机时）、
+        买 {{ work_pass_days }} 天通行证，或改用桌面客户端（在你自己的电脑上跑，不占机时）。
+      </p>
       <h3>可以退款吗？</h3>
       <p class="muted">详见 <a href="/legal/refund">退款政策</a>。</p>
     </div>

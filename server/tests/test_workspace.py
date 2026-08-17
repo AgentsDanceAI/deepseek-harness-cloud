@@ -24,7 +24,7 @@ os.environ.update({
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
-from app import config, credits, db, rate_limit, workspace  # noqa: E402
+from app import config, credits, db, rate_limit, work_access, workspace  # noqa: E402
 from app.main import app  # noqa: E402
 
 
@@ -156,24 +156,27 @@ def _mark_agent_active(uid, ago_s=0.0):
              (time.time() - ago_s, uid))
 
 
-def test_bills_only_minutes_the_agent_worked(fake):
-    """An open tab must be free: only a minute with a real gateway call bills."""
+def test_meters_only_minutes_the_agent_worked(fake):
+    """An open tab must be free: only a minute with a real gateway call counts."""
     c, uid = _user("bill@test.local")
     c.get("/api/work/route"); c.get("/api/work/route")
 
-    # agent just called the gateway -> this minute is billable
+    # agent just called the gateway -> this minute is metered
     _mark_agent_active(uid, ago_s=5)
-    before = credits.balance(uid)
+    before_minutes = work_access.used_minutes(uid)
+    before_credits = credits.balance(uid)
     asyncio.run(workspace.reaper_tick(time.time()))
-    assert credits.balance(uid) == before - config.WORK_CREDITS_PER_MIN
+    assert work_access.used_minutes(uid) == before_minutes + 1
+    # …and machine time is NOT paid for in credits
+    assert credits.balance(uid) == before_credits
 
     # tab still open, agent quiet for 5 minutes -> free, container stays up
     _mark_agent_active(uid, ago_s=300)
     workspace._last_seen[uid] = time.time()
-    before = credits.balance(uid)
+    before_minutes = work_access.used_minutes(uid)
     stops_before = fake.stops
     asyncio.run(workspace.reaper_tick(time.time()))
-    assert credits.balance(uid) == before
+    assert work_access.used_minutes(uid) == before_minutes
     assert fake.stops == stops_before
 
 

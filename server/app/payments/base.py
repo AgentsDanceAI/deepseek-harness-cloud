@@ -22,6 +22,36 @@ from .. import config, credits, db, plans, teams, work_access
 ORDER_PREFIX = {"stripe": "DHS", "alipay": "DHA", "wechat": "DHW", "waffo": "DHF"}
 
 
+def team_terms() -> dict:
+    """Seat terms from the active (per-currency) price table.
+
+    Deliberately not a flat env default: a seat must never undercut the cheapest
+    individual plan, and that threshold is a different number in ¥ than in $.
+    An organisation buys governance — SSO, one invoice, member budgets, usage
+    visibility — not a bulk discount on the personal product; sell it cheaper and
+    buyers will simply expense personal plans instead.
+    """
+    p = plans.pricing()
+    t = dict(p.get("team") or {})
+    t.setdefault("seat_cents", config.TEAM_SEAT_PRICE)
+    t.setdefault("seat_credits", config.TEAM_SEAT_CREDITS)
+    t.setdefault("seat_minutes", config.TEAM_SEAT_MINUTES)
+    t.setdefault("min_seats", config.TEAM_SEAT_MIN)
+    t.setdefault("volume_tiers", config.TEAM_SEAT_TIERS)
+    return t
+
+
+def seat_unit_price(seats: int) -> int:
+    """Per-seat price at this volume. Bands are (min_seats, percent_off), and the
+    discount applies to the seat fee only."""
+    terms = team_terms()
+    price = int(terms["seat_cents"])
+    for min_seats, off in sorted(terms["volume_tiers"], key=lambda b: -b[0]):
+        if seats >= int(min_seats):
+            return max(1, round(price * (100 - int(off)) / 100))
+    return price
+
+
 def resolve_item(item: str) -> dict:
     """Validates an item id against the price table. Returns {kind, amount_cents,
     currency, description, ...} — the ONLY place order amounts come from."""
@@ -51,10 +81,17 @@ def resolve_item(item: str) -> dict:
     # Team seats: N seats for a month. The pool credits scale with the seat
     # count, so a bigger team gets a bigger shared balance, not just more logins.
     if parts[0] == "seats" and len(parts) == 2 and parts[1].isdigit():
-        n = max(1, min(int(parts[1]), 500))
+        terms = team_terms()
+        n = max(int(terms["min_seats"]), min(int(parts[1]), 500))
+        # Volume discount applies to the SEAT FEE only. The included credits and
+        # minutes are real cost, so discounting them would be giving away
+        # margin rather than rewarding commitment.
+        unit = seat_unit_price(n)
         return {"kind": "seats", "seats": n, "cycle": "monthly",
-                "amount_cents": config.TEAM_SEAT_PRICE * n,
-                "credits": config.TEAM_SEAT_CREDITS * n,
+                "amount_cents": unit * n,
+                "unit_cents": unit,
+                "credits": int(terms["seat_credits"]) * n,
+                "minutes": int(terms["seat_minutes"]) * n,
                 "currency": p.get("currency", "CNY"),
                 "description": f"DSH Cloud 团队席位 × {n}（月付）"}
     if parts[0] == "workpass" and len(parts) == 2 and parts[1] == "week":
@@ -122,7 +159,16 @@ def fulfil(order_id: str) -> None:
         else:
             org_id = org["id"]
         teams.set_seats(org_id, info["seats"], time.time() + 31 * 86400)
+        # Seats buy BOTH resources: tokens (credits) and machine time (minutes).
         teams.grant_pool(org_id, info["credits"], 31 * 86400, ref=order_id)
+        teams.grant_minute_pool(org_id, info["minutes"], 31 * 86400, ref=order_id)
+        # Seed per-member ceilings so a fresh org is protected by default; the
+        # owner can raise, lower, or clear them.
+        terms = team_terms()
+        teams.set_default_caps(
+            org_id,
+            credit_cap=int(int(terms["seat_credits"]) * config.TEAM_DEFAULT_CREDIT_CAP_X),
+            minute_cap=int(int(terms["seat_minutes"]) * config.TEAM_DEFAULT_MINUTE_CAP_X))
     elif info["kind"] == "workpass":
         work_access.grant_pass(
             order["user_id"],

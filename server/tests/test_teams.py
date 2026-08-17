@@ -22,7 +22,8 @@ os.environ.update({
 import pytest  # noqa: E402
 from fastapi import HTTPException  # noqa: E402
 
-from app import credits, db, teams  # noqa: E402
+from app import credits, db, plans, teams, work_access  # noqa: E402
+from app.payments import base as pay_base  # noqa: E402
 
 db.ensure_schema()
 
@@ -32,6 +33,8 @@ def _user(uid):
         c.execute("DELETE FROM org_members WHERE user_id=?", (uid,))
         c.execute("DELETE FROM users WHERE id=?", (uid,))
         c.execute("DELETE FROM credit_grants WHERE user_id=?", (uid,))
+        c.execute("DELETE FROM usage_log WHERE user_id=?", (uid,))
+        c.execute("DELETE FROM minute_grants WHERE user_id=?", (uid,))
         c.execute("INSERT INTO users (id,email,session_epoch,created) VALUES (?,?,0,0)",
                   (uid, uid + "@t.local"))
     return uid
@@ -121,6 +124,105 @@ def test_one_org_per_person_and_owner_cannot_be_removed():
         teams.remove_member(org_id, owner)
 
 
+def test_member_cap_stops_that_member_only():
+    """Pooled billing is only fair if one person cannot spend the team's month.
+    Hitting a cap must block the capped member and leave the others working."""
+    owner = _user("u_t_cap_o")
+    heavy = _user("u_t_cap_h")
+    light = _user("u_t_cap_l")
+    org_id = teams.create_org(owner, "CapCo")
+    teams.set_seats(org_id, 9, time.time() + 86400)
+    teams.accept_invite(teams.create_invite(org_id), heavy)
+    teams.accept_invite(teams.create_invite(org_id), light)
+    teams.grant_pool(org_id, 10_000, 3600)
+    teams.set_default_caps(org_id, credit_cap=100)
+
+    credits.spend(heavy, 100, kind="llm", model="m")
+    assert teams.credit_cap_exceeded(heavy) is True
+    assert teams.credit_cap_exceeded(light) is False      # unaffected
+    assert plans.check_run_blocked(heavy) == "member_cap_reached"
+    assert plans.check_run_blocked(light) is None
+    assert teams.pool_balance(org_id) == 9_900             # pool still has plenty
+
+
+def test_member_override_beats_the_org_default():
+    owner = _user("u_t_cap2_o")
+    member = _user("u_t_cap2_m")
+    org_id = teams.create_org(owner, "CapCo2")
+    teams.set_seats(org_id, 5, time.time() + 86400)
+    teams.accept_invite(teams.create_invite(org_id), member)
+    teams.grant_pool(org_id, 10_000, 3600)
+    teams.set_default_caps(org_id, credit_cap=50)
+
+    credits.spend(member, 60, kind="llm", model="m")
+    assert teams.credit_cap_exceeded(member) is True
+    teams.set_member_caps(org_id, member, credit_cap=500)   # owner raises it
+    assert teams.credit_cap_exceeded(member) is False
+    teams.set_member_caps(org_id, member, credit_cap=0)     # 0 = blocked
+    assert teams.credit_cap_exceeded(member) is True
+
+
+def test_org_pools_minutes_separately_from_credits():
+    """Seats buy two resources; spending one must not move the other."""
+    owner = _user("u_t_min_o")
+    member = _user("u_t_min_m")
+    org_id = teams.create_org(owner, "MinCo")
+    teams.set_seats(org_id, 5, time.time() + 86400)
+    teams.accept_invite(teams.create_invite(org_id), member)
+    teams.grant_pool(org_id, 5_000, 3600)
+    teams.grant_minute_pool(org_id, 600, 3600)
+
+    st = work_access.state(member)
+    # org pool is ADDED to the member's own free allowance, never instead of it
+    assert st["scope"] == "org"
+    assert st["org_pool_minutes"] == 600
+    assert st["minutes_left"] == 600 + 120
+
+    credits.spend(member, 200, kind="llm", model="m")        # tokens
+    assert teams.minute_pool(org_id) == 600                  # minutes untouched
+
+    for _ in range(30):                                      # machine time
+        credits.spend(member, 0, kind=work_access.MINUTE_KIND, model="dshwork")
+    assert teams.pool_balance(org_id) == 4_800               # credits untouched
+    assert work_access.state(member)["used_minutes"] == 30
+
+
+def test_member_usage_view_splits_credits_and_minutes():
+    owner = _user("u_t_view_o")
+    member = _user("u_t_view_m")
+    org_id = teams.create_org(owner, "ViewCo")
+    teams.set_seats(org_id, 5, time.time() + 86400)
+    teams.accept_invite(teams.create_invite(org_id), member)
+    teams.grant_pool(org_id, 5_000, 3600)
+
+    credits.spend(member, 40, kind="llm", model="m")
+    for _ in range(7):
+        credits.spend(member, 0, kind=work_access.MINUTE_KIND, model="dshwork")
+
+    row = {r["email"]: r for r in teams.member_usage(org_id, 0)}["u_t_view_m@t.local"]
+    assert row["credits"] == 40 and row["minutes"] == 7
+
+
+def test_seat_volume_discount_applies_to_the_fee_not_the_allowance():
+    """Buying more seats lowers the seat fee; the included credits/minutes are
+    real cost and must scale linearly."""
+    small = pay_base.resolve_item("seats:5")
+    large = pay_base.resolve_item("seats:50")
+    assert large["unit_cents"] < small["unit_cents"]          # volume discount
+    assert large["credits"] == small["credits"] // 5 * 50     # allowance is linear
+    assert large["minutes"] == small["minutes"] // 5 * 50
+
+
+def test_seat_price_never_undercuts_the_individual_plan():
+    """An org buys governance, not a bulk discount — if seats were cheaper than
+    a personal plan, buyers would just expense personal plans instead."""
+    from app import config as cfg
+    cheapest = pay_base.seat_unit_price(500)
+    paid_tiers = [t for k, t in plans.pricing()["tiers"].items() if k != "free"]
+    individual = min(int(t["monthly_cents"]) for t in paid_tiers)
+    assert cheapest >= individual, (cheapest, individual, cfg.TEAM_SEAT_TIERS)
+
+
 def test_leaving_the_org_stops_pool_access():
     owner = _user("u_t_owner7")
     member = _user("u_t_member7")
@@ -132,3 +234,18 @@ def test_leaving_the_org_stops_pool_access():
     assert credits.balance(member) == 800
     teams.remove_member(org_id, member)
     assert credits.balance(member) == 0
+
+
+def test_joining_a_team_never_removes_your_own_allowance():
+    """A member of an org with an empty pool must still have their personal
+    plan minutes — joining a team cannot leave someone worse off than alone."""
+    owner = _user("u_t_keep_o")
+    member = _user("u_t_keep_m")
+    org_id = teams.create_org(owner, "KeepCo")
+    teams.set_seats(org_id, 5, time.time() + 86400)
+    teams.accept_invite(teams.create_invite(org_id), member)
+    # no minute pool bought at all
+    assert teams.minute_pool(org_id) == 0
+    st = work_access.state(member)
+    assert st["minutes_left"] == 120          # their own free allowance survives
+    assert work_access.blocked_reason(member) is None

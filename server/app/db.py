@@ -123,13 +123,21 @@ SCHEMA = [
         owner_id TEXT NOT NULL,
         seats INTEGER NOT NULL DEFAULT 1,
         seats_expires REAL NOT NULL DEFAULT 0,
+        default_credit_cap INTEGER,
+        default_minute_cap INTEGER,
         created REAL NOT NULL
     )""",
+    # `credit_cap` / `minute_cap`: per-member ceilings for the shared pools.
+    # NULL means "use the org default"; 0 means "blocked". Without these, one
+    # person can spend the team's month in a day — the reason pooled billing
+    # gets called unfair.
     """CREATE TABLE IF NOT EXISTS org_members (
         org_id TEXT NOT NULL,
         user_id TEXT NOT NULL,
         role TEXT NOT NULL DEFAULT 'member',
         joined REAL NOT NULL,
+        credit_cap INTEGER,
+        minute_cap INTEGER,
         PRIMARY KEY (org_id, user_id)
     )""",
     """CREATE TABLE IF NOT EXISTS org_invites (
@@ -138,6 +146,19 @@ SCHEMA = [
         email TEXT NOT NULL DEFAULT '',
         expires REAL NOT NULL,
         used_by TEXT NOT NULL DEFAULT '',
+        created REAL NOT NULL
+    )""",
+    # Purchased workspace minutes. Machine time is metered separately from
+    # credits (a container costs RAM, not tokens), so it gets its own buckets —
+    # same expiry-bucket shape as credit_grants, different unit.
+    """CREATE TABLE IF NOT EXISTS minute_grants (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        amount INTEGER NOT NULL,
+        remaining INTEGER NOT NULL,
+        expires REAL NOT NULL,
+        kind TEXT NOT NULL,
+        ref TEXT NOT NULL DEFAULT '',
         created REAL NOT NULL
     )""",
     # Cloud-workspace passes. The free allowance is derived from usage_log, so
@@ -160,6 +181,7 @@ SCHEMA = [
     "CREATE INDEX IF NOT EXISTS idx_devices_user ON devices(user_id)",
     "CREATE INDEX IF NOT EXISTS idx_email_codes ON email_codes(email, purpose)",
     "CREATE INDEX IF NOT EXISTS idx_passes_user ON work_passes(user_id, expires)",
+    "CREATE INDEX IF NOT EXISTS idx_mgrants_user ON minute_grants(user_id, expires)",
     "CREATE INDEX IF NOT EXISTS idx_org_members_user ON org_members(user_id)",
     "CREATE INDEX IF NOT EXISTS idx_org_invites_org ON org_invites(org_id)",
 ]
@@ -242,6 +264,27 @@ def query_one(sql: str, params: tuple = ()):
     return rows[0] if rows else None
 
 
+# Columns added to tables that already exist in deployed databases. CREATE TABLE
+# IF NOT EXISTS is a no-op once the table is there, so new columns need their own
+# idempotent step. (table, column, DDL type) — applied only when absent.
+MIGRATIONS: list[tuple[str, str, str]] = [
+    ("org_members", "credit_cap", "INTEGER"),
+    ("org_members", "minute_cap", "INTEGER"),
+    ("orgs", "default_credit_cap", "INTEGER"),
+    ("orgs", "default_minute_cap", "INTEGER"),
+]
+
+
+def _apply_migrations(execute, columns_of) -> None:
+    for table, column, coltype in MIGRATIONS:
+        try:
+            if column in columns_of(table):
+                continue
+            execute(f"ALTER TABLE {table} ADD COLUMN {column} {coltype}")
+        except Exception:  # noqa: BLE001 — a missing table is fine; SCHEMA creates it
+            continue
+
+
 def ensure_schema() -> None:
     global _initialized
     if _initialized:
@@ -254,12 +297,25 @@ def ensure_schema() -> None:
             with pool.connection() as raw:
                 for stmt in SCHEMA:
                     raw.execute(_pg_schema(stmt))
+
+                def pg_columns(table: str) -> set:
+                    cur = raw.execute(
+                        "SELECT column_name FROM information_schema.columns WHERE table_name=%s",
+                        (table,))
+                    return {r[0] for r in cur.fetchall()}
+
+                _apply_migrations(lambda s: raw.execute(_pg_schema(s)), pg_columns)
                 raw.commit()
         else:
             conn = _sqlite_conn()
             with conn:
                 for stmt in SCHEMA:
                     conn.execute(stmt)
+
+                def sqlite_columns(table: str) -> set:
+                    return {r[1] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+
+                _apply_migrations(conn.execute, sqlite_columns)
         _initialized = True
 
 

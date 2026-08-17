@@ -90,6 +90,11 @@ def check_run_blocked(user_id: str) -> str | None:
         # in-flight streams can finish and be billed truthfully.
         if credits.balance(user_id) <= 0:
             return "insufficient_credits"
+        # A member of an organisation also has their own ceiling on the shared
+        # pool: hitting it stops THAT member, never the whole team.
+        from . import teams
+        if teams.credit_cap_exceeded(user_id):
+            return "member_cap_reached"
         return None
     except Exception:
         return None

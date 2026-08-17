@@ -1,8 +1,11 @@
-"""The cloud-workspace gate: free machine time, then a paid pass.
+"""The cloud-workspace gate: machine time is its own resource, not credits.
 
-The money rules that must hold no matter what the client sends:
-  * the free allowance is spent by ACTIVE agent minutes, nothing else;
-  * the intro price is a first-purchase offer, decided server-side;
+The rules that must hold no matter what the client sends:
+  * a workspace minute NEVER costs credits, and a token call never costs
+    minutes — the two meters are independent (GitHub-Actions shape);
+  * the included allowance comes from the plan tier;
+  * purchased minute packs extend past the allowance;
+  * the intro pass price is a first-purchase offer, decided server-side;
   * a renewal bought early extends, it never burns the remainder.
 """
 import os
@@ -21,7 +24,7 @@ os.environ.update({
 
 import pytest  # noqa: E402
 
-from app import config, credits, db, work_access  # noqa: E402
+from app import config, credits, db, plans, work_access  # noqa: E402
 from app.payments import base as pay_base  # noqa: E402
 
 db.ensure_schema()
@@ -40,35 +43,73 @@ def _user(uid):
         c.execute("DELETE FROM users WHERE id=?", (uid,))
         c.execute("DELETE FROM usage_log WHERE user_id=?", (uid,))
         c.execute("DELETE FROM work_passes WHERE user_id=?", (uid,))
+        c.execute("DELETE FROM minute_grants WHERE user_id=?", (uid,))
+        c.execute("DELETE FROM credit_grants WHERE user_id=?", (uid,))
+        c.execute("DELETE FROM subscriptions WHERE user_id=?", (uid,))
         c.execute("INSERT INTO users (id,email,session_epoch,created) VALUES (?,?,0,0)",
                   (uid, uid + "@t.local"))
     return uid
 
 
 def _burn(uid, minutes):
-    """Spend active workspace minutes the same way the reaper bills them."""
+    """Consume active workspace minutes the same way the reaper meters them."""
     for _ in range(minutes):
-        credits.spend(uid, 0, kind="workspace", model="dshwork")
+        credits.spend(uid, 0, kind=work_access.MINUTE_KIND, model="dshwork")
+        work_access.consume_minute(uid)
 
 
-def test_free_allowance_then_paywall():
+def test_included_allowance_then_paywall():
     uid = _user("u_wa1")
     assert work_access.blocked_reason(uid) is None
     _burn(uid, 119)
-    assert work_access.free_minutes_left(uid) == 1
+    assert work_access.state(uid)["minutes_left"] == 1
     assert work_access.blocked_reason(uid) is None
     _burn(uid, 1)
-    assert work_access.free_minutes_left(uid) == 0
+    assert work_access.state(uid)["minutes_left"] == 0
     assert work_access.blocked_reason(uid) == "work_quota"
 
 
-def test_only_workspace_minutes_consume_the_allowance():
-    """Model and search spending must not eat the machine-time allowance."""
+def test_machine_time_never_costs_credits():
+    """The whole point of the split: a workspace minute is metered in minutes,
+    so a long-running container can never drain the token balance."""
     uid = _user("u_wa2")
+    credits.grant(uid, 1000, 3600, kind="grant_signup")
+    before = credits.balance(uid)
+    _burn(uid, 60)
+    assert credits.balance(uid) == before
+    assert work_access.used_minutes(uid) == 60
+
+
+def test_token_spend_never_eats_the_minute_allowance():
+    """And the reverse: model and search calls must not consume machine time."""
+    uid = _user("u_wa2b")
+    credits.grant(uid, 5000, 3600, kind="grant_signup")
     for _ in range(50):
         credits.spend(uid, 1, kind="llm", model="deepseek-v4-flash")
         credits.spend(uid, 5, kind="search", model="web_search:zhipu")
-    assert work_access.free_minutes_left(uid) == 120
+    assert work_access.used_minutes(uid) == 0
+    assert work_access.state(uid)["minutes_left"] == 120
+
+
+def test_plan_tier_sets_the_allowance():
+    """Included minutes come from the plan, GitHub-Actions style."""
+    uid = _user("u_wa2c")
+    assert work_access.included_minutes(uid) == 120          # free
+    plans.apply_plan(uid, "pro", "monthly")
+    assert work_access.included_minutes(uid) == 3600         # pro: 60h
+    st = work_access.state(uid)
+    assert st["plan_tier"] == "pro" and st["minutes_left"] == 3600
+
+
+def test_purchased_minutes_extend_beyond_the_plan():
+    uid = _user("u_wa2d")
+    _burn(uid, 120)                                          # allowance spent
+    assert work_access.blocked_reason(uid) == "work_quota"
+    work_access.grant_minutes(uid, 300, 30 * 86400, kind="pack")
+    assert work_access.blocked_reason(uid) is None
+    assert work_access.state(uid)["minutes_left"] == 300
+    _burn(uid, 10)
+    assert work_access.minute_packs_left(uid) == 290
 
 
 def test_pass_lifts_the_gate_and_expires():
@@ -114,7 +155,7 @@ def test_state_reports_what_the_ui_needs():
     uid = _user("u_wa7")
     _burn(uid, 30)
     st = work_access.state(uid)
-    assert st["free_minutes_left"] == 90
+    assert st["minutes_left"] == 90
     assert st["allowed"] is True
     assert st["pass_active"] is False
     assert st["next_price"] == 200 and st["next_price_kind"] == "intro"

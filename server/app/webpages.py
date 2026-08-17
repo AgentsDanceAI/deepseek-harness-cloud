@@ -74,9 +74,26 @@ def _ctx(request: Request, page: str, **extra) -> dict:
         "work_pass_days": config.WORK_PASS_DAYS,
         "work_pass_intro_price": config.WORK_PASS_INTRO_PRICE,
         "work_pass_price": config.WORK_PASS_PRICE,
+        **_team_terms_ctx(),
     }
     ctx.update(extra)
     return ctx
+
+
+def _team_terms_ctx() -> dict:
+    """Seat terms for templates — read from the active price table so the
+    displayed price is the one an order would actually charge."""
+    try:
+        from .payments import base as _pay
+        t = _pay.team_terms()
+    except Exception:
+        t = {}
+    return {
+        "team_seat_price": int(t.get("seat_cents", config.TEAM_SEAT_PRICE)),
+        "team_seat_credits": int(t.get("seat_credits", config.TEAM_SEAT_CREDITS)),
+        "team_seat_minutes": int(t.get("seat_minutes", config.TEAM_SEAT_MINUTES)),
+        "team_seat_min": int(t.get("min_seats", config.TEAM_SEAT_MIN)),
+    }
 
 
 def _render(request: Request, template: str, page: str, **extra):
@@ -327,7 +344,11 @@ def console_page(request: Request):
         request, "console.html", "console",
         balance=balance,
         balance_yuan=f"{balance / 100:.2f}",
-        work_free_left=wa["free_minutes_left"],
+        work_used=wa["used_minutes"],
+        work_included=wa["included_minutes"],
+        work_packs=wa["pack_minutes"],
+        work_left=wa["minutes_left"],
+        work_scope=wa["scope"],
         work_pass_active=wa["pass_active"],
         work_pass_expires_text=_fmt_date(wa["pass_expires"]) if wa["pass_expires"] else "",
         org=org,

@@ -18,16 +18,24 @@
           <p class="muted small">无需安装，直接在浏览器（含手机）里使用 DSH。
             <strong>只在 AI 实际干活的分钟计费</strong>——你读回复、想问题、开着页面走开，
             都不花钱；闲置 {{ work_idle_stop_min }} 分钟自动暂停，文件保留，下次秒开。</p>
-          <p class="muted small" style="margin-top:8px">
+          {# machine time is metered in minutes, like CI minutes — never in credits #}
+          <p class="muted small" style="margin-top:10px">
             {% if work_pass_active %}
               通行证有效至 <b>{{ work_pass_expires_text }}</b>，期间机时不限。
-            {% elif work_free_left > 0 %}
-              免费机时剩余 <b>{{ work_free_left // 60 }} 小时 {{ work_free_left % 60 }} 分钟</b>
-              （共 {{ work_free_minutes // 60 }} 小时）。
             {% else %}
-              免费机时已用完 · <a href="/work/upgrade">开通 {{ work_pass_days }} 天通行证</a>
+              本期机时
+              <b>{{ '%d 小时 %d 分'|format(work_used // 60, work_used % 60) }}</b>
+              / {{ '%d 小时'|format(work_included // 60) }}
+              {%- if work_packs %}（另有加购 {{ '%d 小时 %d 分'|format(work_packs // 60, work_packs % 60) }}）{% endif %}
+              {%- if work_left <= 0 %} · <a href="/work/upgrade">已用完，去续</a>{% endif %}
             {% endif %}
           </p>
+          {% if not work_pass_active and work_included %}
+          <div class="meter" role="img"
+               aria-label="本期机时已用 {{ work_used }} 分钟，共 {{ work_included }} 分钟">
+            <span style="width:{{ [100, (work_used * 100 // work_included)] | min }}%"></span>
+          </div>
+          {% endif %}
         </div>
         <div style="display:flex;gap:8px;align-items:center">
           <a class="btn btn-ghost" href="/preview" target="_blank" rel="noopener">端口预览</a>
