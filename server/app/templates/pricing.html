@@ -76,8 +76,12 @@
             {% endif %}
             <li>云工作台 <b>{{ (t.work_minutes or 0) // 60 }} 小时 / 月</b><span class="muted small">（机时另计，不扣积分）</span></li>
             <li>{{ t.concurrency }} 路并发</li>
-            <li>全部模型可用</li>
+            <li>全部模型可用<span class="muted small">（按倍率扣积分）</span></li>
           </ul>
+          <details class="model-list">
+            <summary><span id="model-count-{{ tier }}">全部模型</span>，按倍率计费</summary>
+            <div class="model-rows" data-model-rows></div>
+          </details>
         </div>
       {% endfor %}
     </div>

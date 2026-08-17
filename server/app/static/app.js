@@ -523,6 +523,27 @@
     });
     setCycle("monthly");
 
+    // Every tier lists the same models — credits are the only gate, so the
+    // multiplier IS the price difference. Loaded from /api/models so the
+    // advertised rate is literally the one the gateway bills at.
+    (function loadModels() {
+      var holders = $$("[data-model-rows]");
+      if (!holders.length) return;
+      fetch("/api/models").then(function (r) { return r.json(); }).then(function (d) {
+        var models = d.models || [];
+        var html = models.map(function (m) {
+          return '<div class="model-row"><b title="' + m.id + '">' + m.name +
+                 "</b><span>" + (m.multiplier != null ? m.multiplier + "x" : "—") + " · " +
+                 (m.credits_per_m != null ? m.credits_per_m.toLocaleString() : "—") +
+                 " 积分/1M</span></div>";
+        }).join("");
+        holders.forEach(function (h) { h.innerHTML = html; });
+        $$("[id^=model-count-]").forEach(function (el) {
+          el.textContent = models.length + " 个模型全部可用";
+        });
+      }).catch(function () {});
+    })();
+
     var payCtx = null;
     function getCtx() {
       if (payCtx) return Promise.resolve(payCtx);

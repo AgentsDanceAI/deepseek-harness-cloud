@@ -102,7 +102,7 @@ def test_client_supplied_amount_is_ignored():
                     json={"item": "pack:pack1000", "amount_cents": 1, "total_amount": "0.01"})
     assert r.status_code == 200
     order = base.get_order(r.json()["order_id"])
-    assert order["amount_cents"] == 1000  # from pricing.json, nothing else
+    assert order["amount_cents"] == plans.pricing()["packs"]["pack1000"]["cents"]  # from pricing.json, nothing else
 
 
 # --- context / intent path ---------------------------------------------------
@@ -184,7 +184,7 @@ def test_stripe_happy_path_idempotence_and_refund(monkeypatch):
 
     order = base.get_order(oid)
     assert order["status"] == "paid" and order["provider_ref"] == "pi_1"
-    assert credits.balance(uid) == 3500  # plus monthly_credits
+    assert credits.balance(uid) == plans.pricing()["tiers"]["plus"]["monthly_credits"]  # plus monthly_credits
     sub = db.query_one("SELECT * FROM subscriptions WHERE user_id=?", (uid,))
     assert sub["tier"] == "plus" and float(sub["expires"]) > time.time()
     expires_before = float(sub["expires"])
@@ -193,7 +193,7 @@ def test_stripe_happy_path_idempotence_and_refund(monkeypatch):
     r = client.post("/api/pay/webhook/stripe", content=payload,
                     headers={"stripe-signature": stripe_sig(payload)})
     assert r.status_code == 200
-    assert credits.balance(uid) == 3500
+    assert credits.balance(uid) == plans.pricing()["tiers"]["plus"]["monthly_credits"]
     sub = db.query_one("SELECT * FROM subscriptions WHERE user_id=?", (uid,))
     assert float(sub["expires"]) == expires_before
 
@@ -241,7 +241,8 @@ def test_alipay_sign_verify_roundtrip(monkeypatch):
     qs = dict(parse_qsl(urlsplit(body["pay_url"]).query, keep_blank_values=True))
     assert qs["method"] == "alipay.trade.page.pay" and qs["sign_type"] == "RSA2"
     biz = json.loads(qs["biz_content"])
-    assert biz["out_trade_no"] == oid and biz["total_amount"] == "10.00"
+    expected = "%.2f" % (plans.pricing()["packs"]["pack1000"]["cents"] / 100)
+    assert biz["out_trade_no"] == oid and biz["total_amount"] == expected
     assert qs["notify_url"].endswith("/api/pay/webhook/alipay")
     # request signature verifies against our public key (sign covers everything but `sign`)
     content = "&".join(f"{k}={v}" for k, v in sorted(qs.items()) if k != "sign" and v != "")
@@ -307,7 +308,7 @@ def test_wechat_native_and_webhook(monkeypatch, tmp_path):
     assert oid.startswith("DHW")
     assert sent["headers"]["Authorization"].startswith("WECHATPAY2-SHA256-RSA2048 mchid=")
     req = json.loads(sent["content"])
-    assert req["amount"] == {"total": 1000, "currency": "CNY"} and req["out_trade_no"] == oid
+    assert req["amount"] == {"total": plans.pricing()["packs"]["pack1000"]["cents"], "currency": "CNY"} and req["out_trade_no"] == oid
 
     def encrypted_hook(event_type: str, payload: dict) -> dict:
         nonce = "abcdef123456"
@@ -392,7 +393,7 @@ def test_orders_listing_and_polling():
     assert all("provider_ref" not in o for o in orders)
 
     one = client.get(f"/api/pay/orders/{r1.json()['order_id']}", headers=headers).json()["order"]
-    assert one["status"] == "intent" and one["amount_cents"] == 1000
+    assert one["status"] == "intent" and one["amount_cents"] == plans.pricing()["packs"]["pack1000"]["cents"]
 
     # another user cannot see it
     _, other = make_user()

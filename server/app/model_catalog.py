@@ -1,8 +1,19 @@
 """Model catalog and price math.
 
-Listed prices are CNY per 1M tokens in config/models.json. 1 credit = ¥0.01 of
-listed usage; the actual charge multiplies by MODEL_PRICE_MARKUP. All charges
-round up to at least 1 credit so streaming freeloaders can't ride for free.
+config/models.json is GENERATED (server/scripts/gen_models.py) from the gateway's
+catalog plus a price table — never hand-edited, because a hand-kept price table
+drifts and nobody notices.
+
+Credit convention, identical to AgentsDance so entitlements stay portable:
+  * blended price  = input * 0.75 + output * 0.25   (USD per 1M tokens)
+  * multiplier     = blended / blended(baseline)     ← Claude Sonnet is 1.00x
+  * 1.00x          = 1000 credits per 1M tokens
+  * $1             = 100 credits
+The multiplier is a ratio, so changing MODEL_PRICE_MARKUP moves the charge but
+never the advertised multiplier.
+
+Every charge rounds up to at least 1 credit, so streaming freeloaders can't ride
+for free on sub-credit requests.
 """
 from __future__ import annotations
 
@@ -15,24 +26,38 @@ from . import config
 
 _lock = threading.Lock()
 _cache: dict | None = None
+_meta: dict = {}
 _cache_mtime: float = 0.0
+
+CREDITS_PER_USD = 100  # $1 = 100 credits
 
 
 def _path() -> Path:
     return config.CONFIG_DIR / "models.json"
 
 
-def catalog() -> dict[str, dict]:
-    """id -> model entry. Hot-reloads on file mtime change."""
-    global _cache, _cache_mtime
+def _load() -> None:
+    global _cache, _meta, _cache_mtime
     p = _path()
     mtime = p.stat().st_mtime
+    if _cache is None or mtime != _cache_mtime:
+        data = json.loads(p.read_text())
+        _cache = {m["id"]: m for m in data["models"]}
+        _meta = {k: v for k, v in data.items() if k != "models"}
+        _cache_mtime = mtime
+
+
+def catalog() -> dict[str, dict]:
+    """id -> model entry. Hot-reloads on file mtime change."""
     with _lock:
-        if _cache is None or mtime != _cache_mtime:
-            data = json.loads(p.read_text())
-            _cache = {m["id"]: m for m in data["models"]}
-            _cache_mtime = mtime
+        _load()
         return _cache
+
+
+def meta() -> dict:
+    with _lock:
+        _load()
+        return _meta
 
 
 def resolve(model_id: str) -> dict | None:
@@ -46,18 +71,50 @@ def default_model() -> str:
     return next(iter(catalog()))
 
 
+def _usd_per_m(entry: dict, field: str) -> float:
+    """Price in USD per 1M tokens, tolerating the pre-generator CNY schema."""
+    if f"{field}_usd_per_m" in entry:
+        return float(entry[f"{field}_usd_per_m"])
+    cny = entry.get(f"{field}_cny_per_m")
+    if cny is not None:
+        return float(cny) / 7.2  # frozen display rate; only legacy files hit this
+    return 0.0
+
+
 def charge_credits(model_id: str, uncached_input: int, cache_read: int, output: int) -> int:
     """Credits to charge for one completed request. >= 1 whenever any tokens flowed."""
     m = resolve(model_id)
     if m is None:
-        # Unknown model that somehow got through: bill at the priciest entry.
-        m = max(catalog().values(), key=lambda x: x["output_cny_per_m"])
-    cny = (
-        uncached_input * m["input_cny_per_m"]
-        + cache_read * m.get("cache_read_cny_per_m", m["input_cny_per_m"])
-        + output * m["output_cny_per_m"]
+        # Unknown model that somehow got through: bill at the priciest entry so a
+        # gap in the catalog can never become a free ride.
+        m = max(catalog().values(), key=lambda x: _usd_per_m(x, "output"))
+    input_usd = _usd_per_m(m, "input")
+    output_usd = _usd_per_m(m, "output")
+    # Cached prompt tokens are far cheaper upstream; when the catalog does not
+    # say, assume the common 10% of the input rate rather than full price.
+    cache_usd = _usd_per_m(m, "cache_read") or input_usd * 0.1
+    usd = (
+        uncached_input * input_usd
+        + cache_read * cache_usd
+        + output * output_usd
     ) / 1_000_000
-    credits = math.ceil(cny * 100 * config.MODEL_PRICE_MARKUP)
+    credits = math.ceil(usd * CREDITS_PER_USD * config.MODEL_PRICE_MARKUP)
     if credits < 1 and (uncached_input or cache_read or output):
         credits = 1
     return credits
+
+
+def public_catalog() -> list[dict]:
+    """Catalog for the pricing page: what a model costs, in credits."""
+    out = []
+    for m in catalog().values():
+        out.append({
+            "id": m["id"],
+            "name": m.get("display_name", m["id"]),
+            "provider": m.get("provider", ""),
+            "multiplier": m.get("multiplier"),
+            "credits_per_m": m.get("credits_per_m"),
+            "default": bool(m.get("default")),
+        })
+    out.sort(key=lambda m: (m["multiplier"] is None, m["multiplier"] or 0, m["id"]))
+    return out

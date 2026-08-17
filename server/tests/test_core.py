@@ -153,11 +153,11 @@ def test_plan_apply_and_renewal():
     plans.apply_plan(uid, "pro", "monthly", order_id="o1")
     first = plans.current_plan(uid)
     assert first["tier"] == "pro" and first["concurrency"] == 5
-    assert credits.balance(uid) == 13000
+    assert credits.balance(uid) == plans.pricing()["tiers"]["pro"]["monthly_credits"]
 
     plans.apply_plan(uid, "pro", "monthly", order_id="o2")      # renewal extends
     assert plans.current_plan(uid)["expires"] > first["expires"]
-    assert credits.balance(uid) == 26000
+    assert credits.balance(uid) == plans.pricing()["tiers"]["pro"]["monthly_credits"] * 2
 
 
 # --- gateway -----------------------------------------------------------------
@@ -302,7 +302,7 @@ def test_gateway_anthropic_search_surface(gw_user, monkeypatch):
     assert _FakeClient.last_request["headers"]["x-api-key"] == "sk-upstream-test"
     assert _FakeClient.last_request["url"].endswith("/anthropic/v1/messages")
     spent = before - credits.balance(uid)
-    assert spent >= 5  # flat search fee + token cost
+    assert spent >= config.SEARCH_CALL_CREDITS  # flat search fee + token cost
 
 
 def test_models_listing(gw_user):
@@ -328,3 +328,49 @@ def test_gateway_concurrency_headroom(gw_user, monkeypatch):
     monkeypatch.setitem(gateway._inflight, uid, 1 + gateway.AUX_REQUEST_HEADROOM)
     r2 = fresh.post("/llm/v1/chat/completions", json={"model": "deepseek-v4-flash", "messages": []})
     assert r2.status_code == 429
+
+
+# --- credit convention (must stay aligned with AgentsDance for portability) ---
+
+def test_multiplier_is_anchored_on_the_baseline_model():
+    """1.00x is defined as the baseline model, and 1.00x == 1000 credits / 1M.
+    These two facts are what make a credit balance mean the same thing in both
+    products, so they are locked here rather than left to the generator."""
+    from app import model_catalog
+    meta = model_catalog.meta()
+    baseline = meta.get("baseline_model")
+    assert baseline, "generated catalog must record its 1.00x anchor"
+    entry = model_catalog.resolve(baseline)
+    assert entry is not None
+    assert abs(entry["multiplier"] - 1.0) < 0.01
+    assert entry["credits_per_m"] == meta["credits_per_baseline_m"] == 1000
+
+
+def test_cheaper_model_costs_proportionally_fewer_credits():
+    from app import model_catalog
+    cat = model_catalog.catalog()
+    baseline = model_catalog.meta()["baseline_model"]
+    cheap = min(cat.values(), key=lambda m: m["multiplier"])
+    # a model at 0.1x must cost about a tenth of the baseline for the same tokens
+    tokens = 1_000_000
+    base_cost = model_catalog.charge_credits(baseline, tokens, 0, 0)
+    cheap_cost = model_catalog.charge_credits(cheap["id"], tokens, 0, 0)
+    assert cheap_cost < base_cost
+    ratio = cheap_cost / base_cost
+    assert ratio == pytest.approx(cheap["multiplier"] / cat[baseline]["multiplier"], rel=0.35)
+
+
+def test_unknown_model_bills_at_the_priciest_entry():
+    """A gap in the catalog must never become a free ride."""
+    from app import model_catalog
+    priciest = max(model_catalog.catalog().values(),
+                   key=lambda m: m.get("output_usd_per_m", 0))
+    assert (model_catalog.charge_credits("no-such-model", 0, 0, 100_000)
+            == model_catalog.charge_credits(priciest["id"], 0, 0, 100_000))
+
+
+def test_any_token_flow_costs_at_least_one_credit():
+    from app import model_catalog
+    cheapest = min(model_catalog.catalog().values(), key=lambda m: m["multiplier"])
+    assert model_catalog.charge_credits(cheapest["id"], 1, 0, 1) >= 1
+    assert model_catalog.charge_credits(cheapest["id"], 0, 0, 0) == 0

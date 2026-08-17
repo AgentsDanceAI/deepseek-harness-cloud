@@ -83,9 +83,9 @@ UPSTREAM_ANTHROPIC_BASE = _env("UPSTREAM_ANTHROPIC_BASE", "https://api.deepseek.
 # Which price table to serve: pricing.json (CNY) or pricing.usd.json (overseas).
 PRICING_FILE = _env("PRICING_FILE", "pricing.json")
 MODEL_PRICE_MARKUP = _env_float("MODEL_PRICE_MARKUP", 1.2)
-FREE_SIGNUP_CREDITS = _env_int("FREE_SIGNUP_CREDITS", 500)  # 1 credit = ¥0.01 of listed usage
-SEARCH_CALL_CREDITS = _env_int("SEARCH_CALL_CREDITS", 5)  # flat per web_search call, on top of tokens
-OVERDRAFT_LIMIT_CREDITS = _env_int("OVERDRAFT_LIMIT_CREDITS", 200)  # in-flight streams may finish
+FREE_SIGNUP_CREDITS = _env_int("FREE_SIGNUP_CREDITS", 1000)  # $1 = 100 credits
+SEARCH_CALL_CREDITS = _env_int("SEARCH_CALL_CREDITS", 1)  # flat per web_search call, on top of tokens
+OVERDRAFT_LIMIT_CREDITS = _env_int("OVERDRAFT_LIMIT_CREDITS", 20)  # in-flight streams may finish
 
 # --- gateway guards ---------------------------------------------------------
 GATEWAY_QPS = _env_float("GATEWAY_QPS", 5.0)  # per-user requests/second (token bucket)

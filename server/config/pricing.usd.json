@@ -5,7 +5,7 @@
     "free": {
       "name": "Free",
       "monthly_cents": 0,
-      "signup_credits": 500,
+      "signup_credits": 1000,
       "monthly_credits": 0,
       "concurrency": 1,
       "work_minutes": 4320,
@@ -16,7 +16,7 @@
       "name": "Plus",
       "monthly_cents": 2000,
       "yearly_cents": 16800,
-      "monthly_credits": 3500,
+      "monthly_credits": 2000,
       "concurrency": 2,
       "work_minutes": 10800,
       "monthly_intro_cents": 1600,
@@ -27,7 +27,7 @@
       "name": "Pro",
       "monthly_cents": 10000,
       "yearly_cents": 72000,
-      "monthly_credits": 13000,
+      "monthly_credits": 10000,
       "concurrency": 5,
       "work_minutes": 21600,
       "monthly_intro_cents": 7000,
@@ -38,7 +38,7 @@
       "name": "Max",
       "monthly_cents": 20000,
       "yearly_cents": 117600,
-      "monthly_credits": 42000,
+      "monthly_credits": 20000,
       "concurrency": 10,
       "work_minutes": 32400,
       "monthly_intro_cents": 12000,
@@ -49,19 +49,19 @@
   "packs": {
     "pack1000": {
       "name": "1,000 credits",
-      "cents": 300,
+      "cents": 1200,
       "credits": 1000,
       "valid_days": 365
     },
     "pack5250": {
       "name": "5,250 credits",
-      "cents": 1500,
+      "cents": 5000,
       "credits": 5250,
       "valid_days": 365
     },
     "pack11000": {
       "name": "11,000 credits",
-      "cents": 3000,
+      "cents": 10000,
       "credits": 11000,
       "valid_days": 365
     }

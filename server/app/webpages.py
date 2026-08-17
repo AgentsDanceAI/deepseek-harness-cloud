@@ -375,6 +375,16 @@ def console_page(request: Request):
 
 # --- pricing / orders --------------------------------------------------------
 
+@router.get("/api/models")
+def models_public():
+    """Public model catalog with credit multipliers — the pricing page reads it
+    so the advertised rate and the billed rate can never disagree."""
+    from . import model_catalog
+    return {"baseline": model_catalog.meta().get("baseline_model"),
+            "credits_per_baseline_m": model_catalog.meta().get("credits_per_baseline_m"),
+            "models": model_catalog.public_catalog()}
+
+
 @router.get("/pricing")
 def pricing_page(request: Request):
     pricing = _pricing_safe()

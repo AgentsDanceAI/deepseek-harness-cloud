@@ -213,7 +213,7 @@ def test_webhook_paid_idempotent_then_refund(monkeypatch):
 
     settled = base.get_order(oid)
     assert settled["status"] == "paid" and settled["provider_ref"] == "SESS_9"
-    assert credits.balance(uid) == 3500  # plus monthly_credits (USD table)
+    assert credits.balance(uid) == plans.pricing()["tiers"]["plus"]["monthly_credits"]  # plus monthly_credits (USD table)
     sub = db.query_one("SELECT * FROM subscriptions WHERE user_id=?", (uid,))
     assert sub["tier"] == "plus" and float(sub["expires"]) > time.time()
     expires_before = float(sub["expires"])
@@ -222,7 +222,7 @@ def test_webhook_paid_idempotent_then_refund(monkeypatch):
     r = client.post("/api/pay/webhook/waffo", content=payload,
                     headers={"X-Waffo-Signature": waffo_sig(payload)})
     assert r.status_code == 200
-    assert credits.balance(uid) == 3500
+    assert credits.balance(uid) == plans.pricing()["tiers"]["plus"]["monthly_credits"]
     sub = db.query_one("SELECT * FROM subscriptions WHERE user_id=?", (uid,))
     assert float(sub["expires"]) == expires_before
 
