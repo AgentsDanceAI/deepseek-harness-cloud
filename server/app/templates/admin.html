@@ -1,0 +1,135 @@
+{% extends "base.html" %}
+{% block title %}管理后台 — DSH Cloud{% endblock %}
+{% block content %}
+<section class="section">
+  <div class="container">
+    <span class="eyebrow">超级管理员</span>
+    <h1 class="section-title" style="text-align:left">管理后台</h1>
+
+    <div class="grid grid-4" style="margin:22px 0">
+      <div class="card stat"><div class="stat-label">用户总数</div><div class="stat-value" id="s-users">—</div></div>
+      <div class="card stat"><div class="stat-label">已付订单</div><div class="stat-value" id="s-orders">—</div></div>
+      <div class="card stat"><div class="stat-label">累计收入</div><div class="stat-value" id="s-revenue">—</div></div>
+      <div class="card stat"><div class="stat-label">24h 调用 / 积分</div><div class="stat-value" id="s-calls">—</div></div>
+    </div>
+
+    <div class="card block">
+      <div class="card-row" style="align-items:center;margin-bottom:14px">
+        <h2 style="margin:0">用户</h2>
+        <div class="form-row" style="margin:0">
+          <input type="search" id="q" placeholder="按邮箱搜索" style="max-width:240px">
+          <button class="btn btn-ghost btn-sm" id="btn-search" type="button">搜索</button>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table class="table" id="users">
+          <thead><tr>
+            <th>邮箱</th><th>套餐</th><th>积分</th><th>机时(本期)</th>
+            <th>状态</th><th>注册</th><th>操作</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <p class="muted small" style="margin-top:12px">
+        改套餐立即生效；发放积分进入该用户的个人额度；停用会同时使其全部登录态失效。
+      </p>
+    </div>
+
+    <p class="auth-back" style="margin-top:24px;text-align:left"><a href="/console">← 返回控制台</a></p>
+  </div>
+</section>
+{% endblock %}
+{% block scripts %}
+<script>
+(function () {
+  var $ = function (s) { return document.querySelector(s); };
+  var SYM = document.body.dataset.currencySymbol || "¥";
+
+  function post(url, body) {
+    return fetch(url, { method: "POST", headers: { "content-type": "application/json" },
+                        body: JSON.stringify(body || {}) })
+      .then(function (r) { return r.json().then(function (d) {
+        if (!r.ok) throw new Error(d.detail || "操作失败"); return d; }); });
+  }
+  function fmtDate(ts) {
+    if (!ts) return "—";
+    var d = new Date(ts * 1000), p = function (n) { return (n < 10 ? "0" : "") + n; };
+    return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate());
+  }
+
+  function loadStats() {
+    fetch("/api/admin/stats").then(function (r) { return r.json(); }).then(function (s) {
+      $("#s-users").textContent = (s.users || 0).toLocaleString();
+      $("#s-orders").textContent = (s.paid_orders || 0).toLocaleString();
+      $("#s-revenue").textContent = SYM + ((s.revenue_cents || 0) / 100).toFixed(2);
+      $("#s-calls").textContent = (s.calls_24h || 0).toLocaleString() + " / " + (s.credits_24h || 0).toLocaleString();
+    }).catch(function () {});
+  }
+
+  function loadUsers() {
+    var q = encodeURIComponent($("#q").value.trim());
+    fetch("/api/admin/users?q=" + q + "&limit=100")
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        var tb = $("#users tbody");
+        tb.innerHTML = "";
+        (d.users || []).forEach(function (u) {
+          var tr = document.createElement("tr");
+          var mins = u.work_minutes_used || 0, inc = u.work_minutes_included || 0;
+          tr.innerHTML =
+            "<td>" + u.email + (u.role === "admin" ? ' <span class="tag">管理员</span>' : "") + "</td>" +
+            '<td><select class="cap-input" style="width:96px"></select></td>' +
+            '<td class="num">' + (u.credits || 0).toLocaleString() + "</td>" +
+            '<td class="num">' + Math.floor(mins / 60) + "h / " + Math.floor(inc / 60) + "h</td>" +
+            "<td>" + (u.status === "active"
+              ? '<span class="badge badge-ok">正常</span>'
+              : '<span class="badge badge-danger">已停用</span>') + "</td>" +
+            "<td>" + fmtDate(u.created) + "</td><td></td>";
+
+          // plan: change takes effect immediately
+          var sel = tr.querySelector("select");
+          ["free", "plus", "pro", "max"].forEach(function (t) {
+            var o = document.createElement("option");
+            o.value = t; o.textContent = t;
+            if (t === u.plan) o.selected = true;
+            sel.appendChild(o);
+          });
+          sel.onchange = function () {
+            if (sel.value === "free") { alert("降级到 Free 请让订阅自然到期，或联系我处理退款流程。"); loadUsers(); return; }
+            post("/api/admin/set-plan", { user_id: u.id, tier: sel.value, cycle: "monthly" })
+              .then(loadUsers).catch(function (e) { alert(e.message); loadUsers(); });
+          };
+
+          var act = tr.lastElementChild;
+          var grant = document.createElement("button");
+          grant.className = "link-btn"; grant.textContent = "发积分";
+          grant.onclick = function () {
+            var n = prompt("给 " + u.email + " 发放多少积分？", "1000");
+            if (!n || !/^\d+$/.test(n)) return;
+            post("/api/admin/grant-credits", { user_id: u.id, amount: parseInt(n, 10), valid_days: 365 })
+              .then(loadUsers).catch(function (e) { alert(e.message); });
+          };
+          act.appendChild(grant);
+
+          var toggle = document.createElement("button");
+          toggle.className = "link-btn"; toggle.style.marginLeft = "10px";
+          toggle.textContent = u.status === "active" ? "停用" : "恢复";
+          if (u.status === "active") toggle.classList.add("link-danger");
+          toggle.onclick = function () {
+            var next = u.status === "active" ? "suspended" : "active";
+            if (next === "suspended" && !confirm("停用 " + u.email + "？该用户将立即被登出且无法使用服务。")) return;
+            post("/api/admin/set-status", { user_id: u.id, status: next })
+              .then(loadUsers).catch(function (e) { alert(e.message); });
+          };
+          act.appendChild(toggle);
+          tb.appendChild(tr);
+        });
+      }).catch(function () {});
+  }
+
+  $("#btn-search").addEventListener("click", loadUsers);
+  $("#q").addEventListener("keydown", function (e) { if (e.key === "Enter") loadUsers(); });
+  loadStats(); loadUsers();
+})();
+</script>
+{% endblock %}

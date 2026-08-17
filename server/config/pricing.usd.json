@@ -14,35 +14,35 @@
     },
     "plus": {
       "name": "Plus",
-      "monthly_cents": 900,
-      "yearly_cents": 9000,
+      "monthly_cents": 2000,
+      "yearly_cents": 16800,
       "monthly_credits": 3500,
       "concurrency": 2,
       "work_minutes": 10800,
-      "monthly_intro_cents": 700,
-      "yearly_per_month_cents": 750,
+      "monthly_intro_cents": 1600,
+      "yearly_per_month_cents": 1400,
       "tagline": "个人日常任务，零配置"
     },
     "pro": {
       "name": "Pro",
-      "monthly_cents": 2900,
-      "yearly_cents": 29000,
+      "monthly_cents": 10000,
+      "yearly_cents": 72000,
       "monthly_credits": 13000,
       "concurrency": 5,
       "work_minutes": 21600,
-      "monthly_intro_cents": 1900,
-      "yearly_per_month_cents": 2417,
+      "monthly_intro_cents": 7000,
+      "yearly_per_month_cents": 6000,
       "tagline": "一个人交付一个团队的产出"
     },
     "max": {
       "name": "Max",
-      "monthly_cents": 7900,
-      "yearly_cents": 79000,
+      "monthly_cents": 20000,
+      "yearly_cents": 117600,
       "monthly_credits": 42000,
       "concurrency": 10,
       "work_minutes": 32400,
-      "monthly_intro_cents": 4900,
-      "yearly_per_month_cents": 6583,
+      "monthly_intro_cents": 12000,
+      "yearly_per_month_cents": 9800,
       "tagline": "替代外包预算，重度使用"
     }
   },
@@ -67,7 +67,7 @@
     }
   },
   "team": {
-    "seat_cents": 1200,
+    "seat_cents": 2500,
     "seat_credits": 3500,
     "seat_minutes": 1200,
     "min_seats": 3,

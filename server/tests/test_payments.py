@@ -34,7 +34,7 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
-from app import config, credits, db, security
+from app import plans, config, credits, db, security
 from app.payments import alipay_provider, base, stripe_provider, wechatpay_provider
 from app.payments.api import router as pay_router
 
@@ -89,10 +89,11 @@ def test_resolve_item_rejects_unknown_and_free():
             base.resolve_item(bad)
         assert e.value.status_code == 400
 
-    assert base.resolve_item("plan:plus:monthly")["amount_cents"] == 2900
-    assert base.resolve_item("plan:pro:yearly")["amount_cents"] == 99000
+    table = plans.pricing()["tiers"]
+    assert base.resolve_item("plan:plus:monthly")["amount_cents"] == table["plus"]["monthly_cents"]
+    assert base.resolve_item("plan:pro:yearly")["amount_cents"] == table["pro"]["yearly_cents"]
     info = base.resolve_item("pack:pack5250")
-    assert info["amount_cents"] == 5000 and info["credits"] == 5250
+    assert info["amount_cents"] == plans.pricing()["packs"]["pack5250"]["cents"] and info["credits"] == 5250
 
 
 def test_client_supplied_amount_is_ignored():
@@ -121,7 +122,7 @@ def test_checkout_without_provider_records_intent():
     assert body["provider"] is None and body["intent"] is True
     order = base.get_order(body["order_id"], uid)
     assert order["status"] == "intent" and order["provider"] == "intent"
-    assert order["amount_cents"] == 99000
+    assert order["amount_cents"] == plans.pricing()["tiers"]["pro"]["yearly_cents"]
     assert credits.balance(uid) == 0  # nothing fulfilled
 
 
@@ -163,7 +164,7 @@ def test_stripe_happy_path_idempotence_and_refund(monkeypatch):
     assert body["provider"] == "stripe" and body["pay_url"].startswith("https://checkout.stripe.com")
     oid = body["order_id"]
     assert oid.startswith("DHS")
-    assert sent["data"]["line_items[0][price_data][unit_amount]"] == "2900"
+    assert sent["data"]["line_items[0][price_data][unit_amount]"] == str(plans.pricing()["tiers"]["plus"]["monthly_cents"])
     assert sent["data"]["line_items[0][price_data][currency]"] == "cny"
     assert sent["data"]["client_reference_id"] == oid
     assert sent["data"]["payment_method_types[0]"] == "card"

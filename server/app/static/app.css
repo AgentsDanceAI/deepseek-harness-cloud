@@ -905,3 +905,31 @@ body[data-page="landing"] .site-header {
 .plan .btn { margin-top: 18px; }
 .plan .plain { margin-top: 18px; }
 .plan .plain li { text-align: left; }
+
+/* ---------- nav dropdown: reachable and single-column ----------
+   The menu sits below the trigger with a visual gap; without a bridge the
+   pointer leaves the group mid-travel and the menu closed before it could be
+   clicked. The ::before pad covers that gap so the hover is continuous. */
+.nav-menu::before {
+  content: ""; position: absolute; left: 0; right: 0; top: -16px; height: 16px;
+}
+.nav-menu-1col {
+  grid-template-columns: 1fr;
+  min-width: 320px;
+}
+.nav-menu a { display: flex; align-items: flex-start; gap: 10px; }
+.nav-ico {
+  flex: none; width: 26px; height: 26px; margin-top: 1px; border-radius: 7px;
+  display: grid; place-items: center;
+  background: var(--brand-weak); color: var(--brand);
+}
+.nav-menu a > strong { flex: 1; }
+.nav-menu-1col a { display: grid; grid-template-columns: 26px 1fr; grid-template-rows: auto auto; column-gap: 10px; }
+.nav-menu-1col .nav-ico { grid-row: 1 / span 2; }
+.nav-menu-1col strong { grid-column: 2; }
+.nav-menu-1col span { grid-column: 2; margin-top: 2px; }
+.nav-menu-more {
+  margin-top: 4px; border-top: 1px solid var(--border); padding-top: 11px !important;
+  color: var(--brand) !important; font-size: 13px; display: block !important;
+}
+.nav-menu-more:hover { background: var(--brand-weak); }

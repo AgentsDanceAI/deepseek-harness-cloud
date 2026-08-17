@@ -77,13 +77,28 @@ async def _docker(method: str, path: str, *, json_body: dict | None = None,
 
 def _mint_workspace_token(user: dict) -> str:
     """Device token for the container's gateway auth — same lifecycle as a
-    desktop device: visible in the console's device list, revocable there."""
+    desktop device: visible in the console's device list, revocable there.
+
+    There is ONE workspace per user (the container is named after the user id),
+    so each rebuild replaces the credential rather than adding another: the old
+    row is revoked and pruned. Otherwise every recreate left a dead "云工作台"
+    entry behind and the device list filled with历史 noise.
+    """
     device_id = security.new_id("dev_")
     epoch = int(user["session_epoch"])
     token = security.sign_token(user["id"], device_id=device_id, epoch=epoch,
                                 ttl=config.DEVICE_TOKEN_TTL)
     now = time.time()
     with db.tx() as conn:
+        # the superseded credential must stop working the moment a new one exists
+        conn.execute("UPDATE devices SET revoked=1 WHERE user_id=? AND platform='cloud' AND revoked=0",
+                     (user["id"],))
+        # keep the last few for the audit trail; drop the rest
+        stale = conn.execute(
+            "SELECT id FROM devices WHERE user_id=? AND platform='cloud' AND revoked=1 "
+            "ORDER BY created DESC", (user["id"],)).fetchall()
+        for row in stale[2:]:
+            conn.execute("DELETE FROM devices WHERE id=?", (row["id"],))
         conn.execute(
             "INSERT INTO devices (id, user_id, name, platform, token_hash, epoch, last_seen, created) "
             "VALUES (?,?,?,?,?,?,?,?)",
@@ -184,6 +199,12 @@ async def _create(user: dict) -> None:
         + agents_md +
         "DHCMDEOF\n"
         + merge_agents_md + "\n"
+        # A always-on static server over /workspace. Without it, seeing a file
+        # the agent just wrote meant asking the agent to start a server — and
+        # that server dies with the container, so the link rots. This one is
+        # part of the workspace itself, so "open what it made" always works.
+        f"python3 -m http.server {PREVIEW_STATIC_PORT} --bind 0.0.0.0 "
+        "--directory /workspace >/dev/null 2>&1 & "
         "socat TCP-LISTEN:3081,fork,reuseaddr TCP:127.0.0.1:3080 & "
         "exec dsh web --host 127.0.0.1 --port 3080"
     )
@@ -288,6 +309,9 @@ async def ensure_workspace(user: dict) -> str:
 # domain: /preview/<port>/<path> proxies to dshwork-<hex>:<port>/<path>.
 # dhc-server sits on dshwork-net, so it can reach the container directly.
 
+# A static server over /workspace runs for the life of the container, so a file
+# the agent wrote is viewable without asking it to start anything.
+PREVIEW_STATIC_PORT = 8088
 PREVIEW_PROBE_PORTS = (8080, 3000, 5173, 8000, 5000, 4173, 8888, 3001, 4200, 9000)
 _PREVIEW_PORT_COOKIE = "dhc_preview_port"
 # Ports we will never expose: dsh's own UI (its API drives the agent with the
@@ -314,6 +338,36 @@ async def _port_open(user_id: str, port: int, timeout: float = 0.6) -> bool:
         return False
 
 
+_HREF_RE = re.compile(r'<a href="([^"?/][^"]*)"')
+
+
+async def _workspace_files(user_id: str, limit: int = 60) -> list[str]:
+    """Top-level names in /workspace, read from the container's static server.
+
+    Parsed from its directory index rather than exec'd — the docker socket proxy
+    denies exec by design, and that restriction is worth keeping.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=4.0) as http:
+            r = await http.get(f"http://{_cname(user_id)}:{PREVIEW_STATIC_PORT}/")
+        if r.status_code != 200:
+            return []
+    except httpx.HTTPError:
+        return []
+    names = []
+    for raw in _HREF_RE.findall(r.text):
+        name = raw.strip()
+        if not name or name.startswith((".", "node_modules")):
+            continue
+        names.append(name)
+        if len(names) >= limit:
+            break
+    # things you can actually open in a browser first
+    viewable = (".html", ".htm", ".pdf", ".png", ".jpg", ".jpeg", ".svg", ".gif", ".txt", ".md")
+    names.sort(key=lambda n: (not n.lower().endswith(viewable), n.lower()))
+    return names
+
+
 async def _open_ports(user_id: str) -> list[int]:
     probes = [p for p in PREVIEW_PROBE_PORTS if p not in _PREVIEW_BLOCKED_PORTS]
     results = await asyncio.gather(*(_port_open(user_id, p) for p in probes))
@@ -335,31 +389,53 @@ def _inject_base(body: bytes, prefix: str) -> bytes:
 
 @router.get("/preview")
 async def preview_index(request: Request):
-    """Port picker: which of the container's ports are actually serving."""
+    """What the agent made, ready to open.
+
+    Two things live here: the files in /workspace (served by the container's
+    always-on static server, so nothing needs starting) and any dev server the
+    agent happens to be running. Everything is behind the session — a preview
+    only ever reaches the requester's own container.
+    """
     user = try_resolve_user(request)
     site = config.PUBLIC_BASE.rstrip("/")
     if user is None:
         return RedirectResponse(f"{site}/login?next=/preview", status_code=302)
     info = await _inspect(user["id"])
     running = bool(info) and (info.get("State") or {}).get("Status") == "running"
-    ports = await _open_ports(user["id"]) if running else []
-    if ports:
-        rows = "".join(
-            f'<li><a href="/preview/{p}/">端口 {p} — /preview/{p}/</a></li>' for p in ports)
-        body = f"<p>检测到以下端口正在提供服务：</p><ul>{rows}</ul>"
-    elif running:
-        body = ("<p>没有检测到正在监听的端口。让智能体启动服务时监听 "
-                "<code>0.0.0.0</code>，例如 "
-                "<code>python3 -m http.server 8080 --bind 0.0.0.0</code>，"
-                "然后访问 <code>/preview/8080/</code>。</p>")
-    else:
+
+    files, ports = [], []
+    if running:
+        files = await _workspace_files(user["id"])
+        ports = [p for p in await _open_ports(user["id"]) if p != PREVIEW_STATIC_PORT]
+
+    if not running:
         body = '<p>云工作台未在运行。<a href="/work">先进入云工作台 →</a></p>'
+    else:
+        parts = []
+        if files:
+            rows = "".join(
+                f'<li><a href="/preview/{PREVIEW_STATIC_PORT}/{f}" target="_blank" rel="noopener">{f}</a></li>'
+                for f in files)
+            parts.append(f"<h2>工作区文件</h2><p class=muted>智能体生成的文件，点开即看。</p><ul>{rows}</ul>")
+        else:
+            parts.append("<h2>工作区文件</h2><p class=muted>工作区还是空的——让智能体做点东西，"
+                         "生成的文件会出现在这里。</p>")
+        if ports:
+            rows = "".join(f'<li><a href="/preview/{p}/" target="_blank" rel="noopener">'
+                           f'端口 {p}</a></li>' for p in ports)
+            parts.append(f"<h2>正在运行的服务</h2><ul>{rows}</ul>")
+        body = "".join(parts)
+
     return HTMLResponse(
-        "<!doctype html><meta charset=utf-8><title>端口预览 · DSH Cloud</title>"
-        "<style>body{font:15px/1.7 system-ui,sans-serif;max-width:640px;margin:60px auto;"
-        "padding:0 20px;color:#1a2233}a{color:#2663c9}code{background:#f0f4fa;padding:2px 6px;"
-        "border-radius:4px}</style><h1>端口预览</h1>" + body +
-        '<p style="margin-top:28px"><a href="/work">← 返回云工作台</a></p>')
+        "<!doctype html><meta charset=utf-8><title>预览 · DSH Cloud</title>"
+        "<style>body{font:15px/1.7 system-ui,-apple-system,'PingFang SC',sans-serif;"
+        "max-width:640px;margin:56px auto;padding:0 20px;color:#16233a}"
+        "h1{font-size:26px;margin-bottom:6px}h2{font-size:15px;margin:26px 0 6px}"
+        "a{color:#2663c9}ul{padding-left:20px;margin:8px 0}li{margin:5px 0}"
+        ".muted{color:#66748c;font-size:13.5px;margin:0}"
+        "code{background:#f0f4fa;padding:2px 6px;border-radius:4px}</style>"
+        "<h1>预览</h1>" + body +
+        '<p style="margin-top:32px"><a href="/work">← 返回云工作台</a></p>')
 
 
 @router.api_route("/preview/{port}/{path:path}",

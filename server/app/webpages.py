@@ -67,6 +67,7 @@ def _ctx(request: Request, page: str, **extra) -> dict:
         "download_url_win": os.environ.get("DOWNLOAD_URL_WIN", ""),
         "download_url_mac_x64": os.environ.get("DOWNLOAD_URL_MAC_X64", ""),
         "download_url_android": os.environ.get("DOWNLOAD_URL_ANDROID", ""),
+        "download_url_win_arm": os.environ.get("DOWNLOAD_URL_WIN_ARM", ""),
         "work_enabled": config.WORK_ENABLED,
         "work_credits_per_min": config.WORK_CREDITS_PER_MIN,
         "work_idle_stop_min": config.WORK_IDLE_STOP_MIN,
@@ -272,6 +273,18 @@ def solutions_page(request: Request):
 @router.get("/resources")
 def resources_page(request: Request):
     return _render(request, "resources.html", "resources")
+
+
+@router.get("/console/admin")
+def admin_page(request: Request):
+    """Operator console. The APIs already enforce admin; this refuses early so a
+    non-admin never sees the shell of a page they cannot use."""
+    user = try_resolve_user(request)
+    if user is None:
+        return RedirectResponse("/login?next=/console/admin", status_code=303)
+    if not user.get("is_admin"):
+        return RedirectResponse("/console", status_code=303)
+    return _render(request, "admin.html", "admin")
 
 
 @router.get("/console/team")

@@ -6,7 +6,7 @@ import time
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from . import credits, db, plans
+from . import credits, db, plans, work_access
 from .accounts import resolve_user
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
@@ -29,6 +29,8 @@ def list_users(q: str = "", limit: int = 50, _: dict = Depends(require_admin)):
         d = dict(r)
         d["credits"] = credits.balance(r["id"])
         d["plan"] = plans.current_plan(r["id"])["tier"]
+        d["work_minutes_used"] = work_access.used_minutes(r["id"])
+        d["work_minutes_included"] = work_access.included_minutes(r["id"])
         out.append(d)
     return {"users": out}
 

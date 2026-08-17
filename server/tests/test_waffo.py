@@ -55,7 +55,7 @@ import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
-from app import config, credits, db, plans, security
+from app import plans, config, credits, db, plans, security
 from app.payments import base, waffo_provider
 from app.payments.api import router as pay_router
 
@@ -182,7 +182,7 @@ def test_checkout_creates_pending_order_usd(monkeypatch):
     assert order["status"] == "pending"
     assert order["provider"] == "waffo"
     assert order["currency"] == "USD"
-    assert order["amount_cents"] == 900
+    assert order["amount_cents"] == plans.pricing()["tiers"]["plus"]["monthly_cents"]
     assert credits.balance(uid) == 0  # nothing fulfilled yet
 
     # create-session payload: amount in major units, external id + success url
@@ -190,7 +190,7 @@ def test_checkout_creates_pending_order_usd(monkeypatch):
     p = sent["payload"]
     assert p["productId"] == "PROD_test"
     assert p["currency"] == "USD"
-    assert p["priceSnapshot"]["amount"] == 9.0
+    assert p["priceSnapshot"]["amount"] == plans.pricing()["tiers"]["plus"]["monthly_cents"] / 100
     assert p["orderMerchantExternalId"] == oid
     assert f"order={oid}" in p["successUrl"]
     assert "card" in p["includePaymentMethods"]

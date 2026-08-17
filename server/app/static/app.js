@@ -104,31 +104,54 @@
   (function initNavGroups() {
     var groups = $$("[data-nav-group]");
     if (!groups.length) return;
+    var CLOSE_DELAY = 220;   // crossing the gap to the menu must not close it
+
     function closeAll(except) {
       groups.forEach(function (g) {
         if (g === except) return;
+        clearTimeout(g._t);
         g.dataset.open = "false";
         g.querySelector(".nav-menu").hidden = true;
         g.querySelector("button").setAttribute("aria-expanded", "false");
       });
     }
+
     groups.forEach(function (g) {
       var btn = g.querySelector("button");
       var menu = g.querySelector(".nav-menu");
-      function setOpen(open) {
-        g.dataset.open = open ? "true" : "false";
-        menu.hidden = !open;
-        btn.setAttribute("aria-expanded", open ? "true" : "false");
-        if (open) closeAll(g);
+
+      function open() {
+        clearTimeout(g._t);
+        g.dataset.open = "true";
+        menu.hidden = false;
+        btn.setAttribute("aria-expanded", "true");
+        closeAll(g);
       }
+      // Deliberately delayed: the pointer travels diagonally from the trigger to
+      // the item it is aiming at, briefly leaving the group. Closing on that
+      // first mouseleave made the menu impossible to click.
+      function scheduleClose() {
+        clearTimeout(g._t);
+        g._t = setTimeout(function () {
+          g.dataset.open = "false";
+          menu.hidden = true;
+          btn.setAttribute("aria-expanded", "false");
+        }, CLOSE_DELAY);
+      }
+
       btn.addEventListener("click", function (ev) {
         ev.stopPropagation();
-        setOpen(menu.hidden);
+        if (menu.hidden) open(); else scheduleClose();
       });
-      // pointer users expect hover; keyboard/touch users get the click above
-      g.addEventListener("mouseenter", function () { setOpen(true); });
-      g.addEventListener("mouseleave", function () { setOpen(false); });
+      g.addEventListener("mouseenter", open);
+      g.addEventListener("mouseleave", scheduleClose);
+      menu.addEventListener("mouseenter", function () { clearTimeout(g._t); });
+      g.addEventListener("focusin", open);
+      g.addEventListener("focusout", function (ev) {
+        if (!g.contains(ev.relatedTarget)) scheduleClose();
+      });
     });
+
     document.addEventListener("click", function () { closeAll(null); });
     document.addEventListener("keydown", function (ev) {
       if (ev.key === "Escape") closeAll(null);

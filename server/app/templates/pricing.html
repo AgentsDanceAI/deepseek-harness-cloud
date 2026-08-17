@@ -37,7 +37,7 @@
             </div>
             <p class="plan-note">
               {% if free %}永久免费
-              {% else %}首期价 · 之后 {{ currency_symbol }}{{ std // 100 }}/月 ·
+              {% else %}首月价 · 次月起 {{ currency_symbol }}{{ std // 100 }}/月 ·
                 <button type="button" class="link-btn" data-goto-yearly>年付更省 →</button>
               {% endif %}
             </p>
@@ -54,7 +54,8 @@
             </div>
             <p class="plan-note">
               {% if free %}永久免费
-              {% else %}一次性支付 {{ currency_symbol }}{{ (t.yearly_cents or 0) // 100 }} / 年 · 价格锁定不受调价影响
+              {% else %}按年计费 · {{ currency_symbol }}{{ (t.yearly_cents or 0) // 100 }}/年
+                （省 {{ currency_symbol }}{{ (std * 12 - (t.yearly_cents or 0)) // 100 }}）
               {% endif %}
             </p>
           </div>
