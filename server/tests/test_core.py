@@ -351,13 +351,15 @@ def test_cheaper_model_costs_proportionally_fewer_credits():
     cat = model_catalog.catalog()
     baseline = model_catalog.meta()["baseline_model"]
     cheap = min(cat.values(), key=lambda m: m["multiplier"])
-    # a model at 0.1x must cost about a tenth of the baseline for the same tokens
-    tokens = 1_000_000
-    base_cost = model_catalog.charge_credits(baseline, tokens, 0, 0)
-    cheap_cost = model_catalog.charge_credits(cheap["id"], tokens, 0, 0)
+    # Charge the SAME 75/25 input:output split the multiplier is defined from.
+    # Billing pure input instead compares input prices, which only tracks the
+    # blended multiplier when the two models share the baseline's price shape —
+    # they don't, so that version of this test was asserting a coincidence.
+    base_cost = model_catalog.charge_credits(baseline, 750_000, 0, 250_000)
+    cheap_cost = model_catalog.charge_credits(cheap["id"], 750_000, 0, 250_000)
     assert cheap_cost < base_cost
     ratio = cheap_cost / base_cost
-    assert ratio == pytest.approx(cheap["multiplier"] / cat[baseline]["multiplier"], rel=0.35)
+    assert ratio == pytest.approx(cheap["multiplier"] / cat[baseline]["multiplier"], rel=0.05)
 
 
 def test_unknown_model_bills_at_the_priciest_entry():
@@ -374,3 +376,31 @@ def test_any_token_flow_costs_at_least_one_credit():
     cheapest = min(model_catalog.catalog().values(), key=lambda m: m["multiplier"])
     assert model_catalog.charge_credits(cheapest["id"], 1, 0, 1) >= 1
     assert model_catalog.charge_credits(cheapest["id"], 0, 0, 0) == 0
+
+
+def test_query_tolerates_writes_that_return_no_rows():
+    """db.query() is used for one-off writes as well as SELECTs. SQLite happily
+    fetchall()s a DELETE; psycopg raises "the last operation didn't produce
+    records". That difference took production login down after the Postgres
+    switch, so the layer must absorb it rather than every call site."""
+    from app import db
+    db.query("DELETE FROM email_codes WHERE email=?", ("nobody@nowhere.invalid",))
+    assert db.query("UPDATE users SET display_name=display_name WHERE id=?", ("no-such-id",)) == []
+    assert db.query_one("SELECT COUNT(*) AS n FROM users") is not None
+
+
+def test_workspace_offers_exactly_the_sellable_catalog():
+    """The container's model picker is generated from the catalog, not a copy of
+    it. A hardcoded list drifts: the workspace offered two models while twenty
+    were priced and advertised, so nineteen of them were unreachable in the
+    product we actually ship."""
+    import inspect
+    from app import model_catalog, workspace
+
+    src = inspect.getsource(workspace._create)
+    assert "model_catalog.catalog()" in src, "workspace must read the live catalog"
+    assert "deepseek-v4-flash\\n" not in src, "no hardcoded model ids in the settings template"
+
+    ids = list(model_catalog.catalog())
+    assert len(ids) == 20, f"curated catalog should be 20 models, got {len(ids)}"
+    assert model_catalog.default_model() in ids

@@ -1,0 +1,37 @@
+# 对外开放的模型清单：一行一个「网关 id = 展示名」，顺序即工作台里的展示顺序。
+#
+# 网关里有 120+ 个模型，但选择过多本身就是负担：用户要的是「便宜的 / 好的 /
+# 看图的」这几档，不是一份目录。这里只留每档最有代表性的一个，其余仍可通过
+# API 直接指定 id 调用——models.json 由 gen_models.py 依据本清单生成。
+#
+# 展示名必须手写：从 id 机械推导会得到 "Doubao-Seed-2-0-Pro-260215" 这种带内部
+# 日期后缀、大小写错乱的名字。缺任何一行 id 都会让生成器报错退出，宁可吵闹也
+# 不要静默漏掉。
+
+# —— 日常主力（便宜、快） ——
+deepseek-v4-flash = DeepSeek-V4-Flash
+gemini-3.6-flash = Gemini-3.6-Flash
+mimo-v2-omni = MiMo-V2-Omni
+MiniMax-M2.7 = MiniMax-M2.7
+
+# —— 多模态 / 看图 ——
+Qwen/Qwen3-Omni-30B-A3B-Instruct = Qwen3-Omni-30B-A3B
+Qwen/Qwen3-VL-32B-Instruct = Qwen3-VL-32B
+
+# —— 编码与工具调用 ——
+deepseek-v4-pro = DeepSeek-V4-Pro
+kimi-k2.7-code = Kimi-K2.7-Code
+MiniMax-M3 = MiniMax-M3
+glm-5.2 = GLM-5.2
+qwen3.8-max = Qwen3.8-Max
+doubao-seed-2-0-pro-260215 = Doubao-Seed-2.0-Pro
+kimi-k3 = Kimi-K3
+
+# —— 旗舰 ——
+gpt-5.6-luna = GPT-5.6-Luna
+gpt-5.6-terra = GPT-5.6-Terra
+gpt-5.6-sol = GPT-5.6-Sol
+grok-4.5 = Grok-4.5
+claude-sonnet-5 = Claude-Sonnet-5
+claude-opus-5 = Claude-Opus-5
+claude-fable-5 = Claude-Fable-5

@@ -255,8 +255,22 @@ def tx():
 
 
 def query(sql: str, params: tuple = ()) -> list:
+    """Run a statement and return its rows (empty list for writes).
+
+    Callers use this for both SELECTs and one-off writes. SQLite is happy to
+    fetchall() a DELETE (it just returns nothing); psycopg raises
+    ProgrammingError("the last operation didn't produce records"). Swallowing
+    that here keeps the two backends interchangeable, which is the whole point
+    of this layer — the alternative is auditing every call site forever.
+    """
     with tx() as conn:
-        return list(conn.execute(sql, params).fetchall())
+        cur = conn.execute(sql, params)
+        try:
+            return list(cur.fetchall())
+        except Exception as exc:  # noqa: BLE001 — narrow check below
+            if "didn't produce records" in str(exc) or "no results to fetch" in str(exc):
+                return []
+            raise
 
 
 def query_one(sql: str, params: tuple = ()):

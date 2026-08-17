@@ -34,7 +34,7 @@ import httpx
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 
-from . import config, credits, db, security, work_access
+from . import config, credits, db, model_catalog, security, work_access
 from .accounts import resolve_user, try_resolve_user
 
 log = logging.getLogger("dhc.work")
@@ -143,6 +143,15 @@ async def _create(user: dict) -> None:
     # tool names from it (every tool call died with UNKNOWN_TOOL — the exact
     # combination proven to work is pi-ai + openai-completions against this
     # upstream). web_search stays on the deepseek search row via env.
+    # The model list is the catalog, not a hand-kept copy of it: the picker in
+    # the workspace and the price table on /pricing are then the same 20 rows by
+    # construction, so a model can never be sellable but unpickable (or worse,
+    # pickable but unpriced — which bills at the most expensive entry).
+    model_rows = "".join(
+        f"        - id: {m['id']}\n"
+        f"          name: {m.get('display_name', m['id'])}\n"
+        for m in model_catalog.catalog().values()
+    )
     settings_yaml = (
         "llm-pi-ai:\n"
         "  providers:\n"
@@ -152,11 +161,10 @@ async def _create(user: dict) -> None:
         "      api: openai-completions\n"
         f"      baseURL: {gateway}/llm/v1\n"
         "      models:\n"
-        "        - id: deepseek-v4-flash\n"
-        "        - id: deepseek-v4-pro\n"
-        "agent-default-model:\n"
+        + model_rows
+        + "agent-default-model:\n"
         "  provider: dshcloud\n"
-        "  model: deepseek-v4-flash\n"
+        f"  model: {model_catalog.default_model()}\n"
     )
     # dsh loads $DSH_HOME/AGENTS.md as user-global instructions for every
     # session. Without this the agent tells people to open http://localhost:PORT
@@ -645,7 +653,11 @@ async def work_status(request: Request):
            "url": _work_url("/"),
            "credits_per_min": config.WORK_CREDITS_PER_MIN,
            "idle_stop_min": config.WORK_IDLE_STOP_MIN,
-           "balance": credits.balance(user["id"])}
+           "balance": credits.balance(user["id"]),
+           # The workspace runs on its own subdomain and renders dsh's UI, so it
+           # has no server-side template to branch on — the admin entry in the
+           # floating menu is gated on this flag instead.
+           "is_admin": bool(user.get("is_admin"))}
     out.update(work_access.state(user["id"]))
     return out
 

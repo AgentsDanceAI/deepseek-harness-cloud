@@ -75,19 +75,10 @@ def _ctx(request: Request, page: str, **extra) -> dict:
         "work_pass_days": config.WORK_PASS_DAYS,
         "work_pass_intro_price": config.WORK_PASS_INTRO_PRICE,
         "work_pass_price": config.WORK_PASS_PRICE,
-        "model_count": _model_count(),
         **_team_terms_ctx(),
     }
     ctx.update(extra)
     return ctx
-
-
-def _model_count() -> int:
-    try:
-        from . import model_catalog
-        return len(model_catalog.catalog())
-    except Exception:
-        return 0
 
 
 def _team_terms_ctx() -> dict:

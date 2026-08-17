@@ -175,9 +175,16 @@
         else sessionStorage.removeItem(TASK_KEY);
       } catch (e) {}
       var next = "/work" + (task ? "?task=" + encodeURIComponent(task.slice(0, 2000)) : "");
-      location.href = form.dataset.authed === "1"
-        ? next
-        : "/login?next=" + encodeURIComponent(next);
+      if (form.dataset.authed !== "1") {
+        location.href = "/login?next=" + encodeURIComponent(next);
+        return;
+      }
+      // The workspace is a long-lived session, so it gets its own tab and the
+      // marketing page stays behind it — closing the workspace should not mean
+      // navigating back through the site. Popup blockers only stop window.open
+      // outside a user gesture; this runs inside the click/Enter handler.
+      var w = window.open(next, "_blank", "noopener");
+      if (!w) location.href = next;
     }
 
     form.addEventListener("submit", function (ev) { ev.preventDefault(); submit(); });

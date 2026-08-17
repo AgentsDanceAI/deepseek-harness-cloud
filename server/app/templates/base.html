@@ -36,60 +36,61 @@
         <button type="button" aria-expanded="false">产品
           <svg viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M3 4.5 6 7.5 9 4.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </button>
-        <div class="nav-menu nav-menu-1col" hidden>
-          <a href="/product#workspace"><strong>云工作台</strong><span>浏览器和手机直接用，免安装，任务跑在云端容器里</span></a>
-          <a href="/product#desktop"><strong>桌面客户端</strong><span>macOS / Windows 原生应用，登录即用，无需配 key</span></a>
-          <a href="/product#gateway"><strong>统一模型网关</strong><span>OpenAI 兼容接口，用量按积分计费，密钥不落客户端</span></a>
-          <a href="/product#search"><strong>联网搜索</strong><span>给智能体接上实时网页检索，带来源引用</span></a>
+        <div class="nav-menu" hidden>
+          <a href="/product#workspace"><span class="nav-ico"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.5 19a4.5 4.5 0 1 0-.9-8.9 6 6 0 1 0-11.1 3.4"/><path d="M6 19h11.5"/></svg></span>
+            <strong>云端 Harness</strong><span>浏览器和手机直接用，任务跑在云端容器里</span></a>
+          <a href="/product#desktop"><span class="nav-ico"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="4" width="19" height="12.5" rx="2"/><path d="M8 20.5h8M12 16.5v4"/></svg></span>
+            <strong>桌面 Harness</strong><span>macOS / Windows 原生应用，跑在自己机器上</span></a>
+          <a href="/product#search"><span class="nav-ico"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg></span>
+            <strong>联网搜索</strong><span>给智能体接上实时网页检索，结果带来源</span></a>
+          <a href="/product#gateway"><span class="nav-ico"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="12" r="3.5"/><path d="M11.5 12H21l-2 2.5M17 12v3"/></svg></span>
+            <strong>免 Key 使用</strong><span>密钥托管在服务端，登录即用，按积分计费</span></a>
         </div>
       </div>
       <div class="nav-group" data-nav-group>
         <button type="button" aria-expanded="false">解决方案
           <svg viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M3 4.5 6 7.5 9 4.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </button>
-        <div class="nav-menu nav-menu-1col" hidden>
-          <a href="/solutions#teams"><strong>团队协作</strong><span>席位订阅，积分在组织内共享，用量集中可见</span></a>
-          <a href="/solutions#enterprise"><strong>企业私有化</strong><span>部署本开源项目，得到一套自己的 dsh 云平台</span></a>
-          <a href="/solutions#developers"><strong>开发者</strong><span>自带模型上游，把 dsh 接进现有工具链</span></a>
-          <a href="/solutions#education"><strong>教学与研究</strong><span>按人发额度，无需给每个人配模型密钥</span></a>
-        </div>
-      </div>
-      <div class="nav-group" data-nav-group>
-        <button type="button" aria-expanded="false">桌面版
-          <svg viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M3 4.5 6 7.5 9 4.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
-        </button>
-        {# one column: a four-item menu in two columns reads as a grid of
-           unrelated things, and these are one list of downloads #}
-        <div class="nav-menu nav-menu-1col" hidden>
-          <a href="{{ download_url_mac or '/download' }}"{% if download_url_mac %} download{% endif %}>
-            <span class="nav-ico"><svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor" aria-hidden="true"><path d="M16.7 12.9c0-2.4 2-3.6 2-3.6a4.6 4.6 0 0 0-3.6-1.9c-1.5-.2-3 .9-3.7.9-.8 0-2-.9-3.3-.9A4.9 4.9 0 0 0 4 9.9c-1.8 3-.5 7.5 1.2 10 .8 1.2 1.8 2.5 3.1 2.5 1.3-.1 1.8-.8 3.3-.8s2 .8 3.3.8 2.2-1.2 3-2.4a10 10 0 0 0 1.4-2.8 4.4 4.4 0 0 1-2.6-4.3ZM14.2 5.6A4.5 4.5 0 0 0 15.3 2a4.6 4.6 0 0 0-3 1.5A4.3 4.3 0 0 0 11.2 7a3.8 3.8 0 0 0 3-1.4Z"/></svg></span>
-            <strong>下载 Apple 芯片版</strong><span>macOS 12+ · M 系列原生</span>
-          </a>
-          <a href="{{ download_url_mac_x64 or '/download' }}"{% if download_url_mac_x64 %} download{% endif %}>
-            <span class="nav-ico"><svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor" aria-hidden="true"><path d="M16.7 12.9c0-2.4 2-3.6 2-3.6a4.6 4.6 0 0 0-3.6-1.9c-1.5-.2-3 .9-3.7.9-.8 0-2-.9-3.3-.9A4.9 4.9 0 0 0 4 9.9c-1.8 3-.5 7.5 1.2 10 .8 1.2 1.8 2.5 3.1 2.5 1.3-.1 1.8-.8 3.3-.8s2 .8 3.3.8 2.2-1.2 3-2.4a10 10 0 0 0 1.4-2.8 4.4 4.4 0 0 1-2.6-4.3ZM14.2 5.6A4.5 4.5 0 0 0 15.3 2a4.6 4.6 0 0 0-3 1.5A4.3 4.3 0 0 0 11.2 7a3.8 3.8 0 0 0 3-1.4Z"/></svg></span>
-            <strong>下载 Intel 芯片版</strong><span>macOS 12+ · Intel 处理器</span>
-          </a>
-          <a href="{{ download_url_win or '/download' }}"{% if download_url_win %} download{% endif %}>
-            <span class="nav-ico"><svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor" aria-hidden="true"><path d="M3 5.5 10.5 4.4v7.1H3zM12 4.2 21 3v8.5h-9zM3 13.5h7.5v7.1L3 19.5zM12 13.5h9V21l-9-1.3z"/></svg></span>
-            <strong>下载 Windows x64 版</strong><span>Windows 10 / 11 · 64 位</span>
-          </a>
-          <a href="{{ download_url_win_arm or '/download' }}"{% if download_url_win_arm %} download{% endif %}>
-            <span class="nav-ico"><svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor" aria-hidden="true"><path d="M3 5.5 10.5 4.4v7.1H3zM12 4.2 21 3v8.5h-9zM3 13.5h7.5v7.1L3 19.5zM12 13.5h9V21l-9-1.3z"/></svg></span>
-            <strong>下载 Windows ARM 版</strong>
-            <span>{% if download_url_win_arm %}Windows on ARM · Surface / 骁龙{% else %}构建中，先看下载页{% endif %}</span>
-          </a>
-          <a href="/download" class="nav-menu-more">全部下载与安装说明 · 含 Android / iOS →</a>
+        <div class="nav-menu" hidden>
+          <a href="/solutions#enterprise"><span class="nav-ico"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 21h18M5 21V7l7-4 7 4v14"/><path d="M9.5 11h1M13.5 11h1M9.5 15h1M13.5 15h1"/></svg></span>
+            <strong>企业部署</strong><span>部署开源代码，得到内部专用的 dsh 云平台</span></a>
+          <a href="/solutions#teams"><span class="nav-ico"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3"/><path d="M3.5 20a5.5 5.5 0 0 1 11 0"/><path d="M17 11.5a2.5 2.5 0 1 0 0-5"/><path d="M17.5 20a5 5 0 0 0-3-4.6"/></svg></span>
+            <strong>按席付费</strong><span>席位订阅，积分与机时在组织内共享</span></a>
+          <a href="/pricing#packs"><span class="nav-ico"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg></span>
+            <strong>按量付费</strong><span>买积分包，用多少扣多少，不订阅也能用</span></a>
+          <a href="/pricing#plans"><span class="nav-ico"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg></span>
+            <strong>包年包月</strong><span>月付或年付，含每月积分与云端机时</span></a>
         </div>
       </div>
       <a href="/pricing" {% if page == 'pricing' %}class="active"{% endif %}>定价</a>
-      {% if user %}
-        <a href="/console" {% if page == 'console' %}class="active"{% endif %}>控制台</a>
-        {% if user.is_admin %}<a href="/console/admin" {% if page == 'admin' %}class="active"{% endif %}>管理</a>{% endif %}
-        <a href="/api/auth/logout" id="nav-logout" data-action="logout">退出</a>
-      {% else %}
-        <a href="/login" class="btn btn-primary btn-sm">立即体验</a>
-      {% endif %}
+      <a href="/download" {% if page == 'download' %}class="active"{% endif %}>桌面下载</a>
     </nav>
+    {# The main nav row is identical logged in or out — account state lives here,
+       on the right, so a signed-in visitor reaches the cloud in one click rather
+       than hunting for it among links that moved. #}
+    <div class="nav-account">
+      {% if user %}
+        <div class="nav-group nav-group-end" data-nav-group>
+          <button type="button" aria-expanded="false" class="nav-avatar-btn">
+            <span class="nav-avatar" aria-hidden="true">{{ (user.display_name or user.email)[:1] | upper }}</span>
+            <svg viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M3 4.5 6 7.5 9 4.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+          <div class="nav-menu nav-menu-compact" hidden>
+            <div class="nav-menu-head">
+              <strong>{{ user.display_name or user.email }}</strong>
+              <span>{{ user.email }}</span>
+            </div>
+            <a href="/console"><strong>控制台</strong><span>额度、订阅与用量</span></a>
+            <a href="/team"><strong>团队</strong><span>席位、成员与共享额度</span></a>
+            <a href="/logout" class="nav-menu-quiet"><strong>退出登录</strong></a>
+          </div>
+        </div>
+        <a class="btn btn-primary btn-sm" href="/work" target="_blank" rel="noopener">云端体验</a>
+      {% else %}
+        <a class="nav-signin" href="/login">登录</a>
+        <a class="btn btn-primary btn-sm" href="/login?next=%2Fwork">云端体验</a>
+      {% endif %}
+    </div>
   </div>
 </header>
 {% endif %}

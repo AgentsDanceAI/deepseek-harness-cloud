@@ -27,6 +27,8 @@ import os
 import sys
 from pathlib import Path
 
+CURATED = Path(__file__).resolve().parents[1] / "config" / "models.curated.txt"
+
 BASELINE_MODEL = "claude-sonnet-5"   # the 1.00x anchor
 CREDITS_PER_BASELINE_M = 1000        # 1.00x == 1000 credits / 1M tokens
 
@@ -73,11 +75,29 @@ def main() -> int:
     ap.add_argument("--prices", required=True, help="price table with models[].{id,input_price,output_price}")
     ap.add_argument("--out", default=str(Path(__file__).resolve().parents[1] / "config" / "models.json"))
     ap.add_argument("--default-model", default="deepseek-v4-flash")
+    ap.add_argument("--all", action="store_true",
+                    help="emit every priced chat model instead of config/models.curated.txt")
     args = ap.parse_args()
 
     prices_raw = json.loads(Path(args.prices).read_text())
     rows = prices_raw["models"] if isinstance(prices_raw, dict) else prices_raw
     prices = {r["id"]: r for r in rows}
+
+    # The gateway serves 120+ models; we sell a curated shortlist, in the order
+    # the file lists them, because a 120-row model picker is a worse product than
+    # a 20-row one. --all exists for auditing what the gateway actually carries.
+    curated, names = None, {}
+    if not args.all:
+        curated = []
+        for ln in CURATED.read_text().splitlines():
+            ln = ln.strip()
+            if not ln or ln.startswith("#"):
+                continue
+            mid, _, label = ln.partition("=")
+            mid = mid.strip()
+            curated.append(mid)
+            if label.strip():
+                names[mid] = label.strip()
 
     if args.catalog:
         served = json.loads(Path(args.catalog).read_text())
@@ -95,6 +115,15 @@ def main() -> int:
         return 1
     base_blended = blended(prices[BASELINE_MODEL])
 
+    if curated is not None:
+        missing = [m for m in curated if m not in served]
+        if missing:
+            # Loud, not silent: a curated id the gateway dropped would otherwise
+            # vanish from the catalog and only surface as a user's failed request.
+            print(f"curated models absent from the gateway: {missing}", file=sys.stderr)
+            return 1
+        served = curated
+
     models, skipped, unpriced = [], [], []
     for mid in served:
         if any(s.lower() in mid.lower() for s in SKIP_SUBSTRINGS):
@@ -108,16 +137,20 @@ def main() -> int:
         models.append({
             "id": mid,
             "upstream_model": mid,
-            "display_name": display_name(mid),
+            "display_name": names.get(mid) or display_name(mid),
             "provider": provider_of(mid, row.get("provider", "")),
             "input_usd_per_m": round(row["input_price"], 4),
             "output_usd_per_m": round(row["output_price"], 4),
-            "multiplier": round(mult, 2),
+            # Two decimals is plenty at 1.00x but throws away ~9% at 0.04x, where
+            # the displayed multiplier would no longer match what we actually
+            # charge. Cheap models get a third decimal so the two agree.
+            "multiplier": round(mult, 3 if mult < 0.1 else 2),
             "credits_per_m": round(mult * CREDITS_PER_BASELINE_M),
             "default": mid == args.default_model,
         })
 
-    models.sort(key=lambda m: (m["multiplier"], m["id"]))
+    if curated is None:
+        models.sort(key=lambda m: (m["multiplier"], m["id"]))
     if not any(m["default"] for m in models) and models:
         models[0]["default"] = True
 

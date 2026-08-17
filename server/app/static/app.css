@@ -105,13 +105,20 @@ h1, h2, h3, h4 { line-height: 1.3; text-wrap: balance; font-weight: 600; }
   -webkit-backdrop-filter: blur(12px) saturate(1.4);
   border-bottom: 1px solid var(--border);
 }
-.nav-row { display: flex; align-items: center; justify-content: space-between; height: 60px; }
-.brand { display: flex; align-items: center; gap: 10px; color: var(--fg); }
+.nav-row { display: flex; align-items: center; gap: 32px; height: 64px; }
+.brand { display: flex; align-items: center; gap: 10px; color: var(--fg); flex: none; }
 .brand:hover { color: var(--fg); }
 .brand-name { font-size: 16.5px; font-weight: 650; letter-spacing: .1px; }
-.site-nav { display: flex; align-items: center; gap: 26px; }
-.site-nav a { color: var(--muted); font-size: 14.5px; font-weight: 500; }
-.site-nav a:hover, .site-nav a.active { color: var(--fg); }
+/* Top-level items are padded pills, not bare text, so the hover target matches
+   the dropdown trigger beside it and the row reads as one control strip. */
+.site-nav { display: flex; align-items: center; gap: 2px; }
+.site-nav > a { color: var(--muted); font-size: 14.5px; font-weight: 500; }
+.site-nav > a:not(.btn) {
+  padding: 7px 11px; border-radius: 9px;
+  transition: color .15s ease, background .15s ease;
+}
+.site-nav > a:not(.btn):hover { color: var(--fg); background: var(--brand-weak); }
+.site-nav > a.active { color: var(--fg); }
 .site-nav a.btn { color: var(--brand-fg); }
 .site-nav a.btn:hover { color: var(--brand-fg); }
 
@@ -611,9 +618,11 @@ body[data-page="landing"] .site-header {
 }
 body[data-page="landing"] .brand,
 body[data-page="landing"] .brand:hover { color: #fff; }
-body[data-page="landing"] .site-nav a:not(.btn) { color: rgba(220, 231, 247, .75); }
-body[data-page="landing"] .site-nav a:not(.btn):hover,
-body[data-page="landing"] .site-nav a.active { color: #fff; }
+/* Direct child only. As a descendant selector this outranked the dropdown's own
+   colours and painted the menu's text near-white on its white card. */
+body[data-page="landing"] .site-nav > a:not(.btn) { color: rgba(220, 231, 247, .78); }
+body[data-page="landing"] .site-nav > a:not(.btn):hover { color: #fff; background: rgba(255, 255, 255, .12); }
+body[data-page="landing"] .site-nav > a.active { color: #fff; }
 
 /* ---------- workspace starting spinner ---------- */
 .spinner {
@@ -630,36 +639,91 @@ body[data-page="landing"] .site-nav a.active { color: #fff; }
    stays ours — the blue ripple, not the reference's warm neutrals.
    ========================================================================== */
 
-/* ---------- nav dropdowns ---------- */
+/* ---------- nav dropdowns ----------
+   Geometry lifted from the AgentsDance header so the two products feel like one
+   family: 8px panel padding, 16px corner, one 12px-padded row per item, a 36px
+   icon tile, 13.5px semibold title over a 12px grey description. The palette
+   stays ours — the tile and the hover carry the ripple blue, not warm beige. */
 .nav-group { position: relative; }
 .nav-group > button {
-  display: inline-flex; align-items: center; gap: 5px;
-  padding: 0; border: 0; background: none; cursor: pointer;
+  display: inline-flex; align-items: center; gap: 4px;
+  margin: -7px 0; padding: 7px 11px; border: 0; border-radius: 9px;
+  background: none; cursor: pointer;
   color: var(--muted); font: 500 14.5px var(--font);
+  transition: color .15s ease, background .15s ease;
 }
-.nav-group > button:hover, .nav-group[data-open="true"] > button { color: var(--fg); }
-.nav-group > button svg { width: 12px; height: 12px; transition: transform .18s ease; }
+.nav-group > button:hover,
+.nav-group[data-open="true"] > button { color: var(--fg); background: var(--brand-weak); }
+.nav-group > button svg { width: 13px; height: 13px; transition: transform .18s ease; }
 .nav-group[data-open="true"] > button svg { transform: rotate(180deg); }
 
 .nav-menu {
-  position: absolute; top: calc(100% + 14px); left: 50%; transform: translateX(-50%);
-  min-width: 460px; padding: 10px; z-index: 60;
-  background: var(--card); border: 1px solid var(--border);
-  border-radius: var(--radius-lg); box-shadow: var(--shadow-md);
-  display: grid; grid-template-columns: 1fr 1fr; gap: 2px;
+  position: absolute; top: calc(100% + 10px); left: 0; z-index: 60;
+  width: 420px; padding: 8px;
+  background: var(--card); border: 1px solid var(--border); border-radius: 16px;
+  box-shadow: 0 18px 50px rgba(15, 34, 66, .16), 0 2px 8px rgba(15, 34, 66, .06);
+  display: grid; grid-template-columns: 1fr; gap: 1px;
 }
 .nav-menu[hidden] { display: none; }
+/* The pointer has to cross the 10px gap between trigger and panel. Without this
+   bridge the group's :hover ends mid-travel and the menu shuts before a click. */
+.nav-menu::before { content: ""; position: absolute; inset: -12px 0 auto; height: 12px; }
+.nav-menu-2col { width: 660px; grid-template-columns: 1fr 1fr; column-gap: 4px; }
+
 .nav-menu a {
-  display: block; padding: 11px 12px; border-radius: var(--radius); color: var(--fg);
+  display: grid; grid-template-columns: 36px 1fr; column-gap: 12px; align-items: start;
+  padding: 12px; border-radius: 12px; color: var(--fg);
+  transition: background .14s ease;
 }
-.nav-menu a:hover { background: var(--brand-weak); color: var(--fg); }
-.nav-menu strong { display: block; font-size: 14px; font-weight: 600; }
-.nav-menu span { display: block; margin-top: 3px; color: var(--muted); font-size: 12.5px; line-height: 1.5; }
-body[data-page="landing"] .nav-group > button { color: rgba(220, 231, 247, .75); }
+.nav-menu a:hover { background: var(--brand-weak); }
+/* Both coordinates are explicit: strong/span claim column 2, so auto-placement
+   would otherwise push the tile out of column 1 and stack it above the title. */
+.nav-ico {
+  grid-column: 1; grid-row: 1 / span 2; align-self: start;
+  width: 36px; height: 36px; border-radius: 10px; display: grid; place-items: center;
+  background: color-mix(in srgb, var(--brand) 9%, var(--card));
+  color: var(--fg);
+}
+.nav-menu strong { grid-column: 2; font-size: 13.5px; font-weight: 600; line-height: 1.35; color: var(--fg); }
+/* :not(.nav-ico) is load-bearing — the icon tile is itself a <span>, and the
+   plain `.nav-menu span` form outranks `.nav-ico` on specificity, so it dragged
+   the tile into column 2 and stacked it above the title. */
+.nav-menu span:not(.nav-ico) { grid-column: 2; margin-top: 2px; font-size: 12px; line-height: 1.55; color: var(--faint); }
+
+/* The landing page paints nav text near-white for the dark hero; the panel is
+   its own light surface, so it takes the normal ink back. */
+body[data-page="landing"] .nav-group > button { color: rgba(220, 231, 247, .78); }
 body[data-page="landing"] .nav-group > button:hover,
-body[data-page="landing"] .nav-group[data-open="true"] > button { color: #fff; }
-body[data-page="landing"] .nav-menu a { color: var(--fg); }
+body[data-page="landing"] .nav-group[data-open="true"] > button { color: #fff; background: rgba(255, 255, 255, .12); }
+body[data-page="landing"] .nav-menu a,
+body[data-page="landing"] .nav-menu strong { color: var(--fg); }
+body[data-page="landing"] .nav-menu span:not(.nav-ico) { color: var(--faint); }
 @media (max-width: 860px) { .nav-group { display: none; } }
+
+/* ---------- right-hand account control ----------
+   The nav row itself is state-independent; everything that changes when you
+   sign in lives here, so the logged-in header is the logged-out header plus an
+   avatar rather than a different arrangement of links. */
+.nav-account { margin-left: auto; display: flex; align-items: center; gap: 12px; }
+.nav-signin { color: var(--muted); font-size: 14.5px; font-weight: 500; }
+.nav-signin:hover { color: var(--fg); }
+.nav-avatar-btn { padding: 4px 6px 4px 4px; gap: 3px; margin: 0; }
+.nav-avatar {
+  width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center;
+  background: var(--brand); color: #fff; font-size: 13px; font-weight: 600;
+}
+.nav-group-end .nav-menu { left: auto; right: 0; width: 260px; }
+.nav-menu-compact a { grid-template-columns: 1fr; }
+.nav-menu-compact strong, .nav-menu-compact span:not(.nav-ico) { grid-column: 1; }
+.nav-menu-head { padding: 10px 12px 12px; border-bottom: 1px solid var(--border); margin-bottom: 4px; }
+.nav-menu-head strong { display: block; font-size: 13.5px; font-weight: 600; color: var(--fg); }
+.nav-menu-head span { display: block; margin-top: 2px; font-size: 12px; color: var(--faint); }
+.nav-menu-quiet strong { color: var(--muted) !important; font-weight: 500 !important; }
+body[data-page="landing"] .nav-signin { color: rgba(220, 231, 247, .78); }
+body[data-page="landing"] .nav-signin:hover { color: #fff; }
+body[data-page="landing"] .nav-menu-head strong { color: var(--fg); }
+@media (max-width: 860px) { .nav-signin { display: none; } }
+
 
 /* ---------- hero composer (the homepage's primary control) ---------- */
 /* The hero was a two-column grid (copy | screenshot). Leading with a composer
@@ -867,18 +931,6 @@ body[data-page="landing"] .nav-menu a { color: var(--fg); }
 .cap-input:focus { border-color: var(--brand); outline: none; }
 .table-wrap { overflow-x: auto; }
 
-/* ---------- nav dropdown: readable on its own white card ----------
-   The landing page paints nav text white so it reads on the dark hero, and
-   that rule was leaking into the dropdown — white headings on a white card.
-   The menu is its own surface, so it takes the normal ink colours back, with
-   the brand blue on the heading to tie it to the ripple. */
-.nav-menu strong { color: var(--brand); }
-.nav-menu span { color: var(--muted); }
-body[data-page="landing"] .nav-menu strong,
-body[data-page="landing"] .nav-menu a:hover strong { color: var(--brand); }
-body[data-page="landing"] .nav-menu span,
-body[data-page="landing"] .nav-menu a:hover span { color: var(--muted); }
-body[data-page="landing"] .nav-menu a { color: var(--fg); }
 
 /* ---------- header over the ripple hero ----------
    A flat grey slab across the top of a deep-blue hero reads as a seam. Tint it
@@ -906,35 +958,6 @@ body[data-page="landing"] .site-header {
 .plan .plain { margin-top: 18px; }
 .plan .plain li { text-align: left; }
 
-/* ---------- nav dropdown: reachable and single-column ----------
-   The menu sits below the trigger with a visual gap; without a bridge the
-   pointer leaves the group mid-travel and the menu closed before it could be
-   clicked. The ::before pad covers that gap so the hover is continuous. */
-.nav-menu::before {
-  content: ""; position: absolute; left: 0; right: 0; top: -16px; height: 16px;
-}
-.nav-menu-1col {
-  grid-template-columns: 1fr;
-  min-width: 320px;
-}
-.nav-menu a { display: flex; align-items: flex-start; gap: 10px; }
-.nav-ico {
-  flex: none; width: 26px; height: 26px; margin-top: 1px; border-radius: 7px;
-  display: grid; place-items: center;
-  background: var(--brand-weak); color: var(--brand);
-}
-.nav-menu a > strong { flex: 1; }
-.nav-menu-1col a { display: grid; grid-template-columns: 26px 1fr; grid-template-rows: auto auto; column-gap: 10px; }
-/* the icon needs BOTH coordinates: strong/span claim column 2 explicitly, so
-   auto-placement pushed the icon out of column 1 and it stacked above. */
-.nav-menu-1col .nav-ico { grid-column: 1; grid-row: 1 / span 2; align-self: start; }
-.nav-menu-1col strong { grid-column: 2; }
-.nav-menu-1col span { grid-column: 2; margin-top: 2px; }
-.nav-menu-more {
-  margin-top: 4px; border-top: 1px solid var(--border); padding-top: 11px !important;
-  color: var(--brand) !important; font-size: 13px; display: block !important;
-}
-.nav-menu-more:hover { background: var(--brand-weak); }
 
 /* ---------- per-tier model list (every plan can use every model; credits are
    the only gate, so the list is identical and the multiplier is the price) --- */

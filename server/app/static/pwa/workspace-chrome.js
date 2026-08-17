@@ -32,6 +32,7 @@
       '<div id="dhc-sheet" hidden role="menu" aria-label="DSH Cloud">' +
         '<div class="dhc-meta" id="dhc-meta">云工作台</div>' +
         '<a href="' + SITE + '/console" role="menuitem">← 返回控制台</a>' +
+        '<a href="' + SITE + '/admin" id="dhc-admin" hidden role="menuitem">用户与额度管理</a>' +
         '<a href="' + SITE + '/preview" target="_blank" rel="noopener" role="menuitem">端口预览</a>' +
         '<button type="button" id="dhc-stop" role="menuitem">暂停工作台（省积分）</button>' +
         '<button type="button" id="dhc-signout" class="dhc-danger" role="menuitem">退出登录</button>' +
