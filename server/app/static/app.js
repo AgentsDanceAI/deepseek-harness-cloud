@@ -198,6 +198,27 @@
     });
   })();
 
+  // --- global: model list + public counters ---------------------------------
+  (function initPublicData() {
+    var holders = $$("[data-model-rows]");
+    if (holders.length) {
+      fetch("/api/models").then(function (r) { return r.json(); }).then(function (d) {
+        var html = (d.models || []).map(function (m) {
+          return '<div class="model-row"><b title="' + m.id + '">' + m.name +
+                 "</b><span>" + (m.multiplier != null ? m.multiplier + "x" : "—") + "</span></div>";
+        }).join("");
+        holders.forEach(function (h) { if (!h.innerHTML) h.innerHTML = html; });
+      }).catch(function () {});
+    }
+    var dl = $("#stat-downloads"), lg = $("#stat-logins");
+    if (dl || lg) {
+      fetch("/api/public/stats").then(function (r) { return r.json(); }).then(function (s) {
+        if (dl) dl.textContent = (s.downloads || 0).toLocaleString();
+        if (lg) lg.textContent = (s.logins || 0).toLocaleString();
+      }).catch(function () {});
+    }
+  })();
+
   // --- global: pricing period switch ----------------------------------------
   (function initPeriodSwitch() {
     var sw = $("#period-switch");

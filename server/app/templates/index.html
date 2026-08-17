@@ -60,6 +60,26 @@
       <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 13 4 4L19 7"/></svg>代码开源，可私有化部署</span>
     </div>
 
+    {# The desktop app is the other half of the product, and it is the one that
+       still works when cloud capacity runs out — so it gets equal billing here
+       rather than being buried in a nav menu. #}
+    <div class="hero-doors">
+      <a class="hero-door" href="{{ download_url_mac or '/download' }}"{% if download_url_mac %} download{% endif %}>
+        <span class="door-ico">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true"><path d="M16.7 12.9c0-2.4 2-3.6 2-3.6a4.6 4.6 0 0 0-3.6-1.9c-1.5-.2-3 .9-3.7.9-.8 0-2-.9-3.3-.9A4.9 4.9 0 0 0 4 9.9c-1.8 3-.5 7.5 1.2 10 .8 1.2 1.8 2.5 3.1 2.5 1.3-.1 1.8-.8 3.3-.8s2 .8 3.3.8 2.2-1.2 3-2.4a10 10 0 0 0 1.4-2.8 4.4 4.4 0 0 1-2.6-4.3ZM14.2 5.6A4.5 4.5 0 0 0 15.3 2a4.6 4.6 0 0 0-3 1.5A4.3 4.3 0 0 0 11.2 7a3.8 3.8 0 0 0 3-1.4Z"/></svg>
+        </span>
+        <b>免 Key 桌面版</b>
+        <span class="door-sub">装在自己电脑上 · 不占云端机时 · 同一套积分</span>
+      </a>
+      <a class="hero-door" href="/download">
+        <span class="door-ico">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true"><path d="M3 5.5 10.5 4.4v7.1H3zM12 4.2 21 3v8.5h-9zM3 13.5h7.5v7.1L3 19.5zM12 13.5h9V21l-9-1.3z"/></svg>
+        </span>
+        <b>Windows / 更多平台</b>
+        <span class="door-sub">Windows · Android · iOS 添加到主屏</span>
+      </a>
+    </div>
+
     <p class="hero-note-dark" style="justify-content:center;margin-top:22px">
       <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v4h1"/></svg>
       独立运营的商业服务，并非 DeepSeek 官方产品。
@@ -69,99 +89,67 @@
 
 <section class="section">
   <div class="container">
-    <h2 class="section-title">开箱即用的完整工作台</h2>
-    <p class="section-lede">桌面应用负责好用，云端负责把一切配置繁琐的事都处理掉。</p>
-    <div class="grid grid-3">
+    <span class="eyebrow">两种用法</span>
+    <h2 class="section-title">在云上跑，或者装在自己电脑上</h2>
+    <p class="section-lede">
+      同一个账号、同一份积分。云端省事，桌面端省机时——云端满载时也永远有退路。
+    </p>
+    <div class="grid grid-2" style="margin-top:28px">
       <div class="card feature">
-        <div class="feature-icon" aria-hidden="true">
-          <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 4 14h6l-1 8 9-12h-6z"/></svg>
-        </div>
-        <h3>30 秒登录即用</h3>
-        <p>应用内一键发起授权，浏览器登录确认，回到桌面直接开工。不申请 Key、不配代理、不改配置文件。</p>
+        <span class="eyebrow">免 Key 云端版</span>
+        <h3>打开浏览器就能干活</h3>
+        <p>
+          每人一个隔离容器，手机也能用。智能体做出来的网页、报告、PPT 直接在线打开。
+          每月含 {{ (work_free_minutes // 60) }} 小时机时，只算它<b>实际干活</b>的分钟。
+        </p>
+        <a class="btn btn-primary" href="/work" style="margin-top:14px">进入云工作台 →</a>
       </div>
       <div class="card feature">
-        <div class="feature-icon" aria-hidden="true">
-          <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 4 7v5c0 5 3.5 8 8 9 4.5-1 8-4 8-9V7z"/><path d="m9 12 2 2 4-4"/></svg>
-        </div>
-        <h3>统一模型网关</h3>
-        <p>云端统一接入上游大模型，密钥只存在服务器。桌面端持有的是可随时吊销的设备令牌，改密码即全端下线。</p>
-      </div>
-      <div class="card feature">
-        <div class="feature-icon" aria-hidden="true">
-          <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
-        </div>
-        <h3>内置联网搜索</h3>
-        <p>AI 写代码时可以直接查最新资料——搜索能力云端内置，无需再接第三方搜索服务。</p>
-      </div>
-      <div class="card feature">
-        <div class="feature-icon" aria-hidden="true">
-          <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 10h18M7 15h4"/></svg>
-        </div>
-        <h3>透明积分计费</h3>
-        <p>按实际 tokens 用量扣积分，每一笔在控制台可查。免费额度起步，套餐与积分包按需加购。</p>
-      </div>
-      <div class="card feature">
-        <div class="feature-icon" aria-hidden="true">
-          <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="13" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
-        </div>
-        <h3>多设备管理</h3>
-        <p>一个账号多台设备，控制台随时查看与吊销。设备丢了？一键下线，令牌立即作废。</p>
-      </div>
-      <div class="card feature">
-        <div class="feature-icon" aria-hidden="true">
-          <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>
-        </div>
-        <h3>会话留在本地</h3>
-        <p>代码与会话记录保存在你自己的电脑上，云端只做模型转发与计量，不存储你的对话内容。</p>
+        <span class="eyebrow">免 Key 桌面版</span>
+        <h3>跑在自己机器上，不占机时</h3>
+        <p>
+          macOS 与 Windows 原生应用，登录即用，不用申请任何 API Key。
+          任务在本地执行，只有模型调用按积分计费——重度使用更划算。
+        </p>
+        <a class="btn btn-ghost" href="/download" style="margin-top:14px">下载客户端</a>
       </div>
     </div>
   </div>
 </section>
 
 <section class="section section-alt">
-  <div class="container center">
-    <h2 class="section-title">三步开始</h2>
-    <div class="grid grid-3 steps">
-      <div class="step"><div class="step-num">1</div><p>下载并安装 DSH Cloud 桌面应用</p></div>
-      <div class="step"><div class="step-num">2</div><p>在应用内点击登录，浏览器授权本设备</p></div>
-      <div class="step"><div class="step-num">3</div><p>回到应用，开始 AI 编程</p></div>
-    </div>
-    <a class="btn btn-primary btn-lg" href="/download">立即下载</a>
+  <div class="container">
+    <span class="eyebrow">积分怎么算</span>
+    <h2 class="section-title">{{ model_count }} 个模型，一套积分</h2>
+    <p class="section-lede">
+      以 Claude Sonnet 为 1.00x 基准，越便宜的模型倍率越低。所有套餐都能用全部模型——
+      <b>积分是唯一闸门</b>，不存在「买了 Pro 才能用 Pro 模型」。
+    </p>
+    <div class="model-strip" data-model-rows></div>
+    <p class="center" style="margin-top:20px">
+      <a class="btn btn-ghost" href="/pricing#plans">查看完整价目 →</a>
+    </p>
   </div>
 </section>
 
 <section class="section">
-  <div class="container">
-    <h2 class="section-title">简单透明的定价</h2>
-    <p class="section-lede">免费开始，用得多再升级。所有套餐可随时取消。</p>
-    <div class="grid grid-3 teaser-grid">
-      {% for tier in ['plus', 'pro', 'max'] %}
-        {% set t = pricing.tiers.get(tier) %}
-        {% if t %}
-        <div class="card price-teaser {% if tier == 'pro' %}highlight{% endif %}">
-          {% if tier == 'pro' %}<div class="ribbon">最受欢迎</div>{% endif %}
-          <h3>{{ t.name }}</h3>
-          <div class="price"><span class="currency">{{ currency_symbol }}</span>{{ t.monthly_cents // 100 }}<span class="per">/月</span></div>
-          <ul class="plain">
-            <li>每月 {{ '{:,}'.format(t.monthly_credits) }} 积分</li>
-            <li>{{ t.concurrency }} 路并发任务</li>
-          </ul>
-          <a class="btn {% if tier == 'pro' %}btn-primary{% else %}btn-ghost{% endif %} btn-block" href="/pricing">查看详情</a>
-        </div>
-        {% endif %}
-      {% endfor %}
+  <div class="container center">
+    <h2 class="section-title">代码开源，也能装进自己内网</h2>
+    <p class="section-lede">
+      服务端、桌面端补丁与部署编排全部开源。企业部署一份，就得到一套内部专用的
+      dsh 云平台——账号、额度、工作台都在你的边界内。
+    </p>
+    <div class="hero-actions-sub" style="justify-content:center;margin-top:20px">
+      <a class="btn btn-primary" href="https://github.com/AgentsDanceAI/deepseek-harness-cloud" rel="noopener" target="_blank">
+        <svg viewBox="0 0 24 24" width="17" height="17" fill="currentColor" aria-hidden="true"><path d="M12 2a10 10 0 0 0-3.16 19.49c.5.09.68-.22.68-.48l-.01-1.7c-2.78.6-3.37-1.34-3.37-1.34-.45-1.16-1.11-1.47-1.11-1.47-.91-.62.07-.6.07-.6 1 .07 1.53 1.03 1.53 1.03.89 1.53 2.34 1.09 2.91.83.09-.65.35-1.09.63-1.34-2.22-.25-4.56-1.11-4.56-4.94 0-1.09.39-1.98 1.03-2.68-.1-.25-.45-1.27.1-2.65 0 0 .84-.27 2.75 1.02a9.5 9.5 0 0 1 5 0c1.91-1.29 2.75-1.02 2.75-1.02.55 1.38.2 2.4.1 2.65.64.7 1.03 1.59 1.03 2.68 0 3.84-2.34 4.68-4.57 4.93.36.31.68.92.68 1.85l-.01 2.75c0 .27.18.58.69.48A10 10 0 0 0 12 2Z"/></svg>
+        GitHub 仓库
+      </a>
+      <a class="btn btn-ghost" href="/resources#selfhost">自部署指南</a>
     </div>
-    <p class="center muted" style="margin-top:22px">还有免费版与按量积分包 · <a href="/pricing">查看完整定价 →</a></p>
-  </div>
-</section>
-
-<section class="section" style="padding-top:0">
-  <div class="container">
-    <div class="cta-band">
-      <h2>准备好让 AI 帮你写代码了吗？</h2>
-      <p>注册即送免费积分，下载安装到开始对话不超过三分钟。</p>
-      <a class="btn btn-ghost btn-lg" href="/download">免费开始</a>
-    </div>
+    <p class="muted small" style="margin-top:22px">
+      桌面端累计下载 <b class="num" id="stat-downloads">—</b> 次 ·
+      云端版累计登录 <b class="num" id="stat-logins">—</b> 次
+    </p>
   </div>
 </section>
 {% endblock %}

@@ -75,10 +75,19 @@ def _ctx(request: Request, page: str, **extra) -> dict:
         "work_pass_days": config.WORK_PASS_DAYS,
         "work_pass_intro_price": config.WORK_PASS_INTRO_PRICE,
         "work_pass_price": config.WORK_PASS_PRICE,
+        "model_count": _model_count(),
         **_team_terms_ctx(),
     }
     ctx.update(extra)
     return ctx
+
+
+def _model_count() -> int:
+    try:
+        from . import model_catalog
+        return len(model_catalog.catalog())
+    except Exception:
+        return 0
 
 
 def _team_terms_ctx() -> dict:
@@ -374,6 +383,25 @@ def console_page(request: Request):
 
 
 # --- pricing / orders --------------------------------------------------------
+
+@router.get("/api/public/stats")
+def public_stats():
+    """Numbers the homepage shows. Real counts, not decoration: downloads are
+    served from our own /releases so they can be counted honestly, and logins
+    are device authorisations plus browser sign-ins."""
+    from . import db
+    def _n(sql, params=()):
+        row = db.query_one(sql, params)
+        return int((row["n"] if row is not None else 0) or 0)
+    return {
+        "downloads": _n("SELECT COALESCE(v,'0') AS n FROM kv WHERE k='downloads_total'")
+                     + config.DOWNLOAD_COUNT_BASE,
+        "logins": _n("SELECT COUNT(*) AS n FROM devices")
+                  + _n("SELECT COUNT(*) AS n FROM users WHERE last_login>0"),
+        "users": _n("SELECT COUNT(*) AS n FROM users"),
+        "models": len(__import__("app.model_catalog", fromlist=["x"]).catalog()),
+    }
+
 
 @router.get("/api/models")
 def models_public():

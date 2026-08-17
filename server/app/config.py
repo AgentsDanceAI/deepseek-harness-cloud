@@ -190,6 +190,11 @@ WORK_START_TIMEOUT_S = _env_float("WORK_START_TIMEOUT_S", 45.0)
 # session to the work subdomain too. Empty = host-only (single-domain deploys).
 COOKIE_DOMAIN = _env("COOKIE_DOMAIN", "")
 
+# Downloads served before we started counting (installers published by hand).
+# Shown on the homepage so the number reflects reality rather than restarting
+# at zero on every deploy.
+DOWNLOAD_COUNT_BASE = _env_int("DOWNLOAD_COUNT_BASE", 0)
+
 # --- admin ------------------------------------------------------------------
 ADMIN_EMAILS = [e.strip().lower() for e in _env("ADMIN_EMAILS").split(",") if e.strip()]
 
