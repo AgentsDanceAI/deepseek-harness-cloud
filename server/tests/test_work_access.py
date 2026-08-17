@@ -32,6 +32,15 @@ db.ensure_schema()
 
 @pytest.fixture(autouse=True)
 def _cfg(monkeypatch):
+    # Included minutes now come from the price table (the real source), so the
+    # tests pin a small table rather than the config fallback — otherwise every
+    # allowance change in pricing.json would rewrite these numbers.
+    table = dict(plans.pricing())
+    tiers = {k: dict(v) for k, v in table["tiers"].items()}
+    tiers["free"]["work_minutes"] = 120
+    tiers["pro"]["work_minutes"] = 3600
+    table["tiers"] = tiers
+    monkeypatch.setattr(plans, "pricing", lambda: table)
     monkeypatch.setattr(config, "WORK_FREE_MINUTES", 120)
     monkeypatch.setattr(config, "WORK_PASS_DAYS", 7)
     monkeypatch.setattr(config, "WORK_PASS_INTRO_PRICE", 200)

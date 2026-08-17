@@ -154,7 +154,8 @@ WORK_AGENT_IDLE_STOP_MIN = _env_int("WORK_AGENT_IDLE_STOP_MIN", 30)
 # Everyone gets this many ACTIVE agent minutes on the house; when they run out,
 # the next task hits the paywall instead of silently draining credits. Active
 # minutes are the same meter that bills (see workspace.reaper_tick).
-WORK_FREE_MINUTES = _env_int("WORK_FREE_MINUTES", 120)  # 2 hours
+WORK_FREE_MINUTES = _env_int("WORK_FREE_MINUTES", 4320)  # 72h — fallback when the
+# price table carries no work_minutes for the free tier
 # The intro offer that unlocks it again: cheap for the first period, then the
 # standard price. Amounts are minor units (cents / 分) in PRICING_CURRENCY.
 WORK_PASS_DAYS = _env_int("WORK_PASS_DAYS", 7)

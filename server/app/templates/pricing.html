@@ -14,35 +14,76 @@
     <div class="grid grid-4 plan-grid">
       {% for tier in tier_order %}
         {% set t = pricing.tiers[tier] %}
+        {% set free = tier == 'free' %}
+        {% set intro = t.monthly_intro_cents or 0 %}
+        {% set std = t.monthly_cents or 0 %}
+        {% set off = ((1 - intro / std) * 100) | round | int if (intro and std and intro < std) else 0 %}
         <div class="card plan {% if tier == 'pro' %}highlight{% endif %}">
-          {% if tier == 'pro' %}<div class="ribbon">最受欢迎</div>{% endif %}
-          <h3>{{ t.name }}</h3>
-          {% if tier == 'free' %}
-            <div class="price"><span class="currency">{{ currency_symbol }}</span>0</div>
-            <ul class="plain">
-              <li>注册送 {{ '{:,}'.format(t.signup_credits or 0) }} 积分</li>
-              <li>云工作台 {{ (t.work_minutes or 0) // 60 }} 小时 / 月</li>
-              <li>{{ t.concurrency }} 路并发</li>
-              <li>全部模型可用</li>
-            </ul>
+          {% if tier == 'pro' %}<div class="ribbon">推荐</div>{% endif %}
+          {% if free %}
+            <span class="tier-plain">Free</span>
+          {% else %}
+            <span class="tier-pill">{{ t.name | lower }}</span>
+          {% endif %}
+          <p class="tier-tagline">{{ t.tagline or '' }}</p>
+
+          {# monthly view: first-period price struck through against standard #}
+          <div data-period-view="monthly" {% if false %}hidden{% endif %}>
+            <div class="price-row">
+              <span class="price-now">{{ currency_symbol }}{{ (intro if intro else std) // 100 }}</span>
+              {% if off %}<span class="price-was">{{ currency_symbol }}{{ std // 100 }}</span>{% endif %}
+              <span class="per">/月</span>
+              {% if off %}<span class="off-badge">省 {{ off }}%</span>{% endif %}
+            </div>
+            <p class="plan-note">
+              {% if free %}永久免费
+              {% else %}首期价 · 之后 {{ currency_symbol }}{{ std // 100 }}/月 ·
+                <button type="button" class="link-btn" data-goto-yearly>年付更省 →</button>
+              {% endif %}
+            </p>
+          </div>
+
+          <div data-period-view="yearly" hidden>
+            <div class="price-row">
+              <span class="price-now">{{ currency_symbol }}{{ (t.yearly_per_month_cents or 0) // 100 }}</span>
+              {% if std %}<span class="price-was">{{ currency_symbol }}{{ std // 100 }}</span>{% endif %}
+              <span class="per">/月</span>
+              {% if std and t.yearly_per_month_cents %}
+                <span class="off-badge">省 {{ ((1 - t.yearly_per_month_cents / std) * 100) | round | int }}%</span>
+              {% endif %}
+            </div>
+            <p class="plan-note">
+              {% if free %}永久免费
+              {% else %}一次性支付 {{ currency_symbol }}{{ (t.yearly_cents or 0) // 100 }} / 年 · 价格锁定不受调价影响
+              {% endif %}
+            </p>
+          </div>
+
+          {% if free %}
             <a class="btn btn-ghost btn-block" href="/login">免费开始</a>
           {% else %}
-            <div class="price" data-monthly="{{ t.monthly_cents }}" data-yearly="{{ t.yearly_cents or 0 }}">
-              <span class="currency">{{ currency_symbol }}</span><span class="amount">{{ t.monthly_cents // 100 }}</span><span class="per">/月</span>
-            </div>
-            <ul class="plain">
-              <li>每月 {{ '{:,}'.format(t.monthly_credits) }} 积分<span class="muted small">（模型 / 搜索）</span></li>
-              <li>云工作台 <b>{{ (t.work_minutes or 0) // 60 }} 小时 / 月</b><span class="muted small">（机时另计，不扣积分）</span></li>
-              <li>{{ t.concurrency }} 路并发</li>
-              <li>全部模型可用</li>
-            </ul>
             <button class="btn {% if tier == 'pro' %}btn-primary{% else %}btn-ghost{% endif %} btn-block buy-btn"
                     data-item-monthly="plan:{{ tier }}:monthly" data-item-yearly="plan:{{ tier }}:yearly"
                     type="button">订阅 {{ t.name }}</button>
           {% endif %}
+
+          <ul class="plain">
+            {% if free %}
+              <li>注册送 {{ '{:,}'.format(t.signup_credits or 0) }} 积分</li>
+            {% else %}
+              <li>每月 {{ '{:,}'.format(t.monthly_credits) }} 积分<span class="muted small">（模型 / 搜索）</span></li>
+            {% endif %}
+            <li>云工作台 <b>{{ (t.work_minutes or 0) // 60 }} 小时 / 月</b><span class="muted small">（机时另计，不扣积分）</span></li>
+            <li>{{ t.concurrency }} 路并发</li>
+            <li>全部模型可用</li>
+          </ul>
         </div>
       {% endfor %}
     </div>
+
+    <p class="center muted small" style="margin-top:18px">
+      价格以 {{ currency }} 计，未含税（如适用将在收银台按所在地计算）· 按周期预付，到期不自动扣款
+    </p>
 
     {# Two meters, deliberately kept apart: credits pay for tokens, minutes pay
        for the machine. One number covering both made the bill unreadable. #}

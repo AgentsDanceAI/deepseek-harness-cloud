@@ -15,7 +15,8 @@
 services:
   dhc-server:
     build:
-      context: ../../server
+      context: ../..
+      dockerfile: server/Dockerfile
     image: dhc-server:latest
     container_name: dhc-server
     restart: unless-stopped

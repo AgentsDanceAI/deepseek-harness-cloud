@@ -24,7 +24,12 @@
           <button class="btn btn-ghost btn-block" type="button" disabled>重新构建中</button>
         {% endif %}
         {% if download_url_mac_x64 %}
-          <a class="btn btn-ghost btn-block" href="{{ download_url_mac_x64 }}" rel="noopener" style="margin-top:10px">下载 .dmg（Intel）</a>
+          <a class="btn btn-ghost btn-block" href="{{ download_url_mac_x64 }}" rel="noopener" style="margin-top:10px">
+            下载 {{ '.zip' if download_url_mac_x64.endswith('.zip') else '.dmg' }}（Intel）
+          </a>
+          {% if download_url_mac_x64.endswith('.zip') %}
+          <p class="muted small" style="margin-top:6px">Intel 版为 zip：解压后把 App 拖进「应用程序」即可。</p>
+          {% endif %}
         {% endif %}
       </div>
       <div class="card dl-card">

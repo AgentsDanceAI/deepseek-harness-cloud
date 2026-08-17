@@ -6,13 +6,18 @@ WORKDIR /srv/dhc
 # source tree via PYTHONPATH. We deliberately do NOT `pip install .` the package:
 # templates/, static/, and config/ are resolved through __file__-relative paths at
 # runtime, and a site-packages install would drop those non-.py data files.
-COPY pyproject.toml ./
+COPY server/pyproject.toml ./
 RUN pip install --no-cache-dir \
         "fastapi>=0.115" "uvicorn[standard]>=0.30" "httpx>=0.27" "jinja2>=3.1" \
         "python-multipart>=0.0.9" "itsdangerous>=2.2" "cryptography>=42"
 
-COPY app ./app
-COPY config ./config
+COPY server/app ./app
+COPY server/config ./config
+# The legal documents live at the repo root and are read at request time by
+# webpages._legal_dir(). Without this they are absent from the image and every
+# /legal/* page renders empty — which is exactly what a payment processor's
+# review would see. The build context is the repo root so they can be copied.
+COPY legal /srv/legal
 
 ENV PYTHONPATH=/srv/dhc
 ENV DHC_DATA_DIR=/app/data

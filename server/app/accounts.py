@@ -15,6 +15,7 @@ from email.header import Header
 from email.mime.text import MIMEText
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi.responses import RedirectResponse
 
 from . import config, credits, db, rate_limit, security
 
@@ -235,10 +236,39 @@ def me(user: dict = Depends(resolve_user)):
             "credits": credits.balance(user["id"])}
 
 
+def clear_session_cookie(response: Response) -> None:
+    """Delete the session cookie with the SAME attributes it was set with.
+
+    A cookie is identified by (name, domain, path). Ours is set with
+    COOKIE_DOMAIN so the workspace subdomain sees it; deleting without that
+    domain removes a *different* cookie that never existed, and the real one
+    survives — which is exactly why signing out appeared to do nothing.
+    """
+    extra = {"domain": config.COOKIE_DOMAIN} if config.COOKIE_DOMAIN else {}
+    response.delete_cookie(config.SESSION_COOKIE, path="/", **extra)
+    # Belt and braces: a host-only cookie may linger from before COOKIE_DOMAIN
+    # was introduced, and it would keep the person signed in on the apex.
+    if extra:
+        response.delete_cookie(config.SESSION_COOKIE, path="/")
+
+
 @router.post("/logout")
 def logout(response: Response):
-    response.delete_cookie(config.SESSION_COOKIE, path="/")
+    clear_session_cookie(response)
     return {"ok": True}
+
+
+@router.get("/logout")
+def logout_get(request: Request):
+    """A plain link that signs out and lands on the homepage.
+
+    The JS handler needs fetch + JSON to succeed; if anything about that path
+    breaks, the person is stuck signed in. A GET that works without JavaScript
+    is the floor under that.
+    """
+    response = RedirectResponse(config.PUBLIC_BASE.rstrip("/") + "/", status_code=303)
+    clear_session_cookie(response)
+    return response
 
 
 @router.post("/password")

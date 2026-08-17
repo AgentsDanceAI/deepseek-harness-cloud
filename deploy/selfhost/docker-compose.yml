@@ -30,7 +30,8 @@ services:
   # ---------------------------------------------------------------------------
   dhc-server:
     build:
-      context: ../../server
+      context: ../..
+      dockerfile: server/Dockerfile
     image: dsh-cloud-server:selfhost
     restart: unless-stopped
     env_file: [".env"]

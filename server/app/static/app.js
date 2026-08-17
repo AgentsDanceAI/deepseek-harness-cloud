@@ -474,18 +474,31 @@
   // --- page: pricing ---------------------------------------------------------
   function initPricing() {
     var cycle = "monthly";
+
+    // Each card renders BOTH period views server-side and the toggle swaps
+    // which is visible. Rendering rather than recomputing keeps the struck-out
+    // standard price and the discount badge consistent with what an order
+    // would actually charge — the amounts come from the price table, not JS.
+    function setCycle(next) {
+      cycle = next;
+      $$(".cycle-toggle .tab").forEach(function (t) {
+        t.classList.toggle("active", t.dataset.cycle === next);
+      });
+      $$("[data-period-view]").forEach(function (el) {
+        el.hidden = el.dataset.periodView !== next;
+      });
+    }
     $$(".cycle-toggle .tab").forEach(function (tab) {
-      tab.addEventListener("click", function () {
-        cycle = tab.dataset.cycle;
-        $$(".cycle-toggle .tab").forEach(function (t) { t.classList.toggle("active", t === tab); });
-        $$(".price[data-monthly]").forEach(function (p) {
-          var cents = parseInt(cycle === "yearly" ? p.dataset.yearly : p.dataset.monthly, 10) || 0;
-          if (cycle === "yearly" && !parseInt(p.dataset.yearly, 10)) cents = parseInt(p.dataset.monthly, 10) || 0;
-          $(".amount", p).textContent = Math.round(cents / 100);
-          $(".per", p).textContent = cycle === "yearly" && parseInt(p.dataset.yearly, 10) ? "/年" : "/月";
-        });
+      tab.addEventListener("click", function () { setCycle(tab.dataset.cycle); });
+    });
+    $$("[data-goto-yearly]").forEach(function (b) {
+      b.addEventListener("click", function () {
+        setCycle("yearly");
+        var sw = $(".cycle-toggle");
+        if (sw) sw.scrollIntoView({ block: "center", behavior: "smooth" });
       });
     });
+    setCycle("monthly");
 
     var payCtx = null;
     function getCtx() {

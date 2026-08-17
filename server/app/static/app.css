@@ -866,3 +866,42 @@ body[data-page="landing"] .nav-menu a { color: var(--fg); }
 }
 .cap-input:focus { border-color: var(--brand); outline: none; }
 .table-wrap { overflow-x: auto; }
+
+/* ---------- nav dropdown: readable on its own white card ----------
+   The landing page paints nav text white so it reads on the dark hero, and
+   that rule was leaking into the dropdown — white headings on a white card.
+   The menu is its own surface, so it takes the normal ink colours back, with
+   the brand blue on the heading to tie it to the ripple. */
+.nav-menu strong { color: var(--brand); }
+.nav-menu span { color: var(--muted); }
+body[data-page="landing"] .nav-menu strong,
+body[data-page="landing"] .nav-menu a:hover strong { color: var(--brand); }
+body[data-page="landing"] .nav-menu span,
+body[data-page="landing"] .nav-menu a:hover span { color: var(--muted); }
+body[data-page="landing"] .nav-menu a { color: var(--fg); }
+
+/* ---------- header over the ripple hero ----------
+   A flat grey slab across the top of a deep-blue hero reads as a seam. Tint it
+   with the hero's own blue and let the page show through instead. */
+body[data-page="landing"] .site-header {
+  background: linear-gradient(180deg, rgba(11, 28, 56, .92), rgba(11, 28, 56, .68));
+  border-bottom-color: rgba(122, 165, 240, .18);
+  backdrop-filter: blur(14px) saturate(1.5);
+  -webkit-backdrop-filter: blur(14px) saturate(1.5);
+}
+
+/* ---------- pricing cards (structure mirrors the AgentsDance reference so
+   entitlements and copy stay portable between the two products) ---------- */
+.tier-pill {
+  display: inline-block; padding: 2px 9px; border: 2.5px solid var(--fg);
+  border-radius: 9px; font-size: 13px; font-weight: 800; letter-spacing: .3px;
+  color: var(--fg); text-transform: lowercase;
+}
+.tier-plain { font-size: 17px; font-weight: 700; color: var(--faint); }
+.tier-tagline { margin-top: 9px; color: var(--faint); font-size: 12.5px; line-height: 1.5; min-height: 38px; }
+.price-row { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; margin-top: 14px; }
+.price-now { font-size: 34px; font-weight: 700; letter-spacing: -1px; line-height: 1; color: var(--fg); }
+.price-row .per { color: var(--faint); font-size: 12.5px; }
+.plan .btn { margin-top: 18px; }
+.plan .plain { margin-top: 18px; }
+.plan .plain li { text-align: left; }

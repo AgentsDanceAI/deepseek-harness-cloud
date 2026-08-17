@@ -176,7 +176,7 @@ def test_org_pools_minutes_separately_from_credits():
     # org pool is ADDED to the member's own free allowance, never instead of it
     assert st["scope"] == "org"
     assert st["org_pool_minutes"] == 600
-    assert st["minutes_left"] == 600 + 120
+    assert st["minutes_left"] == 600 + work_access.included_minutes(member)
 
     credits.spend(member, 200, kind="llm", model="m")        # tokens
     assert teams.minute_pool(org_id) == 600                  # minutes untouched
@@ -247,7 +247,8 @@ def test_joining_a_team_never_removes_your_own_allowance():
     # no minute pool bought at all
     assert teams.minute_pool(org_id) == 0
     st = work_access.state(member)
-    assert st["minutes_left"] == 120          # their own free allowance survives
+    assert st["minutes_left"] == work_access.included_minutes(member)  # own allowance survives
+    assert st["minutes_left"] > 0
     assert work_access.blocked_reason(member) is None
 
 
