@@ -43,9 +43,8 @@ echo "==> 5/6 ensure DHC site blocks in Caddyfile.gpu (dshcloud-v3, backup kept)
 #   dshcloud.online        -> dhc-server (primary console/site)
 #   www.dshcloud.online    -> 308 to apex
 #   work.dshcloud.online   -> dshwork-v2 routing (PWA shell + forward_auth)
-#   open-search.ai         -> /api /llm /releases passthrough (published
-#                             installers keep working), pages 308 to primary
-#   work.open-search.ai    -> 308 to work.dshcloud.online
+# (旧域 open-search.ai 的兼容层已于 2026-08-17 撤除 —— 站主确认前期无用户。
+#  LEGACY_HOST 仍保留, 因为下面第 2/3 步要用它把历史遗留的块清理干净。)
 PRIMARY_HOST="${PRIMARY_DOMAIN:-dshcloud.online}"
 LEGACY_HOST="${LEGACY_DOMAIN:-open-search.ai}"
 WORK_HOST="${WORK_DOMAIN:-work.dshcloud.online}"
@@ -104,22 +103,16 @@ www.{primary} {{
 \t\t}}
 \t}}
 }}
-# legacy domain: APIs/downloads keep serving (already-shipped desktop builds,
-# device tokens, webhooks), everything else redirects to the primary domain.
-{legacy} {{
-\t@passthrough path /api/* /llm/* /releases/*
-\thandle @passthrough {{
-\t\treverse_proxy dhc-server:8100 {{
-\t\t\tflush_interval -1
-\t\t}}
-\t}}
-\thandle {{
-\t\tredir https://{primary}{{uri}} 308
-\t}}
-}}
-work.{legacy} {{
-\tredir https://{work}{{uri}} 308
-}}
+# 旧域 open-search.ai 兼容层已于 2026-08-17 按站主决定撤除 (前期无用户,
+# 无已分发的、指向旧域的客户端需要照顾)。撤除后 open-search.ai 不再由本机
+# 提供任何服务 —— Caddy 没有它的站点块, CF 回源会拿到 SNI 不匹配而握手失败。
+# ⚠️ 若将来发现仍有旧客户端在打旧域, 恢复方式是把下面这段取消注释后重跑本脚本:
+#   {legacy} {{
+#     @passthrough path /api/* /llm/* /releases/*
+#     handle @passthrough {{ reverse_proxy dhc-server:8100 {{ flush_interval -1 }} }}
+#     handle {{ redir https://{primary}{{uri}} 308 }}
+#   }}
+#   work.{legacy} {{ redir https://{work}{{uri}} 308 }}
 # ── DHC sites v3 END ──
 """
 open(p, "w", encoding="utf-8").write(s + block)

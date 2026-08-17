@@ -1,58 +1,66 @@
-<!-- 本文为草案，正式发布前请经法律专业人士审阅 -->
+# 退款政策
 
-# DSH Cloud 退款政策
+**版本 1.0 · 生效日期：2026 年 8 月 17 日**
 
-版本 1.0，生效日期【上线日期】
-
-> 草案说明：本文为草案，正式发布前请经法律专业人士审阅。文中【】内为占位符，发布前须逐项填写或确认。
->
-> 本政策由**【运营主体】**（当前为北京跃迁效应人工智能科技有限公司 / Beijing AgentsDance AI Technology Co., Ltd.）发布，是《用户协议》的组成部分。
-
-## 1. 适用范围
-
-本政策适用于在 DSH Cloud 内购买的付费套餐（Plus / Pro / Max，按月或按年）与积分加油包。积分与套餐权益为**虚拟商品**，在线交付、即时生效。
-
-## 2. 积分加油包退款
-
-同时满足以下条件的，可申请**全额退款（扣除支付渠道手续费）**：
-
-- 自购买之日起 **7 日内**提出申请；且
-- 该加油包积分剩余 **90% 以上**（即已使用不超过 10%）。
-
-不满足上述条件的加油包订单不予退款，但您依法享有的法定权利不受影响（见第 4 条）。退款获批后，该加油包对应的全部剩余积分即时作废。
-
-## 3. 套餐退款
-
-3.1 套餐周期开始后，该周期的月度积分**不予退款**，但您依法享有的法定权利不受影响（见第 4 条）。
-
-3.2 【待运营方确定并经律师确认：年付套餐中尚未开始的后续周期是否可按比例退款及其计算方式。】
-
-3.3 取消订阅自下一周期起生效，当前周期权益不受影响；本政策不影响您随时取消后续续费。
-
-## 4. 法定权利声明
-
-4.1 **中国用户**：本政策不减损您依据《中华人民共和国消费者权益保护法》等法律享有的权利。因服务存在质量问题（如已支付但未到账、系统错误重复扣款）导致的退款请求，不受第 2、3 条条件限制，经核实后退款。
-
-4.2 **欧盟/欧洲经济区用户**（如适用）：您依法享有 14 天撤回权（right of withdrawal）。但根据 Consumer Rights Directive（2011/83/EU）关于数字内容/数字服务的例外，若您明确同意在撤回期届满前立即开始履行、并确认知悉因此丧失撤回权，则撤回权自履行开始时丧失。我们将在购买流程中呈现该项同意与确认。
-
-## 5. 如何申请退款
-
-- **渠道**：发送邮件至【联系邮箱】，注明账号邮箱、订单号、退款原因。
-- **审核**：我们自收到完整申请之日起【7】个工作日内完成审核并答复。
-- **退回方式**：原路退回至原支付渠道；到账时间以支付渠道为准。
-
-## 6. 渠道手续费说明
-
-支付渠道（Stripe / 支付宝 / 微信支付）收取的手续费由渠道扣收、通常不予退还；按第 2 条退款时，实际退款金额为订单金额扣除渠道实际扣收的手续费后的余额。因服务质量问题（第 4.1 条）产生的退款，手续费不由您承担。
-
-## 7. 退款后的处理
-
-退款完成后，对应订单状态变更为"已退款"（终态），对应积分/套餐权益即时终止。为防止滥用，同一账号多次购买-退款的异常行为可能被限制适用第 2 条的无条件退款。
+本政策是 [服务条款](/legal/terms) 不可分割的组成部分，并在结账页同时展示。
 
 ---
 
-## English Summary
+## 0. 先说清楚：本服务不自动续费
 
-This is a non-binding summary; the Chinese text above is the operative version.
+**我们不会向您的支付方式发起任何周期性扣款。** 每一次付费都是单次、一次性的：周期结束后账号自动回落至免费版，除非您主动再次下单，否则不会有第二次扣款。因此不存在「忘记取消订阅被扣款」的情形，也没有需要取消的订阅。
 
-Credits and subscriptions are virtual goods delivered online. Credit packs: full refund (minus payment-channel fees) if requested within 7 days of purchase and more than 90% of the pack's credits remain unused; otherwise non-refundable except for statutory rights. Plan (Plus/Pro/Max) monthly credits are non-refundable once the billing period has started, except for statutory rights; cancellation stops future renewals. Statutory consumer rights under PRC Consumer Protection Law are preserved; for EU/EEA users, the 14-day withdrawal right is acknowledged, subject to the digital-content exception where service begins immediately with the user's express consent and acknowledgment. To request a refund, email 【联系邮箱】 with your account email and order number; we respond within 【7】 business days and refund via the original payment method. Channel fees withheld by payment providers are generally not refundable, except where the refund is due to a service fault on our side.
+## 1. 首次购买：14 天无理由退款
+
+自您**首次**在本服务付费之日起 **14 个自然日**内，若该次购买所含积分消耗**不超过 20%**，可申请**全额退款**。
+
+- 「首次购买」指您账号下的第一笔成功付款，套餐与积分包均适用；
+- 消耗比例以我们后台的用量记录为准，您可在控制台自行查看；
+- 退款后，该次购买对应的积分与机时权益同时收回。
+
+## 2. 无条件全额退款的情形
+
+以下情况无论使用与否、无论是否首次购买，均全额退还：
+
+| 情形 | 说明 |
+|---|---|
+| 重复扣款 | 同一订单被扣款多次 |
+| 错误扣款 | 您未发起的扣款，或金额与页面展示不符 |
+| 未交付 | 付款成功但权益未发放，且我们无法在 24 小时内修复 |
+
+## 3. 服务中断的按比例退款
+
+若本服务发生**单次连续超过 72 小时**的不可用，我们按受影响天数占当前周期的比例退还该周期费用。您无需举证，我们会主动核对可用性记录。
+
+## 4. 账号被终止时
+
+- **因我们的原因终止**（例如我们停止运营）：退还您已付费但尚未开始的完整周期，并按第 3 条处理进行中的周期。
+- **因您违反条款被终止**：退还您已付费但**尚未开始**的完整周期；进行中的周期与已发放未使用的积分不予退还。
+- **因欺诈、攻击、违法行为被终止**：不予退还任何款项。
+
+## 5. 不予退款的情形
+
+除上述各条外，以下不予退款：
+
+- 已消耗的积分与已使用的机时（模型调用与算力已实际发生成本）；
+- 免费赠送的额度（本就未付费）；
+- 未使用的额度在周期结束时的结余——额度**不结转**至下一周期，也不可提现或转让；
+- 主动注销账号时剩余的付费周期（注销前请先用完或先申请退款）。
+
+## 6. 怎么申请
+
+发送邮件至 **support@dshcloud.online**，写明：
+
+1. 注册邮箱；
+2. 订单号（可在控制台「订单」页查到）；
+3. 申请理由。
+
+**我们在 5 个工作日内答复。** 获准的退款由 **Waffo Pancake** 原路退回至您的原支付方式，到账时间取决于您的发卡行，通常为 5–10 个工作日。
+
+## 7. 争议
+
+若您对处理结果有异议，可回复原邮件要求复核，我们将由另一位同事重新评估。您依所在地消费者保护法享有的权利不受本政策限制。您也可直接联系发卡行发起争议，但我们建议先与我们沟通——多数问题可以更快解决。
+
+---
+
+*最后更新：2026 年 8 月 17 日 · 版本 1.0 · 联系：support@dshcloud.online*
