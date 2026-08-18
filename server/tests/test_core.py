@@ -612,3 +612,15 @@ def test_admin_role_guards_cannot_lock_everyone_out():
     finally:
         config.ADMIN_EMAILS[:] = old
     db.query("DELETE FROM users WHERE email LIKE 'guard-%@t.local'")
+
+
+def test_product_id_is_cached_before_publish():
+    """Publishing is a separate call that can fail. If the id is only cached
+    after it succeeds, every retry creates another product — that is how the
+    store accumulated three copies of all eleven items."""
+    import inspect
+    from app.payments import waffo_provider
+    src = inspect.getsource(waffo_provider.ensure_product_id)
+    cache_pos = src.index('_kv_set(cache_key, pid)')
+    publish_pos = src.index('publish-product')
+    assert cache_pos < publish_pos, "the id must be cached before the publish call"

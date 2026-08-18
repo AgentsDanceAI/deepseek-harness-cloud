@@ -250,6 +250,12 @@ async def ensure_product_id(item: str) -> str:
     # the call answers "No test version found" — for us that is the normal path,
     # not a failure. Treat it as success when the product is already active, and
     # only escalate a publish error that leaves the product unusable.
+    # Cache the id BEFORE publishing. Publishing failed on the first two
+    # attempts here, and because the id was only cached afterwards, every retry
+    # created a NEW product — the store ended up with three copies of all eleven.
+    # The product exists the moment create-product returns; caching that fact is
+    # what makes a retry idempotent.
+    _kv_set(cache_key, pid)
     st2, d2 = await _waffo_request("/v1/actions/onetime-product/publish-product", {"id": pid})
     if st2 >= 300:
         msg = ""
