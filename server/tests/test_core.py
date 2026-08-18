@@ -556,3 +556,15 @@ def test_language_resolution_prefers_an_explicit_choice():
     assert i18n.resolve(Req(cookie="en", accept="zh-CN")) == ("en", False)
     assert i18n.resolve(Req(accept="en-GB,en;q=0.9,zh;q=0.4")) == ("en", False)
     assert i18n.resolve(Req(accept="fr-FR,fr;q=0.9")) == (i18n.DEFAULT, False)
+
+
+def test_query_survives_a_literal_percent():
+    """psycopg treats % as a placeholder marker, so `LIKE 'x_%'` blew up with
+    "only '%s', '%b', '%t' are allowed as placeholders" — on SQLite the same
+    query works fine, so this only ever failed in production."""
+    from app import db
+    db.query("INSERT INTO kv (k, v) VALUES (?, ?) ON CONFLICT (k) DO UPDATE SET v=EXCLUDED.v",
+             ("pcttest_a", "1"))
+    rows = db.query("SELECT k FROM kv WHERE k LIKE 'pcttest%'")
+    assert any(r["k"] == "pcttest_a" for r in rows)
+    db.query("DELETE FROM kv WHERE k LIKE 'pcttest%'")

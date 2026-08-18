@@ -195,7 +195,13 @@ class _PgConn:
 
     def execute(self, sql: str, params: tuple = ()):  # noqa: ANN001
         cur = self._conn.cursor()
-        cur.execute(sql.replace("?", "%s"), params)
+        # psycopg reads % as the start of a placeholder, so a literal % in the
+        # SQL — a LIKE pattern such as `LIKE 'dl_%'` — makes it reject the whole
+        # statement with "only '%s', '%b', '%t' are allowed as placeholders".
+        # Doubling literal percents is how psycopg wants them escaped. Order
+        # matters: escape first, then swap ? for %s, or the %s we just wrote
+        # would be escaped too.
+        cur.execute(sql.replace("%", "%%").replace("?", "%s"), params)
         return cur
 
     def commit(self) -> None:
