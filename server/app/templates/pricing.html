@@ -99,6 +99,35 @@
     <p class="center muted small" style="margin-top:18px">
       {{ t("pricing.tax_note", currency=currency) }}
     </p>
+    {# Seats and a shared pool: the thing an organisation buys is not N personal
+       accounts, it is one balance several people draw from.
+
+       This section was collateral damage when the workspace pass was removed —
+       the edit took the team block out with it, leaving /solutions linking to a
+       #team anchor that no longer existed and twelve orphaned strings. Seats
+       stayed on sale in Waffo and behind /console/team the whole time; the only
+       place they disappeared from was the page where people go to buy. #}
+    <h2 class="section-title" id="team" style="margin-top:64px">{{ t("pricing.team.h2") }}</h2>
+    <p class="center muted">{{ t("pricing.team.lede") }}</p>
+    <div class="grid grid-2" style="max-width:720px;margin:22px auto 0">
+      <div class="card pack">
+        <h3>{{ t("pricing.team.seats_h3") }}</h3>
+        <div class="price"><span class="currency">{{ currency_symbol }}</span>{{ team_seat_price // 100 }}<span class="per">{{ t("pricing.team.per_seat_month") }}</span></div>
+        <p class="muted">
+          {{ t("pricing.team.seat_line1", credits='{:,}'.format(team_seat_credits), hours=team_seat_minutes // 60) }}<br>
+          {{ t("pricing.team.seat_line2", min=team_seat_min) }}<br>
+          {{ t("pricing.team.seat_line3") }}
+        </p>
+        <a class="btn btn-primary btn-block" href="/console/team">{{ t("pricing.team.create_cta") }}</a>
+      </div>
+      <div class="card pack">
+        <h3>{{ t("pricing.team.selfhost_h3") }}</h3>
+        <div class="price" style="font-size:26px;letter-spacing:-.3px">{{ t("pricing.team.selfhost_headline") }}</div>
+        <p class="muted">{{ t("pricing.team.selfhost_note") }}</p>
+        <a class="btn btn-ghost btn-block" href="/resources#selfhost">{{ t("pricing.team.selfhost_cta") }}</a>
+      </div>
+    </div>
+
     <h2 class="section-title" id="packs" style="margin-top:64px">{{ t("pricing.packs.h2") }}</h2>
     <p class="center muted">{{ t("pricing.packs.lede") }}</p>
     <div class="grid grid-3 pack-grid">

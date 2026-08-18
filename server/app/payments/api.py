@@ -21,7 +21,7 @@ from urllib.parse import parse_qsl
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse, PlainTextResponse
 
-from .. import config, db, plans
+from .. import config, currency, db, plans
 from ..accounts import resolve_user
 from . import alipay_provider, base, stripe_provider, waffo_provider, wechatpay_provider
 
@@ -43,21 +43,35 @@ def active_providers() -> list[str]:
     return out
 
 
+def _quoted_currency(request: Request) -> str:
+    """The currency this visitor is being QUOTED in — the same resolver the
+    pricing page renders with (?cur= -> cookie -> CF-IPCountry -> USD), so the
+    number on the checkout page is the number on the card that was clicked.
+
+    Resolved from the request, never from the request BODY: six independently
+    set price tables are not exact conversions of each other, so a
+    client-chosen currency would let a caller shop for the cheapest one.
+    """
+    cur, _explicit = currency.resolve(request)
+    return cur
+
+
 @router.get("/context")
-def pay_context():
-    p = plans.pricing()
+def pay_context(request: Request):
+    p = plans.pricing(_quoted_currency(request))
     return {"providers": active_providers(), "pricing": p, "currency": p.get("currency", "CNY")}
 
 
 @router.post("/checkout")
-def checkout(body: dict, user: dict = Depends(resolve_user)):
+def checkout(request: Request, body: dict, user: dict = Depends(resolve_user)):
     item = str(body.get("item", ""))
+    cur = _quoted_currency(request)
     requested = str(body.get("provider", "") or "")
     active = active_providers()
     if not active:
         # No payment channel configured yet: record the intent so demand is
         # visible; the frontend shows "支付即将开通".
-        info = base.resolve_item(item)
+        info = base.resolve_item(item, cur)
         info["amount_cents"] = base.price_for(user["id"], info)
         order_id = "DHI" + time.strftime("%y%m%d") + secrets.token_hex(5).upper()
         with db.tx() as conn:
@@ -68,7 +82,15 @@ def checkout(body: dict, user: dict = Depends(resolve_user)):
                  "intent", time.time()))
         return {"order_id": order_id, "provider": None, "intent": True}
     provider = requested if requested in active else active[0]
-    order = base.create_order(user["id"], provider, item)
+    if provider == "waffo":
+        # Ask before writing the order row: CNY is WeChat-only on Waffo and
+        # WeChat has a ceiling, so the priciest yuan-quoted items have no
+        # payable method. The client turns this code into an offer to switch
+        # currency rather than a dead end.
+        probe = base.resolve_item(item, cur)
+        if not waffo_provider.payable(probe["currency"], probe["amount_cents"]):
+            raise HTTPException(400, "currency_not_payable")
+    order = base.create_order(user["id"], provider, item, cur)
     if provider == "stripe":
         return {"order_id": order["order_id"], "provider": "stripe",
                 "pay_url": stripe_provider.create_checkout(order)}

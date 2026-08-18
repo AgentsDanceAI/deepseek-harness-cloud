@@ -491,9 +491,20 @@ def test_waffo_product_amount_is_a_display_string():
     almost impossible to diagnose from the response alone."""
     import inspect
     from app.payments import waffo_provider
-    src = inspect.getsource(waffo_provider.ensure_product_id)
-    assert 'f"{info[\'amount_cents\'] / 100:.2f}"' in src
-    assert "round(info[\"amount_cents\"]" not in src
+    src = inspect.getsource(waffo_provider.catalog_prices)
+    assert 'f"{cents / 100:.2f}"' in src
+    assert "round(cents" not in src
+
+
+def test_waffo_products_carry_every_quoted_currency():
+    """create-session is rejected for a currency the product does not list, so a
+    USD-only product breaks checkout for exactly the visitors who were quoted a
+    local price."""
+    from app import currency
+    from app.payments import waffo_provider
+    prices = waffo_provider.catalog_prices("plan:plus:monthly")
+    assert set(prices) == set(currency.SUPPORTED)
+    assert prices["USD"]["amount"] == "10.00" and prices["CNY"]["amount"] == "70.00"
 
 
 def test_item_of_round_trips_every_sellable_kind():

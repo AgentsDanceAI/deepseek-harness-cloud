@@ -101,6 +101,29 @@ def test_resolve_item_rejects_unknown_and_free():
     assert info["amount_cents"] == pack["cents"] and info["credits"] == pack["credits"]
 
 
+def test_checkout_charges_the_currency_the_page_quoted():
+    """The pricing page renders from the visitor's currency table while checkout
+    priced from the default one, so a visitor shown ¥70 landed on a payment page
+    asking for $10. Both sides now resolve the currency the same way."""
+    _, headers = make_user()
+    r = client.post("/api/pay/checkout?cur=CNY", json={"item": "plan:plus:monthly"}, headers=headers)
+    assert r.status_code == 200
+    order = base.get_order(r.json()["order_id"])
+    assert order["currency"] == "CNY"
+    assert order["amount_cents"] == plans.pricing("CNY")["tiers"]["plus"]["monthly_cents"]
+    assert client.get("/api/pay/context?cur=CNY").json()["currency"] == "CNY"
+
+
+def test_client_cannot_choose_its_own_currency():
+    """Six independently set tables are not exact conversions of each other, so a
+    body-supplied currency would let a caller shop for the cheapest one."""
+    _, headers = make_user()
+    r = client.post("/api/pay/checkout", headers=headers,
+                    json={"item": "plan:plus:monthly", "currency": "JPY", "cur": "JPY"})
+    order = base.get_order(r.json()["order_id"])
+    assert order["currency"] == plans.pricing()["currency"]
+
+
 def test_client_supplied_amount_is_ignored():
     _, headers = make_user()
     r = client.post("/api/pay/checkout", headers=headers,

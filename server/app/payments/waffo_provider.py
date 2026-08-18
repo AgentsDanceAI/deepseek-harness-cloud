@@ -192,6 +192,30 @@ async def ensure_store_id() -> str:
     return sid
 
 
+def catalog_prices(item: str) -> dict:
+    """Catalog placeholder prices for every currency the site quotes.
+
+    Placeholders because checkout overrides the amount with priceSnapshot — but
+    the CURRENCY KEYS are not cosmetic: create-session is rejected for a
+    currency the product does not list, so a USD-only product breaks checkout
+    for every visitor quoted in anything else.
+
+    A STRING per currency, not a number. The API documents amount as "display
+    format string" and rejects a JSON number with a bare {"message":"Invalid
+    input"} naming no field — every create-product call failed this way until
+    it was traced.
+    """
+    from .. import currency as _cur
+    prices = {}
+    for cur in _cur.SUPPORTED:
+        try:
+            cents = base.resolve_item(item, cur)["amount_cents"]
+        except Exception:      # an item priced in some tables but not others
+            continue
+        prices[cur] = {"amount": f"{cents / 100:.2f}", "taxIncluded": True, "taxCategory": "saas"}
+    return prices
+
+
 async def ensure_product_id(item: str) -> str:
     """Resolve (or create+publish) the Waffo product backing this item. Name and
     description come from base.resolve_item — the catalog price is a placeholder,
@@ -205,11 +229,6 @@ async def ensure_product_id(item: str) -> str:
         return pid
     info = base.resolve_item(item)
     name = info["description"]
-    currency = info["currency"]
-    # A STRING, not a number. The API documents amount as "display format string"
-    # and rejects a JSON number with a bare {"message":"Invalid input"} that names
-    # no field — every create-product call failed this way until it was traced.
-    amount = f"{info['amount_cents'] / 100:.2f}"  # catalog placeholder
     store_id = await ensure_store_id()
     # Reuse an existing product with the same name — a lost cache / a parse
     # failure on create must not spawn duplicate catalog products.
@@ -239,8 +258,10 @@ async def ensure_product_id(item: str) -> str:
         "name": name,
         "description": name,
         # prices is keyed by ISO-4217 currency (not an array); each sellable
-        # currency needs a key or its create-session is rejected.
-        "prices": {currency: {"amount": amount, "taxIncluded": True, "taxCategory": "saas"}},
+        # currency needs a key or its create-session is rejected. The site
+        # quotes six, so all six go in — a product carrying only USD makes
+        # checkout fail for exactly the visitors who were shown a local price.
+        "prices": catalog_prices(item),
     })
     body = data.get("data") if isinstance(data, dict) and isinstance(data.get("data"), dict) else data
     prod = (body or {}).get("product") if isinstance((body or {}).get("product"), dict) else (body or {})
@@ -284,6 +305,18 @@ async def ensure_product_id(item: str) -> str:
 # before the checkout page rather than show an empty method list.
 WECHAT_CAP = {"USD": 140.0, "CNY": 1000.0}
 _WALLET_METHODS = ["card", "applepay", "googlepay"]
+
+
+def payable(currency: str, amount_cents: int) -> bool:
+    """Whether Waffo has any method for this currency at this amount.
+
+    Verified against the API, not assumed: card, applepay and googlepay are all
+    rejected for CNY with "Payment methods not supported for CNY (onetime)", so
+    a yuan-quoted order above the WeChat ceiling has nowhere to go. Checking
+    before the order row is written lets the page offer the buyer a way out
+    instead of stranding them on a checkout that cannot be paid.
+    """
+    return bool(payment_methods_for(currency, amount_cents / 100))
 
 
 def payment_methods_for(currency: str, amount: float) -> list[str]:

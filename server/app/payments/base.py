@@ -22,8 +22,8 @@ from .. import config, credits, db, plans, teams, work_access
 ORDER_PREFIX = {"stripe": "DHS", "alipay": "DHA", "wechat": "DHW", "waffo": "DHF"}
 
 
-def team_terms() -> dict:
-    """Seat terms from the active (per-currency) price table.
+def team_terms(cur: str | None = None) -> dict:
+    """Seat terms from the price table the buyer was quoted in.
 
     Deliberately not a flat env default: a seat must never undercut the cheapest
     individual plan, and that threshold is a different number in ¥ than in $.
@@ -31,7 +31,7 @@ def team_terms() -> dict:
     visibility — not a bulk discount on the personal product; sell it cheaper and
     buyers will simply expense personal plans instead.
     """
-    p = plans.pricing()
+    p = plans.pricing(cur)
     t = dict(p.get("team") or {})
     t.setdefault("seat_cents", config.TEAM_SEAT_PRICE)
     t.setdefault("seat_credits", config.TEAM_SEAT_CREDITS)
@@ -41,10 +41,10 @@ def team_terms() -> dict:
     return t
 
 
-def seat_unit_price(seats: int) -> int:
+def seat_unit_price(seats: int, cur: str | None = None) -> int:
     """Per-seat price at this volume. Bands are (min_seats, percent_off), and the
     discount applies to the seat fee only."""
-    terms = team_terms()
+    terms = team_terms(cur)
     price = int(terms["seat_cents"])
     for min_seats, off in sorted(terms["volume_tiers"], key=lambda b: -b[0]):
         if seats >= int(min_seats):
@@ -52,10 +52,17 @@ def seat_unit_price(seats: int) -> int:
     return price
 
 
-def resolve_item(item: str) -> dict:
+def resolve_item(item: str, cur: str | None = None) -> dict:
     """Validates an item id against the price table. Returns {kind, amount_cents,
-    currency, description, ...} — the ONLY place order amounts come from."""
-    p = plans.pricing()
+    currency, description, ...} — the ONLY place order amounts come from.
+
+    `cur` is the currency the visitor was QUOTED in, resolved server-side from
+    their request (never sent by the client — that would let a caller shop the
+    six tables for the cheapest one). Passing None keeps the default table,
+    which is what fulfilment uses: quotas are identical across currencies, so
+    only the amount depends on this.
+    """
+    p = plans.pricing(cur)
     parts = item.split(":")
     if parts[0] == "plan" and len(parts) == 3:
         tier, cycle = parts[1], parts[2]
@@ -78,12 +85,12 @@ def resolve_item(item: str) -> dict:
     # Team seats: N seats for a month. The pool credits scale with the seat
     # count, so a bigger team gets a bigger shared balance, not just more logins.
     if parts[0] == "seats" and len(parts) == 2 and parts[1].isdigit():
-        terms = team_terms()
+        terms = team_terms(cur)
         n = max(int(terms["min_seats"]), min(int(parts[1]), 500))
         # Volume discount applies to the SEAT FEE only. The included credits and
         # minutes are real cost, so discounting them would be giving away
         # margin rather than rewarding commitment.
-        unit = seat_unit_price(n)
+        unit = seat_unit_price(n, cur)
         return {"kind": "seats", "seats": n, "cycle": "monthly",
                 "amount_cents": unit * n,
                 "unit_cents": unit,
@@ -101,8 +108,8 @@ def price_for(user_id: str, info: dict) -> int:
     return int(info["amount_cents"])
 
 
-def create_order(user_id: str, provider: str, item: str) -> dict:
-    info = resolve_item(item)
+def create_order(user_id: str, provider: str, item: str, cur: str | None = None) -> dict:
+    info = resolve_item(item, cur)
     info["amount_cents"] = price_for(user_id, info)
     order_id = ORDER_PREFIX[provider] + time.strftime("%y%m%d") + secrets.token_hex(5).upper()
     now = time.time()
@@ -135,7 +142,10 @@ def fulfil(order_id: str) -> None:
     order = db.query_one("SELECT * FROM orders WHERE id=?", (order_id,))
     if order is None:
         raise ValueError(f"order {order_id} not found")
-    info = resolve_item(order["item"])
+    # Priced in the order's OWN currency, not today's default table: the row
+    # is the record of what was sold, and re-resolving it in another currency
+    # would make a refund or an audit disagree with the receipt.
+    info = resolve_item(order["item"], order["currency"])
     if info["kind"] == "plan":
         plans.apply_plan(order["user_id"], info["tier"], info["cycle"], order_id=order_id)
     elif info["kind"] == "seats":
@@ -152,7 +162,7 @@ def fulfil(order_id: str) -> None:
         teams.grant_minute_pool(org_id, info["minutes"], 31 * 86400, ref=order_id)
         # Seed per-member ceilings so a fresh org is protected by default; the
         # owner can raise, lower, or clear them.
-        terms = team_terms()
+        terms = team_terms(order["currency"])
         teams.set_default_caps(
             org_id,
             credit_cap=int(int(terms["seat_credits"]) * config.TEAM_DEFAULT_CREDIT_CAP_X),

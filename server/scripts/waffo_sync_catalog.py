@@ -51,20 +51,31 @@ async def main(apply: bool) -> int:
         except Exception:
             print(f"  ! {item}: no longer in the price table — product {p['id']} is orphaned")
             continue
-        want = f"{info['amount_cents'] / 100:.2f}"
-        cur = info["currency"]
-        have = next((str((x.get("priceInfo") or {}).get("amount"))
-                     for x in (p.get("prices") or []) if x.get("currency") == cur), None)
-        if have == want and p["name"] == info["description"]:
+        want = w.catalog_prices(item)
+        have = {x.get("currency"): str((x.get("priceInfo") or {}).get("amount"))
+                for x in (p.get("prices") or [])}
+        # Compare numerically: Waffo normalises zero-decimal currencies, so the
+        # "1500.00" we send for JPY reads back as "1500" and a string compare
+        # would report drift on every single run.
+        def same(a, b):
+            try:
+                return a is not None and b is not None and abs(float(a) - float(b)) < 0.005
+            except (TypeError, ValueError):
+                return False
+        off = [c for c, v in want.items() if not same(have.get(c), v["amount"])]
+        if not off and p["name"] == info["description"]:
             continue
         drift += 1
-        print(f"  {item}: {have} {cur} -> {want} {cur}")
+        detail = ", ".join(f"{c} {have.get(c) or '-'}->{want[c]['amount']}" for c in off) or "name"
+        print(f"  {item}: {detail}")
         if apply:
             st, d = await w._waffo_request("/v1/actions/onetime-product/update-product", {
                 "id": p["id"],
                 "name": info["description"],
                 "description": info["description"],
-                "prices": {cur: {"amount": want, "taxIncluded": True, "taxCategory": "saas"}},
+                # update-product REPLACES the price map, so every currency has
+                # to be sent every time, not just the ones that drifted.
+                "prices": want,
             })
             if st >= 300:
                 print(f"    FAILED {st} {d}")

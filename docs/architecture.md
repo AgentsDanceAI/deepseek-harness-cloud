@@ -83,7 +83,8 @@ POST /api/device/poll {device_code}─▶ approved → 签发设备 token
 - `web_search` 走 **Anthropic Messages 协议**（dsh 的 `web-search-deepseek` 打 `{base}/messages`，头带 `x-api-key` + `anthropic-version`），
   网关单独提供 `/llm/anthropic/v1/messages` 透传到上游 `${UPSTREAM_ANTHROPIC_BASE}`，按次+token 计费。
 - 计费口径：`积分 = ceil((uncached_in × P_in + cache_read × P_cache + out × P_out) / 1M × 100 × MARKUP)`，
-  牌价 CNY/百万 token 存 `config/models.json`，`MODEL_PRICE_MARKUP` 默认 1.2。1 积分 = ¥0.01 牌价用量。
+  牌价 **USD**/百万 token 存 `config/models.json`（`input_usd_per_m` / `output_usd_per_m`），
+  `MODEL_PRICE_MARKUP` 默认 1.2。**$1 = 100 积分**，即 1 积分 = $0.01 牌价用量。
 - 错误映射（dsh 侧行为已核实）：401/403 → dsh 报 AUTH 不重试；429 → RATE_LIMIT；余额不足返回 **402 + OpenAI 风格 error body**（dsh 映射 QUOTA_EXCEEDED，不重试）。
 - 闸门顺序：token 有效 → 账号状态 → 并发上限（按套餐）→ QPS 桶 → 积分余额 > 0。
   原则（沿用 a sibling production system）：**只拦新请求，绝不掐断进行中的流**；途中耗尽让它跑完如实入账（允许小额透支）。

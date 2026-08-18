@@ -25,6 +25,7 @@
     registration_disabled: "js.err.registration_disabled",
     account_disabled: "js.err.account_disabled",
     code_not_found: "js.err.code_not_found",
+    currency_not_payable: "js.err.currency_not_payable",
     already_handled: "js.err.already_handled",
     confirm_mismatch: "js.err.confirm_mismatch",
     mail_not_configured: "js.err.mail_not_configured",
@@ -86,7 +87,15 @@
     return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate()) + " " + p(d.getHours()) + ":" + p(d.getMinutes());
   }
 
-  function fmtYuan(cents) { var sym = document.body.dataset.currencySymbol || "¥"; return sym + (cents / 100).toFixed(2); }
+  var CUR_SYMBOL = { USD: "$", CNY: "\u00a5", EUR: "\u20ac", GBP: "\u00a3", HKD: "HK$", JPY: "\u00a5" };
+  // An order carries the currency it was PLACED in. Formatting it with whatever
+  // currency the page happens to be showing turned a $10 order into "\u00a510.00"
+  // for anyone who had switched currencies since buying.
+  function fmtMoney(cents, cur) {
+    var sym = CUR_SYMBOL[String(cur || "").toUpperCase()] ||
+              document.body.dataset.currencySymbol || "$";
+    return sym + (cents / 100).toFixed(2);
+  }
 
   var TIER_ZH = { plus: "Plus", pro: "Pro", max: "Max", free: T("js.msg.04") };
   function itemLabel(item) {
@@ -664,7 +673,13 @@
         });
       }).catch(function (err) {
         if (err.status === 401) location.href = "/login?next=" + encodeURIComponent("/pricing");
-        else toast(err.message);
+        else if (err.detail === "currency_not_payable") {
+          // Not a dead end: the same item is payable by card in USD, so offer
+          // the switch instead of leaving the buyer with an error toast.
+          if (window.confirm(T("js.err.currency_not_payable") + "\n\n" + T("js.msg.switch_usd"))) {
+            location.href = "/pricing?cur=USD#" + (item.indexOf("pack:") === 0 ? "packs" : "plans");
+          }
+        } else toast(err.message);
       });
     }
 
@@ -713,7 +728,7 @@
         idCell.appendChild(codeEl);
         tr.appendChild(idCell);
         cell(itemLabel(o.item));
-        cell(fmtYuan(o.amount_cents || 0)).className = "num";
+        cell(fmtMoney(o.amount_cents || 0, o.currency)).className = "num";
         cell(PROVIDER_ZH[o.provider] || o.provider || "—");
         var st = document.createElement("td");
         var badge = document.createElement("span");

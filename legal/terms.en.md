@@ -82,7 +82,7 @@ All payments for the Service are processed by **Waffo Pancake**, which acts as t
 
 ### 5.4 Prices and Taxes
 
-Unless otherwise stated, listed prices do not include tax; applicable VAT, sales tax, and similar taxes are calculated and collected by Waffo Pancake at checkout. A price change does not affect a period you have already purchased that has not yet expired.
+**Listed prices are tax-inclusive.** Applicable VAT, sales tax, and similar taxes are already contained in the amount shown on the page and are collected and remitted by Waffo Pancake as merchant of record; nothing is added on top at checkout. A price change does not affect a period you have already purchased that has not yet expired.
 
 ## 6. Refunds
 

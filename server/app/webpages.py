@@ -46,6 +46,7 @@ def _ctx(request: Request, page: str, **extra) -> dict:
     except Exception:
         user = None
     from . import plans as _plans
+    _cur_ctx = _currency_ctx(request)
     ctx = {
         "request": request,
         "page": page,
@@ -58,7 +59,7 @@ def _ctx(request: Request, page: str, **extra) -> dict:
         "year": time.localtime().tm_year,
         "asset_v": ASSET_V,
         **_i18n_ctx(request),
-        **_currency_ctx(request),
+        **_cur_ctx,
         # Templates link to /dl/<key>; these flags only say whether a build
         # exists, so a platform with no artifact is shown as unavailable rather
         # than as a link that 404s.
@@ -72,7 +73,9 @@ def _ctx(request: Request, page: str, **extra) -> dict:
         "work_idle_stop_min": config.WORK_IDLE_STOP_MIN,
         "work_free_minutes": config.WORK_FREE_MINUTES,
         **_stars_ctx(),
-        **_team_terms_ctx(),
+        # Seat price follows the same currency as everything else on the page;
+        # a EUR page quoting a USD seat fee was the same mismatch in miniature.
+        **_team_terms_ctx(_cur_ctx.get("currency")),
     }
     ctx.update(extra)
     return ctx
@@ -124,12 +127,12 @@ def _stars_ctx() -> dict:
     }
 
 
-def _team_terms_ctx() -> dict:
-    """Seat terms for templates — read from the active price table so the
-    displayed price is the one an order would actually charge."""
+def _team_terms_ctx(cur: str | None = None) -> dict:
+    """Seat terms for templates — read from the price table the visitor is being
+    quoted in, so the displayed price is the one their order actually charges."""
     try:
         from .payments import base as _pay
-        t = _pay.team_terms()
+        t = _pay.team_terms(cur)
     except Exception:
         t = {}
     return {
