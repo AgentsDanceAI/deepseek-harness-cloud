@@ -22,7 +22,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse, PlainTextResponse
 
 from .. import config, currency, db, plans
-from ..accounts import resolve_user
+from ..accounts import resolve_user, try_resolve_user
 from . import alipay_provider, base, stripe_provider, waffo_provider, wechatpay_provider
 
 router = APIRouter(prefix="/api/pay", tags=["pay"])
@@ -59,7 +59,14 @@ def _quoted_currency(request: Request) -> str:
 @router.get("/context")
 def pay_context(request: Request):
     p = plans.pricing(_quoted_currency(request))
-    return {"providers": active_providers(), "pricing": p, "currency": p.get("currency", "CNY")}
+    # Signed-in visitors also get their per-tier first-month eligibility, so the
+    # card can drop the intro price for a tier they have already bought a month
+    # of. Optional auth on purpose: this route is what an anonymous pricing page
+    # loads too, and a 401 there would break it.
+    user = try_resolve_user(request)
+    intro = base.intro_eligibility(user["id"], p.get("currency")) if user else {}
+    return {"providers": active_providers(), "pricing": p, "currency": p.get("currency", "CNY"),
+            "intro_eligible": intro}
 
 
 @router.post("/checkout")
@@ -88,7 +95,10 @@ def checkout(request: Request, body: dict, user: dict = Depends(resolve_user)):
         # payable method. The client turns this code into an offer to switch
         # currency rather than a dead end.
         probe = base.resolve_item(item, cur)
-        if not waffo_provider.payable(probe["currency"], probe["amount_cents"]):
+        # Probe the price this user will actually be charged, not the standard
+        # one: an intro month can sit under the WeChat ceiling while the
+        # standard price does not, and blocking that is refusing a payable order.
+        if not waffo_provider.payable(probe["currency"], base.price_for(user["id"], probe)):
             raise HTTPException(400, "currency_not_payable")
     order = base.create_order(user["id"], provider, item, cur)
     if provider == "stripe":

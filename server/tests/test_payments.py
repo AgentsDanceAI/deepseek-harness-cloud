@@ -90,8 +90,14 @@ def test_resolve_item_rejects_unknown_and_free():
         assert e.value.status_code == 400
 
     table = plans.pricing()["tiers"]
-    assert base.resolve_item("plan:plus:monthly")["amount_cents"] == table["plus"]["monthly_cents"]
-    assert base.resolve_item("plan:pro:yearly")["amount_cents"] == table["pro"]["yearly_cents"]
+    # resolve_item states the STANDARD price and carries the advertised intro one
+    # beside it; which of the two is owed is price_for's call, from history.
+    monthly = base.resolve_item("plan:plus:monthly")
+    assert monthly["amount_cents"] == table["plus"]["monthly_cents"]
+    assert monthly["intro_cents"] == table["plus"]["monthly_intro_cents"]
+    yearly = base.resolve_item("plan:pro:yearly")
+    assert yearly["amount_cents"] == table["pro"]["yearly_cents"]
+    assert yearly["intro_cents"] == 0  # a year is never sold at the first-month price
     # Read the pack id from the table rather than pinning one: the tiers are a
     # commercial decision that changes, and a test that fails when they do is
     # testing the price list, not the code.
@@ -99,6 +105,70 @@ def test_resolve_item_rejects_unknown_and_free():
     info = base.resolve_item(f"pack:{pack_id}")
     pack = plans.pricing()["packs"][pack_id]
     assert info["amount_cents"] == pack["cents"] and info["credits"] == pack["credits"]
+
+
+def test_first_month_is_charged_the_advertised_intro_price():
+    """The pricing card struck through the standard price, showed the intro one
+    and carried a "save 40%" badge, while the order charged the standard price —
+    $60 advertised, $100 taken. price_for is what closes that gap."""
+    table = plans.pricing()["tiers"]
+    uid, headers = make_user()
+
+    first = base.create_order(uid, "stripe", "plan:plus:monthly")
+    assert first["amount_cents"] == table["plus"]["monthly_intro_cents"]
+
+    # An unpaid checkout must not burn the offer — otherwise closing a tab, or
+    # anyone hammering /checkout, spends an offer that was never sold.
+    assert base.create_order(uid, "stripe", "plan:plus:monthly")["amount_cents"] == \
+        table["plus"]["monthly_intro_cents"]
+
+    assert base.mark_paid(first["order_id"], "pi_intro_plus") is True
+    assert base.create_order(uid, "stripe", "plan:plus:monthly")["amount_cents"] == \
+        table["plus"]["monthly_cents"]
+
+
+def test_intro_is_per_tier_and_never_applies_to_a_year():
+    table = plans.pricing()["tiers"]
+    uid, headers = make_user()
+    base.mark_paid(base.create_order(uid, "stripe", "plan:plus:monthly")["order_id"])
+
+    # Plus is spent; Pro is a different offer this buyer has not been sold yet.
+    assert base.create_order(uid, "stripe", "plan:pro:monthly")["amount_cents"] == \
+        table["pro"]["monthly_intro_cents"]
+    # A first month is a first MONTH: the yearly SKU is sold at its own price.
+    assert base.create_order(uid, "stripe", "plan:pro:yearly")["amount_cents"] == \
+        table["pro"]["yearly_cents"]
+    # ...and buying the year does not consume the monthly offer either.
+    assert base.intro_eligible(uid, "max") is True
+
+
+def test_a_refund_gives_the_first_month_offer_back():
+    """We did not end up selling that month. Holding the discount against the
+    buyer would make a refund a second, silent penalty."""
+    table = plans.pricing()["tiers"]
+    uid, _ = make_user()
+    o = base.create_order(uid, "stripe", "plan:max:monthly")
+    base.mark_paid(o["order_id"])
+    assert base.intro_eligible(uid, "max") is False
+    base.mark_refunded(o["order_id"])
+    assert base.intro_eligible(uid, "max") is True
+    assert base.create_order(uid, "stripe", "plan:max:monthly")["amount_cents"] == \
+        table["max"]["monthly_intro_cents"]
+
+
+def test_pay_context_reports_intro_eligibility_and_stays_anonymous_safe():
+    """The card has to know, or a repeat buyer is shown a price checkout will not
+    honour — the same advertise-one-charge-another bug from the other side."""
+    assert client.get("/api/pay/context").json()["intro_eligible"] == {}  # anonymous
+
+    uid, headers = make_user()
+    body = client.get("/api/pay/context", headers=headers).json()
+    assert body["intro_eligible"] == {t: True for t in plans.pricing()["tiers"] if t != "free"}
+
+    base.mark_paid(base.create_order(uid, "stripe", "plan:pro:monthly")["order_id"])
+    body = client.get("/api/pay/context", headers=headers).json()
+    assert body["intro_eligible"]["pro"] is False
+    assert body["intro_eligible"]["plus"] is True
 
 
 def test_checkout_charges_the_currency_the_page_quoted():
@@ -110,7 +180,7 @@ def test_checkout_charges_the_currency_the_page_quoted():
     assert r.status_code == 200
     order = base.get_order(r.json()["order_id"])
     assert order["currency"] == "CNY"
-    assert order["amount_cents"] == plans.pricing("CNY")["tiers"]["plus"]["monthly_cents"]
+    assert order["amount_cents"] == plans.pricing("CNY")["tiers"]["plus"]["monthly_intro_cents"]
     assert client.get("/api/pay/context?cur=CNY").json()["currency"] == "CNY"
 
 
@@ -213,7 +283,8 @@ def test_stripe_happy_path_idempotence_and_refund(monkeypatch):
     assert body["provider"] == "stripe" and body["pay_url"].startswith("https://checkout.stripe.com")
     oid = body["order_id"]
     assert oid.startswith("DHS")
-    assert sent["data"]["line_items[0][price_data][unit_amount]"] == str(plans.pricing()["tiers"]["plus"]["monthly_cents"])
+    assert sent["data"]["line_items[0][price_data][unit_amount]"] == \
+        str(plans.pricing()["tiers"]["plus"]["monthly_intro_cents"])  # first month
     assert sent["data"]["line_items[0][price_data][currency]"] == plans.pricing()["currency"].lower()
     assert sent["data"]["client_reference_id"] == oid
     assert sent["data"]["payment_method_types[0]"] == "card"

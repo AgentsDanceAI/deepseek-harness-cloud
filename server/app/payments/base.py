@@ -72,7 +72,13 @@ def resolve_item(item: str, cur: str | None = None) -> dict:
         cents = tdef.get(f"{cycle}_cents")
         if not cents:
             raise HTTPException(400, "unknown_item")
+        # `intro_cents` is the ADVERTISED first-month price, carried alongside the
+        # standard one so price_for can decide between them from stored history.
+        # It is never the amount on its own: an item nobody is eligible for still
+        # has to resolve to something chargeable.
+        intro = int(tdef.get("monthly_intro_cents") or 0) if cycle == "monthly" else 0
         return {"kind": "plan", "tier": tier, "cycle": cycle, "amount_cents": int(cents),
+                "intro_cents": intro if 0 < intro < int(cents) else 0,
                 "currency": p.get("currency", "CNY"),
                 "description": f"deepseek-harness-cloud {tdef['name']} ({'年付' if cycle == 'yearly' else '月付'})"}
     if parts[0] == "pack" and len(parts) == 2:
@@ -101,11 +107,46 @@ def resolve_item(item: str, cur: str | None = None) -> dict:
     raise HTTPException(400, "unknown_item")
 
 
+def intro_eligible(user_id: str, tier: str) -> bool:
+    """Has this user never paid for a month of `tier`?
+
+    Per tier, not per account: the first month of Plus and the first month of Pro
+    are two separate offers, and someone who tried Plus has not yet been sold Pro.
+
+    Only 'paid' counts. A refunded order gives the offer back — we did not end up
+    selling that month, and holding the discount against the buyer turns a refund
+    into a second, silent penalty. 'pending'/'expired' rows are abandoned
+    checkouts; treating those as consumed would let anyone burn a stranger's
+    offer, or their own by closing a tab.
+    """
+    row = db.query_one(
+        "SELECT 1 FROM orders WHERE user_id=? AND item=? AND status='paid' LIMIT 1",
+        (user_id, f"plan:{tier}:monthly"))
+    return row is None
+
+
+def intro_eligibility(user_id: str, cur: str | None = None) -> dict[str, bool]:
+    """Per-tier eligibility for the pricing page, so a repeat buyer is shown the
+    price they will actually be charged. The page defaults to eligible (the
+    common case, and what a logged-out visitor is quoted); this narrows it."""
+    tiers = plans.pricing(cur).get("tiers") or {}
+    return {t: intro_eligible(user_id, t) for t in tiers if t != "free"}
+
+
 def price_for(user_id: str, info: dict) -> int:
-    """The amount this user actually owes. Only the workspace pass varies: the
-    intro price is a first-purchase offer, so it is decided here from stored
-    history — never from anything the client sent."""
-    return int(info["amount_cents"])
+    """The amount this user actually owes. Only a monthly plan varies: the intro
+    price is a first-purchase offer, so it is decided here from stored history —
+    never from anything the client sent.
+
+    This function is the reason the pricing page may advertise a first-month
+    price at all. Without it the card struck through the standard price, showed
+    the intro one, and the order still charged the standard one.
+    """
+    amount = int(info["amount_cents"])
+    intro = int(info.get("intro_cents") or 0)
+    if not intro or info.get("kind") != "plan" or info.get("cycle") != "monthly":
+        return amount
+    return intro if intro_eligible(user_id, str(info["tier"])) else amount
 
 
 def create_order(user_id: str, provider: str, item: str, cur: str | None = None) -> dict:

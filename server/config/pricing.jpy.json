@@ -1,5 +1,5 @@
 {
-  "_comment": "由 server/scripts/gen_pricing.py 生成，请勿手改。基准 1 USD = 7 CNY = 100 积分；其余币种按对美元汇率折算后取整（日元取整到 100）。年付＝12 个月原价打折，Plus 8 折 / Pro 7.5 折 / Max 7 折；首月特价 Plus 8 折 / Pro 7 折 / Max 6 折。积分包＝基准积分＋多送，多送 0% / 10% / 25%。",
+  "_comment": "由 server/scripts/gen_pricing.py 生成，请勿手改。基准 1 USD = 7 CNY = 100 积分；其余币种按对美元汇率折算后取整（日元取整到 100）。三档 $20 / $50 / $100，年付一律 7 折、首月一律 7.5 折（原为最深 7 折 / 6 折：满用时首月与年付价一律负毛利，而买年付的恰是最可能烧满额度的人）。积分包不再多送——100 积分/美元是公示承诺，包的价值在于不随月清零，同价的包也绝不能比同价套餐给得多，否则最高档被自己的加油包压制。",
   "currency": "JPY",
   "tiers": {
     "free": {
@@ -12,25 +12,25 @@
     },
     "plus": {
       "name": "Plus",
-      "monthly_cents": 150000,
-      "monthly_credits": 1000,
+      "monthly_cents": 300000,
+      "monthly_credits": 2000,
       "concurrency": 2,
       "work_minutes": 10800,
-      "yearly_list_cents": 1800000,
-      "yearly_cents": 1440000,
-      "yearly_per_month_cents": 120000,
-      "monthly_intro_cents": 120000
+      "yearly_list_cents": 3600000,
+      "yearly_cents": 2520000,
+      "yearly_per_month_cents": 210000,
+      "monthly_intro_cents": 230000
     },
     "pro": {
       "name": "Pro",
-      "monthly_cents": 300000,
-      "monthly_credits": 2000,
+      "monthly_cents": 750000,
+      "monthly_credits": 5000,
       "concurrency": 5,
       "work_minutes": 21600,
-      "yearly_list_cents": 3600000,
-      "yearly_cents": 2760000,
-      "yearly_per_month_cents": 230000,
-      "monthly_intro_cents": 210000
+      "yearly_list_cents": 9000000,
+      "yearly_cents": 6360000,
+      "yearly_per_month_cents": 530000,
+      "monthly_intro_cents": 560000
     },
     "max": {
       "name": "Max",
@@ -41,7 +41,7 @@
       "yearly_list_cents": 18000000,
       "yearly_cents": 12600000,
       "yearly_per_month_cents": 1050000,
-      "monthly_intro_cents": 900000
+      "monthly_intro_cents": 1130000
     }
   },
   "packs": {
@@ -54,23 +54,23 @@
       "valid_days": 365,
       "name_key": "pricing.pack.pack1000"
     },
+    "pack5000": {
+      "name": "5,000 credits",
+      "cents": 750000,
+      "base_credits": 5000,
+      "bonus_pct": 0,
+      "credits": 5000,
+      "valid_days": 365,
+      "name_key": "pricing.pack.pack5000"
+    },
     "pack10000": {
-      "name": "11,000 credits (10,000 + 10% bonus)",
+      "name": "10,000 credits",
       "cents": 1500000,
       "base_credits": 10000,
-      "bonus_pct": 10,
-      "credits": 11000,
+      "bonus_pct": 0,
+      "credits": 10000,
       "valid_days": 365,
       "name_key": "pricing.pack.pack10000"
-    },
-    "pack100000": {
-      "name": "125,000 credits (100,000 + 25% bonus)",
-      "cents": 15000000,
-      "base_credits": 100000,
-      "bonus_pct": 25,
-      "credits": 125000,
-      "valid_days": 365,
-      "name_key": "pricing.pack.pack100000"
     }
   },
   "team": {

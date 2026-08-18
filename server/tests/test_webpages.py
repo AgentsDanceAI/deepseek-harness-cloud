@@ -86,6 +86,36 @@ def test_pricing_page_renders(client):
     assert "pack:pack1000" in body
 
 
+def test_pricing_headline_is_the_price_checkout_charges(client):
+    """The number in the big type and the number on the order have to be the same
+    one. They were not: the card advertised the first-month price while checkout
+    charged the standard one, so a Max buyer saw $60 and was billed $100."""
+    import re
+
+    from app import plans
+
+    r = client.post("/api/auth/register",
+                    json={"email": "headline@example.com", "password": "secret-pass-123"})
+    assert r.status_code == 200, r.text
+
+    body = client.get("/pricing").text
+    table = plans.pricing()["tiers"]
+    for tier in ("plus", "pro", "max"):
+        card = body.split(f'data-tier="{tier}"', 1)[1].split("</div>\n        </div>", 1)[0]
+        shown = re.search(r'class="price-now"[^>]*>[^0-9]*([0-9,]+)<', card)
+        assert shown, tier
+        headline = int(shown.group(1).replace(",", ""))
+
+        r = client.post("/api/pay/checkout", json={"item": f"plan:{tier}:monthly"})
+        assert r.status_code == 200, r.text
+        order = r.json()
+        # No provider is configured in tests, so checkout records an intent —
+        # priced by the same price_for the real providers are handed.
+        charged = client.get(f"/api/pay/orders/{order['order_id']}").json()["order"]["amount_cents"]
+        assert charged == table[tier]["monthly_intro_cents"], tier
+        assert headline == charged // 100, f"{tier}: page shows {headline}, order charges {charged // 100}"
+
+
 def test_activate_page_renders(client):
     r = client.get("/activate?code=AB12-CD34")
     assert r.status_code == 200

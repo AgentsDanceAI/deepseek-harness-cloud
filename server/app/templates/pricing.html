@@ -41,7 +41,7 @@
         {% set intro = t.monthly_intro_cents or 0 %}
         {% set std = t.monthly_cents or 0 %}
         {% set off = ((1 - intro / std) * 100) | round | int if (intro and std and intro < std) else 0 %}
-        <div class="card plan {% if tier == 'pro' %}highlight{% endif %}">
+        <div class="card plan {% if tier == 'pro' %}highlight{% endif %}" data-tier="{{ tier }}">
           {% if tier == 'pro' %}<div class="ribbon">{{ _t("pricing.ribbon") }}</div>{% endif %}
           {% if free %}
             <span class="tier-plain">Free</span>
@@ -55,15 +55,23 @@
 
           {# monthly view: first-period price struck through against standard #}
           <div data-period-view="monthly" {% if false %}hidden{% endif %}>
+            {# The intro price is a FIRST-month offer, so a buyer who has already had
+               their first month of this tier must be shown the standard price — the
+               server charges them that (payments/base.price_for). Both numbers are
+               rendered here and app.js picks, from /api/pay/context, which one this
+               visitor sees. Defaulting to the intro price is right for the anonymous
+               and first-time cases, which is nearly everyone. #}
             <div class="price-row">
-              <span class="price-now">{{ currency_symbol }}{{ (intro if intro else std) // 100 }}</span>
-              {% if off %}<span class="price-was">{{ currency_symbol }}{{ std // 100 }}</span>{% endif %}
+              <span class="price-now" data-price-now
+                    data-std-label="{{ currency_symbol }}{{ std // 100 }}">{{ currency_symbol }}{{ (intro if intro else std) // 100 }}</span>
+              {% if off %}<span class="price-was" data-intro-only>{{ currency_symbol }}{{ std // 100 }}</span>{% endif %}
               <span class="per">{{ _t("pricing.per_month") }}</span>
-              {% if off %}<span class="off-badge">{{ _t("pricing.save_pct", pct=off) }}</span>{% endif %}
+              {% if off %}<span class="off-badge" data-intro-only>{{ _t("pricing.save_pct", pct=off) }}</span>{% endif %}
             </div>
             <p class="plan-note">
               {% if free %}{{ _t("pricing.plan.free_forever") }}
-              {% else %}{{ _t("pricing.plan.intro_note", price=currency_symbol ~ (std // 100)) }} ·
+              {% else %}<span data-intro-only>{{ _t("pricing.plan.intro_note", price=currency_symbol ~ (std // 100)) }}</span><span
+                    data-intro-used hidden>{{ _t("pricing.plan.intro_used") }}</span> ·
                 <button type="button" class="link-btn" data-goto-yearly>{{ _t("pricing.plan.yearly_cheaper") }}</button>
               {% endif %}
             </p>

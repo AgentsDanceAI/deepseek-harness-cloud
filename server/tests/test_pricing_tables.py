@@ -66,6 +66,45 @@ def test_pack_credits_are_base_plus_bonus(path):
 
 
 @pytest.mark.parametrize("path", TABLES, ids=lambda p: p.stem)
+def test_a_pack_never_beats_the_plan_it_costs_the_same_as(path):
+    """A $100 pack that granted 11,000 credits sat beside a $100 Max subscription
+    granting 10,000 — the top-up strictly dominated the top plan, which is a good
+    way to make the top plan unsellable. Packs sell "does not expire monthly",
+    never "more credits for the same money"."""
+    t = table(path)
+    for pid, pack in t["packs"].items():
+        for tier, tdef in t["tiers"].items():
+            if tdef.get("monthly_cents") == pack["cents"]:
+                assert pack["credits"] <= tdef["monthly_credits"], f"{pid} vs {tier}"
+
+
+def _rates(t: dict) -> dict[str, float]:
+    out = {tier: t["tiers"][tier]["monthly_credits"] / t["tiers"][tier]["monthly_cents"]
+           for tier in PAID}
+    out.update({pid: p["credits"] / p["cents"] for pid, p in t["packs"].items()})
+    return out
+
+
+def test_usd_buys_credits_at_exactly_one_rate():
+    """One promise, one number: in the currency the table is authored in, every paid
+    tier and every pack buys credits at 100 per dollar. A tier that quietly gives a
+    better rate is a discount nobody decided on — it moves the gross margin without
+    moving a price."""
+    rates = _rates(table(CONFIG / "pricing.usd.json"))
+    assert set(round(r, 9) for r in rates.values()) == {1.0}, rates   # 100 积分 / 100 分
+
+
+@pytest.mark.parametrize("path", TABLES, ids=lambda p: p.stem)
+def test_other_currencies_stay_within_rounding_of_that_rate(path):
+    """Elsewhere the rate cannot be exact: prices are quantised to whole units of
+    the currency while the credit counts are fixed, so a €18.40 price shown as €18
+    buys marginally more per euro. That is rounding, and it has to stay rounding —
+    a spread bigger than this means someone changed a price without its credits."""
+    rates = list(_rates(table(path)).values())
+    assert max(rates) / min(rates) <= 1.05, dict(_rates(table(path)))
+
+
+@pytest.mark.parametrize("path", TABLES, ids=lambda p: p.stem)
 def test_prices_are_whole_units(path):
     """The page renders prices with integer division by 100, so a price with a
     fractional unit would silently display as less than it charges."""

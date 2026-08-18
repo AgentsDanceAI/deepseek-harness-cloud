@@ -177,12 +177,13 @@ def test_checkout_creates_pending_order_usd(monkeypatch):
     oid = body["order_id"]
     assert oid.startswith("DHF")
 
-    # order row: pending, USD, amount straight from pricing.usd.json (900 cents)
+    # order row: pending, USD, amount straight from pricing.usd.json — the intro
+    # price, because this user has not bought a month of Plus before
     order = base.get_order(oid, uid)
     assert order["status"] == "pending"
     assert order["provider"] == "waffo"
     assert order["currency"] == "USD"
-    assert order["amount_cents"] == plans.pricing()["tiers"]["plus"]["monthly_cents"]
+    assert order["amount_cents"] == plans.pricing()["tiers"]["plus"]["monthly_intro_cents"]
     assert credits.balance(uid) == 0  # nothing fulfilled yet
 
     # create-session payload: amount in major units, external id + success url
@@ -194,7 +195,7 @@ def test_checkout_creates_pending_order_usd(monkeypatch):
     # locked in exactly the shape the live API rejects with a fieldless
     # {"message":"Invalid input","layer":"order"} — every real checkout
     # failed against production while the suite stayed green.
-    expected = f'{plans.pricing()["tiers"]["plus"]["monthly_cents"] / 100:.2f}'
+    expected = f'{plans.pricing()["tiers"]["plus"]["monthly_intro_cents"] / 100:.2f}'
     assert p["priceSnapshot"]["amount"] == expected
     assert isinstance(p["priceSnapshot"]["amount"], str)
     assert p["orderMerchantExternalId"] == oid

@@ -603,6 +603,24 @@
         .catch(function () { return {}; });
     }
 
+    // A tier whose first month this account has already bought is charged the
+    // standard price, so the card must stop advertising the intro one. The
+    // server decides (payments/base.price_for); this only stops the page from
+    // promising a number the checkout will not honour.
+    getCtx().then(function (ctx) {
+      var elig = ctx && ctx.intro_eligible;
+      if (!elig) return;
+      $$(".card.plan[data-tier]").forEach(function (card) {
+        if (elig[card.dataset.tier] !== false) return;
+        var view = card.querySelector('[data-period-view="monthly"]');
+        if (!view) return;
+        var now = view.querySelector("[data-price-now]");
+        if (now && now.dataset.stdLabel) now.textContent = now.dataset.stdLabel;
+        view.querySelectorAll("[data-intro-only]").forEach(function (el) { el.hidden = true; });
+        view.querySelectorAll("[data-intro-used]").forEach(function (el) { el.hidden = false; });
+      });
+    });
+
     function providerId(p) { return typeof p === "string" ? p : (p && (p.id || p.provider || p.name)) || ""; }
     function providerName(p) {
       var id = providerId(p);

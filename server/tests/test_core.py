@@ -504,7 +504,10 @@ def test_waffo_products_carry_every_quoted_currency():
     from app.payments import waffo_provider
     prices = waffo_provider.catalog_prices("plan:plus:monthly")
     assert set(prices) == set(currency.SUPPORTED)
-    assert prices["USD"]["amount"] == "10.00" and prices["CNY"]["amount"] == "70.00"
+    # 价目表是商业决定, 会变 —— 读表而不是钉死数字, 否则改价必然连累这条测试
+    table = plans.pricing("USD")["tiers"]["plus"], plans.pricing("CNY")["tiers"]["plus"]
+    assert prices["USD"]["amount"] == f'{table[0]["monthly_cents"] / 100:.2f}'
+    assert prices["CNY"]["amount"] == f'{table[1]["monthly_cents"] / 100:.2f}'
 
 
 def test_item_of_round_trips_every_sellable_kind():
