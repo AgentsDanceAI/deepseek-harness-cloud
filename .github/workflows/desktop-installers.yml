@@ -111,6 +111,11 @@ jobs:
           mkdir -p ../out && STAGE=$(mktemp -d)
           cp -R "$APP" "$STAGE/"
           ln -s /Applications "$STAGE/Applications"
+          # 未签名期间的首次打开说明, 放进 DMG 窗口 (用户拖拽前就能看见)。
+          # 内容给的是「系统设置 → 隐私与安全性 → 仍要打开」+ xattr 兜底 ——
+          # macOS 15 Sequoia 已移除「右键点图标 → 打开」那条老路子, 别再写它。
+          # 签名+公证上线后这个文件就该删掉 (连同本步骤)。
+          cp "$GITHUB_WORKSPACE/desktop/dmg-extras/请先阅读.txt" "$STAGE/"
           hdiutil create -volname "DSH Cloud Desktop" -srcfolder "$STAGE" -ov -format UDZO \
             "../out/DSH-Cloud-Desktop-${VERSION}-mac-${ARCH_LABEL:-arm64}.dmg"
           ls -la ../out/
@@ -165,6 +170,11 @@ jobs:
           mkdir -p ../out && STAGE=$(mktemp -d)
           cp -R "$APP" "$STAGE/"
           ln -s /Applications "$STAGE/Applications"
+          # 未签名期间的首次打开说明, 放进 DMG 窗口 (用户拖拽前就能看见)。
+          # 内容给的是「系统设置 → 隐私与安全性 → 仍要打开」+ xattr 兜底 ——
+          # macOS 15 Sequoia 已移除「右键点图标 → 打开」那条老路子, 别再写它。
+          # 签名+公证上线后这个文件就该删掉 (连同本步骤)。
+          cp "$GITHUB_WORKSPACE/desktop/dmg-extras/请先阅读.txt" "$STAGE/"
           hdiutil create -volname "DSH Cloud Desktop" -srcfolder "$STAGE" -ov -format UDZO \
             "../out/DSH-Cloud-Desktop-${VERSION}-mac-${ARCH_LABEL:-arm64}.dmg"
           ls -la ../out/
