@@ -111,6 +111,7 @@ PUBLIC_ORDER_COLS = ("id", "provider", "item", "amount_cents", "currency", "stat
 
 @router.get("/orders")
 def list_orders(user: dict = Depends(resolve_user)):
+    base.expire_stale_pending(user["id"])
     rows = db.query(
         f"SELECT {', '.join(PUBLIC_ORDER_COLS)} FROM orders WHERE user_id=? "
         "ORDER BY created DESC LIMIT 100", (user["id"],))

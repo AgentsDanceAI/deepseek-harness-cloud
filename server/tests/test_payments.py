@@ -124,6 +124,27 @@ def test_client_cannot_choose_its_own_currency():
     assert order["currency"] == plans.pricing()["currency"]
 
 
+def test_abandoned_checkouts_expire_but_stay_fulfillable():
+    """Abandoned checkouts sat as "pending" forever, including ones whose item
+    had since been withdrawn from the price table. They expire now — and a late
+    webhook still fulfils them, because expiry is our guess and the provider
+    confirming a payment outranks it."""
+    uid, headers = make_user()
+    oid = client.post("/api/pay/checkout", json={"item": "pack:pack1000"},
+                      headers=headers).json()["order_id"]
+    with db.tx() as conn:
+        conn.execute("UPDATE orders SET status='pending', created=? WHERE id=?",
+                     (time.time() - base.PENDING_TTL_S - 60, oid))
+
+    assert client.get("/api/pay/orders", headers=headers).status_code == 200
+    assert base.get_order(oid)["status"] == "expired"
+
+    # money still outranks housekeeping
+    assert base.mark_paid(oid, "ref") is True
+    assert base.get_order(oid)["status"] == "paid"
+    assert base.mark_paid(oid, "ref") is False
+
+
 def test_client_supplied_amount_is_ignored():
     _, headers = make_user()
     r = client.post("/api/pay/checkout", headers=headers,

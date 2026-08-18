@@ -121,12 +121,34 @@ def create_order(user_id: str, provider: str, item: str, cur: str | None = None)
     return {"order_id": order_id, **info}
 
 
-def mark_paid(order_id: str, provider_ref: str = "") -> bool:
-    """First pending->paid transition returns True and the caller MUST fulfil
-    exactly then. Repeat webhooks return False and change nothing."""
+# A checkout the buyer walked away from stays 'pending' forever otherwise, and
+# their order list fills up with rows that will never resolve. Well past any
+# provider's session lifetime, so nothing still payable is swept.
+PENDING_TTL_S = 24 * 3600
+
+
+def expire_stale_pending(user_id: str) -> int:
+    """Retire abandoned checkouts. Safe because mark_paid accepts 'expired'
+    too — a webhook that arrives after the sweep still fulfils."""
     with db.tx() as conn:
         cur = conn.execute(
-            "UPDATE orders SET status='paid', provider_ref=?, paid_at=? WHERE id=? AND status='pending'",
+            "UPDATE orders SET status='expired' WHERE user_id=? AND status='pending' AND created < ?",
+            (user_id, time.time() - PENDING_TTL_S))
+        return cur.rowcount
+
+
+def mark_paid(order_id: str, provider_ref: str = "") -> bool:
+    """First transition into paid returns True and the caller MUST fulfil
+    exactly then. Repeat webhooks return False and change nothing.
+
+    'expired' is accepted alongside 'pending' on purpose: expiry is our own
+    housekeeping guess, and a provider confirming a payment always outranks it.
+    Refusing here would mean money taken with nothing delivered.
+    """
+    with db.tx() as conn:
+        cur = conn.execute(
+            "UPDATE orders SET status='paid', provider_ref=?, paid_at=? "
+            "WHERE id=? AND status IN ('pending','expired')",
             (provider_ref, time.time(), order_id))
         return cur.rowcount > 0
 

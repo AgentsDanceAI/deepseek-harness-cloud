@@ -10,8 +10,11 @@ Waffo has no delete and no archive: update-status accepts only 'active' or
 called "deepseek-harness-cloud Plus (月付)" and no way to tell from the name
 which one checkout uses. Prefixing the dead ones makes the list scannable.
 
-Never touched: any product with orders against it. The 7-day pass carries the
-one real completed payment, and its name is what that receipt refers to.
+Orders do not pin the live name: every order references a productVersion that
+snapshots the name at purchase time, so renaming the current record leaves
+history intact. What the script will not touch is a product with an order that
+is still LIVE — money that has not been refunded stays legible under the name
+it was sold as.
 """
 import asyncio, json, sys
 
@@ -20,8 +23,9 @@ from app.payments import waffo_provider as w
 
 TAG = "[RETIRED] "
 LIST = ("query($s:String!){ onetimeProducts(storeId:$s, limit:200)"
-        "{ id name description status prices { currency priceInfo { amount taxCategory } } "
-        "orders { id } } }")
+        "{ id name description status prices { currency priceInfo { amount taxCategory } } } }")
+ORDERS = ("query($s:String!){ onetimeOrders(storeId:$s, limit:200)"
+          "{ status payments { refundStatus } onetimeProduct { id } } }")
 
 
 async def main(apply: bool) -> int:
@@ -32,14 +36,23 @@ async def main(apply: bool) -> int:
     products = d["data"]["onetimeProducts"]
     live = {r["v"] for r in db.query("SELECT v FROM kv WHERE k LIKE 'waffo_product:%'", ())}
 
+    _st, od = await w._waffo_request("/v1/graphql", {"query": ORDERS, "variables": {"s": store}})
+    live_orders = set()
+    for o in ((od.get("data") or {}).get("onetimeOrders") or []):
+        if o.get("status") == "canceled":
+            continue
+        if all((pay.get("refundStatus") == "refunded") for pay in (o.get("payments") or [])):
+            continue          # money went back; the product is free to be marked
+        live_orders.add((o.get("onetimeProduct") or {}).get("id"))
+
     done = skipped = 0
     for p in products:
         if p["status"] == "active" or p["id"] in live:
             continue
         if p["name"].startswith(TAG):
             continue
-        if p.get("orders"):
-            print(f"  keep as-is (has {len(p['orders'])} order(s)): {p['name']}")
+        if p["id"] in live_orders:
+            print(f"  keep as-is (unrefunded order against it): {p['name']}")
             skipped += 1
             continue
         name = TAG + p["name"]
