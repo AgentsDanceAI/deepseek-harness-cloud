@@ -61,6 +61,7 @@ def _ctx(request: Request, page: str, **extra) -> dict:
         "legal_contact_email": config.LEGAL_CONTACT_EMAIL,
         "year": time.localtime().tm_year,
         "asset_v": ASSET_V,
+        **_i18n_ctx(request),
         "currency": currency,
         "currency_symbol": {"CNY": "¥", "USD": "$"}.get(currency, currency + " "),
         # Templates link to /dl/<key>; these flags only say whether a build
@@ -83,6 +84,18 @@ def _ctx(request: Request, page: str, **extra) -> dict:
     }
     ctx.update(extra)
     return ctx
+
+
+def _i18n_ctx(request: Request) -> dict:
+    """Language and the bound translator every template uses."""
+    from . import i18n
+    lang, _explicit = i18n.resolve(request)
+    return {
+        "lang": lang,
+        "t": lambda key, **kw: i18n.t(lang, key, **kw),
+        "other_lang": i18n.other(lang),
+        "other_lang_label": "EN" if lang == "zh" else "中文",
+    }
 
 
 def _stars_ctx() -> dict:
@@ -117,7 +130,16 @@ def _team_terms_ctx() -> dict:
 
 
 def _render(request: Request, template: str, page: str, **extra):
-    return templates.TemplateResponse(request, template, _ctx(request, page, **extra))
+    from . import i18n
+    response = templates.TemplateResponse(request, template, _ctx(request, page, **extra))
+    lang, explicit = i18n.resolve(request)
+    if explicit:
+        # Persist the click. Without this the switcher works for exactly one
+        # page view and every link after it snaps back to the browser locale.
+        response.set_cookie(i18n.COOKIE, lang, max_age=i18n.COOKIE_MAX_AGE,
+                            path="/", samesite="lax",
+                            secure=config.PUBLIC_BASE.startswith("https://"))
+    return response
 
 
 def _pricing_safe() -> dict:
@@ -493,7 +515,14 @@ def legal_page(request: Request, doc: str):
     if doc not in LEGAL_DOCS:
         return RedirectResponse("/legal/terms", status_code=303)
     title = LEGAL_DOCS[doc]
-    path = _legal_dir() / f"{doc}.zh.md"
+    # Whole-document translation: legal text is not assembled from phrases, and
+    # a half-translated clause is a liability. Falls back to Chinese so a
+    # not-yet-translated policy still renders its real text.
+    from . import i18n
+    lang, _ = i18n.resolve(request)
+    path = _legal_dir() / f"{doc}.{lang}.md"
+    if not path.is_file():
+        path = _legal_dir() / f"{doc}.{i18n.DEFAULT}.md"
     body_html = ""
     pending = True
     try:

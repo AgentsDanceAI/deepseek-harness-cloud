@@ -516,3 +516,43 @@ def test_workspace_assets_are_version_stamped():
     assert "{asset_v}" not in head, "version placeholder was not substituted"
     for asset in ("mobile.css", "workspace-chrome.css", "workspace-chrome.js"):
         assert re.search(rf"{re.escape(asset)}\?v=\w+", head), f"{asset} is not version-stamped"
+
+
+def test_i18n_catalogs_are_in_parity():
+    """Both languages must define the same keys with the same placeholders.
+    A key present in only one language renders that language's text inside the
+    other's page; a placeholder mismatch throws away a runtime value."""
+    import json, re
+    from app import config, i18n
+    cats = {}
+    for lang in i18n.SUPPORTED:
+        p = config.CONFIG_DIR / "i18n" / f"{lang}.json"
+        cats[lang] = {k: v for k, v in json.loads(p.read_text()).items() if not k.startswith("_")}
+    zh, en = cats["zh"], cats["en"]
+    assert set(zh) == set(en), f"key drift: only-zh={sorted(set(zh)-set(en))} only-en={sorted(set(en)-set(zh))}"
+    for k in zh:
+        assert set(re.findall(r"{(\w+)}", zh[k])) == set(re.findall(r"{(\w+)}", en[k])), k
+
+
+def test_i18n_falls_back_rather_than_blanking():
+    from app import i18n
+    assert i18n.t("en", "nav.pricing") == "Pricing"
+    # an unknown key renders as itself — visible in review, never a blank page
+    assert i18n.t("en", "no.such.key") == "no.such.key"
+
+
+def test_language_resolution_prefers_an_explicit_choice():
+    """A click on EN must beat a zh-CN browser, and must be reported as
+    explicit so the caller persists it — otherwise the switch lasts one page."""
+    from app import i18n
+
+    class Req:
+        def __init__(self, q=None, cookie=None, accept=""):
+            self.query_params = q or {}
+            self.cookies = {i18n.COOKIE: cookie} if cookie else {}
+            self.headers = {"accept-language": accept}
+
+    assert i18n.resolve(Req(q={"lang": "en"}, cookie="zh", accept="zh-CN")) == ("en", True)
+    assert i18n.resolve(Req(cookie="en", accept="zh-CN")) == ("en", False)
+    assert i18n.resolve(Req(accept="en-GB,en;q=0.9,zh;q=0.4")) == ("en", False)
+    assert i18n.resolve(Req(accept="fr-FR,fr;q=0.9")) == (i18n.DEFAULT, False)
