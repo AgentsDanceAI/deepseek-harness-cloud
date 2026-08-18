@@ -90,9 +90,17 @@ def _i18n_ctx(request: Request) -> dict:
     """Language and the bound translator every template uses."""
     from . import i18n
     lang, _explicit = i18n.resolve(request)
+    # Only the js.* namespace crosses into the browser. Shipping the whole
+    # catalog would put every page's copy on every page for no benefit.
+    js_strings = {k: i18n.t(lang, k) for k in i18n.catalog(lang) if k.startswith("js.")}
+    if lang != i18n.DEFAULT:
+        for k in i18n.catalog(i18n.DEFAULT):
+            if k.startswith("js.") and k not in js_strings:
+                js_strings[k] = i18n.t(lang, k)
     return {
         "lang": lang,
         "t": lambda key, **kw: i18n.t(lang, key, **kw),
+        "js_i18n": js_strings,
         "other_lang": i18n.other(lang),
         "other_lang_label": "EN" if lang == "zh" else "中文",
     }
