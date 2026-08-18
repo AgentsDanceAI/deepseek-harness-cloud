@@ -497,11 +497,10 @@ def test_waffo_product_amount_is_a_display_string():
 
 
 def test_item_of_round_trips_every_sellable_kind():
-    """resolve_item accepts plan / pack / seats / workpass; _item_of has to
-    rebuild all four. It knew only two, so seats and the workspace pass raised
+    """resolve_item accepts plan / pack / seats; _item_of has to rebuild all three. It knew only two, so seats and the workspace pass raised
     KeyError on the way to checkout and could never be bought."""
     from app.payments import base, waffo_provider
-    for item in ("plan:pro:yearly", "pack:pack1000", "seats:3", "workpass:week"):
+    for item in ("plan:pro:yearly", "pack:pack1000", "seats:3"):
         info = dict(base.resolve_item(item))
         assert waffo_provider._item_of(info) == item, item
 
@@ -568,3 +567,48 @@ def test_query_survives_a_literal_percent():
     rows = db.query("SELECT k FROM kv WHERE k LIKE 'pcttest%'")
     assert any(r["k"] == "pcttest_a" for r in rows)
     db.query("DELETE FROM kv WHERE k LIKE 'pcttest%'")
+
+
+def test_admin_role_guards_cannot_lock_everyone_out():
+    """The three ways an admin panel loses its last admin: demoting yourself,
+    demoting the only one left, and demoting someone the env grants anyway
+    (which the UI would then be lying about, since the next request restores it)."""
+    import time
+    from fastapi import HTTPException
+    from app import admin, config, db, security
+
+    def mk(email, role="user"):
+        uid = security.new_id("u_")
+        with db.tx() as c:
+            c.execute("INSERT INTO users (id,email,display_name,role,session_epoch,created) "
+                      "VALUES (?,?,?,?,?,?)", (uid, email, "", role, 1, time.time()))
+        return dict(db.query_one("SELECT * FROM users WHERE id=?", (uid,)))
+
+    a = mk("guard-a@t.local", "admin")
+    b = mk("guard-b@t.local", "admin")
+
+    for body, expect in (({"user_id": a["id"], "admin": False}, "cannot_demote_self"),):
+        try:
+            admin.set_role(body, user=a); raise AssertionError("expected refusal")
+        except HTTPException as e:
+            assert expect in str(e.detail)
+
+    # demoting the other one is fine while two exist
+    admin.set_role({"user_id": b["id"], "admin": False}, user=a)
+    assert db.query_one("SELECT role FROM users WHERE id=?", (b["id"],))["role"] == "user"
+
+    # promoting works, and is what the UI calls
+    admin.set_role({"user_id": b["id"], "admin": True}, user=a)
+    assert db.query_one("SELECT role FROM users WHERE id=?", (b["id"],))["role"] == "admin"
+
+    # an env-granted admin cannot be demoted from the UI
+    old = list(config.ADMIN_EMAILS)
+    config.ADMIN_EMAILS.append("guard-b@t.local")
+    try:
+        admin.set_role({"user_id": b["id"], "admin": False}, user=a)
+        raise AssertionError("expected refusal")
+    except HTTPException as e:
+        assert "admin_from_env" in str(e.detail)
+    finally:
+        config.ADMIN_EMAILS[:] = old
+    db.query("DELETE FROM users WHERE email LIKE 'guard-%@t.local'")

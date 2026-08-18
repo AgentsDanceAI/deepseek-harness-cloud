@@ -137,6 +137,20 @@
               .then(loadUsers).catch(function (e) { alert(e.message); });
           };
           act.appendChild(toggle);
+
+          // Admin rights. The server holds the real guards (no self-demotion, no
+          // demoting the last admin, no demoting one granted by ADMIN_EMAILS);
+          // this only states the intent and surfaces the refusal.
+          var role = document.createElement("button");
+          role.className = "link-btn"; role.style.marginLeft = "10px";
+          role.textContent = u.is_admin ? T.role_revoke : T.role_grant;
+          role.onclick = function () {
+            var next = !u.is_admin;
+            if (!confirm((next ? T.role_grant_confirm : T.role_revoke_confirm).replace("{email}", u.email))) return;
+            post("/api/admin/set-role", { user_id: u.id, admin: next })
+              .then(loadUsers).catch(function (e) { alert(e.message); });
+          };
+          act.appendChild(role);
           tb.appendChild(tr);
         });
       }).catch(function () {});

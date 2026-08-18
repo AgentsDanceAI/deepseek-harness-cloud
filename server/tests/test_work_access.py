@@ -110,6 +110,19 @@ def test_plan_tier_sets_the_allowance():
     assert st["plan_tier"] == "pro" and st["minutes_left"] == 3600
 
 
+def test_machine_hours_are_the_only_gate():
+    """The 7-day pass was a second way to buy workspace access, parallel to the
+    monthly hours. Two meters that can disagree is one more than the product
+    needs, so access is now decided by hours alone."""
+    import inspect
+    from app import work_access
+    src = inspect.getsource(work_access)
+    for gone in ("active_pass", "grant_pass", "next_price", "PASS_INTRO"):
+        assert gone not in src, f"{gone} survived the pass removal"
+    st = work_access.state("u_nobody")
+    assert "pass_active" not in st and "next_price" not in st
+    assert st["allowed"] == (st["minutes_left"] > 0)
+
 def test_purchased_minutes_extend_beyond_the_plan():
     uid = _user("u_wa2d")
     _burn(uid, 120)                                          # allowance spent
@@ -119,53 +132,3 @@ def test_purchased_minutes_extend_beyond_the_plan():
     assert work_access.state(uid)["minutes_left"] == 300
     _burn(uid, 10)
     assert work_access.minute_packs_left(uid) == 290
-
-
-def test_pass_lifts_the_gate_and_expires():
-    uid = _user("u_wa3")
-    _burn(uid, 120)
-    assert work_access.blocked_reason(uid) == "work_quota"
-    work_access.grant_pass(uid, kind=work_access.PASS_INTRO, days=7)
-    assert work_access.blocked_reason(uid) is None
-    # an expired pass must not keep the gate open
-    with db.tx() as c:
-        c.execute("UPDATE work_passes SET expires=? WHERE user_id=?", (time.time() - 1, uid))
-    assert work_access.blocked_reason(uid) == "work_quota"
-
-
-def test_intro_price_is_first_purchase_only():
-    uid = _user("u_wa4")
-    price, kind = work_access.next_price(uid)
-    assert (price, kind) == (200, work_access.PASS_INTRO)
-    work_access.grant_pass(uid, kind=work_access.PASS_INTRO, days=7)
-    price, kind = work_access.next_price(uid)
-    assert (price, kind) == (900, work_access.PASS_STANDARD)
-
-
-def test_order_amount_ignores_the_client_and_follows_history():
-    """The price is decided from stored purchases, never from the request."""
-    uid = _user("u_wa5")
-    info = pay_base.resolve_item("workpass:week")
-    assert pay_base.price_for(uid, info) == 200          # first one: intro
-    work_access.grant_pass(uid, kind=work_access.PASS_INTRO, days=7)
-    assert pay_base.price_for(uid, info) == 900          # renewals: standard
-
-
-def test_renewal_extends_instead_of_overwriting():
-    uid = _user("u_wa6")
-    work_access.grant_pass(uid, kind=work_access.PASS_INTRO, days=7)
-    first = work_access.active_pass(uid)["expires"]
-    work_access.grant_pass(uid, kind=work_access.PASS_STANDARD, days=7)
-    second = work_access.active_pass(uid)["expires"]
-    assert second - first == pytest.approx(7 * 86400, abs=5)
-
-
-def test_state_reports_what_the_ui_needs():
-    uid = _user("u_wa7")
-    _burn(uid, 30)
-    st = work_access.state(uid)
-    assert st["minutes_left"] == 90
-    assert st["allowed"] is True
-    assert st["pass_active"] is False
-    assert st["next_price"] == 200 and st["next_price_kind"] == "intro"
-    assert st["standard_price"] == 900

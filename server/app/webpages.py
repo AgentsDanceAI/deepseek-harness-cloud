@@ -71,9 +71,6 @@ def _ctx(request: Request, page: str, **extra) -> dict:
         "work_credits_per_min": config.WORK_CREDITS_PER_MIN,
         "work_idle_stop_min": config.WORK_IDLE_STOP_MIN,
         "work_free_minutes": config.WORK_FREE_MINUTES,
-        "work_pass_days": config.WORK_PASS_DAYS,
-        "work_pass_intro_price": config.WORK_PASS_INTRO_PRICE,
-        "work_pass_price": config.WORK_PASS_PRICE,
         **_stars_ctx(),
         **_team_terms_ctx(),
     }
@@ -376,27 +373,6 @@ def team_join_page(request: Request):
 
 # --- cloud workspace paywall --------------------------------------------------
 
-@router.get("/work/upgrade")
-def work_upgrade_page(request: Request):
-    """Shown when the free machine-time allowance is spent. Deliberately a page
-    rather than a modal: it is a purchase decision, and it needs a way back."""
-    user = try_resolve_user(request)
-    if user is None:
-        return RedirectResponse("/login?next=/work/upgrade", status_code=303)
-    from . import work_access
-    st = work_access.state(user["id"])
-    return _render(
-        request, "work_upgrade.html", "work_upgrade",
-        pass_active=st["pass_active"],
-        pass_expires_text=_fmt_date(st["pass_expires"]) if st["pass_expires"] else "",
-        next_price=st["next_price"],
-        next_price_kind=st["next_price_kind"],
-        standard_price=st["standard_price"],
-        free_minutes_left=st["free_minutes_left"],
-    )
-
-
-# --- console -----------------------------------------------------------------
 
 @router.get("/console")
 def console_page(request: Request):
@@ -426,8 +402,6 @@ def console_page(request: Request):
         work_packs=wa["pack_minutes"],
         work_left=wa["minutes_left"],
         work_scope=wa["scope"],
-        work_pass_active=wa["pass_active"],
-        work_pass_expires_text=_fmt_date(wa["pass_expires"]) if wa["pass_expires"] else "",
         org=org,
         org_pool=teams.pool_balance(org["id"]) if org else 0,
         plan=plan,

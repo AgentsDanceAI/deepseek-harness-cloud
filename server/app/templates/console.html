@@ -19,17 +19,10 @@
             <strong>{{ t("console.work.lede_strong") }}</strong>{{ t("console.work.lede_tail", minutes=work_idle_stop_min) }}</p>
           {# machine time is metered in minutes, like CI minutes — never in credits #}
           <p class="muted small" style="margin-top:10px">
-            {% if work_pass_active %}
-              {{ t("console.work.pass_until") }} <b>{{ work_pass_expires_text }}</b>{{ t("console.work.pass_tail") }}
-            {% else %}
-              {{ t("console.work.this_period") }}
-              <b>{{ t("console.work.hm", h=work_used // 60, m=work_used % 60) }}</b>
-              / {{ t("console.work.h", h=work_included // 60) }}
-              {%- if work_packs %}{{ t("console.work.packs", h=work_packs // 60, m=work_packs % 60) }}{% endif %}
-              {%- if work_left <= 0 %} · <a href="/work/upgrade">{{ t("console.work.exhausted") }}</a>{% endif %}
-            {% endif %}
+            {{ t("console.work.h", h=work_included // 60) }}
+            {%- if work_left <= 0 %} · <a href="/pricing#plans">{{ t("console.work.exhausted") }}</a>{% endif %}
           </p>
-          {% if not work_pass_active and work_included %}
+          {% if work_included %}
           <div class="meter" role="img"
                aria-label="{{ t('console.work.meter_aria', used=work_used, total=work_included) }}">
             <span style="width:{{ [100, (work_used * 100 // work_included)] | min }}%"></span>

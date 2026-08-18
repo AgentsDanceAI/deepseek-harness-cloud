@@ -301,8 +301,6 @@ def _item_of(order: dict) -> str:
         return f"plan:{order['tier']}:{order['cycle']}"
     if kind == "seats":
         return f"seats:{order['seats']}"
-    if kind == "workpass":
-        return "workpass:week"
     return f"pack:{order['pack']}"
 
 

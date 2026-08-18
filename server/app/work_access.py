@@ -24,8 +24,6 @@ import time
 
 from . import config, db, plans, security
 
-PASS_INTRO = "intro"
-PASS_STANDARD = "standard"
 
 # usage_log rows written by the reaper carry this kind; one row == one minute.
 MINUTE_KIND = "workspace"
@@ -106,46 +104,6 @@ def consume_minute(user_id: str) -> None:
             conn.execute("UPDATE minute_grants SET remaining=remaining-1 WHERE id=?", (row["id"],))
 
 
-# --- passes (the no-subscription entry point) --------------------------------
-
-def active_pass(user_id: str) -> dict | None:
-    row = db.query_one(
-        "SELECT id, kind, started, expires FROM work_passes "
-        "WHERE user_id=? AND expires > ? ORDER BY expires DESC LIMIT 1",
-        (user_id, time.time()))
-    return dict(row) if row is not None else None
-
-
-def has_ever_purchased(user_id: str) -> bool:
-    row = db.query_one("SELECT COUNT(*) AS n FROM work_passes WHERE user_id=?", (user_id,))
-    return int((row["n"] if row is not None else 0) or 0) > 0
-
-
-def next_price(user_id: str) -> tuple[int, str]:
-    """(minor units, kind) — the intro price is a first-purchase offer."""
-    if has_ever_purchased(user_id):
-        return config.WORK_PASS_PRICE, PASS_STANDARD
-    return config.WORK_PASS_INTRO_PRICE, PASS_INTRO
-
-
-def grant_pass(user_id: str, *, kind: str, days: int | None = None,
-               price: int = 0, currency: str = "", ref: str = "") -> str:
-    """Open (or extend) a pass window. Buying early stacks rather than burns."""
-    now = time.time()
-    span = (days if days is not None else config.WORK_PASS_DAYS) * 86400
-    current = active_pass(user_id)
-    expires = (current["expires"] if current else now) + span
-    pass_id = security.new_id("wpass_")
-    with db.tx() as conn:
-        conn.execute(
-            "INSERT INTO work_passes (id, user_id, kind, started, expires, price, currency, ref, created) "
-            "VALUES (?,?,?,?,?,?,?,?,?)",
-            (pass_id, user_id, kind, now, expires, price, currency, ref, now))
-    return pass_id
-
-
-# --- the gate ----------------------------------------------------------------
-
 def state(user_id: str) -> dict:
     """Everything the UI needs to show the meter and decide go / paywall.
 
@@ -166,8 +124,6 @@ def _personal_state(user_id: str) -> dict:
     included = included_minutes(user_id)
     used = used_minutes(user_id)
     packs = minute_packs_left(user_id)
-    current = active_pass(user_id)
-    price, kind = next_price(user_id)
     plan = plans.current_plan(user_id)
     left = max(0, included - used) + packs
     return {
@@ -179,13 +135,10 @@ def _personal_state(user_id: str) -> dict:
         "pack_minutes": packs,
         "minutes_left": left,
         "period_start": period_start(user_id),
-        "pass_active": current is not None,
-        "pass_expires": current["expires"] if current else 0,
-        "allowed": left > 0 or current is not None,
-        "next_price": price,
-        "next_price_kind": kind,
-        "pass_days": config.WORK_PASS_DAYS,
-        "standard_price": config.WORK_PASS_PRICE,
+        # Machine hours are now the only gate. The 7-day pass was a second,
+        # parallel way to buy access; removing it means one meter to reason
+        # about instead of two that could disagree.
+        "allowed": left > 0,
         # kept for older callers/templates that still read the free-hours wording
         "free_minutes_total": included,
         "free_minutes_left": left,

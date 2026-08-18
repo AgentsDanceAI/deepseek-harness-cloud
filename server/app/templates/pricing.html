@@ -97,65 +97,6 @@
     <p class="center muted small" style="margin-top:18px">
       {{ t("pricing.tax_note", currency=currency) }}
     </p>
-
-    {# Two meters, deliberately kept apart: credits pay for tokens, minutes pay
-       for the machine. One number covering both made the bill unreadable. #}
-    <h2 class="section-title" id="workspace" style="margin-top:64px">{{ t("pricing.workspace.h2") }}</h2>
-    <p class="center muted" style="max-width:640px;margin-inline:auto">
-      {{ t("pricing.workspace.lede_1") }}<b>{{ t("pricing.workspace.lede_2") }}</b>{{ t("pricing.workspace.lede_3") }}<b>{{ t("pricing.workspace.lede_4") }}</b>{{ t("pricing.workspace.lede_5") }}
-    </p>
-    <div class="grid grid-3" style="max-width:900px;margin:22px auto 0">
-      <div class="card pack">
-        <h3>{{ t("pricing.workspace.free_h3") }}</h3>
-        <div class="price"><span class="currency">{{ currency_symbol }}</span>0</div>
-        <p class="muted">{{ t("pricing.workspace.free_note", hours=(work_free_minutes // 60)) }}</p>
-        <a class="btn btn-ghost btn-block" href="/work">{{ t("pricing.workspace.free_cta") }}</a>
-      </div>
-      <div class="card pack plan-popular">
-        <div class="plan-flag">{{ t("pricing.workspace.upgrade_flag") }}</div>
-        <div class="plan-body">
-          <h3>{{ t("pricing.workspace.upgrade_h3") }}</h3>
-          <div class="price" style="font-size:26px;letter-spacing:-.3px">{{ t("pricing.workspace.upgrade_headline") }}</div>
-          <p class="muted">{{ t("pricing.workspace.upgrade_note") }}</p>
-          <a class="btn btn-primary btn-block" href="#plans">{{ t("pricing.workspace.upgrade_cta") }}</a>
-        </div>
-      </div>
-      <div class="card pack">
-        <h3>{{ t("pricing.workspace.pass_h3", days=work_pass_days) }}</h3>
-        <div class="price">
-          <span class="currency">{{ currency_symbol }}</span>{{ '%.2f'|format(work_pass_intro_price / 100) }}
-        </div>
-        <p class="muted">
-          {{ t("pricing.workspace.pass_note_1") }}<span class="price-was">{{ currency_symbol }}{{ '%.2f'|format(work_pass_price / 100) }}</span><br>
-          {{ t("pricing.workspace.pass_note_2") }}
-        </p>
-        <button class="btn btn-ghost btn-block buy-btn" data-item="workpass:week" type="button">{{ t("pricing.workspace.pass_cta") }}</button>
-      </div>
-    </div>
-
-    {# Seats and a shared pool: the thing an organisation buys is not N personal
-       accounts, it is one balance several people draw from. #}
-    <h2 class="section-title" id="team" style="margin-top:64px">{{ t("pricing.team.h2") }}</h2>
-    <p class="center muted">{{ t("pricing.team.lede") }}</p>
-    <div class="grid grid-2" style="max-width:720px;margin:22px auto 0">
-      <div class="card pack">
-        <h3>{{ t("pricing.team.seats_h3") }}</h3>
-        <div class="price"><span class="currency">{{ currency_symbol }}</span>{{ '%.2f'|format(team_seat_price / 100) }}<span class="per">{{ t("pricing.team.per_seat_month") }}</span></div>
-        <p class="muted">
-          {{ t("pricing.team.seat_line1", credits='{:,}'.format(team_seat_credits), hours=team_seat_minutes // 60) }}<br>
-          {{ t("pricing.team.seat_line2", min=team_seat_min) }}<br>
-          {{ t("pricing.team.seat_line3") }}
-        </p>
-        <a class="btn btn-primary btn-block" href="/console/team">{{ t("pricing.team.create_cta") }}</a>
-      </div>
-      <div class="card pack">
-        <h3>{{ t("pricing.team.selfhost_h3") }}</h3>
-        <div class="price" style="font-size:26px;letter-spacing:-.3px">{{ t("pricing.team.selfhost_headline") }}</div>
-        <p class="muted">{{ t("pricing.team.selfhost_note") }}</p>
-        <a class="btn btn-ghost btn-block" href="/resources#selfhost">{{ t("pricing.team.selfhost_cta") }}</a>
-      </div>
-    </div>
-
     <h2 class="section-title" id="packs" style="margin-top:64px">{{ t("pricing.packs.h2") }}</h2>
     <p class="center muted">{{ t("pricing.packs.lede") }}</p>
     <div class="grid grid-3 pack-grid">
