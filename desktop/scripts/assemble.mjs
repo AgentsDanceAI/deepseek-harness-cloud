@@ -136,28 +136,18 @@ console.log('assemble: copied dsh-plugin-cloud sources and assets')
   }
 }
 
-// 4e. 只打目标平台的原生变体。sharp / koffi / ripgrep / node-addon-require-builtin
-// 各自按平台分包, 装了全架构 (4d) 之后 node_modules 里同时存在 linux/win32/darwin
-// 三套。electron-builder 的 files 是白名单, 但 node_modules 是隐式全量纳入的 ——
-// 不排除的话每个包都背着另外两个平台的二进制 (实测 win 包因此多 125MB, mac 多 62MB),
-// 而且 rcodesign 会试图给它们签名并失败。用 "!" 排除模式按 ${os} 变量动态裁剪:
-// electron-builder 在打包时会把 ${os} 展开成当前目标平台 (darwin/win32/linux)。
-{
-  const EXCLUDES = [
-    '!node_modules/@img/sharp-!(${os})*/**',
-    '!node_modules/@img/sharp-libvips-!(${os})*/**',
-    '!node_modules/@koromix/koffi-!(${os})*/**',
-    '!node_modules/@vscode/ripgrep-!(${os})*/**',
-    '!node_modules/node-addon-require-builtin-!(${os})*/**',
-    '!node_modules/node-pty/prebuilds/!(${os})*/**',
-  ]
-  const files = pkg.build?.files
-  let added = 0
-  for (const glob of EXCLUDES) {
-    if (!files.includes(glob)) { files.push(glob); added++ }
-  }
-  if (added > 0) console.log(`assemble: registered ${added} cross-platform excludes in build.files`)
-}
+// 4e. (2026-08-18) 曾在 build.files 里做"只打目标平台原生变体"的裁剪, 已回退。
+//
+// 动机是合理的: 装了全架构依赖 (4d) 后 node_modules 里同时存在 linux/win32/darwin
+// 三套 sharp/koffi/ripgrep/node-pty, 每个安装包因此多背 60-125MB。
+// 但两次尝试都出了事故, 且都不是"配置写错"而是 electron-builder 的行为不透明:
+//   · "!node_modules/@vscode/ripgrep-!(${os})*/**" (extglob 取反) 会把**目标平台
+//     自己那份也排掉** → 包里原生模块全空 → 应用启动即闪退;
+//   · 想按 ${os} 条件展开生成三条独立规则, 又依赖模板求值的具体语义, 同样在猜。
+//
+// 多背几十 MB 是可承受的; 发一个装上去打不开的包不是。所以这里**不做任何裁剪**,
+// 由 verify-package.mjs 保证"包里目标平台的二进制齐全且无外来平台二进制"这条底线。
+// 将来若要重做裁剪, 必须先在真机上验证包能启动, 再看体积。
 
 // 5. redistribution guard: the identity-scoped @anthropic-ai/claude-agent-sdk
 // authorization does not extend to us; the desktop tree must not depend on it.

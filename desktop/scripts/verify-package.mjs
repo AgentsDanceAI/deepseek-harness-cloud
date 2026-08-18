@@ -54,6 +54,9 @@ for (const asar of asars) {
   for (const name of REQUIRED) if (head.includes(name)) inAsar.add(name)
 }
 
+// 两道检查都跑完再统一判定 —— 顺序 exit 会让前一道失败时看不到后一道的问题,
+// 而它们成因不同 (打包白名单 vs 平台依赖), 一次看全才好定位。
+const failures = []
 const missing = REQUIRED.filter(name => !unpacked.has(name) && !inAsar.has(name))
 console.log(`verify-package: scanned ${asars.length} asar(s) under ${outDir}`)
 console.log(`  unpacked build/cloud: ${[...unpacked].join(', ') || '(none)'}`)
@@ -63,49 +66,54 @@ if (missing.length > 0) {
     + missing.join(', '))
   console.error('  electron-builder `files` is an allow-list; ensure build/cloud/** is listed '
     + '(assemble.mjs registers it) and rerun packaging.')
-  process.exit(1)
+  failures.push('登录墙资源缺失')
 }
 console.log('verify-package: login-wall assets present in the packaged app')
 
-// ── 原生二进制平台校验 (2026-08-18 事故后) ────────────────────────────────
-// sharp / koffi / ripgrep / node-addon-require-builtin 是按平台分包的 optional
-// dependency。yarn 只装宿主平台那份时, Linux 上打出的 mac/Windows 包里塞的是
-// Linux ELF —— 构建全绿、装到目标机上一调就崩。已发布的 win x64/arm64 两版全中,
-// 而当时的两道检查 (本文件只查登录墙资源、build-win.sh 只查 node-pty) 都没拦住。
+// ── 原生二进制校验 (2026-08-18 两次事故后定稿) ──────────────────────────
+// 判据只有一条: **目标平台的原生二进制必须在包里**。
 //
-// 这里按魔数判断每个原生二进制的实际格式, 与产物目录推断出的目标平台比对。
-// 只读文件头 4 字节, 不依赖外部 `file` 命令 (CI 镜像未必有)。
-const MAGIC = [
-  { name: 'ELF',    test: b => b[0] === 0x7f && b[1] === 0x45 && b[2] === 0x4c && b[3] === 0x46, os: 'linux' },
-  { name: 'PE',     test: b => b[0] === 0x4d && b[1] === 0x5a,                                    os: 'win32' },
-  // Mach-O: 32/64 位、大小端、以及 universal fat 的四种魔数
-  { name: 'Mach-O', test: b => { const m = b.readUInt32BE(0)
-      return [0xfeedface, 0xfeedfacf, 0xcefaedfe, 0xcffaedfe, 0xcafebabe, 0xbebafeca].includes(m) }, os: 'darwin' },
-]
+// 不判"包里有没有其他平台的二进制": 装了全架构依赖后 node_modules 本就同时存在
+// linux/win32/darwin 三套, 它们躺在包里只是多占几十 MB, 运行时按平台选择, 无害。
+// 曾试图在 build.files 里裁掉它们, 两次都把目标平台自己那份也一起排掉, 导致包
+// 装上去启动即闪退 —— 所以现在不裁剪, 也不为此报错。
+//
+// 两次事故的真正教训是反过来的:
+//   ① 2026-08-17 win 包里 sharp/koffi/ripgrep 是 Linux ELF (yarn 只装了宿主平台
+//      那份), 目标平台的二进制根本不存在 → 装到 Windows 上一调就崩;
+//   ② 2026-08-18 extglob 取反把目标平台的也排掉 → 包里一个原生模块都没有 → 闪退。
+// 两次都是"该有的没有", 都能被下面这条判据抓住。
+const NATIVE_REQUIRED = {
+  darwin: ['node-pty/prebuilds/darwin', '@vscode/ripgrep-darwin', '@img/sharp-darwin'],
+  win32:  ['node-pty/prebuilds/win32',  '@vscode/ripgrep-win32',  '@img/sharp-win32'],
+}
 const dirName = outDir.replace(/\\/g, '/').split('/').filter(Boolean).pop() || ''
-const targetOs = /^win/.test(dirName) ? 'win32' : /^mac|^darwin/.test(dirName) ? 'darwin' : null
+// 目标平台从**产物结构**判断, 不靠目录名。目录名 (mac-arm64 / win-unpacked) 是
+// electron-builder 的默认命名, 一旦谁改了输出目录或拷到别处, 靠名字推断就会静默
+// 跳过整段检查 —— 2026-08-18 写反向测试时就撞上了 (拷到 /tmp/ep 后检查不执行)。
+// .app 目录是 macOS 独有, .exe 主程序是 Windows 独有, 这两个信号不会因改名而变。
+const allPaths = [...walk(outDir)].map(p => p.replace(/\\/g, '/'))
+const targetOs = allPaths.some(p => p.includes('.app/Contents/'))  ? 'darwin'
+               : allPaths.some(p => /\/[^/]+\.exe$/i.test(p))      ? 'win32'
+               : null
 
 if (targetOs) {
-  const foreign = []
-  let checked = 0
-  for (const path of walk(outDir)) {
-    if (!/\.(node|dylib|so)$/.test(path) && !/[\\/](rg|rg\.exe|spawn-helper)$/.test(path)) continue
-    let head
-    try { const fd = openSync(path, 'r'); head = Buffer.alloc(4)
-          readSync(fd, head, 0, 4, 0); closeSync(fd) }
-    catch { continue }
-    const hit = MAGIC.find(m => { try { return m.test(head) } catch { return false } })
-    if (!hit) continue
-    checked++
-    if (hit.os !== targetOs) foreign.push(`${path.replace(/.*node_modules[\/\\]/, '')} → ${hit.name}`)
+  const missing = NATIVE_REQUIRED[targetOs].filter(frag => !allPaths.some(p => p.includes(frag)))
+  console.log(`verify-package: 目标平台 ${targetOs}, 检查 ${NATIVE_REQUIRED[targetOs].length} 组原生模块`)
+  if (missing.length > 0) {
+    console.error(`verify-package: FAILED — 目标平台 ${targetOs} 的原生模块缺失:`)
+    for (const m of missing) console.error('  ' + m)
+    console.error('  这样的包装到目标系统上会崩溃或功能失效。两个已知成因:')
+    console.error('   · yarn 只装了宿主平台的 optional 依赖 → 装配树 .yarnrc.yml 需要')
+    console.error('     supportedArchitectures (assemble.mjs 会写入), 然后重跑 yarn install;')
+    console.error('   · build.files 的排除规则误伤了目标平台自己那份 (别用 extglob 取反)。')
+    failures.push(`目标平台 ${targetOs} 原生模块缺失: ${missing.join(', ')}`)
   }
-  console.log(`verify-package: 原生二进制 ${checked} 个, 目标平台 ${targetOs}`)
-  if (foreign.length > 0) {
-    console.error(`verify-package: FAILED — ${foreign.length} 个二进制不属于目标平台 ${targetOs}:`)
-    for (const f of foreign.slice(0, 12)) console.error('  ' + f)
-    console.error('  根因通常是 yarn 只装了宿主平台的 optional 依赖。装配树的 .yarnrc.yml')
-    console.error('  需要 supportedArchitectures (assemble.mjs 会写入), 然后重跑 yarn install。')
-    process.exit(1)
-  }
-  console.log('verify-package: 全部原生二进制与目标平台一致')
+  console.log('verify-package: 目标平台原生模块齐全')
+}
+
+if (failures.length > 0) {
+  console.error(`\nverify-package: FAILED — ${failures.length} 项:`)
+  for (const f of failures) console.error('  · ' + f)
+  process.exit(1)
 }
