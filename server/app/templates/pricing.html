@@ -10,9 +10,28 @@
     <h1 class="section-title" id="plans">{{ t("pricing.h1") }}</h1>
     <p class="center muted">{{ t("pricing.lede") }}</p>
 
-    <div class="cycle-toggle center" role="tablist">
-      <button class="tab active" data-cycle="monthly" type="button">{{ t("pricing.cycle.monthly") }}</button>
-      <button class="tab" data-cycle="yearly" type="button">{{ t("pricing.cycle.yearly") }}<span class="tag">{{ t("pricing.cycle.yearly_tag") }}</span></button>
+    {# Billing period and currency are the two knobs on this page's prices, so
+       they sit together. The picker is a link list, not a form: an explicit
+       ?cur= is what persists the choice, and it has to work without JS. #}
+    <div class="cycle-row">
+      <div class="cycle-toggle" role="tablist">
+        <button class="tab active" data-cycle="monthly" type="button">{{ t("pricing.cycle.monthly") }}</button>
+        <button class="tab" data-cycle="yearly" type="button">{{ t("pricing.cycle.yearly") }}<span class="tag">{{ t("pricing.cycle.yearly_tag") }}</span></button>
+      </div>
+      <div class="cur-picker" data-nav-group>
+        <button type="button" aria-expanded="false" aria-label="{{ t("nav.currency") }}">
+          <span class="cur-code">{{ currency_symbol }} {{ currency }}</span>
+          <svg viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M3 4.5 6 7.5 9 4.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <div class="nav-menu nav-menu-cur" hidden>
+          {% for c in currency_options %}
+            <a href="{{ c.href }}" rel="nofollow"{% if c.active %} class="active" aria-current="true"{% endif %}>
+              <b>{{ c.symbol }}</b><span>{{ c.code }}</span>
+              {%- if c.code == currency_auto %}<em>{{ t("nav.currency_auto") }}</em>{% endif -%}
+            </a>
+          {% endfor %}
+        </div>
+      </div>
     </div>
 
     <div class="grid grid-4 plan-grid">

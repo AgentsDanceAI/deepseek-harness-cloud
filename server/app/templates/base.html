@@ -79,22 +79,11 @@
        on the right, so a signed-in visitor reaches the cloud in one click rather
        than hunting for it among links that moved. #}
     <div class="nav-account">
-      {# Both switchers carry every other query parameter through, so changing
-         one does not silently reset the other. #}
-      <div class="nav-group cur-switch" data-nav-group>
-        <button type="button" aria-expanded="false" aria-label="{{ t("nav.currency") }}">
-          <span class="cur-code">{{ currency_symbol }} {{ currency }}</span>
-          <svg viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M3 4.5 6 7.5 9 4.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
-        </button>
-        <div class="nav-menu nav-menu-cur" hidden>
-          {% for c in currency_options %}
-            <a href="{{ c.href }}" rel="nofollow"{% if c.active %} class="active" aria-current="true"{% endif %}>
-              <b>{{ c.symbol }}</b><span>{{ c.code }}</span>
-              {%- if c.code == currency_auto %}<em>{{ t("nav.currency_auto") }}</em>{% endif -%}
-            </a>
-          {% endfor %}
-        </div>
-      </div>
+      {# Language belongs in the nav — it changes every page. Currency only ever
+         changes prices, so its picker lives beside the pricing page's own
+         monthly/yearly toggle rather than following the reader everywhere.
+         Both hrefs carry the rest of the query string, so neither resets the
+         other. #}
       <a class="lang-switch" href="{{ lang_switch_url }}" rel="nofollow"
          aria-label="{{ 'Switch to English' if lang == 'zh' else '切换到中文' }}">{{ other_lang_label }}</a>
       {# The two ways into the product sit together on the right, styled the

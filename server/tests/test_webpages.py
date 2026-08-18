@@ -280,6 +280,16 @@ def test_release_throttle_holds_the_slot_until_the_body_ends():
 
 # --- currency picker ---------------------------------------------------------
 
+def test_currency_picker_is_only_on_the_pricing_page(client):
+    """It belongs next to the billing-period toggle, not in the nav: currency
+    changes nothing anywhere else, and a control on every page reads as
+    something the reader has to deal with on every page."""
+    assert "cur-picker" in client.get("/pricing").text
+    for path in ("/", "/product", "/solutions", "/download"):
+        assert "cur-picker" not in client.get(path).text, path
+        assert "lang-switch" in client.get(path).text, path   # language still is global
+
+
 def test_currency_defaults_to_the_visitor_country(client):
     """Cloudflare puts CF-IPCountry in front of every request; the price a
     visitor sees should follow it without them doing anything."""
