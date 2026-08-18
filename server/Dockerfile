@@ -14,6 +14,10 @@ RUN pip install --no-cache-dir \
 
 COPY server/app ./app
 COPY server/config ./config
+# Maintenance scripts run with `docker exec` against the live deployment
+# (waffo_sync_catalog.py talks to the payment provider with the running
+# container's credentials), so they have to be in the image, not just the repo.
+COPY server/scripts ./scripts
 # The legal documents live at the repo root and are read at request time by
 # webpages._legal_dir(). Without this they are absent from the image and every
 # /legal/* page renders empty — which is exactly what a payment processor's

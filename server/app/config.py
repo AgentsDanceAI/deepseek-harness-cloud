@@ -154,14 +154,10 @@ WORK_AGENT_IDLE_STOP_MIN = _env_int("WORK_AGENT_IDLE_STOP_MIN", 30)
 # Everyone gets this many ACTIVE agent minutes on the house; when they run out,
 # the next task hits the paywall instead of silently draining credits. Active
 # minutes are the same meter that bills (see workspace.reaper_tick).
-WORK_FREE_MINUTES = _env_int("WORK_FREE_MINUTES", 180)  # 72h — fallback when the
-# price table carries no work_minutes for the free tier
-# The intro offer that unlocks it again: cheap for the first period, then the
-# standard price. Amounts are minor units (cents / 分) in PRICING_CURRENCY.
-WORK_PASS_DAYS = _env_int("WORK_PASS_DAYS", 7)
-WORK_PASS_INTRO_PRICE = _env_int("WORK_PASS_INTRO_PRICE", 200)     # $2.00 / ¥9.90 (CN file)
-WORK_PASS_PRICE = _env_int("WORK_PASS_PRICE", 900)                 # standard weekly price
-WORK_PASS_CREDITS = _env_int("WORK_PASS_CREDITS", 0)  # 0 = pass grants time, not credits
+# 180 = 3h/month for the free tier; only a fallback for when the price table
+# carries no work_minutes for it. The workspace pass that used to top this up
+# was withdrawn — machine hours now come from a plan or from nowhere.
+WORK_FREE_MINUTES = _env_int("WORK_FREE_MINUTES", 180)
 
 # --- teams ------------------------------------------------------------------
 # Seats bound how many people may share an organisation's credit pool. Price is

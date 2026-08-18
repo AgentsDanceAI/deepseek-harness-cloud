@@ -1,6 +1,6 @@
 # Terms of Service
 
-**Version 1.0 · Effective date: August 17, 2026**
+**Version 1.1 · Effective date: August 18, 2026**
 
 These Terms are the agreement between you and the Operator regarding deepseek-harness-cloud (the "Service", at https://dshcloud.online). By registering an account, downloading a client, or using the Service, you confirm that you have read and agree to these Terms. If you do not agree, please do not use the Service.
 
@@ -41,7 +41,7 @@ Built on the open-source project DeepSeek Harness (MIT License), the Service pro
 
 4.2 **How credits are deducted.** Each model has a published multiplier, with Claude Sonnet as the 1.00x baseline; 1.00x means a deduction of 1,000 credits per 1 million tokens. The full multiplier table is published in real time at https://dshcloud.online/pricing . When a multiplier changes because of an upstream price adjustment, we will update that page before the change takes effect.
 
-4.3 **Free quota.** Registration includes a one-time grant of credits, plus 72 cloud machine hours per month. Free quota cannot be cashed out or transferred.
+4.3 **Free quota.** Registration includes a one-time grant of credits (currently 500), plus 3 cloud machine hours per month, reset on the first of each calendar month. Free quota cannot be cashed out or transferred.
 
 ## 5. Payment, Auto-Renewal, and Cancellation
 
@@ -61,14 +61,18 @@ The prices below are current (in US dollars). RMB prices and the latest price li
 
 | Plan | Monthly | Annual | Credits per month | Machine hours per month | Concurrency |
 |---|---|---|---|---|---|
-| Free | $0 | — | 0 (one-time grant of 1,000 at registration) | 72 hours | 1 |
-| Plus | $20 | $168 ($14/month) | 2,000 | 180 hours | 2 |
-| Pro | $100 | $720 ($60/month) | 10,000 | 360 hours | 5 |
-| Max | $200 | $1,176 ($98/month) | 20,000 | 540 hours | 10 |
+| Free | $0 | — | 0 (one-time grant of 500 at registration) | 3 hours | 1 |
+| Plus | $10 | $96 ($8/month) | 1,000 | 180 hours | 2 |
+| Pro | $20 | $180 ($15/month) | 2,000 | 360 hours | 5 |
+| Max | $100 | $840 ($70/month) | 10,000 | 540 hours | 10 |
 
-**Credit packs** (can be purchased without a plan; valid for 365 days): 1,000 credits for $12; 5,250 credits for $50; 11,000 credits for $100.
+**Annual discount**: the annual list price is twelve months at the monthly rate; Plus is 20% off that, Pro 25% off, and Max 30% off.
 
-**Team seats**: $25 per seat per month, minimum 3 seats; each seat includes 3,500 credits and 20 machine hours, shared within the organization.
+**First-month price**: the first monthly period of a tier you have not subscribed to before costs $8 for Plus, $14 for Pro, and $60 for Max. The standard monthly price applies from the second monthly period. The offer is available once per account per tier.
+
+**Credit packs** (can be purchased without a plan; valid for 365 days): 1,000 credits for $10; 11,000 credits for $100 (10,000 base plus a 10% bonus); 125,000 credits for $1,000 (100,000 base plus a 25% bonus).
+
+**Team seats**: $25 per seat per month, minimum 3 seats; each seat includes 2,500 credits and 20 machine hours, shared within the organization.
 
 An annual plan is a single payment for the full year that grants the full year of entitlements at once, and it likewise does not renew automatically.
 
@@ -163,4 +167,4 @@ These Terms are governed by the laws of the People's Republic of China (excludin
 
 ---
 
-*Last updated: August 17, 2026 · Version 1.0*
+*Last updated: August 18, 2026 · Version 1.1 (this revision changes only the prices in section 5.2 and the free quota in section 4.3; every change is a reduction in the customer's favour)*

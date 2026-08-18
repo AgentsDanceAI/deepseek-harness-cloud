@@ -42,9 +42,6 @@ def _cfg(monkeypatch):
     table["tiers"] = tiers
     monkeypatch.setattr(plans, "pricing", lambda: table)
     monkeypatch.setattr(config, "WORK_FREE_MINUTES", 120)
-    monkeypatch.setattr(config, "WORK_PASS_DAYS", 7)
-    monkeypatch.setattr(config, "WORK_PASS_INTRO_PRICE", 200)
-    monkeypatch.setattr(config, "WORK_PASS_PRICE", 900)
 
 
 def _user(uid):

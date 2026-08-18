@@ -624,3 +624,16 @@ def test_product_id_is_cached_before_publish():
     cache_pos = src.index('_kv_set(cache_key, pid)')
     publish_pos = src.index('publish-product')
     assert cache_pos < publish_pos, "the id must be cached before the publish call"
+
+
+def test_existing_product_scan_sees_the_whole_store():
+    """The reuse-by-name scan is the second line of defence against duplicates,
+    and it was blind twice over: onetimeProducts returns 10 products unless
+    asked for more, and a name match against a DEACTIVATED product would have
+    handed checkout a product Waffo refuses to sell."""
+    import inspect
+    from app.payments import waffo_provider
+    src = inspect.getsource(waffo_provider.ensure_product_id)
+    assert "limit:200" in src
+    scan = src[src.index("onetimeProducts"):src.index('"/v1/actions/onetime-product/create-product"')]
+    assert 'p.get("status") != "active"' in scan

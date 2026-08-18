@@ -213,11 +213,17 @@ async def ensure_product_id(item: str) -> str:
     store_id = await ensure_store_id()
     # Reuse an existing product with the same name — a lost cache / a parse
     # failure on create must not spawn duplicate catalog products.
+    # `limit` matters: the query defaults to 10 products, so once the catalog
+    # outgrew that the scan stopped seeing most of the store and "reuse" quietly
+    # became "create another one". Deactivated products are skipped — matching
+    # one would hand checkout a product Waffo will not sell.
     try:
         _st, d = await _waffo_request("/v1/graphql", {
-            "query": "query($s:String!){ onetimeProducts(storeId:$s){ id name status } }",
+            "query": "query($s:String!){ onetimeProducts(storeId:$s, limit:200){ id name status } }",
             "variables": {"s": store_id}})
         for p in ((d.get("data") or {}).get("onetimeProducts") or []) if isinstance(d, dict) else []:
+            if p.get("status") != "active":
+                continue
             if str(p.get("name") or "").strip() == name:
                 pid = str(p.get("id") or "").strip()
                 if pid:

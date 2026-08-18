@@ -94,7 +94,12 @@
     if (parts[0] === "plan") {
       return T("js.msg.09") + (TIER_ZH[parts[1]] || parts[1]) + (parts[2] === "yearly" ? T("js.msg.49") : T("js.msg.50"));
     }
-    if (parts[0] === "pack") return T("js.msg.34") + parts[1];
+    if (parts[0] === "pack") {
+      // Pack ids are the base credit amount ("pack10000"). Show that number,
+      // matching the card headline — the raw id was leaking into the confirm dialog.
+      var n = parseInt(String(parts[1]).replace(/\D+/g, ""), 10);
+      return T("js.msg.34") + (n > 0 ? n.toLocaleString() : parts[1]);
+    }
     return item || "—";
   }
 

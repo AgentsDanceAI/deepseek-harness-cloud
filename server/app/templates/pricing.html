@@ -61,9 +61,11 @@
             </div>
             <p class="plan-note">
               {% if free %}{{ _t("pricing.plan.free_forever") }}
-              {% else %}{{ _t("pricing.plan.yearly_note",
-                              price=currency_symbol ~ ((t.yearly_cents or 0) // 100),
-                              saved=currency_symbol ~ ((std * 12 - (t.yearly_cents or 0)) // 100)) }}
+              {% else %}{% set list_cents = t.yearly_list_cents or std * 12 %}
+                {{ _t("pricing.plan.yearly_note",
+                      list=currency_symbol ~ (list_cents // 100),
+                      price=currency_symbol ~ ((t.yearly_cents or 0) // 100),
+                      saved=currency_symbol ~ ((list_cents - (t.yearly_cents or 0)) // 100)) }}
               {% endif %}
             </p>
           </div>
@@ -105,7 +107,16 @@
         <h3>{{ _t(p.name_key) if p.name_key else p.name }}</h3>
         {% if p.bonus_pct %}<span class="off-badge">{{ _t("pricing.pack.bonus", pct=p.bonus_pct) }}</span>{% endif %}
         <div class="price"><span class="currency">{{ currency_symbol }}</span>{{ p.cents // 100 }}</div>
-        <p class="muted">{{ t("pricing.packs.pack_note", credits='{:,}'.format(p.credits), days=p.valid_days) }}</p>
+        {# The card headline is the BASE amount and the badge is the bonus, so the
+           ladder is legible; the note states what actually lands in the account,
+           which is the number the charge path grants. #}
+        <p class="muted">
+          {% if p.bonus_pct %}{{ _t("pricing.packs.pack_note_bonus",
+                                    credits='{:,}'.format(p.credits),
+                                    bonus='{:,}'.format(p.credits - (p.base_credits or p.credits)),
+                                    days=p.valid_days) }}
+          {% else %}{{ _t("pricing.packs.pack_note", credits='{:,}'.format(p.credits), days=p.valid_days) }}{% endif %}
+        </p>
         <button class="btn btn-primary btn-block buy-btn" data-item="pack:{{ pid }}" type="button">{{ t("pricing.packs.buy") }}</button>
       </div>
       {% endfor %}
@@ -123,7 +134,7 @@
       </p>
       <h3>{{ t("pricing.faq.q4") }}</h3>
       <p class="muted">
-        {{ t("pricing.faq.a4", days=work_pass_days) }}
+        {{ t("pricing.faq.a4") }}
       </p>
       <h3>{{ t("pricing.faq.q5") }}</h3>
       <p class="muted">{{ t("pricing.faq.a5_prefix") }}<a href="/legal/refund">{{ t("common.refund") }}</a>{{ t("pricing.faq.a5_suffix") }}</p>
