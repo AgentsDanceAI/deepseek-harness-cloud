@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Electron hardened runtime 最低 entitlements (公证硬性要求, docs/code-signing.md 报告二§三):
+     allow-jit 为 V8 JIT 必需; allow-unsigned-executable-memory 兼容旧路径, 加上无害。
+     SIGN_MODE=devid 时由 build_macos_dmg.sh 应用到主程序与全部 Helper。 -->
+<plist version="1.0">
+<dict>
+  <key>com.apple.security.cs.allow-jit</key>
+  <true/>
+  <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+  <true/>
+  <!-- 本机电脑 (2026-07-27): 智能体要在用户机器上跑命令、按需控制访达
+       (如清空废纸篓)。hardened runtime 下不给这两条, 子进程会被拦、
+       Apple Event 发不出去 —— 表现是"开了全部目录权限还是没权限"。 -->
+  <key>com.apple.security.automation.apple-events</key>
+  <true/>
+  <key>com.apple.security.cs.allow-dyld-environment-variables</key>
+  <true/>
+  <key>com.apple.security.cs.disable-library-validation</key>
+  <true/>
+</dict>
+</plist>

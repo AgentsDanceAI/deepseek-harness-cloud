@@ -129,7 +129,7 @@ done
 
 echo "==> repoint DOWNLOAD_URL_* at R2"
 declare -A MAP=(
-  [DOWNLOAD_URL_MAC]="mac-arm64.dmg"
+  [DOWNLOAD_URL_MAC]="mac-arm64.zip"   # 2026-08-18: dmg→zip (Linux 上打不出可公证的 UDIF; 票据 staple 在 .app 本体)
   [DOWNLOAD_URL_MAC_X64]="mac-x64.zip"
   [DOWNLOAD_URL_WIN]="win-x64.exe"
   [DOWNLOAD_URL_WIN_ARM]="win-arm64.exe"
@@ -137,12 +137,19 @@ declare -A MAP=(
 )
 for var in "${!MAP[@]}"; do
   # Match the real filename by suffix rather than assuming a naming scheme.
+  # ⚠️ 必须有 default 分支并先清空 pat: case 落空时 bash 会**保留上一轮循环的值**,
+  # 于是该变量会被指到上一个平台的产物上。2026-08-18 实测: MAP 里把 mac 从 .dmg
+  # 改成 .zip 后没同步这里, DOWNLOAD_URL_MAC 被静默指向了 Android 的 .apk ——
+  # 官网 macOS 下载按钮会给出一个安卓安装包, 而脚本一行报错都没有。
+  pat=""
   case "${MAP[$var]}" in
+    mac-arm64.zip) pat="*mac-arm64.zip" ;;
     mac-arm64.dmg) pat="*mac-arm64.dmg" ;;
     mac-x64.zip)   pat="*mac-x64.zip" ;;
     win-x64.exe)   pat="*-x64-Setup.exe" ;;
     win-arm64.exe) pat="*-arm64-Setup.exe" ;;
     android.apk)   pat="*.apk" ;;
+    *) echo "    !! $var: MAP 值 '${MAP[$var]}' 没有对应的匹配模式" >&2; exit 1 ;;
   esac
   # shellcheck disable=SC2086
   found="$(cd "$STAGE" && ls -1 $pat 2>/dev/null | head -1 || true)"

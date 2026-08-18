@@ -117,6 +117,48 @@ console.log('assemble: copied dsh-plugin-cloud sources and assets')
   console.log(`assemble: windows targets ${JSON.stringify(targets)}`)
 }
 
+// 4d. 跨平台打包必需: sharp / koffi / ripgrep / node-addon-require-builtin 都是
+// **按平台分包**的 optional dependency。yarn 默认只装宿主平台那一份, 于是在
+// Linux 上打出来的 mac/Windows 包里塞的是 Linux ELF —— 构建全绿、装到目标系统
+// 上一调就崩 (2026-08-17 实测: 已发布的 win x64/arm64 两个包全中)。
+// electron-builder 对此只打一行 "missing optional dependencies" 的普通提示,
+// 不算错误。这里把目标架构写进装配树的 .yarnrc.yml, 让 yarn 把各平台二进制
+// 都下下来。写在这里而不是手改文件: assemble 每次 rmSync 整棵树重建, 手改活不过一轮。
+{
+  const yarnrc = join(dest, '.yarnrc.yml')
+  const existing = existsSync(yarnrc) ? readFileSync(yarnrc, 'utf8') : ''
+  if (!existing.includes('supportedArchitectures')) {
+    writeFileSync(yarnrc, existing.replace(/\n*$/, '\n') +
+      '\n# 由 assemble.mjs 写入 — 跨平台打包必需, 详见本文件 4d 段\n' +
+      'supportedArchitectures:\n  os:\n    - darwin\n    - linux\n    - win32\n' +
+      '  cpu:\n    - x64\n    - arm64\n')
+    console.log('assemble: registered supportedArchitectures in .yarnrc.yml')
+  }
+}
+
+// 4e. 只打目标平台的原生变体。sharp / koffi / ripgrep / node-addon-require-builtin
+// 各自按平台分包, 装了全架构 (4d) 之后 node_modules 里同时存在 linux/win32/darwin
+// 三套。electron-builder 的 files 是白名单, 但 node_modules 是隐式全量纳入的 ——
+// 不排除的话每个包都背着另外两个平台的二进制 (实测 win 包因此多 125MB, mac 多 62MB),
+// 而且 rcodesign 会试图给它们签名并失败。用 "!" 排除模式按 ${os} 变量动态裁剪:
+// electron-builder 在打包时会把 ${os} 展开成当前目标平台 (darwin/win32/linux)。
+{
+  const EXCLUDES = [
+    '!node_modules/@img/sharp-!(${os})*/**',
+    '!node_modules/@img/sharp-libvips-!(${os})*/**',
+    '!node_modules/@koromix/koffi-!(${os})*/**',
+    '!node_modules/@vscode/ripgrep-!(${os})*/**',
+    '!node_modules/node-addon-require-builtin-!(${os})*/**',
+    '!node_modules/node-pty/prebuilds/!(${os})*/**',
+  ]
+  const files = pkg.build?.files
+  let added = 0
+  for (const glob of EXCLUDES) {
+    if (!files.includes(glob)) { files.push(glob); added++ }
+  }
+  if (added > 0) console.log(`assemble: registered ${added} cross-platform excludes in build.files`)
+}
+
 // 5. redistribution guard: the identity-scoped @anthropic-ai/claude-agent-sdk
 // authorization does not extend to us; the desktop tree must not depend on it.
 const manifest = JSON.parse(readFileSync(join(dest, 'dsh-plugin-desktop', 'package.json'), 'utf8'))
