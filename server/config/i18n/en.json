@@ -410,10 +410,10 @@
   "download.rebuild_notice_link": "browser-based cloud workspace",
   "download.rebuild_notice_b": " — it has the same features and works on a phone.",
   "download.mac_meta": "Apple silicon (M series) and Intel · macOS 12+",
-  "download.mac_dmg": "Download .dmg (Apple silicon)",
+  "download.mac_dmg": "Download .zip (Apple silicon)",
   "download.rebuilding": "Rebuilding",
   "download.mac_zip": "Download .zip (Intel)",
-  "download.mac_zip_note": "The Intel build ships as a zip: unpack it and drag the app into Applications.",
+  "download.mac_zip_note": "Both builds ship as a zip: unpack and drag the app into Applications. Notarized by Apple, so the first launch needs no extra approval.",
   "download.win_arm64_suffix": "and ARM64",
   "download.win_exe_x64": "Download .exe (x64)",
   "download.win_exe_arm64": "Download .exe (ARM64)",
@@ -557,5 +557,7 @@
   "admin.js.role_grant": "Make admin",
   "admin.js.role_revoke": "Remove admin",
   "admin.js.role_grant_confirm": "Make {email} an admin? They will be able to see and change every user's quota and status.",
-  "admin.js.role_revoke_confirm": "Remove admin rights from {email}?"
+  "admin.js.role_revoke_confirm": "Remove admin rights from {email}?",
+  "download.android_qr": "Or scan with your phone to install directly",
+  "download.android_qr_alt": "QR code for the Android download"
 }

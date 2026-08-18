@@ -1200,3 +1200,9 @@ body:not([data-page="landing"]) .section:first-of-type { position: relative; z-i
    the two ways in this is before the label is read. */
 .nav-account .btn-sm { display: inline-flex; align-items: center; gap: 6px; }
 .nav-account .btn-sm svg { flex: none; opacity: .9; }
+
+/* Android 卡片的扫码直装 (2026-08-18): 免去"先下到电脑再传手机"。
+   二维码由 tinyQR 在前端画, 不产生额外请求。 */
+.dl-qr { margin-top: 14px; text-align: center; }
+.dl-qr canvas { border-radius: 8px; background: #fff; padding: 6px; box-shadow: 0 1px 4px rgb(15 23 42 / 10%); }
+.dl-qr-note { margin-top: 6px; font-size: 13px; }

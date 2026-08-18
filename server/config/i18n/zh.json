@@ -410,10 +410,10 @@
   "download.rebuild_notice_link": "浏览器版云工作台",
   "download.rebuild_notice_b": "，功能一致，手机也能用。",
   "download.mac_meta": "Apple Silicon（M 系列）与 Intel · macOS 12+",
-  "download.mac_dmg": "下载 .dmg（Apple 芯片）",
+  "download.mac_dmg": "下载 .zip（Apple 芯片）",
   "download.rebuilding": "重新构建中",
   "download.mac_zip": "下载 .zip（Intel 芯片）",
-  "download.mac_zip_note": "Intel 版为 zip：解压后把 App 拖进「应用程序」即可。",
+  "download.mac_zip_note": "两个版本均为 zip：解压后把 App 拖进「应用程序」即可。已通过 Apple 公证，首次打开无需额外授权。",
   "download.win_arm64_suffix": "与 ARM64",
   "download.win_exe_x64": "下载 .exe（x64）",
   "download.win_exe_arm64": "下载 .exe（ARM64）",
@@ -557,5 +557,7 @@
   "admin.js.role_grant": "设为管理员",
   "admin.js.role_revoke": "取消管理员",
   "admin.js.role_grant_confirm": "把 {email} 设为管理员？该账号将能查看和修改所有用户的额度与状态。",
-  "admin.js.role_revoke_confirm": "取消 {email} 的管理员权限？"
+  "admin.js.role_revoke_confirm": "取消 {email} 的管理员权限？",
+  "download.android_qr": "或用手机扫码直接安装",
+  "download.android_qr_alt": "Android 安装包下载二维码"
 }

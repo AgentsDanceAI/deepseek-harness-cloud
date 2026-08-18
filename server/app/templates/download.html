@@ -49,6 +49,13 @@
         <h3>Android</h3>
         <p class="muted">{{ t("download.android_meta") }}</p>
         <a class="btn btn-primary btn-block" href="/dl/android">{{ t("download.android_apk") }}</a>
+        {# 手机扫码直装, 免去"先下到电脑再传过去"。二维码用仓库自带的 tinyQR
+           (微信支付那条线写的, 无外部依赖) 在前端画, 内容是下载页自己的
+           /dl/android —— 走服务端跳转而非写死 R2 地址, 换包后二维码不用重生成。 #}
+        <div class="dl-qr">
+          <canvas id="android-qr" width="132" height="132" aria-label="{{ t('download.android_qr_alt') }}"></canvas>
+          <p class="muted dl-qr-note">{{ t("download.android_qr") }}</p>
+        </div>
       </div>
       {% endif %}
       <div class="card dl-card">
@@ -72,4 +79,18 @@
     <p class="muted small" style="margin-top:26px">{{ t("download.help") }} <a href="mailto:{{ legal_contact_email }}">{{ legal_contact_email }}</a></p>
   </div>
 </section>
+{% endblock %}
+{% block scripts %}<script src="/static/qr.js" defer></script>
+<script>
+  // tinyQR 是 defer 加载的, 等 DOM 就绪再画。画的是**绝对地址**, 因为二维码要给
+  // 手机扫 —— 相对路径在手机上没有基准。
+  document.addEventListener("DOMContentLoaded", function () {
+    var c = document.getElementById("android-qr");
+    if (!c || !window.tinyQR) return;
+    try { window.tinyQR.draw(c, location.origin + "/dl/android", 132); }
+    catch (e) { c.style.display = "none"; }   // 画不出来就藏起来, 别留个空白框
+  });
+</script>
+<script>
+</script>
 {% endblock %}

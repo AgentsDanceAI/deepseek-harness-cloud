@@ -47,10 +47,25 @@ for dir in "$@"; do
   app="$DIST/$dir/DSH Cloud Desktop.app"
   [ -d "$app" ] || { echo "!! 找不到 $app" >&2; exit 1; }
 
-  echo "==> [$dir] 签名 (--for-notarization)"
+  # ⚠️ --for-notarization 只统一处理 hardened runtime **标志**; entitlements 仍然
+  # 按 rcodesign 的通用规则**只作用于主实体**。Electron 的渲染进程跑在
+  # Helper (Renderer).app 里, 它开了 hardened runtime 却拿不到 allow-jit 的话,
+  # V8 申请不到 JIT 内存 → "Failed to reserve virtual memory for CodeRange" →
+  # 渲染进程死 → 应用启动即退出 (2026-08-18 用户实测)。
+  # 而**公证照样能过** —— Apple 只校验 runtime 标志, 不校验 entitlements 够不够用。
+  # 所以每个 Helper.app 必须用 "<相对路径>:<文件>" 显式再给一遍 entitlements。
+  # (这些路径不含 @, scope 能正常表达; 含 @ 的 ripgrep 不需要 entitlements。)
+  ent_args=(--entitlements-xml-file "$ENT")
+  for nested in "$app"/Contents/Frameworks/*.app; do
+    [ -e "$nested" ] || continue
+    rel="Contents/Frameworks/$(basename "$nested")"
+    ent_args+=(--entitlements-xml-file "$rel:$ENT")
+  done
+
+  echo "==> [$dir] 签名 (--for-notarization + $(( ${#ent_args[@]} / 2 )) 组 entitlements)"
   "$RC" sign --for-notarization \
     --p12-file "$P12" --p12-password-file "$P12PW" \
-    --entitlements-xml-file "$ENT" "$app" >/dev/null
+    "${ent_args[@]}" "$app" >/dev/null
 
   echo "==> [$dir] 本地校验 hardened runtime (公证前先在本地拦一道)"
   node "$here/verify-mac-signature.mjs" "$app"

@@ -72,6 +72,33 @@ for (const p of walk(app)) {
 }
 
 console.log(`    hardened runtime: ${ok} 个已开, ${bad.length} 个未开`)
+
+// ── Helper 的 entitlements (2026-08-18 用户实测崩溃后加) ────────────────────
+// 光有 hardened runtime 不够。Electron 的渲染进程跑在 Helper (Renderer).app 里,
+// 开了 runtime 却没有 com.apple.security.cs.allow-jit 的话, V8 申请不到 JIT 内存,
+// 报 "Failed to reserve virtual memory for CodeRange" 后渲染进程死, 应用启动即退。
+// 而**公证照样通过** —— Apple 只校验 runtime 标志, 不校验 entitlements 够不够用。
+// rcodesign 的 entitlements 默认只作用于主实体, 每个 Helper 必须 scoped 再给一遍。
+const helpers = readdirSync(join(app, 'Contents', 'Frameworks'), { withFileTypes: true })
+  .filter(e => e.isDirectory() && e.name.endsWith('.app'))
+  .map(e => join(app, 'Contents', 'Frameworks', e.name))
+const noJit = []
+for (const h of helpers) {
+  const exeDir = join(h, 'Contents', 'MacOS')
+  let exe
+  try { exe = join(exeDir, readdirSync(exeDir)[0]) } catch { continue }
+  // entitlements 以明文 XML 嵌在签名超级块里, 直接找特征串即可
+  const blob = readFileSync(exe).toString('latin1')
+  if (!blob.includes('com.apple.security.cs.allow-jit')) noJit.push(h.slice(app.length + 1))
+}
+console.log(`    Helper entitlements: ${helpers.length - noJit.length}/${helpers.length} 个带 allow-jit`)
+if (noJit.length > 0) {
+  console.error('verify-mac-signature: FAILED — 以下 Helper 缺 allow-jit, 应用会启动即闪退:')
+  for (const h of noJit) console.error('  ' + h)
+  console.error('  修法: rcodesign sign 对每个 Helper 加 --entitlements-xml-file "<相对路径>:<plist>"')
+  console.error('  (entitlements 默认只作用于主实体, --for-notarization 不覆盖这一项)')
+  process.exit(1)
+}
 if (bad.length > 0) {
   console.error('verify-mac-signature: FAILED — 以下可执行体没开 hardened runtime, 公证必被拒:')
   for (const [rel, f] of bad) console.error(`  ${rel}  flags=${f}`)
