@@ -504,3 +504,15 @@ def test_item_of_round_trips_every_sellable_kind():
     for item in ("plan:pro:yearly", "pack:pack1000", "seats:3", "workpass:week"):
         info = dict(base.resolve_item(item))
         assert waffo_provider._item_of(info) == item, item
+
+
+def test_workspace_assets_are_version_stamped():
+    """Cloudflare caches /pwa/*.css for 24h. Those stylesheets carry the phone
+    layout fixes, so an unversioned URL means a layout fix ships a day late —
+    the stale copy IS the bug being fixed."""
+    import re
+    from app import workspace
+    head = workspace._pwa_inject()
+    assert "{asset_v}" not in head, "version placeholder was not substituted"
+    for asset in ("mobile.css", "workspace-chrome.css", "workspace-chrome.js"):
+        assert re.search(rf"{re.escape(asset)}\?v=\w+", head), f"{asset} is not version-stamped"

@@ -18,3 +18,48 @@
 @media (display-mode: standalone) {
   body { padding-top: env(safe-area-inset-top); } /* notch clearance in app mode */
 }
+
+/* ---------- expanded sidebar must not squeeze the chat ----------
+   dsh lays the workspace out as a CSS GRID with a column for the sidebar and a
+   column for the chat. That is right on a laptop and unusable on a phone:
+   expanding the sidebar leaves it 280px and the conversation 110px, narrow
+   enough that CJK text renders one character per line.
+
+   The fix is three coordinated changes — a partial one leaves the chat at zero
+   width, because overriding flex properties on a grid child does nothing:
+     1. collapse the grid to a single column, so the sidebar's track disappears;
+     2. take the sidebar out of flow so expanding it overlays rather than pushes;
+     3. inset the chat by the collapsed rail's width so the rail never covers it.
+
+   The parent is matched through :has() rather than by its own hashed class, so
+   only the child name (`…_sidebarCol`) has to stay stable across upstream
+   builds. If it stops matching, the layout degrades to today's squeeze rather
+   than breaking. */
+@media (max-width: 760px) {
+  :has(> [class*="sidebarCol"]) { grid-template-columns: 1fr !important; }
+  [class*="sidebarCol"] {
+    position: fixed !important;
+    top: 0; bottom: 0; left: 0;
+    z-index: 60;
+    background: var(--dsh-surface, Canvas);
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, .06), 8px 0 32px -12px rgba(0, 0, 0, .35);
+  }
+  [class*="centerCol"] {
+    width: auto !important;
+    max-width: none !important;
+    min-width: 0;
+    margin-left: 60px;          /* the collapsed rail keeps its own space */
+  }
+  /* Scrim, so an open drawer reads as a layer over the chat rather than as a
+     half-covered page. Only while expanded — dsh marks the collapsed rail with
+     a `…_collapsed` class on its inner root. Sits inside the sidebar's own
+     stacking context at z-index -1: above the chat, beneath the drawer. */
+  [class*="sidebarCol"]:not(:has([class*="collapsed"]))::after {
+    content: "";
+    position: fixed;
+    top: 0; bottom: 0; left: 100%;
+    width: 100vw;
+    z-index: -1;
+    background: rgba(8, 16, 30, .38);
+  }
+}

@@ -633,19 +633,29 @@ async def work_route(request: Request):
 
 # --- PWA shell: the workspace document with mobile/PWA layers injected -------
 
-_PWA_INJECT = """
+# Versioned so a CSS fix reaches phones today rather than whenever Cloudflare's
+# 24-hour cache expires. The workspace's stylesheets carry the mobile layout
+# fixes, so a stale copy is exactly the bug the fix was for.
+_PWA_INJECT_TMPL = """
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#0b1c38">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="DSH Cloud">
+<meta name="apple-mobile-web-app-title" content="deepseek-harness-cloud">
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="apple-touch-icon" href="/pwa/icon-180.png">
-<link rel="stylesheet" href="/pwa/mobile.css">
-<link rel="stylesheet" href="/pwa/workspace-chrome.css">
-<script>if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catch(function(){})}</script>
-<script defer src="/pwa/workspace-chrome.js"></script>
+<link rel="stylesheet" href="/pwa/mobile.css?v={asset_v}">
+<link rel="stylesheet" href="/pwa/workspace-chrome.css?v={asset_v}">
+<script>if('serviceWorker' in navigator){{navigator.serviceWorker.register('/sw.js').catch(function(){{}})}}</script>
+<script defer src="/pwa/workspace-chrome.js?v={asset_v}"></script>
 """
+
+
+def _pwa_inject() -> str:
+    """The injected head block, stamped with the current asset version."""
+    from .webpages import ASSET_V
+    return _PWA_INJECT_TMPL.replace("{asset_v}", ASSET_V)
+
 
 
 @router.get("/api/work/shell")
@@ -679,7 +689,7 @@ async def work_shell(request: Request):
         return RedirectResponse(f"{site}/work/starting", status_code=302)
     html = upstream.text
     if "</head>" in html:
-        html = html.replace("</head>", _PWA_INJECT + "</head>", 1)
+        html = html.replace("</head>", _pwa_inject() + "</head>", 1)
     return HTMLResponse(html, headers={"cache-control": "no-store"})
 
 

@@ -694,7 +694,10 @@ form .btn-block { margin-top: 16px; }
 .nav-menu a,
 .nav-menu strong { color: var(--fg); }
 .nav-menu span:not(.nav-ico) { color: var(--faint); }
-@media (max-width: 860px) { .nav-group { display: none; } }
+/* Hide the product/solutions menus on a phone — but NOT the account menu.
+   Blanket-hiding .nav-group took 控制台 / 团队 / 退出登录 with it, leaving a
+   signed-in phone user with no way to reach their account or sign out. */
+@media (max-width: 860px) { .nav-group:not(.nav-group-end) { display: none; } }
 
 /* ---------- right-hand account control ----------
    The nav row itself is state-independent; everything that changes when you
@@ -718,7 +721,7 @@ form .btn-block { margin-top: 16px; }
 .nav-signin { color: rgba(220, 231, 247, .78); }
 .nav-signin:hover { color: #fff; }
 .nav-menu-head strong { color: var(--fg); }
-@media (max-width: 860px) { .nav-signin { display: none; } }
+@media (max-width: 470px) { .nav-signin { display: none; } }
 
 
 /* ---------- hero composer (the homepage's primary control) ---------- */
@@ -1088,3 +1091,27 @@ body:not([data-page="landing"]) .site-header::after {
   background: linear-gradient(180deg, rgba(11, 28, 56, .40), rgba(11, 28, 56, 0));
 }
 body:not([data-page="landing"]) .section:first-of-type { position: relative; z-index: 1; }
+
+/* ---------- phone header ----------
+   The row is brand + links + two CTA buttons + account. On a 390px phone that
+   needs 637px, so the browser scaled the whole page down: the header background
+   stopped covering the viewport, the buttons hung off the right edge, and every
+   table below inherited the widened viewport. Nothing here is a table bug — the
+   header was the only thing overflowing.
+
+   Order of sacrifice on a narrow screen: nav links (they are in the footer and
+   the dropdowns are already hidden), then button padding, then the wordmark —
+   the two ways into the product are the last thing to give up. */
+@media (max-width: 760px) {
+  .nav-row { gap: 12px; height: 58px; }
+  .site-nav > a:not(.btn) { display: none; }
+  .nav-account { gap: 8px; }
+  .nav-account .btn-sm { padding: 7px 11px; font-size: 13px; white-space: nowrap; }
+  .brand-name { font-size: 15px; }
+}
+@media (max-width: 470px) {
+  /* The wordmark is 22 characters; at this width it costs more than it earns.
+     The logo mark still links home and the <title> still names the site. */
+  .brand-name { display: none; }
+  .nav-account .btn-sm { padding: 7px 9px; font-size: 12.5px; }
+}
