@@ -4,10 +4,10 @@
 <section class="section">
   <div class="container container-narrow">
     <nav class="legal-nav">
-      <a href="/legal/terms" {% if doc == 'terms' %}class="active"{% endif %}>服务条款</a>
-      <a href="/legal/privacy" {% if doc == 'privacy' %}class="active"{% endif %}>隐私政策</a>
-      <a href="/legal/refund" {% if doc == 'refund' %}class="active"{% endif %}>退款政策</a>
-      <a href="/legal/aup" {% if doc == 'aup' %}class="active"{% endif %}>可接受使用政策</a>
+      <a href="/legal/terms" {% if doc == 'terms' %}class="active"{% endif %}>{{ t("common.terms") }}</a>
+      <a href="/legal/privacy" {% if doc == 'privacy' %}class="active"{% endif %}>{{ t("common.privacy") }}</a>
+      <a href="/legal/refund" {% if doc == 'refund' %}class="active"{% endif %}>{{ t("common.refund") }}</a>
+      <a href="/legal/aup" {% if doc == 'aup' %}class="active"{% endif %}>{{ t("common.aup") }}</a>
     </nav>
     {# Cloudflare's Email Address Obfuscation rewrites every address on the page
        into "[email protected]" plus a JS decoder. A human reviewer with JS on
@@ -19,13 +19,13 @@
     <article class="card block legal-doc">
       {% if pending %}
         <h1>{{ doc_title }}</h1>
-        <div class="banner">文档整理中，敬请期待。如有疑问请联系
-          <a href="mailto:{{ legal_contact_email }}">{{ legal_contact_email }}</a>。</div>
+        <div class="banner">{{ t("legal.pending") }}
+          <a href="mailto:{{ legal_contact_email }}">{{ legal_contact_email }}</a>{{ t("legal.pending_end") }}</div>
       {% else %}
         {{ body_html | safe }}
       {% endif %}
       <hr>
-      <p class="muted small">运营主体：{{ legal_entity_zh }} · 联系邮箱：<a href="mailto:{{ legal_contact_email }}">{{ legal_contact_email }}</a></p>
+      <p class="muted small">{{ t("legal.operator") }} {{ legal_entity_zh }} · {{ t("legal.contact") }} <a href="mailto:{{ legal_contact_email }}">{{ legal_contact_email }}</a></p>
     </article>
     <!--/email_off-->
   </div>

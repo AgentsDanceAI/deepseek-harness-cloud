@@ -1,19 +1,18 @@
 {% extends "base.html" %}
-{% block title %}继续使用云工作台 — deepseek-harness-cloud{% endblock %}
+{% block title %}{{ t("work_upgrade.title") }}{% endblock %}
 {% block content %}
 <section class="section">
   <div class="container">
     <div class="paywall">
-      <span class="eyebrow">云工作台</span>
+      <span class="eyebrow">{{ t("work_upgrade.eyebrow") }}</span>
       <h1 class="section-title" style="margin-bottom:10px">
-        {% if pass_active %}你的通行证已生效{% else %}免费机时已用完{% endif %}
+        {% if pass_active %}{{ t("work_upgrade.h1_active") }}{% else %}{{ t("work_upgrade.h1_used_up") }}{% endif %}
       </h1>
       <p class="section-lede">
         {% if pass_active %}
-          有效期至 {{ pass_expires_text }}，期间云工作台随开随用。
+          {{ t("work_upgrade.lede_active", date=pass_expires_text) }}
         {% else %}
-          你已经用掉了 {{ (work_free_minutes // 60) }} 小时免费机时——这是智能体<b>实际干活</b>的时长，
-          读回复、开着页面走开都不计入。继续用的话，开一张通行证就行。
+          {{ t("work_upgrade.lede_used_pre", hours=(work_free_minutes // 60)) }}<b>{{ t("work_upgrade.lede_used_em") }}</b>{{ t("work_upgrade.lede_used_post") }}
         {% endif %}
       </p>
 
@@ -21,38 +20,38 @@
       <div class="offer">
         <div class="price">
           {{ currency_symbol }}{{ '%.2f'|format(next_price / 100) }}
-          <span class="per">/ {{ work_pass_days }} 天</span>
+          <span class="per">/ {{ t("work_upgrade.per_days", days=work_pass_days) }}</span>
         </div>
         {% if next_price_kind == 'intro' %}
           <p class="plan-note" style="margin-top:8px">
-            首张通行证特价<span class="price-was">{{ currency_symbol }}{{ '%.2f'|format(standard_price / 100) }}</span>
-            <span class="off-badge">省 {{ ((1 - next_price / standard_price) * 100) | round | int }}%</span><br>
-            到期后按标准价 {{ currency_symbol }}{{ '%.2f'|format(standard_price / 100) }} / {{ work_pass_days }} 天续期，可随时不续。
+            {{ t("work_upgrade.intro_label") }}<span class="price-was">{{ currency_symbol }}{{ '%.2f'|format(standard_price / 100) }}</span>
+            <span class="off-badge">{{ t("work_upgrade.save_pct", pct=((1 - next_price / standard_price) * 100) | round | int) }}</span><br>
+            {{ t("work_upgrade.renew_note", price=(currency_symbol ~ ('%.2f'|format(standard_price / 100))), days=work_pass_days) }}
           </p>
         {% else %}
-          <p class="plan-note" style="margin-top:8px">标准价 · 到期自动失效，不自动续费。</p>
+          <p class="plan-note" style="margin-top:8px">{{ t("work_upgrade.standard_note") }}</p>
         {% endif %}
 
         <button class="btn btn-primary btn-block" id="buy-workpass" style="margin-top:18px">
-          开通并继续
+          {{ t("work_upgrade.buy_btn") }}
         </button>
         <p class="form-error" id="buy-error" hidden></p>
 
         <ul>
-          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 13 4 4L19 7"/></svg>{{ work_pass_days }} 天内云工作台不限机时</li>
-          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 13 4 4L19 7"/></svg>文件与会话保留，换设备接着用</li>
-          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 13 4 4L19 7"/></svg>个人成品：做出来的网页可直接公网打开</li>
-          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 13 4 4L19 7"/></svg>模型与搜索用量另按积分计，用多少扣多少</li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 13 4 4L19 7"/></svg>{{ t("work_upgrade.feat_unlimited", days=work_pass_days) }}</li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 13 4 4L19 7"/></svg>{{ t("work_upgrade.feat_persist") }}</li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 13 4 4L19 7"/></svg>{{ t("work_upgrade.feat_outputs") }}</li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 13 4 4L19 7"/></svg>{{ t("work_upgrade.feat_credits") }}</li>
         </ul>
       </div>
       {% else %}
-      <a class="btn btn-primary btn-block" href="/work" style="max-width:280px;margin:24px auto 0">进入云工作台 →</a>
+      <a class="btn btn-primary btn-block" href="/work" style="max-width:280px;margin:24px auto 0">{{ t("work_upgrade.enter_cta") }}</a>
       {% endif %}
 
       <p class="muted small" style="margin-top:26px">
-        不想开通也可以继续用：<a href="/download">桌面客户端</a>在你自己的电脑上跑，不占云端机时。
+        {{ t("work_upgrade.alt_pre") }}<a href="/download">{{ t("work_upgrade.alt_link") }}</a>{{ t("work_upgrade.alt_post") }}
       </p>
-      <p class="auth-back" style="margin-top:14px"><a href="/console">← 返回控制台</a></p>
+      <p class="auth-back" style="margin-top:14px"><a href="/console">{{ t("work_upgrade.back_console") }}</a></p>
     </div>
   </div>
 </section>
@@ -65,22 +64,22 @@
   var err = document.getElementById('buy-error');
   btn.addEventListener('click', function () {
     btn.disabled = true;
-    btn.textContent = '正在创建订单…';
+    btn.textContent = {{ t("work_upgrade.creating_order") | tojson }};
     fetch('/api/pay/checkout', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ item: 'workpass:week' })
     }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
       .then(function (res) {
-        if (!res.ok) throw new Error((res.d && res.d.detail) || '下单失败');
+        if (!res.ok) throw new Error((res.d && res.d.detail) || {{ t("work_upgrade.order_failed") | tojson }});
         if (res.d.pay_url) { location.href = res.d.pay_url; return; }
         if (res.d.intent) { location.href = '/orders?intent=' + encodeURIComponent(res.d.order_id); return; }
         location.href = '/orders';
       })
       .catch(function (e) {
         btn.disabled = false;
-        btn.textContent = '开通并继续';
-        err.textContent = e.message || '下单失败，请稍后重试';
+        btn.textContent = {{ t("work_upgrade.buy_btn") | tojson }};
+        err.textContent = e.message || {{ t("work_upgrade.order_failed_retry") | tojson }};
         err.hidden = false;
       });
   });

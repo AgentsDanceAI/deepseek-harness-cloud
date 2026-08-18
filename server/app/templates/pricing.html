@@ -1,14 +1,18 @@
 {% extends "base.html" %}
-{% block title %}定价 — deepseek-harness-cloud{% endblock %}
+{% block title %}{{ t("pricing.title") }}{% endblock %}
 {% block content %}
+{# The tier loop below binds `t` to the tier it is rendering, which shadows the
+   translation helper for the length of the loop — so keep a second handle on
+   it here and use `_t` inside. #}
+{% set _t = t %}
 <section class="section">
   <div class="container">
-    <h1 class="section-title" id="plans">定价</h1>
-    <p class="center muted">积分按上游模型牌价用量折算，用多少扣多少 · 套餐积分当期有效 · 积分包 12 个月有效</p>
+    <h1 class="section-title" id="plans">{{ t("pricing.h1") }}</h1>
+    <p class="center muted">{{ t("pricing.lede") }}</p>
 
     <div class="cycle-toggle center" role="tablist">
-      <button class="tab active" data-cycle="monthly" type="button">月付</button>
-      <button class="tab" data-cycle="yearly" type="button">年付<span class="tag">约 10 个月价</span></button>
+      <button class="tab active" data-cycle="monthly" type="button">{{ t("pricing.cycle.monthly") }}</button>
+      <button class="tab" data-cycle="yearly" type="button">{{ t("pricing.cycle.yearly") }}<span class="tag">{{ t("pricing.cycle.yearly_tag") }}</span></button>
     </div>
 
     <div class="grid grid-4 plan-grid">
@@ -19,26 +23,29 @@
         {% set std = t.monthly_cents or 0 %}
         {% set off = ((1 - intro / std) * 100) | round | int if (intro and std and intro < std) else 0 %}
         <div class="card plan {% if tier == 'pro' %}highlight{% endif %}">
-          {% if tier == 'pro' %}<div class="ribbon">推荐</div>{% endif %}
+          {% if tier == 'pro' %}<div class="ribbon">{{ _t("pricing.ribbon") }}</div>{% endif %}
           {% if free %}
             <span class="tier-plain">Free</span>
           {% else %}
             <span class="tier-pill">{{ t.name | lower }}</span>
           {% endif %}
-          <p class="tier-tagline">{{ t.tagline or '' }}</p>
+          {# The tagline lives in the price table, so it is the one string on this page
+             the template sweep could not see. Keyed by tier id; a new tier without a
+             key renders the key itself, which is meant to be noticed. #}
+          <p class="tier-tagline">{{ _t("pricing.tagline." ~ tier) }}</p>
 
           {# monthly view: first-period price struck through against standard #}
           <div data-period-view="monthly" {% if false %}hidden{% endif %}>
             <div class="price-row">
               <span class="price-now">{{ currency_symbol }}{{ (intro if intro else std) // 100 }}</span>
               {% if off %}<span class="price-was">{{ currency_symbol }}{{ std // 100 }}</span>{% endif %}
-              <span class="per">/月</span>
-              {% if off %}<span class="off-badge">省 {{ off }}%</span>{% endif %}
+              <span class="per">{{ _t("pricing.per_month") }}</span>
+              {% if off %}<span class="off-badge">{{ _t("pricing.save_pct", pct=off) }}</span>{% endif %}
             </div>
             <p class="plan-note">
-              {% if free %}永久免费
-              {% else %}首月价 · 次月起 {{ currency_symbol }}{{ std // 100 }}/月 ·
-                <button type="button" class="link-btn" data-goto-yearly>年付更省 →</button>
+              {% if free %}{{ _t("pricing.plan.free_forever") }}
+              {% else %}{{ _t("pricing.plan.intro_note", price=currency_symbol ~ (std // 100)) }} ·
+                <button type="button" class="link-btn" data-goto-yearly>{{ _t("pricing.plan.yearly_cheaper") }}</button>
               {% endif %}
             </p>
           </div>
@@ -47,39 +54,40 @@
             <div class="price-row">
               <span class="price-now">{{ currency_symbol }}{{ (t.yearly_per_month_cents or 0) // 100 }}</span>
               {% if std %}<span class="price-was">{{ currency_symbol }}{{ std // 100 }}</span>{% endif %}
-              <span class="per">/月</span>
+              <span class="per">{{ _t("pricing.per_month") }}</span>
               {% if std and t.yearly_per_month_cents %}
-                <span class="off-badge">省 {{ ((1 - t.yearly_per_month_cents / std) * 100) | round | int }}%</span>
+                <span class="off-badge">{{ _t("pricing.save_pct", pct=((1 - t.yearly_per_month_cents / std) * 100) | round | int) }}</span>
               {% endif %}
             </div>
             <p class="plan-note">
-              {% if free %}永久免费
-              {% else %}按年计费 · {{ currency_symbol }}{{ (t.yearly_cents or 0) // 100 }}/年
-                （省 {{ currency_symbol }}{{ (std * 12 - (t.yearly_cents or 0)) // 100 }}）
+              {% if free %}{{ _t("pricing.plan.free_forever") }}
+              {% else %}{{ _t("pricing.plan.yearly_note",
+                              price=currency_symbol ~ ((t.yearly_cents or 0) // 100),
+                              saved=currency_symbol ~ ((std * 12 - (t.yearly_cents or 0)) // 100)) }}
               {% endif %}
             </p>
           </div>
 
           {% if free %}
-            <a class="btn btn-ghost btn-block" href="/login">免费开始</a>
+            <a class="btn btn-ghost btn-block" href="/login">{{ _t("pricing.plan.start_free") }}</a>
           {% else %}
             <button class="btn {% if tier == 'pro' %}btn-primary{% else %}btn-ghost{% endif %} btn-block buy-btn"
                     data-item-monthly="plan:{{ tier }}:monthly" data-item-yearly="plan:{{ tier }}:yearly"
-                    type="button">订阅 {{ t.name }}</button>
+                    type="button">{{ _t("pricing.plan.subscribe", name=t.name) }}</button>
           {% endif %}
 
           <ul class="plain">
             {% if free %}
-              <li>注册送 {{ '{:,}'.format(t.signup_credits or 0) }} 积分</li>
+              <li>{{ _t("pricing.plan.signup_credits", n='{:,}'.format(t.signup_credits or 0)) }}</li>
             {% else %}
-              <li>每月 {{ '{:,}'.format(t.monthly_credits) }} 积分<span class="muted small">（模型 / 搜索）</span></li>
+              <li>{{ _t("pricing.plan.monthly_credits", n='{:,}'.format(t.monthly_credits)) }}<span class="muted small">{{ _t("pricing.plan.credits_scope") }}</span></li>
             {% endif %}
-            <li>云工作台 <b>{{ (t.work_minutes or 0) // 60 }} 小时 / 月</b><span class="muted small">（机时另计，不扣积分）</span></li>
-            <li>{{ t.concurrency }} 路并发</li>
-            <li>全部模型可用<span class="muted small">（按倍率扣积分）</span></li>
+            <li>{{ _t("pricing.plan.workspace_label") }} <b>{{ _t("pricing.plan.hours_per_month", n=(t.work_minutes or 0) // 60) }}</b><span class="muted small">{{ _t("pricing.plan.hours_note") }}</span></li>
+            <li>{{ _t("pricing.plan.concurrency", n=t.concurrency) }}</li>
+            <li>{{ _t("pricing.plan.all_models") }}<span class="muted small">{{ _t("pricing.plan.multiplier_note") }}</span></li>
           </ul>
           <details class="model-list">
-            <summary><span id="model-count-{{ tier }}">全部模型</span>，按倍率计费</summary>
+            <summary><span id="model-count-{{ tier }}">{{ _t("pricing.plan.all_models_short") }}</span>{{ _t("pricing.plan.billed_by_multiplier") }}</summary>
             <div class="model-rows" data-model-rows></div>
           </details>
         </div>
@@ -87,119 +95,114 @@
     </div>
 
     <p class="center muted small" style="margin-top:18px">
-      价格以 {{ currency }} 计，未含税（如适用将在收银台按所在地计算）· 按周期预付，到期不自动扣款
+      {{ t("pricing.tax_note", currency=currency) }}
     </p>
 
     {# Two meters, deliberately kept apart: credits pay for tokens, minutes pay
        for the machine. One number covering both made the bill unreadable. #}
-    <h2 class="section-title" id="workspace" style="margin-top:64px">云工作台机时</h2>
+    <h2 class="section-title" id="workspace" style="margin-top:64px">{{ t("pricing.workspace.h2") }}</h2>
     <p class="center muted" style="max-width:640px;margin-inline:auto">
-      机时和积分是<b>两本账</b>：积分用于模型与搜索，机时用于容器运行——就像 CI 的构建分钟数。
-      每档套餐含不同机时（见上表），且只算智能体<b>实际干活</b>的分钟，
-      读回复、开着页面走开都不计。
+      {{ t("pricing.workspace.lede_1") }}<b>{{ t("pricing.workspace.lede_2") }}</b>{{ t("pricing.workspace.lede_3") }}<b>{{ t("pricing.workspace.lede_4") }}</b>{{ t("pricing.workspace.lede_5") }}
     </p>
     <div class="grid grid-3" style="max-width:900px;margin:22px auto 0">
       <div class="card pack">
-        <h3>免费额度</h3>
+        <h3>{{ t("pricing.workspace.free_h3") }}</h3>
         <div class="price"><span class="currency">{{ currency_symbol }}</span>0</div>
-        <p class="muted">{{ (work_free_minutes // 60) }} 小时 / 月 · 注册即得</p>
-        <a class="btn btn-ghost btn-block" href="/work">直接开始</a>
+        <p class="muted">{{ t("pricing.workspace.free_note", hours=(work_free_minutes // 60)) }}</p>
+        <a class="btn btn-ghost btn-block" href="/work">{{ t("pricing.workspace.free_cta") }}</a>
       </div>
       <div class="card pack plan-popular">
-        <div class="plan-flag">机时不够用</div>
+        <div class="plan-flag">{{ t("pricing.workspace.upgrade_flag") }}</div>
         <div class="plan-body">
-          <h3>升级套餐</h3>
-          <div class="price" style="font-size:26px;letter-spacing:-.3px">最多 200 小时 / 月</div>
-          <p class="muted">机时随套餐档次提升，同时含更多积分与并发</p>
-          <a class="btn btn-primary btn-block" href="#plans">查看套餐</a>
+          <h3>{{ t("pricing.workspace.upgrade_h3") }}</h3>
+          <div class="price" style="font-size:26px;letter-spacing:-.3px">{{ t("pricing.workspace.upgrade_headline") }}</div>
+          <p class="muted">{{ t("pricing.workspace.upgrade_note") }}</p>
+          <a class="btn btn-primary btn-block" href="#plans">{{ t("pricing.workspace.upgrade_cta") }}</a>
         </div>
       </div>
       <div class="card pack">
-        <h3>{{ work_pass_days }} 天通行证</h3>
+        <h3>{{ t("pricing.workspace.pass_h3", days=work_pass_days) }}</h3>
         <div class="price">
           <span class="currency">{{ currency_symbol }}</span>{{ '%.2f'|format(work_pass_intro_price / 100) }}
         </div>
         <p class="muted">
-          不想订阅就买这个。首张特价<span class="price-was">{{ currency_symbol }}{{ '%.2f'|format(work_pass_price / 100) }}</span><br>
-          期间机时不限，到期自动失效不续费
+          {{ t("pricing.workspace.pass_note_1") }}<span class="price-was">{{ currency_symbol }}{{ '%.2f'|format(work_pass_price / 100) }}</span><br>
+          {{ t("pricing.workspace.pass_note_2") }}
         </p>
-        <button class="btn btn-ghost btn-block buy-btn" data-item="workpass:week" type="button">开通</button>
+        <button class="btn btn-ghost btn-block buy-btn" data-item="workpass:week" type="button">{{ t("pricing.workspace.pass_cta") }}</button>
       </div>
     </div>
 
     {# Seats and a shared pool: the thing an organisation buys is not N personal
        accounts, it is one balance several people draw from. #}
-    <h2 class="section-title" id="team" style="margin-top:64px">团队与企业</h2>
-    <p class="center muted">按席位订阅，积分在组织内共享；或把开源代码部署到自己的机器上。</p>
+    <h2 class="section-title" id="team" style="margin-top:64px">{{ t("pricing.team.h2") }}</h2>
+    <p class="center muted">{{ t("pricing.team.lede") }}</p>
     <div class="grid grid-2" style="max-width:720px;margin:22px auto 0">
       <div class="card pack">
-        <h3>团队席位</h3>
-        <div class="price"><span class="currency">{{ currency_symbol }}</span>{{ '%.2f'|format(team_seat_price / 100) }}<span class="per">/席位/月</span></div>
+        <h3>{{ t("pricing.team.seats_h3") }}</h3>
+        <div class="price"><span class="currency">{{ currency_symbol }}</span>{{ '%.2f'|format(team_seat_price / 100) }}<span class="per">{{ t("pricing.team.per_seat_month") }}</span></div>
         <p class="muted">
-          每席含 {{ '{:,}'.format(team_seat_credits) }} 积分 + {{ team_seat_minutes // 60 }} 小时机时，统一进组织池共享<br>
-          {{ team_seat_min }} 席起 · 满 10 席 9 折、25 席 85 折、50 席 8 折<br>
-          成员用量可见 · 可给每人设上限
+          {{ t("pricing.team.seat_line1", credits='{:,}'.format(team_seat_credits), hours=team_seat_minutes // 60) }}<br>
+          {{ t("pricing.team.seat_line2", min=team_seat_min) }}<br>
+          {{ t("pricing.team.seat_line3") }}
         </p>
-        <a class="btn btn-primary btn-block" href="/console/team">创建团队</a>
+        <a class="btn btn-primary btn-block" href="/console/team">{{ t("pricing.team.create_cta") }}</a>
       </div>
       <div class="card pack">
-        <h3>企业私有化</h3>
-        <div class="price" style="font-size:26px;letter-spacing:-.3px">部署即拥有</div>
-        <p class="muted">开源代码部署到你的服务器，数据不出内网，模型上游换成你自己的</p>
-        <a class="btn btn-ghost btn-block" href="/resources#selfhost">自部署指南</a>
+        <h3>{{ t("pricing.team.selfhost_h3") }}</h3>
+        <div class="price" style="font-size:26px;letter-spacing:-.3px">{{ t("pricing.team.selfhost_headline") }}</div>
+        <p class="muted">{{ t("pricing.team.selfhost_note") }}</p>
+        <a class="btn btn-ghost btn-block" href="/resources#selfhost">{{ t("pricing.team.selfhost_cta") }}</a>
       </div>
     </div>
 
-    <h2 class="section-title" id="packs" style="margin-top:64px">积分包</h2>
-    <p class="center muted">不想订阅？按量购买积分包，12 个月内有效。</p>
+    <h2 class="section-title" id="packs" style="margin-top:64px">{{ t("pricing.packs.h2") }}</h2>
+    <p class="center muted">{{ t("pricing.packs.lede") }}</p>
     <div class="grid grid-3 pack-grid">
       {% for pid, p in pricing.packs.items() %}
       <div class="card pack">
         <h3>{{ p.name }}</h3>
         <div class="price"><span class="currency">{{ currency_symbol }}</span>{{ p.cents // 100 }}</div>
-        <p class="muted">{{ '{:,}'.format(p.credits) }} 积分 · {{ p.valid_days }} 天内有效</p>
-        <button class="btn btn-primary btn-block buy-btn" data-item="pack:{{ pid }}" type="button">购买</button>
+        <p class="muted">{{ t("pricing.packs.pack_note", credits='{:,}'.format(p.credits), days=p.valid_days) }}</p>
+        <button class="btn btn-primary btn-block buy-btn" data-item="pack:{{ pid }}" type="button">{{ t("pricing.packs.buy") }}</button>
       </div>
       {% endfor %}
     </div>
 
     <div class="card block faq">
-      <h2>常见问题</h2>
-      <h3>积分怎么计费？</h3>
-      <p class="muted">按上游模型牌价折算，按实际输入/输出 tokens 结算，用多少扣多少；明细在控制台逐条可查。</p>
-      <h3>套餐积分和积分包积分有什么区别？</h3>
-      <p class="muted">套餐积分在订阅周期内有效（月付 31 天 / 年付 366 天）；积分包积分 12 个月内有效。扣费时优先使用先到期的积分。</p>
-      <h3>积分和机时有什么区别？</h3>
+      <h2>{{ t("pricing.faq.h2") }}</h2>
+      <h3>{{ t("pricing.faq.q1") }}</h3>
+      <p class="muted">{{ t("pricing.faq.a1") }}</p>
+      <h3>{{ t("pricing.faq.q2") }}</h3>
+      <p class="muted">{{ t("pricing.faq.a2") }}</p>
+      <h3>{{ t("pricing.faq.q3") }}</h3>
       <p class="muted">
-        两本账，互不挪用：<b>积分</b>用于模型调用与联网搜索，按 token 用量扣；
-        <b>机时</b>用于云工作台容器运行，按分钟计，像 CI 的构建分钟数。
-        跑一个不怎么调模型的长任务只消耗机时，不扣积分；在桌面端用模型只扣积分，不占机时。
+        {{ t("pricing.faq.a3_1") }}<b>{{ t("pricing.faq.a3_2") }}</b>{{ t("pricing.faq.a3_3") }}<b>{{ t("pricing.faq.a3_4") }}</b>{{ t("pricing.faq.a3_5") }}
       </p>
-      <h3>机时用完了会怎样？</h3>
+      <h3>{{ t("pricing.faq.q4") }}</h3>
       <p class="muted">
-        当前任务不会被打断，下一个任务会提示升级。可以升级套餐（每档含更多机时）、
-        买 {{ work_pass_days }} 天通行证，或改用桌面客户端（在你自己的电脑上跑，不占机时）。
+        {{ t("pricing.faq.a4", days=work_pass_days) }}
       </p>
-      <h3>可以退款吗？</h3>
-      <p class="muted">详见 <a href="/legal/refund">退款政策</a>。</p>
+      <h3>{{ t("pricing.faq.q5") }}</h3>
+      <p class="muted">{{ t("pricing.faq.a5_prefix") }}<a href="/legal/refund">{{ t("common.refund") }}</a>{{ t("pricing.faq.a5_suffix") }}</p>
     </div>
   </div>
 </section>
 
 <div id="qr-modal" class="modal" hidden>
   <div class="modal-box card">
-    <h3>微信扫码支付</h3>
+    <h3>{{ t("pricing.qr.title") }}</h3>
     <canvas id="qr-canvas" width="220" height="220"></canvas>
-    <p class="muted small">请使用微信扫描二维码完成支付。<br>支付完成后将自动跳转。</p>
-    <button class="btn btn-ghost btn-block" type="button" id="qr-close">取消</button>
+    <p class="muted small">{{ t("pricing.qr.line_1") }}<br>{{ t("pricing.qr.line_2") }}</p>
+    <button class="btn btn-ghost btn-block" type="button" id="qr-close">{{ t("pricing.modal.cancel") }}</button>
   </div>
 </div>
 
 <div id="provider-modal" class="modal" hidden>
   <div class="modal-box card">
-    <h3>选择支付方式</h3>
+    <h3>{{ t("pricing.provider.title") }}</h3>
     <div id="provider-list" class="btn-col"></div>
-    <button class="btn btn-ghost btn-block" type="button" id="provider-close">取消</button>
+    <button class="btn btn-ghost btn-block" type="button" id="provider-close">{{ t("pricing.modal.cancel") }}</button>
   </div>
 </div>
 {% endblock %}

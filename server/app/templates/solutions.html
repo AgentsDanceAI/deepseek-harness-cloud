@@ -1,87 +1,82 @@
 {% extends "base.html" %}
-{% block title %}解决方案 — deepseek-harness-cloud{% endblock %}
+{% block title %}{{ t("solutions.title") }}{% endblock %}
 {% block content %}
-{# The four sections here are exactly the four entries in the 解决方案 dropdown,
+{# The four sections here are exactly the four entries in the Solutions dropdown,
    in the same order and under the same names. A menu that promises four things
    and lands on a page describing different ones is worse than no menu. #}
 <section class="section">
   <div class="container">
-    <span class="eyebrow">解决方案</span>
-    <h1 class="section-title">按你的组织形态选一种</h1>
+    <span class="eyebrow">{{ t("nav.solutions") }}</span>
+    <h1 class="section-title">{{ t("solutions.h1") }}</h1>
     <p class="section-lede">
-      前两种决定<b>系统装在哪</b>，后两种决定<b>额度怎么买</b>。可以组合：
-      自部署一套，同时在我们这里买积分包给外部协作者用。
+      {{ t("solutions.lede") }}
     </p>
 
     <div id="enterprise" class="card feature" style="margin-top:32px">
-      <span class="eyebrow">企业部署</span>
-      <h2>部署一份，得到内部专用的 dsh 云平台</h2>
+      <span class="eyebrow">{{ t("nav.s.enterprise") }}</span>
+      <h2>{{ t("solutions.enterprise.title") }}</h2>
       <p>
-        代码开源。把它部署到你自己的服务器或私有云上，就得到一套完整的内部智能体平台：
-        账号体系、额度管理、云工作台、模型网关全都在你的边界内，数据不出内网。
+        {{ t("solutions.enterprise.body") }}
       </p>
       <ul class="check-list">
-        <li>docker compose 一条命令起全栈</li>
-        <li>模型上游换成你自己的（自建、专属网关或公有云均可）</li>
-        <li>网关是 OpenAI 兼容接口，现有代码改一个 base_url 就能接进来</li>
-        <li>可对接内部账号体系，用量按部门核算</li>
+        <li>{{ t("solutions.enterprise.li1") }}</li>
+        <li>{{ t("solutions.enterprise.li2") }}</li>
+        <li>{{ t("solutions.enterprise.li3") }}</li>
+        <li>{{ t("solutions.enterprise.li4") }}</li>
       </ul>
-      <a class="btn btn-ghost" href="/resources#selfhost" style="margin-top:16px">自部署指南</a>
+      <a class="btn btn-ghost" href="/resources#selfhost" style="margin-top:16px">{{ t("home.oss.selfhost") }}</a>
     </div>
 
     <div id="teams" class="card feature" style="margin-top:20px">
-      <span class="eyebrow">按席付费</span>
-      <h2>按席位订阅，积分与机时组织内共享</h2>
+      <span class="eyebrow">{{ t("nav.s.teams") }}</span>
+      <h2>{{ t("solutions.teams.title") }}</h2>
       <p>
-        管理员购买席位并邀请成员，全员共用一个积分池和机时池，谁用了多少在后台一目了然。
-        不用给每个人单独申请模型密钥，也不用各自报销。
+        {{ t("solutions.teams.body") }}
       </p>
       <ul class="check-list">
-        <li>席位按月/年订阅，可随时增减，{{ team_seat_min }} 席起</li>
-        <li>共享池叠加在个人额度之上，成员不会因为入组而变少</li>
-        <li>可给单个成员设上限，防止一个人用光全组</li>
-        <li>适合按人发额度的场景（教学、研究、外包协作）：给账号不给密钥，用完即止</li>
+        <li>{{ t("solutions.teams.li1", min=team_seat_min) }}</li>
+        <li>{{ t("solutions.teams.li2") }}</li>
+        <li>{{ t("solutions.teams.li3") }}</li>
+        <li>{{ t("solutions.teams.li4") }}</li>
       </ul>
-      <a class="btn btn-primary" href="/pricing#team" style="margin-top:16px">查看团队方案</a>
+      <a class="btn btn-primary" href="/pricing#team" style="margin-top:16px">{{ t("solutions.teams.cta") }}</a>
     </div>
 
     <div id="payg" class="card feature" style="margin-top:20px">
-      <span class="eyebrow">按量付费</span>
-      <h2>买积分包，用多少扣多少</h2>
+      <span class="eyebrow">{{ t("nav.s.payg") }}</span>
+      <h2>{{ t("solutions.payg.title") }}</h2>
       <p>
-        不订阅也能用。积分不按月清零，适合用量起伏大、或者只是偶尔跑几个任务的情况。
-        所有模型都能用——积分是唯一闸门，不存在「买了高档套餐才能用高档模型」。
+        {{ t("solutions.payg.body") }}
       </p>
       <ul class="check-list">
-        <li>一次性购买，余额长期有效</li>
-        <li>倍率以 Claude Sonnet 为 1.00x 基准，最低 0.044x</li>
-        <li>桌面版与云端版共用同一份积分</li>
+        <li>{{ t("solutions.payg.li1") }}</li>
+        <li>{{ t("solutions.payg.li2") }}</li>
+        <li>{{ t("solutions.payg.li3") }}</li>
       </ul>
-      <a class="btn btn-ghost" href="/pricing#packs" style="margin-top:16px">查看积分包价格</a>
+      <a class="btn btn-ghost" href="/pricing#packs" style="margin-top:16px">{{ t("solutions.payg.cta") }}</a>
     </div>
 
     <div id="subscription" class="card feature" style="margin-top:20px">
-      <span class="eyebrow">包年包月</span>
-      <h2>月付或年付，含每月积分与云端机时</h2>
+      <span class="eyebrow">{{ t("nav.s.subscription") }}</span>
+      <h2>{{ t("solutions.subscription.title") }}</h2>
       <p>
-        稳定用量最划算的一种。每月发放积分，另外单独发放云端工作台的机时——
-        两者互不占用，机时只算智能体<b>实际干活</b>的分钟。
+        {{ t("solutions.subscription.body") }}
       </p>
       <ul class="check-list">
-        <li>Free / Plus / Pro / Max 四档，机时 {{ (work_free_minutes // 60) }} 小时起</li>
-        <li>年付比月付便宜，可随时升降档</li>
-        <li>桌面版不占机时，重度使用可以只用桌面版省机时</li>
+        <li>{{ t("solutions.subscription.li1", hours=(work_free_minutes // 60)) }}</li>
+        <li>{{ t("solutions.subscription.li2") }}</li>
+        <li>{{ t("solutions.subscription.li3") }}</li>
       </ul>
-      <a class="btn btn-ghost" href="/pricing#plans" style="margin-top:16px">查看套餐价格</a>
+      <a class="btn btn-ghost" href="/pricing#plans" style="margin-top:16px">{{ t("solutions.subscription.cta") }}</a>
     </div>
   </div>
 </section>
 
 <section class="section section-alt">
   <div class="container center">
-    <h2 class="section-title">要私有化部署或团队席位？</h2>
-    <p class="section-lede">告诉我们规模与场景，我们给出配置建议。</p>
-    <a class="btn btn-primary" href="mailto:{{ legal_contact_email }}">联系我们</a>
+    <h2 class="section-title">{{ t("solutions.contact.title") }}</h2>
+    <p class="section-lede">{{ t("solutions.contact.lede") }}</p>
+    <a class="btn btn-primary" href="mailto:{{ legal_contact_email }}">{{ t("solutions.contact.cta") }}</a>
   </div>
 </section>
 {% endblock %}

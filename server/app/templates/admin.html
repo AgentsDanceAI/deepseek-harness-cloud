@@ -1,41 +1,41 @@
 {% extends "base.html" %}
-{% block title %}管理后台 — deepseek-harness-cloud{% endblock %}
+{% block title %}{{ t("admin.title") }}{% endblock %}
 {% block content %}
 <section class="section">
   <div class="container">
-    <span class="eyebrow">超级管理员</span>
-    <h1 class="section-title" style="text-align:left">管理后台</h1>
+    <span class="eyebrow">{{ t("admin.eyebrow") }}</span>
+    <h1 class="section-title" style="text-align:left">{{ t("admin.h1") }}</h1>
 
     <div class="grid grid-4" style="margin:22px 0">
-      <div class="card stat"><div class="stat-label">用户总数</div><div class="stat-value" id="s-users">—</div></div>
-      <div class="card stat"><div class="stat-label">已付订单</div><div class="stat-value" id="s-orders">—</div></div>
-      <div class="card stat"><div class="stat-label">累计收入</div><div class="stat-value" id="s-revenue">—</div></div>
-      <div class="card stat"><div class="stat-label">24h 调用 / 积分</div><div class="stat-value" id="s-calls">—</div></div>
+      <div class="card stat"><div class="stat-label">{{ t("admin.stat.users") }}</div><div class="stat-value" id="s-users">—</div></div>
+      <div class="card stat"><div class="stat-label">{{ t("admin.stat.orders") }}</div><div class="stat-value" id="s-orders">—</div></div>
+      <div class="card stat"><div class="stat-label">{{ t("admin.stat.revenue") }}</div><div class="stat-value" id="s-revenue">—</div></div>
+      <div class="card stat"><div class="stat-label">{{ t("admin.stat.calls") }}</div><div class="stat-value" id="s-calls">—</div></div>
     </div>
 
     <div class="card block">
       <div class="card-row" style="align-items:center;margin-bottom:14px">
-        <h2 style="margin:0">用户</h2>
+        <h2 style="margin:0">{{ t("admin.users.title") }}</h2>
         <div class="form-row" style="margin:0">
-          <input type="search" id="q" placeholder="按邮箱搜索" style="max-width:240px">
-          <button class="btn btn-ghost btn-sm" id="btn-search" type="button">搜索</button>
+          <input type="search" id="q" placeholder="{{ t('admin.users.search_placeholder') }}" style="max-width:240px">
+          <button class="btn btn-ghost btn-sm" id="btn-search" type="button">{{ t("admin.users.search") }}</button>
         </div>
       </div>
       <div class="table-wrap">
         <table class="table" id="users">
           <thead><tr>
-            <th>邮箱</th><th>套餐</th><th>积分</th><th>机时(本期)</th>
-            <th>状态</th><th>注册</th><th>操作</th>
+            <th>{{ t("admin.th.email") }}</th><th>{{ t("admin.th.plan") }}</th><th>{{ t("admin.th.credits") }}</th><th>{{ t("admin.th.hours") }}</th>
+            <th>{{ t("admin.th.status") }}</th><th>{{ t("admin.th.joined") }}</th><th>{{ t("admin.th.actions") }}</th>
           </tr></thead>
           <tbody></tbody>
         </table>
       </div>
       <p class="muted small" style="margin-top:12px">
-        改套餐立即生效；发放积分进入该用户的个人额度；停用会同时使其全部登录态失效。
+        {{ t("admin.users.note") }}
       </p>
     </div>
 
-    <p class="auth-back" style="margin-top:24px;text-align:left"><a href="/console">← 返回控制台</a></p>
+    <p class="auth-back" style="margin-top:24px;text-align:left"><a href="/console">{{ t("admin.back") }}</a></p>
   </div>
 </section>
 {% endblock %}
@@ -45,11 +45,26 @@
   var $ = function (s) { return document.querySelector(s); };
   var SYM = document.body.dataset.currencySymbol || "¥";
 
+  // Copy for the rows this script builds at runtime. Piped through tojson so a
+  // quote or an ampersand in either language stays a valid JS string literal.
+  var T = {
+    failed: {{ t("admin.js.failed") | tojson }},
+    admin_tag: {{ t("admin.js.admin_tag") | tojson }},
+    status_active: {{ t("admin.js.status_active") | tojson }},
+    status_suspended: {{ t("admin.js.status_suspended") | tojson }},
+    downgrade: {{ t("admin.js.downgrade") | tojson }},
+    grant_btn: {{ t("admin.js.grant_btn") | tojson }},
+    grant_prompt: {{ t("admin.js.grant_prompt") | tojson }},
+    suspend: {{ t("admin.js.suspend") | tojson }},
+    restore: {{ t("admin.js.restore") | tojson }},
+    suspend_confirm: {{ t("admin.js.suspend_confirm") | tojson }}
+  };
+
   function post(url, body) {
     return fetch(url, { method: "POST", headers: { "content-type": "application/json" },
                         body: JSON.stringify(body || {}) })
       .then(function (r) { return r.json().then(function (d) {
-        if (!r.ok) throw new Error(d.detail || "操作失败"); return d; }); });
+        if (!r.ok) throw new Error(d.detail || T.failed); return d; }); });
   }
   function fmtDate(ts) {
     if (!ts) return "—";
@@ -77,13 +92,13 @@
           var tr = document.createElement("tr");
           var mins = u.work_minutes_used || 0, inc = u.work_minutes_included || 0;
           tr.innerHTML =
-            "<td>" + u.email + (u.role === "admin" ? ' <span class="tag">管理员</span>' : "") + "</td>" +
+            "<td>" + u.email + (u.role === "admin" ? ' <span class="tag">' + T.admin_tag + "</span>" : "") + "</td>" +
             '<td><select class="cap-input" style="width:96px"></select></td>' +
             '<td class="num">' + (u.credits || 0).toLocaleString() + "</td>" +
             '<td class="num">' + Math.floor(mins / 60) + "h / " + Math.floor(inc / 60) + "h</td>" +
             "<td>" + (u.status === "active"
-              ? '<span class="badge badge-ok">正常</span>'
-              : '<span class="badge badge-danger">已停用</span>') + "</td>" +
+              ? '<span class="badge badge-ok">' + T.status_active + "</span>"
+              : '<span class="badge badge-danger">' + T.status_suspended + "</span>") + "</td>" +
             "<td>" + fmtDate(u.created) + "</td><td></td>";
 
           // plan: change takes effect immediately
@@ -95,16 +110,16 @@
             sel.appendChild(o);
           });
           sel.onchange = function () {
-            if (sel.value === "free") { alert("降级到 Free 请让订阅自然到期，或联系我处理退款流程。"); loadUsers(); return; }
+            if (sel.value === "free") { alert(T.downgrade); loadUsers(); return; }
             post("/api/admin/set-plan", { user_id: u.id, tier: sel.value, cycle: "monthly" })
               .then(loadUsers).catch(function (e) { alert(e.message); loadUsers(); });
           };
 
           var act = tr.lastElementChild;
           var grant = document.createElement("button");
-          grant.className = "link-btn"; grant.textContent = "发积分";
+          grant.className = "link-btn"; grant.textContent = T.grant_btn;
           grant.onclick = function () {
-            var n = prompt("给 " + u.email + " 发放多少积分？", "1000");
+            var n = prompt(T.grant_prompt.replace("{email}", u.email), "1000");
             if (!n || !/^\d+$/.test(n)) return;
             post("/api/admin/grant-credits", { user_id: u.id, amount: parseInt(n, 10), valid_days: 365 })
               .then(loadUsers).catch(function (e) { alert(e.message); });
@@ -113,11 +128,11 @@
 
           var toggle = document.createElement("button");
           toggle.className = "link-btn"; toggle.style.marginLeft = "10px";
-          toggle.textContent = u.status === "active" ? "停用" : "恢复";
+          toggle.textContent = u.status === "active" ? T.suspend : T.restore;
           if (u.status === "active") toggle.classList.add("link-danger");
           toggle.onclick = function () {
             var next = u.status === "active" ? "suspended" : "active";
-            if (next === "suspended" && !confirm("停用 " + u.email + "？该用户将立即被登出且无法使用服务。")) return;
+            if (next === "suspended" && !confirm(T.suspend_confirm.replace("{email}", u.email))) return;
             post("/api/admin/set-status", { user_id: u.id, status: next })
               .then(loadUsers).catch(function (e) { alert(e.message); });
           };

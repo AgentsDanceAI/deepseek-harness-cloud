@@ -1,30 +1,29 @@
 {% extends "base.html" %}
-{% block title %}团队 — deepseek-harness-cloud{% endblock %}
+{% block title %}{{ t("team.page_title") }}{% endblock %}
 {% block content %}
 <section class="section">
   <div class="container">
-    <span class="eyebrow">团队</span>
-    <h1 class="section-title" style="text-align:left">团队与共享积分</h1>
+    <span class="eyebrow">{{ t("nav.team") }}</span>
+    <h1 class="section-title" style="text-align:left">{{ t("team.title") }}</h1>
 
     <div id="team-none" hidden>
       <div class="card block">
-        <h2>还没有团队</h2>
+        <h2>{{ t("team.none_title") }}</h2>
         <p class="muted">
-          创建团队后，成员共用一个积分池：谁都不用单独充值，用量按人可查。
-          席位 {{ currency_symbol }}{{ '%.2f'|format(team_seat_price / 100) }} / 席 / 月，含
-          {{ '{:,}'.format(team_seat_credits) }} 积分入池。
+          {{ t("team.none_lede") }}
+          {{ t("team.none_seat_line", symbol=currency_symbol, price='%.2f'|format(team_seat_price / 100), credits='{:,}'.format(team_seat_credits)) }}
         </p>
         <div class="form-row" style="margin-top:16px">
-          <input type="text" id="team-name" placeholder="团队名称" style="max-width:280px">
-          <button class="btn btn-primary" id="btn-create-team" type="button">创建团队</button>
+          <input type="text" id="team-name" placeholder="{{ t('team.name_placeholder') }}" style="max-width:280px">
+          <button class="btn btn-primary" id="btn-create-team" type="button">{{ t("team.create_btn") }}</button>
         </div>
         <p class="form-error" id="team-error" hidden></p>
         <p class="muted small" style="margin-top:18px">
-          收到邀请码？<button class="link-btn" id="btn-show-join" type="button">用邀请码加入</button>
+          {{ t("team.have_code") }} <button class="link-btn" id="btn-show-join" type="button">{{ t("team.join_with_code") }}</button>
         </p>
         <div id="join-row" hidden class="form-row" style="margin-top:10px">
-          <input type="text" id="join-code" placeholder="邀请码" style="max-width:200px">
-          <button class="btn btn-ghost" id="btn-join" type="button">加入</button>
+          <input type="text" id="join-code" placeholder="{{ t('team.code_placeholder') }}" style="max-width:200px">
+          <button class="btn btn-ghost" id="btn-join" type="button">{{ t("team.join_btn") }}</button>
         </div>
       </div>
     </div>
@@ -32,41 +31,39 @@
     <div id="team-view" hidden>
       {# two pools, shown apart: credits buy tokens, minutes buy the machine #}
       <div class="grid grid-4" style="margin-bottom:22px">
-        <div class="card stat"><div class="stat-label">共享积分池</div><div class="stat-value" id="t-pool">—</div>
-          <div class="muted small">模型 / 搜索</div></div>
-        <div class="card stat"><div class="stat-label">共享机时池</div><div class="stat-value" id="t-minutes">—</div>
-          <div class="muted small">云工作台运行</div></div>
-        <div class="card stat"><div class="stat-label">席位</div><div class="stat-value" id="t-seats">—</div></div>
-        <div class="card stat"><div class="stat-label">团队</div><div class="stat-value" id="t-name" style="font-size:20px">—</div></div>
+        <div class="card stat"><div class="stat-label">{{ t("team.stat_pool") }}</div><div class="stat-value" id="t-pool">—</div>
+          <div class="muted small">{{ t("team.stat_pool_note") }}</div></div>
+        <div class="card stat"><div class="stat-label">{{ t("team.stat_minutes") }}</div><div class="stat-value" id="t-minutes">—</div>
+          <div class="muted small">{{ t("team.stat_minutes_note") }}</div></div>
+        <div class="card stat"><div class="stat-label">{{ t("team.stat_seats") }}</div><div class="stat-value" id="t-seats">—</div></div>
+        <div class="card stat"><div class="stat-label">{{ t("nav.team") }}</div><div class="stat-value" id="t-name" style="font-size:20px">—</div></div>
       </div>
 
       <div class="card block" id="owner-tools" hidden>
-        <h2>成员用量与上限</h2>
+        <h2>{{ t("team.usage_title") }}</h2>
         <p class="muted small">
-          本月每人用了多少一目了然。给成员设上限后，触限的<b>只有该成员</b>会被暂停，
-          其他人照常工作；设为 0 即暂停该成员。留空 = 用团队默认值。
+          {{ t("team.usage_note_1") }}<b>{{ t("team.usage_note_strong") }}</b>{{ t("team.usage_note_2") }}
         </p>
         <div class="table-wrap">
           <table class="table" id="t-members">
-            <thead><tr><th>成员</th><th>角色</th><th>本月积分</th><th>本月机时</th><th>积分上限</th><th>机时上限</th><th></th></tr></thead>
+            <thead><tr><th>{{ t("team.th_member") }}</th><th>{{ t("team.th_role") }}</th><th>{{ t("team.th_credits") }}</th><th>{{ t("team.th_hours") }}</th><th>{{ t("team.th_credit_cap") }}</th><th>{{ t("team.th_hour_cap") }}</th><th></th></tr></thead>
             <tbody></tbody>
           </table>
         </div>
         <div class="form-row" style="margin-top:18px;flex-wrap:wrap;gap:8px">
-          <button class="btn btn-primary" id="btn-invite" type="button">生成邀请链接</button>
-          <button class="btn btn-ghost" id="btn-buy-seats" type="button">增购席位</button>
-          <button class="btn btn-ghost" id="btn-defaults" type="button">设团队默认上限</button>
+          <button class="btn btn-primary" id="btn-invite" type="button">{{ t("team.invite_btn") }}</button>
+          <button class="btn btn-ghost" id="btn-buy-seats" type="button">{{ t("team.buy_seats_btn") }}</button>
+          <button class="btn btn-ghost" id="btn-defaults" type="button">{{ t("team.defaults_btn") }}</button>
         </div>
         <p class="muted small" id="invite-out" hidden style="margin-top:12px"></p>
       </div>
 
       <p class="muted small" style="margin-top:18px">
-        消费顺序：先扣团队共享池，池子空了才用成员自己的额度。每笔用量都记在使用者名下，
-        所以「谁花了多少」永远可查。
+        {{ t("team.spend_order") }}
       </p>
     </div>
 
-    <p class="auth-back" style="margin-top:24px;text-align:left"><a href="/console">← 返回控制台</a></p>
+    <p class="auth-back" style="margin-top:24px;text-align:left"><a href="/console">{{ t("team.back_console") }}</a></p>
   </div>
 </section>
 {% endblock %}
@@ -78,7 +75,7 @@
     return fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' },
                         body: JSON.stringify(body || {}) })
       .then(function (r) { return r.json().then(function (d) {
-        if (!r.ok) throw new Error(d.detail || '操作失败'); return d; }); });
+        if (!r.ok) throw new Error(d.detail || {{ t("team.err_request_failed") | tojson }}); return d; }); });
   }
   function err(msg) { var e = $('#team-error'); if (e) { e.textContent = msg; e.hidden = false; } }
 
@@ -88,7 +85,8 @@
     $('#team-view').hidden = false;
     $('#t-pool').textContent = (s.pool_balance || 0).toLocaleString();
     var mins = s.minute_pool || 0;
-    $('#t-minutes').textContent = Math.floor(mins / 60) + ' 小时' + (mins % 60 ? ' ' + (mins % 60) + ' 分' : '');
+    $('#t-minutes').textContent = Math.floor(mins / 60) + ' ' + {{ t("team.unit_hours") | tojson }} +
+      (mins % 60 ? ' ' + (mins % 60) + ' ' + {{ t("team.unit_minutes") | tojson }} : '');
     $('#t-seats').textContent = s.seats_used + ' / ' + s.seats;
     $('#t-name').textContent = s.name;
     if (s.role !== 'owner') return;
@@ -101,7 +99,7 @@
       var hrs = Math.floor((u.minutes || 0) / 60), mm = (u.minutes || 0) % 60;
       tr.innerHTML =
         '<td>' + u.email + '</td>' +
-        '<td>' + (u.role === 'owner' ? '所有者' : '成员') + '</td>' +
+        '<td>' + (u.role === 'owner' ? {{ t("team.role_owner") | tojson }} : {{ t("team.role_member") | tojson }}) + '</td>' +
         '<td class="num">' + (u.credits || 0).toLocaleString() + '</td>' +
         '<td class="num">' + (hrs ? hrs + 'h ' : '') + mm + 'm</td>' +
         '<td></td><td></td><td></td>';
@@ -112,7 +110,7 @@
       function capCell(cell, field, value) {
         var input = document.createElement('input');
         input.type = 'number'; input.min = '0'; input.className = 'cap-input';
-        input.placeholder = '默认';
+        input.placeholder = {{ t("team.cap_default") | tojson }};
         if (value !== null && value !== undefined) input.value = value;
         input.onchange = function () {
           var body = { user_id: u.user_id };
@@ -126,9 +124,9 @@
 
       if (u.role !== 'owner') {
         var b = document.createElement('button');
-        b.className = 'link-btn'; b.textContent = '移除';
+        b.className = 'link-btn'; b.textContent = {{ t("team.remove_btn") | tojson }};
         b.onclick = function () {
-          if (!confirm('移除 ' + u.email + '？该成员将立即失去共享池权限。')) return;
+          if (!confirm({{ t("team.confirm_remove") | tojson }}.replace('{email}', u.email))) return;
           post('/api/team/remove', { user_id: u.user_id }).then(load).catch(function (e) { alert(e.message); });
         };
         cells[6].appendChild(b);
@@ -153,14 +151,14 @@
   $('#btn-invite').addEventListener('click', function () {
     post('/api/team/invite', {}).then(function (d) {
       var out = $('#invite-out');
-      out.textContent = '邀请链接（14 天内有效）：' + d.url;
+      out.textContent = {{ t("team.invite_link_out") | tojson }}.replace('{url}', d.url);
       out.hidden = false;
     }).catch(function (e) { alert(e.message); });
   });
   $('#btn-defaults').addEventListener('click', function () {
-    var c = prompt('团队默认「每人每月积分上限」（留空 = 不限）', '');
+    var c = prompt({{ t("team.prompt_credit_cap") | tojson }}, '');
     if (c === null) return;
-    var m = prompt('团队默认「每人每月机时上限（分钟）」（留空 = 不限）', '');
+    var m = prompt({{ t("team.prompt_minute_cap") | tojson }}, '');
     if (m === null) return;
     post('/api/team/defaults', {
       credit_cap: c === '' ? null : parseInt(c, 10),
@@ -168,7 +166,7 @@
     }).then(load).catch(function (e) { alert(e.message); });
   });
   $('#btn-buy-seats').addEventListener('click', function () {
-    var n = prompt('购买多少个席位？', '5');
+    var n = prompt({{ t("team.prompt_seats") | tojson }}, '5');
     if (!n || !/^\d+$/.test(n)) return;
     post('/api/pay/checkout', { item: 'seats:' + n }).then(function (d) {
       if (d.pay_url) { location.href = d.pay_url; return; }

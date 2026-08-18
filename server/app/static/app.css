@@ -1127,3 +1127,9 @@ body:not([data-page="landing"]) .section:first-of-type { position: relative; z-i
 }
 .lang-switch:hover { color: #fff; border-color: rgba(255, 255, 255, .45); }
 @media (max-width: 470px) { .lang-switch { padding: 5px 7px; font-size: 12px; } }
+
+/* ---------- pricing ribbon ----------
+   .ribbon is absolutely positioned but its card was `static`, so it resolved
+   against the page and floated up under the header instead of sitting on the
+   Pro card. Present in both languages — it predates the translation work. */
+.card.plan { position: relative; }

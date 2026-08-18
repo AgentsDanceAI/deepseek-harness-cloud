@@ -1,12 +1,12 @@
 {% extends "base.html" %}
-{% block title %}控制台 — deepseek-harness-cloud{% endblock %}
+{% block title %}{{ t("console.title") }}{% endblock %}
 {% block content %}
 <section class="section console">
   <div class="container">
     <div id="pay-banner" class="banner banner-ok" hidden></div>
 
     <div class="console-head">
-      <h1>控制台</h1>
+      <h1>{{ t("nav.console") }}</h1>
       <span class="muted">{{ user.email }}</span>
     </div>
 
@@ -14,32 +14,31 @@
     <div class="card section-card work-banner">
       <div class="card-row">
         <div>
-          <h2 style="margin-bottom:4px">☁️ 云工作台</h2>
-          <p class="muted small">无需安装，直接在浏览器（含手机）里使用 DSH。
-            <strong>只在 AI 实际干活的分钟计费</strong>——你读回复、想问题、开着页面走开，
-            都不花钱；闲置 {{ work_idle_stop_min }} 分钟自动暂停，文件保留，下次秒开。</p>
+          <h2 style="margin-bottom:4px">☁️ {{ t("console.work.title") }}</h2>
+          <p class="muted small">{{ t("console.work.lede") }}
+            <strong>{{ t("console.work.lede_strong") }}</strong>{{ t("console.work.lede_tail", minutes=work_idle_stop_min) }}</p>
           {# machine time is metered in minutes, like CI minutes — never in credits #}
           <p class="muted small" style="margin-top:10px">
             {% if work_pass_active %}
-              通行证有效至 <b>{{ work_pass_expires_text }}</b>，期间机时不限。
+              {{ t("console.work.pass_until") }} <b>{{ work_pass_expires_text }}</b>{{ t("console.work.pass_tail") }}
             {% else %}
-              本期机时
-              <b>{{ '%d 小时 %d 分'|format(work_used // 60, work_used % 60) }}</b>
-              / {{ '%d 小时'|format(work_included // 60) }}
-              {%- if work_packs %}（另有加购 {{ '%d 小时 %d 分'|format(work_packs // 60, work_packs % 60) }}）{% endif %}
-              {%- if work_left <= 0 %} · <a href="/work/upgrade">已用完，去续</a>{% endif %}
+              {{ t("console.work.this_period") }}
+              <b>{{ t("console.work.hm", h=work_used // 60, m=work_used % 60) }}</b>
+              / {{ t("console.work.h", h=work_included // 60) }}
+              {%- if work_packs %}{{ t("console.work.packs", h=work_packs // 60, m=work_packs % 60) }}{% endif %}
+              {%- if work_left <= 0 %} · <a href="/work/upgrade">{{ t("console.work.exhausted") }}</a>{% endif %}
             {% endif %}
           </p>
           {% if not work_pass_active and work_included %}
           <div class="meter" role="img"
-               aria-label="本期机时已用 {{ work_used }} 分钟，共 {{ work_included }} 分钟">
+               aria-label="{{ t('console.work.meter_aria', used=work_used, total=work_included) }}">
             <span style="width:{{ [100, (work_used * 100 // work_included)] | min }}%"></span>
           </div>
           {% endif %}
         </div>
         <div style="display:flex;gap:8px;align-items:center">
-          <a class="btn btn-ghost" href="/preview" target="_blank" rel="noopener">个人成品</a>
-          <a class="btn btn-primary" href="/work" target="_blank" rel="noopener">进入云工作台 →</a>
+          <a class="btn btn-ghost" href="/preview" target="_blank" rel="noopener">{{ t("console.work.outputs") }}</a>
+          <a class="btn btn-primary" href="/work" target="_blank" rel="noopener">{{ t("console.work.enter") }}</a>
         </div>
       </div>
     </div>
@@ -47,39 +46,39 @@
 
     <div class="grid grid-3 stat-grid">
       <div class="card stat">
-        <div class="stat-label">积分余额</div>
+        <div class="stat-label">{{ t("console.stat.balance") }}</div>
         <div class="stat-value">{{ '{:,}'.format(balance) }}</div>
         {% if org %}
-          <div class="muted">含团队共享池 {{ '{:,}'.format(org_pool) }} · <a href="/console/team">团队</a></div>
+          <div class="muted">{{ t("console.stat.org_pool", credits='{:,}'.format(org_pool)) }} · <a href="/console/team">{{ t("nav.team") }}</a></div>
         {% else %}
-          <div class="muted">≈ {{ currency_symbol }}{{ balance_yuan }} 牌价用量</div>
+          <div class="muted">{{ t("console.stat.list_price", symbol=currency_symbol, amount=balance_yuan) }}</div>
         {% endif %}
-        <a class="btn btn-primary btn-sm" href="/pricing">充值 / 升级</a>
+        <a class="btn btn-primary btn-sm" href="/pricing">{{ t("console.stat.topup") }}</a>
       </div>
       <div class="card stat">
-        <div class="stat-label">当前套餐</div>
+        <div class="stat-label">{{ t("console.stat.plan") }}</div>
         <div class="stat-value">{{ plan.name or plan.tier }}</div>
         {% if plan.tier != 'free' %}
-          <div class="muted">有效期至 {{ plan_expires_str }} · {{ plan.concurrency }} 路并发</div>
+          <div class="muted">{{ t("console.stat.plan_until", date=plan_expires_str) }} · {{ t("console.stat.concurrency", n=plan.concurrency) }}</div>
         {% else %}
-          <div class="muted">免费版 · {{ plan.concurrency }} 路并发</div>
+          <div class="muted">{{ t("console.stat.free_plan") }} · {{ t("console.stat.concurrency", n=plan.concurrency) }}</div>
         {% endif %}
-        <a class="btn btn-ghost btn-sm" href="/orders">我的订单</a>
+        <a class="btn btn-ghost btn-sm" href="/orders">{{ t("console.stat.orders") }}</a>
       </div>
       <div class="card stat">
-        <div class="stat-label">本月用量</div>
-        <div class="stat-value">{{ '{:,}'.format(usage.credits) }} <span class="stat-unit">积分</span></div>
-        <div class="muted">{{ '{:,}'.format(usage.calls) }} 次调用 ·
-          输入 {{ '{:,}'.format(usage.input_tokens) }} / 输出 {{ '{:,}'.format(usage.output_tokens) }} tokens</div>
+        <div class="stat-label">{{ t("console.stat.month_usage") }}</div>
+        <div class="stat-value">{{ '{:,}'.format(usage.credits) }} <span class="stat-unit">{{ t("console.unit.credits") }}</span></div>
+        <div class="muted">{{ t("console.stat.calls", n='{:,}'.format(usage.calls)) }} ·
+          {{ t("console.stat.tokens", input='{:,}'.format(usage.input_tokens), output='{:,}'.format(usage.output_tokens)) }}</div>
       </div>
     </div>
 
     <div class="card block">
-      <h2>最近用量</h2>
+      <h2>{{ t("console.recent.title") }}</h2>
       {% if recent %}
       <div class="table-wrap">
         <table>
-          <thead><tr><th>时间</th><th>模型</th><th>类型</th><th class="num">输入</th><th class="num">缓存读</th><th class="num">输出</th><th class="num">积分</th></tr></thead>
+          <thead><tr><th>{{ t("console.recent.th.time") }}</th><th>{{ t("console.recent.th.model") }}</th><th>{{ t("console.recent.th.kind") }}</th><th class="num">{{ t("console.recent.th.input") }}</th><th class="num">{{ t("console.recent.th.cache_read") }}</th><th class="num">{{ t("console.recent.th.output") }}</th><th class="num">{{ t("console.recent.th.credits") }}</th></tr></thead>
           <tbody>
             {% for r in recent %}
             <tr>
@@ -96,46 +95,46 @@
         </table>
       </div>
       {% else %}
-      <p class="muted">还没有用量记录。在桌面应用中登录后开始使用即可。</p>
+      <p class="muted">{{ t("console.recent.empty") }}</p>
       {% endif %}
     </div>
 
     <div class="card block">
-      <h2>我的设备</h2>
-      <p class="muted small">已授权登录的桌面设备。吊销后该设备需要重新授权。</p>
+      <h2>{{ t("console.devices.title") }}</h2>
+      <p class="muted small">{{ t("console.devices.lede") }}</p>
       <div class="table-wrap">
         <table id="devices-table">
-          <thead><tr><th>设备</th><th>平台</th><th>最近活跃</th><th>授权时间</th><th>状态</th><th></th></tr></thead>
-          <tbody><tr><td colspan="6" class="muted">加载中…</td></tr></tbody>
+          <thead><tr><th>{{ t("console.devices.th.device") }}</th><th>{{ t("console.devices.th.platform") }}</th><th>{{ t("console.devices.th.last_active") }}</th><th>{{ t("console.devices.th.authorized") }}</th><th>{{ t("console.devices.th.status") }}</th><th></th></tr></thead>
+          <tbody><tr><td colspan="6" class="muted">{{ t("console.loading") }}</td></tr></tbody>
         </table>
       </div>
     </div>
 
     <div class="card block">
-      <h2>修改密码</h2>
+      <h2>{{ t("console.pwd.title") }}</h2>
       <form id="form-password" class="form-narrow">
-        <label>当前密码
-          <input type="password" name="old" autocomplete="current-password" placeholder="首次设置可留空">
+        <label>{{ t("console.pwd.current") }}
+          <input type="password" name="old" autocomplete="current-password" placeholder="{{ t('console.pwd.current_ph') }}">
         </label>
-        <label>新密码
-          <input type="password" name="new" required minlength="8" autocomplete="new-password" placeholder="至少 8 位">
+        <label>{{ t("console.pwd.new") }}
+          <input type="password" name="new" required minlength="8" autocomplete="new-password" placeholder="{{ t('console.pwd.new_ph') }}">
         </label>
         <p class="form-error" id="pwd-error" hidden></p>
-        <button class="btn btn-primary" type="submit">保存新密码</button>
-        <p class="muted small">修改密码后，所有设备与浏览器会话将退出登录。</p>
+        <button class="btn btn-primary" type="submit">{{ t("console.pwd.submit") }}</button>
+        <p class="muted small">{{ t("console.pwd.note") }}</p>
       </form>
     </div>
 
     <div class="card block danger-zone">
-      <h2>危险区</h2>
-      <p class="muted small">注销账号将立即停用账号并吊销所有设备，剩余积分作废，且不可恢复。
-        请输入您的邮箱 <code>{{ user.email }}</code> 以确认。</p>
+      <h2>{{ t("console.danger.title") }}</h2>
+      <p class="muted small">{{ t("console.danger.body") }}
+        {{ t("console.danger.confirm_prefix") }} <code>{{ user.email }}</code> {{ t("console.danger.confirm_suffix") }}</p>
       <form id="form-delete" class="form-narrow" data-email="{{ user.email }}">
-        <label>确认邮箱
+        <label>{{ t("console.danger.confirm_label") }}
           <input type="text" name="confirm" required placeholder="{{ user.email }}" autocomplete="off">
         </label>
         <p class="form-error" id="del-error" hidden></p>
-        <button class="btn btn-danger" type="submit">永久注销账号</button>
+        <button class="btn btn-danger" type="submit">{{ t("console.danger.submit") }}</button>
       </form>
     </div>
   </div>

@@ -1,14 +1,14 @@
 {% extends "base.html" %}
-{% block title %}下载 — deepseek-harness-cloud{% endblock %}
+{% block title %}{{ t("download.title") }}{% endblock %}
 {% block content %}
 <section class="dl-wrap">
   <div class="container">
-    <h1>下载 deepseek-harness-cloud 桌面应用</h1>
-    <p class="muted">安装后在应用内登录，浏览器授权设备，即可开始使用。</p>
+    <h1>{{ t("download.h1") }}</h1>
+    <p class="muted">{{ t("download.sub") }}</p>
     {% if not has_mac_arm64 or not has_win_x64 %}
     <p class="muted" style="background:#fff7ed;border:1px solid #fed7aa;border-radius:10px;padding:12px 14px">
-      桌面安装包正在重新构建，暂时无法下载。这段时间可以直接用
-      <a href="/work">浏览器版云工作台</a>，功能一致，手机也能用。
+      {{ t("download.rebuild_notice_a") }}
+      <a href="/work">{{ t("download.rebuild_notice_link") }}</a>{{ t("download.rebuild_notice_b") }}
     </p>
     {% endif %}
     <div class="dl-grid">
@@ -17,15 +17,15 @@
           <svg viewBox="0 0 24 24" fill="currentColor"><path d="M16.7 12.9c0-2.4 2-3.6 2-3.6a4.6 4.6 0 0 0-3.6-1.9c-1.5-.2-3 .9-3.7.9-.8 0-2-.9-3.3-.9A4.9 4.9 0 0 0 4 9.9c-1.8 3-.5 7.5 1.2 10 .8 1.2 1.8 2.5 3.1 2.5 1.3-.1 1.8-.8 3.3-.8s2 .8 3.3.8 2.2-1.2 3-2.4a10 10 0 0 0 1.4-2.8 4.4 4.4 0 0 1-2.6-4.3ZM14.2 5.6A4.5 4.5 0 0 0 15.3 2a4.6 4.6 0 0 0-3 1.5A4.3 4.3 0 0 0 11.2 7a3.8 3.8 0 0 0 3-1.4Z"/></svg>
         </div>
         <h3>macOS</h3>
-        <p class="muted">Apple Silicon（M 系列）与 Intel · macOS 12+</p>
+        <p class="muted">{{ t("download.mac_meta") }}</p>
         {% if has_mac_arm64 %}
-          <a class="btn btn-primary btn-block" href="/dl/mac-arm64">下载 .dmg（Apple 芯片）</a>
+          <a class="btn btn-primary btn-block" href="/dl/mac-arm64">{{ t("download.mac_dmg") }}</a>
         {% else %}
-          <button class="btn btn-ghost btn-block" type="button" disabled>重新构建中</button>
+          <button class="btn btn-ghost btn-block" type="button" disabled>{{ t("download.rebuilding") }}</button>
         {% endif %}
         {% if has_mac_x64 %}
-          <a class="btn btn-ghost btn-block" href="/dl/mac-x64" style="margin-top:10px">下载 .zip（Intel 芯片）</a>
-          <p class="muted small" style="margin-top:6px">Intel 版为 zip：解压后把 App 拖进「应用程序」即可。</p>
+          <a class="btn btn-ghost btn-block" href="/dl/mac-x64" style="margin-top:10px">{{ t("download.mac_zip") }}</a>
+          <p class="muted small" style="margin-top:6px">{{ t("download.mac_zip_note") }}</p>
         {% endif %}
       </div>
       <div class="card dl-card">
@@ -33,12 +33,12 @@
           <svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 5.5 10.5 4.4v7.1H3zM12 4.2 21 3v8.5h-9zM3 13.5h7.5v7.1L3 19.5zM12 13.5h9V21l-9-1.3z"/></svg>
         </div>
         <h3>Windows</h3>
-        <p class="muted">Windows 10 / 11 · x64{% if has_win_arm64 %} 与 ARM64{% endif %}</p>
+        <p class="muted">Windows 10 / 11 · x64{% if has_win_arm64 %} {{ t("download.win_arm64_suffix") }}{% endif %}</p>
         {% if has_win_x64 %}
-          <a class="btn btn-primary btn-block" href="/dl/win-x64">下载 .exe（x64）</a>
-          {% if has_win_arm64 %}<a class="btn btn-ghost btn-block" href="/dl/win-arm64" style="margin-top:10px">下载 .exe（ARM64）</a>{% endif %}
+          <a class="btn btn-primary btn-block" href="/dl/win-x64">{{ t("download.win_exe_x64") }}</a>
+          {% if has_win_arm64 %}<a class="btn btn-ghost btn-block" href="/dl/win-arm64" style="margin-top:10px">{{ t("download.win_exe_arm64") }}</a>{% endif %}
         {% else %}
-          <button class="btn btn-ghost btn-block" type="button" disabled>重新构建中</button>
+          <button class="btn btn-ghost btn-block" type="button" disabled>{{ t("download.rebuilding") }}</button>
         {% endif %}
       </div>
       {% if has_android %}
@@ -47,8 +47,8 @@
           <svg viewBox="0 0 24 24" fill="currentColor"><path d="M7.2 8.6h9.6c.4 0 .7.3.7.7v7.2a2 2 0 0 1-2 2h-.5v2.3a1 1 0 1 1-2 0v-2.3h-2v2.3a1 1 0 1 1-2 0v-2.3H8.5a2 2 0 0 1-2-2V9.3c0-.4.3-.7.7-.7Zm-3 .7a1 1 0 0 1 1 1v4.6a1 1 0 1 1-2 0v-4.6a1 1 0 0 1 1-1Zm15.6 0a1 1 0 0 1 1 1v4.6a1 1 0 1 1-2 0v-4.6a1 1 0 0 1 1-1ZM15.9 3.6l1-1.5a.4.4 0 0 0-.6-.4l-1.1 1.6a6.7 6.7 0 0 0-6.4 0L7.7 1.7a.4.4 0 1 0-.6.4l1 1.5A6 6 0 0 0 6.5 7.8h11a6 6 0 0 0-1.6-4.2ZM9.6 6a.7.7 0 1 1 0-1.4.7.7 0 0 1 0 1.4Zm4.8 0a.7.7 0 1 1 0-1.4.7.7 0 0 1 0 1.4Z"/></svg>
         </div>
         <h3>Android</h3>
-        <p class="muted">Android 8+ · APK 直装（需允许安装未知来源应用）</p>
-        <a class="btn btn-primary btn-block" href="/dl/android">下载 .apk</a>
+        <p class="muted">{{ t("download.android_meta") }}</p>
+        <a class="btn btn-primary btn-block" href="/dl/android">{{ t("download.android_apk") }}</a>
       </div>
       {% endif %}
       <div class="card dl-card">
@@ -56,20 +56,20 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="2.5" width="12" height="19" rx="2.5"/><path d="M10.5 5h3M12 18.5h.01"/></svg>
         </div>
         <h3>iPhone / iPad</h3>
-        <p class="muted">无需安装：Safari 打开云工作台，「分享」→「添加到主屏幕」即可当 App 使用</p>
-        <a class="btn btn-ghost btn-block" href="/work" rel="noopener">打开云工作台</a>
+        <p class="muted">{{ t("download.ios_meta") }}</p>
+        <a class="btn btn-ghost btn-block" href="/work" rel="noopener">{{ t("download.open_workspace") }}</a>
       </div>
     </div>
 
     <details class="dl-tips">
-      <summary>首次打开的安全提示（当前安装包未签名）</summary>
-      <p><strong>macOS</strong>：首次打开若提示"无法验证开发者"，请在应用图标上<strong>右键 → 打开</strong>，
-        或在终端执行 <code>xattr -cr "/Applications/deepseek-harness-cloud Desktop.app"</code> 后再打开。</p>
-      <p><strong>Windows</strong>：SmartScreen 提示时点击<strong>「更多信息」→「仍要运行」</strong>。</p>
-      <p>正式的代码签名与公证版本将在后续更新中提供。</p>
+      <summary>{{ t("download.tips_summary") }}</summary>
+      <p><strong>macOS</strong>{{ t("download.tip_mac_a") }}<strong>{{ t("download.tip_mac_action") }}</strong>{{ t("download.tip_mac_b") }}
+        <code>xattr -cr "/Applications/deepseek-harness-cloud Desktop.app"</code> {{ t("download.tip_mac_c") }}</p>
+      <p><strong>Windows</strong>{{ t("download.tip_win_a") }}<strong>{{ t("download.tip_win_action") }}</strong>{{ t("download.tip_win_end") }}</p>
+      <p>{{ t("download.tip_signing") }}</p>
     </details>
 
-    <p class="muted small" style="margin-top:26px">安装遇到问题？联系 <a href="mailto:{{ legal_contact_email }}">{{ legal_contact_email }}</a></p>
+    <p class="muted small" style="margin-top:26px">{{ t("download.help") }} <a href="mailto:{{ legal_contact_email }}">{{ legal_contact_email }}</a></p>
   </div>
 </section>
 {% endblock %}

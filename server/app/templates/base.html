@@ -6,7 +6,8 @@
 <title>{% block title %}deepseek-harness-cloud{% endblock %}</title>
 <meta name="description" content="{{ t('meta.description') }}">
 <link rel="stylesheet" href="/static/app.css?v={{ asset_v }}">
-<script src="/static/app.js?v={{ asset_v }}" defer></script>
+<script>window.__T=JSON.parse({{ js_i18n | tojson | tojson }});window.__LANG="{{ lang }}";</script>
+  <script src="/static/app.js?v={{ asset_v }}" defer></script>
 {% block head %}{% endblock %}
 </head>
 <body data-page="{{ page }}" data-currency-symbol="{{ currency_symbol }}">

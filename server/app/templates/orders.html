@@ -1,17 +1,17 @@
 {% extends "base.html" %}
-{% block title %}我的订单 — deepseek-harness-cloud{% endblock %}
+{% block title %}{{ t("orders.title") }}{% endblock %}
 {% block content %}
 <section class="section console">
   <div class="container">
     <div class="console-head">
-      <h1>我的订单</h1>
-      <a class="btn btn-ghost btn-sm" href="/console">← 返回控制台</a>
+      <h1>{{ t("orders.h1") }}</h1>
+      <a class="btn btn-ghost btn-sm" href="/console">{{ t("orders.back") }}</a>
     </div>
     <div class="card block">
       <div class="table-wrap">
         <table id="orders-table">
-          <thead><tr><th>订单号</th><th>商品</th><th class="num">金额</th><th>支付方式</th><th>状态</th><th>创建时间</th></tr></thead>
-          <tbody><tr><td colspan="6" class="muted">加载中…</td></tr></tbody>
+          <thead><tr><th>{{ t("orders.col.id") }}</th><th>{{ t("orders.col.item") }}</th><th class="num">{{ t("orders.col.amount") }}</th><th>{{ t("orders.col.method") }}</th><th>{{ t("orders.col.status") }}</th><th>{{ t("orders.col.created") }}</th></tr></thead>
+          <tbody><tr><td colspan="6" class="muted">{{ t("orders.loading") }}</td></tr></tbody>
         </table>
       </div>
     </div>
