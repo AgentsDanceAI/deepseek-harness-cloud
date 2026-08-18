@@ -1128,6 +1128,43 @@ body:not([data-page="landing"]) .section:first-of-type { position: relative; z-i
 .lang-switch:hover { color: #fff; border-color: rgba(255, 255, 255, .45); }
 @media (max-width: 470px) { .lang-switch { padding: 5px 7px; font-size: 12px; } }
 
+/* ---------- currency picker ----------
+   Styled as a sibling of the language pill rather than of the product menus:
+   the two are the same kind of control, and they sit next to each other. The
+   menu is narrow — six rows of a code and a symbol, not the wide feature
+   panels the .nav-menu default is sized for. */
+.cur-switch > button {
+  margin: 0; padding: 4px 7px 4px 9px; border-radius: 7px;
+  border: 1px solid var(--rule, rgba(255, 255, 255, .2));
+  color: rgba(220, 231, 247, .8); font: 600 12.5px/1.3 var(--font);
+  letter-spacing: .02em;
+}
+.cur-switch > button:hover,
+.cur-switch[data-open="true"] > button {
+  color: #fff; background: none; border-color: rgba(255, 255, 255, .45);
+}
+.cur-switch .cur-code { white-space: nowrap; }
+.nav-menu-cur { width: 176px; left: auto; right: 0; padding: 6px; }
+.nav-menu-cur a {
+  grid-template-columns: 22px auto 1fr; column-gap: 8px; align-items: center;
+  padding: 8px 10px; border-radius: 9px;
+}
+.nav-menu-cur b { grid-column: 1; font-size: 13.5px; font-weight: 600; color: var(--fg); }
+/* The generic `.nav-menu span:not(.nav-ico)` rule pins spans to column 2 and
+   greys them; these are labels in their own right, so both are restated. */
+.nav-menu-cur span:not(.nav-ico) {
+  grid-column: 2; margin-top: 0; font-size: 13px; font-weight: 600; color: var(--fg);
+}
+.nav-menu-cur em {
+  grid-column: 3; justify-self: end; font-style: normal;
+  font-size: 11px; color: var(--faint);
+}
+.nav-menu-cur a.active { background: var(--brand-weak); }
+@media (max-width: 470px) {
+  .cur-switch > button { padding: 4px 6px; font-size: 12px; }
+  .cur-switch > button svg { display: none; }
+}
+
 /* ---------- pricing ribbon ----------
    .ribbon is absolutely positioned but its card was `static`, so it resolved
    against the page and floated up under the header instead of sitting on the

@@ -3,6 +3,8 @@
   "nav.product": "Product",
   "nav.solutions": "Solutions",
   "nav.pricing": "Pricing",
+  "nav.currency": "Currency",
+  "nav.currency_auto": "your region",
   "nav.desktop_cta": "Download desktop",
   "nav.cloud_cta": "Try in cloud",
   "nav.signin": "Sign in",

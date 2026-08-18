@@ -276,3 +276,40 @@ def test_release_throttle_holds_the_slot_until_the_body_ends():
         assert mw._prune(__import__("time").time()) == 0
 
     asyncio.run(run())
+
+
+# --- currency picker ---------------------------------------------------------
+
+def test_currency_defaults_to_the_visitor_country(client):
+    """Cloudflare puts CF-IPCountry in front of every request; the price a
+    visitor sees should follow it without them doing anything."""
+    body = client.get("/pricing", headers={"CF-IPCountry": "CN"}).text
+    assert "¥ CNY" in body
+    assert client.get("/pricing", headers={"CF-IPCountry": "JP"}).text.count("¥ JPY")
+    assert "£ GBP" in client.get("/pricing", headers={"CF-IPCountry": "GB"}).text
+    assert "€ EUR" in client.get("/pricing", headers={"CF-IPCountry": "DE"}).text
+    # nowhere on the map -> USD rather than a currency they must convert
+    assert "$ USD" in client.get("/pricing", headers={"CF-IPCountry": "BR"}).text
+
+
+def test_currency_picker_offers_every_currency_and_a_way_back(client):
+    """An explicit ?cur= sticks in a cookie for a year. Without a visible picker
+    a single shared link pinned a visitor to a currency their country would
+    never have chosen — which is exactly what happened."""
+    from app import currency
+
+    r = client.get("/pricing?cur=USD", headers={"CF-IPCountry": "CN"})
+    assert r.cookies.get(currency.COOKIE) == "USD"
+    body = r.text
+    for code in currency.SUPPORTED:
+        assert f'>{code}<' in body, code
+    # the country's own currency is labelled, so the way back is findable
+    assert "按所在地" in body or "your region" in body
+
+
+def test_switchers_do_not_reset_each_other(client):
+    """Bare `?lang=en` hrefs replace the whole query string; switching language
+    on /pricing?cur=CNY used to silently drop the currency."""
+    body = client.get("/pricing?lang=en&cur=CNY").text
+    assert "cur=CNY" in body and "lang=zh" in body      # language link keeps cur
+    assert "lang=en" in body and "cur=EUR" in body      # currency links keep lang

@@ -81,6 +81,22 @@ def _ctx(request: Request, page: str, **extra) -> dict:
     return ctx
 
 
+def _switch_url(request: Request, **overrides) -> str:
+    """A link to this same page with one query parameter changed.
+
+    The switchers used bare `?lang=en` hrefs, which replace the WHOLE query
+    string — switching language on /pricing?cur=CNY silently dropped the
+    currency. Keeping the other parameters is what makes the two pickers
+    independent of each other.
+    """
+    from urllib.parse import urlencode
+
+    params = dict(request.query_params)
+    params.update(overrides)
+    q = urlencode(params)
+    return f"{request.url.path}?{q}" if q else request.url.path
+
+
 def _currency_ctx(request: Request) -> dict:
     """Currency shown to this visitor, and the table that goes with it."""
     from . import currency as _cur
@@ -89,6 +105,14 @@ def _currency_ctx(request: Request) -> dict:
         "currency": cur,
         "currency_symbol": _cur.symbol(cur),
         "supported_currencies": _cur.SUPPORTED,
+        # The picker exists because an explicit ?cur= sticks for a year in a
+        # cookie: without a visible way back, one link pinned a visitor to a
+        # currency their country would never have chosen.
+        "currency_options": [{"code": c, "symbol": _cur.symbol(c),
+                              "active": c == cur,
+                              "href": _switch_url(request, cur=c)}
+                             for c in _cur.SUPPORTED],
+        "currency_auto": _cur.from_country(request.headers.get("cf-ipcountry", "")) or _cur.DEFAULT,
     }
 
 
@@ -108,6 +132,7 @@ def _i18n_ctx(request: Request) -> dict:
         "t": lambda key, **kw: i18n.t(lang, key, **kw),
         "js_i18n": js_strings,
         "other_lang": i18n.other(lang),
+        "lang_switch_url": _switch_url(request, lang=i18n.other(lang)),
         "other_lang_label": "EN" if lang == "zh" else "中文",
     }
 

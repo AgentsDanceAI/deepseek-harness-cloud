@@ -3,6 +3,8 @@
   "nav.product": "产品",
   "nav.solutions": "解决方案",
   "nav.pricing": "定价",
+  "nav.currency": "货币",
+  "nav.currency_auto": "按所在地",
   "nav.desktop_cta": "下载桌面版",
   "nav.cloud_cta": "云端体验",
   "nav.signin": "登录",
