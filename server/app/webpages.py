@@ -46,10 +46,6 @@ def _ctx(request: Request, page: str, **extra) -> dict:
     except Exception:
         user = None
     from . import plans as _plans
-    try:
-        currency = _plans.pricing().get("currency", "CNY")
-    except Exception:
-        currency = "CNY"
     ctx = {
         "request": request,
         "page": page,
@@ -62,8 +58,7 @@ def _ctx(request: Request, page: str, **extra) -> dict:
         "year": time.localtime().tm_year,
         "asset_v": ASSET_V,
         **_i18n_ctx(request),
-        "currency": currency,
-        "currency_symbol": {"CNY": "¥", "USD": "$"}.get(currency, currency + " "),
+        **_currency_ctx(request),
         # Templates link to /dl/<key>; these flags only say whether a build
         # exists, so a platform with no artifact is shown as unavailable rather
         # than as a link that 404s.
@@ -84,6 +79,17 @@ def _ctx(request: Request, page: str, **extra) -> dict:
     }
     ctx.update(extra)
     return ctx
+
+
+def _currency_ctx(request: Request) -> dict:
+    """Currency shown to this visitor, and the table that goes with it."""
+    from . import currency as _cur
+    cur, _explicit = _cur.resolve(request)
+    return {
+        "currency": cur,
+        "currency_symbol": _cur.symbol(cur),
+        "supported_currencies": _cur.SUPPORTED,
+    }
 
 
 def _i18n_ctx(request: Request) -> dict:
@@ -141,6 +147,12 @@ def _render(request: Request, template: str, page: str, **extra):
     from . import i18n
     response = templates.TemplateResponse(request, template, _ctx(request, page, **extra))
     lang, explicit = i18n.resolve(request)
+    from . import currency as _cur
+    cur, cur_explicit = _cur.resolve(request)
+    if cur_explicit:
+        response.set_cookie(_cur.COOKIE, cur, max_age=_cur.COOKIE_MAX_AGE,
+                            path="/", samesite="lax",
+                            secure=config.PUBLIC_BASE.startswith("https://"))
     if explicit:
         # Persist the click. Without this the switcher works for exactly one
         # page view and every link after it snaps back to the browser locale.
@@ -150,11 +162,14 @@ def _render(request: Request, template: str, page: str, **extra):
     return response
 
 
-def _pricing_safe() -> dict:
+def _pricing_safe(cur: str | None = None) -> dict:
+    """The price table to DISPLAY. Charging still resolves its own table from
+    the order's currency — a page showing EUR must never decide what a card
+    gets debited."""
     try:
-        return plans.pricing()
+        return plans.pricing(cur)
     except Exception:
-        return {"currency": "CNY", "tiers": {}, "packs": {}}
+        return {"currency": cur or "USD", "tiers": {}, "packs": {}}
 
 
 def _fmt_ts(ts: float | None) -> str:
@@ -495,7 +510,9 @@ def models_public():
 
 @router.get("/pricing")
 def pricing_page(request: Request):
-    pricing = _pricing_safe()
+    from . import currency as _cur
+    cur, _ = _cur.resolve(request)
+    pricing = _pricing_safe(cur)
     tier_order = [t for t in ("free", "plus", "pro", "max") if t in pricing.get("tiers", {})]
     return _render(request, "pricing.html", "pricing", pricing=pricing, tier_order=tier_order)
 

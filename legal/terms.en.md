@@ -10,9 +10,7 @@ These Terms are the agreement between you and the Operator regarding deepseek-ha
 
 | Item | Details |
 |---|---|
-| Legal entity | 北京跃迁效应人工智能科技有限公司 (Beijing AgentsDance AI Technology Co., Ltd.) |
-| Unified Social Credit Code | 91110108MAKL3PHR6X |
-| Registered address | Room 01-1922, 1F, Building 15, East Zone, Yard 10 Xibeiwang East Road, Haidian District, Beijing, China<br>中国北京市海淀区西北旺东路 10 号院东区 15 号楼 1 层 01-1922 |
+| Legal entity | AgentsDance AI |
 | Service and billing support | support@agentsdance.ai |
 | Legal and privacy | legal@agentsdance.ai |
 | Security vulnerability reports | security@agentsdance.ai |

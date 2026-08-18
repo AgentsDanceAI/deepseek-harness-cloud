@@ -4,7 +4,7 @@
 
 版本 1.0，生效日期【上线日期】
 
-DSH Cloud 桌面应用由**【运营主体】**（当前为北京跃迁效应人工智能科技有限公司 / Beijing AgentsDance AI Technology Co., Ltd.）基于下列 MIT 许可的开源项目构建并再分发。我们按许可要求完整保留其版权与许可声明。
+DSH Cloud 桌面应用由**【运营主体】**（当前为AgentsDance AI / Beijing AgentsDance AI Technology Co., Ltd.）基于下列 MIT 许可的开源项目构建并再分发。我们按许可要求完整保留其版权与许可声明。
 
 The DSH Cloud desktop application is built upon and redistributes the following MIT-licensed open-source projects. Their copyright and permission notices are reproduced in full below, as required by the license.
 

@@ -161,7 +161,8 @@
     <div class="grid grid-3 pack-grid">
       {% for pid, p in pricing.packs.items() %}
       <div class="card pack">
-        <h3>{{ p.name }}</h3>
+        <h3>{{ _t(p.name_key) if p.name_key else p.name }}</h3>
+        {% if p.bonus_pct %}<span class="off-badge">{{ _t("pricing.pack.bonus", pct=p.bonus_pct) }}</span>{% endif %}
         <div class="price"><span class="currency">{{ currency_symbol }}</span>{{ p.cents // 100 }}</div>
         <p class="muted">{{ t("pricing.packs.pack_note", credits='{:,}'.format(p.credits), days=p.valid_days) }}</p>
         <button class="btn btn-primary btn-block buy-btn" data-item="pack:{{ pid }}" type="button">{{ t("pricing.packs.buy") }}</button>

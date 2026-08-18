@@ -10,9 +10,7 @@ This Policy explains how deepseek-harness-cloud (the site at https://dshcloud.on
 
 | Item | Details |
 |---|---|
-| Legal entity | 北京跃迁效应人工智能科技有限公司 (Beijing AgentsDance AI Technology Co., Ltd.) |
-| Unified Social Credit Code | 91110108MAKL3PHR6X |
-| Registered address | Room 01-1922, 1F, Building 15, East Zone, Yard 10 Xibeiwang East Road, Haidian District, Beijing, China<br>中国北京市海淀区西北旺东路 10 号院东区 15 号楼 1 层 01-1922 |
+| Legal entity | AgentsDance AI |
 | Privacy contact email | legal@agentsdance.ai |
 | General support | support@agentsdance.ai |
 | Security incident reports | security@agentsdance.ai |

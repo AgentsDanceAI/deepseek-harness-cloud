@@ -10,9 +10,7 @@
 
 | 项目 | 内容 |
 |---|---|
-| 法律实体 | 北京跃迁效应人工智能科技有限公司（Beijing AgentsDance AI Technology Co., Ltd.） |
-| 统一社会信用代码 | 91110108MAKL3PHR6X |
-| 注册地址 | 中国北京市海淀区西北旺东路 10 号院东区 15 号楼 1 层 01-1922 |
+| 法律实体 | AgentsDance AI |
 | 服务与账单支持 | support@agentsdance.ai |
 | 法务与隐私 | legal@agentsdance.ai |
 | 安全漏洞报告 | security@agentsdance.ai |

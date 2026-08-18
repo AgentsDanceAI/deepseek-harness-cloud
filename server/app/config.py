@@ -81,9 +81,9 @@ UPSTREAM_ANTHROPIC_BASE = _env("UPSTREAM_ANTHROPIC_BASE", "https://api.deepseek.
 
 # --- pricing / credits ------------------------------------------------------
 # Which price table to serve: pricing.json (CNY) or pricing.usd.json (overseas).
-PRICING_FILE = _env("PRICING_FILE", "pricing.json")
+PRICING_FILE = _env("PRICING_FILE", "pricing.usd.json")
 MODEL_PRICE_MARKUP = _env_float("MODEL_PRICE_MARKUP", 1.2)
-FREE_SIGNUP_CREDITS = _env_int("FREE_SIGNUP_CREDITS", 1000)  # $1 = 100 credits
+FREE_SIGNUP_CREDITS = _env_int("FREE_SIGNUP_CREDITS", 500)  # $1 = 100 credits
 SEARCH_CALL_CREDITS = _env_int("SEARCH_CALL_CREDITS", 1)  # flat per web_search call, on top of tokens
 OVERDRAFT_LIMIT_CREDITS = _env_int("OVERDRAFT_LIMIT_CREDITS", 20)  # in-flight streams may finish
 
@@ -154,7 +154,7 @@ WORK_AGENT_IDLE_STOP_MIN = _env_int("WORK_AGENT_IDLE_STOP_MIN", 30)
 # Everyone gets this many ACTIVE agent minutes on the house; when they run out,
 # the next task hits the paywall instead of silently draining credits. Active
 # minutes are the same meter that bills (see workspace.reaper_tick).
-WORK_FREE_MINUTES = _env_int("WORK_FREE_MINUTES", 4320)  # 72h — fallback when the
+WORK_FREE_MINUTES = _env_int("WORK_FREE_MINUTES", 180)  # 72h — fallback when the
 # price table carries no work_minutes for the free tier
 # The intro offer that unlocks it again: cheap for the first period, then the
 # standard price. Amounts are minor units (cents / 分) in PRICING_CURRENCY.

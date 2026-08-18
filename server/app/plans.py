@@ -19,15 +19,37 @@ _cache: dict | None = None
 _cache_mtime: float = 0.0
 
 
-def pricing() -> dict:
-    global _cache, _cache_mtime
-    p = config.CONFIG_DIR / config.PRICING_FILE
+def pricing(cur: str | None = None) -> dict:
+    """Price table for one currency.
+
+    Cached per currency and hot-reloaded on mtime, so editing a table takes
+    effect without a restart. `cur=None` keeps the historical behaviour (the
+    PRICING_FILE default), which is what every server-side charge path uses —
+    the amount a user owes must come from the table their order was priced in,
+    never from whatever currency the current page happens to be showing.
+    """
+    key = (cur or "").upper() or "_default"
+    if key == "_default":
+        p = config.CONFIG_DIR / config.PRICING_FILE
+    else:
+        from . import currency as _cur
+        p = config.CONFIG_DIR / _cur.price_file(key)
+        if not p.is_file():
+            p = config.CONFIG_DIR / config.PRICING_FILE
     mtime = p.stat().st_mtime
     with _lock:
-        if _cache is None or mtime != _cache_mtime:
-            _cache = json.loads(p.read_text())
-            _cache_mtime = mtime
-        return _cache
+        entry = _cache.get(key) if isinstance(_cache, dict) else None
+        if entry is None or entry[0] != mtime:
+            data = json.loads(p.read_text())
+            if not isinstance(_cache, dict):
+                _cache_reset()
+            _cache[key] = (mtime, data)
+        return _cache[key][1]
+
+
+def _cache_reset() -> None:
+    global _cache
+    _cache = {}
 
 
 def tier_def(tier: str) -> dict | None:

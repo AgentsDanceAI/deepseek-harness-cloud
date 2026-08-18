@@ -92,8 +92,13 @@ def test_resolve_item_rejects_unknown_and_free():
     table = plans.pricing()["tiers"]
     assert base.resolve_item("plan:plus:monthly")["amount_cents"] == table["plus"]["monthly_cents"]
     assert base.resolve_item("plan:pro:yearly")["amount_cents"] == table["pro"]["yearly_cents"]
-    info = base.resolve_item("pack:pack5250")
-    assert info["amount_cents"] == plans.pricing()["packs"]["pack5250"]["cents"] and info["credits"] == 5250
+    # Read the pack id from the table rather than pinning one: the tiers are a
+    # commercial decision that changes, and a test that fails when they do is
+    # testing the price list, not the code.
+    pack_id = next(iter(plans.pricing()["packs"]))
+    info = base.resolve_item(f"pack:{pack_id}")
+    pack = plans.pricing()["packs"][pack_id]
+    assert info["amount_cents"] == pack["cents"] and info["credits"] == pack["credits"]
 
 
 def test_client_supplied_amount_is_ignored():
@@ -109,7 +114,7 @@ def test_client_supplied_amount_is_ignored():
 
 def test_context_lists_active_providers(monkeypatch):
     body = client.get("/api/pay/context").json()
-    assert body["providers"] == [] and body["currency"] == "CNY"
+    assert body["providers"] == [] and body["currency"] == plans.pricing()["currency"]
     assert "plus" in body["pricing"]["tiers"] and "pack1000" in body["pricing"]["packs"]
     monkeypatch.setattr(config, "STRIPE_SECRET_KEY", "sk_test")
     assert client.get("/api/pay/context").json()["providers"] == ["stripe"]
@@ -165,7 +170,7 @@ def test_stripe_happy_path_idempotence_and_refund(monkeypatch):
     oid = body["order_id"]
     assert oid.startswith("DHS")
     assert sent["data"]["line_items[0][price_data][unit_amount]"] == str(plans.pricing()["tiers"]["plus"]["monthly_cents"])
-    assert sent["data"]["line_items[0][price_data][currency]"] == "cny"
+    assert sent["data"]["line_items[0][price_data][currency]"] == plans.pricing()["currency"].lower()
     assert sent["data"]["client_reference_id"] == oid
     assert sent["data"]["payment_method_types[0]"] == "card"
     assert sent["data"]["payment_method_options[wechat_pay][client]"] == "web"
@@ -308,6 +313,8 @@ def test_wechat_native_and_webhook(monkeypatch, tmp_path):
     assert oid.startswith("DHW")
     assert sent["headers"]["Authorization"].startswith("WECHATPAY2-SHA256-RSA2048 mchid=")
     req = json.loads(sent["content"])
+    # WeChat settles in CNY only, so this one IS a literal — the provider
+    # would reject anything else regardless of what the page was showing.
     assert req["amount"] == {"total": plans.pricing()["packs"]["pack1000"]["cents"], "currency": "CNY"} and req["out_trade_no"] == oid
 
     def encrypted_hook(event_type: str, payload: dict) -> dict:

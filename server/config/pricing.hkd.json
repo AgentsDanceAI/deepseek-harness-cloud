@@ -1,6 +1,6 @@
 {
   "_comment": "由 scripts/gen_pricing.py 生成，请勿手改。基准 1 USD = 7 CNY = 100 积分；其余币种按对美元汇率折算后取整。年付约 10 个月价；首月特价 Plus 8 折 / Pro 7 折 / Max 6 折。",
-  "currency": "USD",
+  "currency": "HKD",
   "tiers": {
     "free": {
       "name": "Free",
@@ -12,39 +12,39 @@
     },
     "plus": {
       "name": "Plus",
-      "monthly_cents": 1000,
+      "monthly_cents": 7800,
       "monthly_credits": 1000,
       "concurrency": 2,
       "work_minutes": 10800,
-      "yearly_cents": 10000,
-      "yearly_per_month_cents": 800,
-      "monthly_intro_cents": 800
+      "yearly_cents": 78000,
+      "yearly_per_month_cents": 6500,
+      "monthly_intro_cents": 6200
     },
     "pro": {
       "name": "Pro",
-      "monthly_cents": 2000,
+      "monthly_cents": 15600,
       "monthly_credits": 2000,
       "concurrency": 5,
       "work_minutes": 21600,
-      "yearly_cents": 20000,
-      "yearly_per_month_cents": 1700,
-      "monthly_intro_cents": 1400
+      "yearly_cents": 156000,
+      "yearly_per_month_cents": 13000,
+      "monthly_intro_cents": 10900
     },
     "max": {
       "name": "Max",
-      "monthly_cents": 10000,
+      "monthly_cents": 78000,
       "monthly_credits": 10000,
       "concurrency": 10,
       "work_minutes": 32400,
-      "yearly_cents": 100000,
-      "yearly_per_month_cents": 8300,
-      "monthly_intro_cents": 6000
+      "yearly_cents": 780000,
+      "yearly_per_month_cents": 65000,
+      "monthly_intro_cents": 46800
     }
   },
   "packs": {
     "pack1000": {
       "name": "1,000 credits",
-      "cents": 1000,
+      "cents": 7800,
       "credits": 1000,
       "valid_days": 365,
       "bonus_pct": 0,
@@ -52,7 +52,7 @@
     },
     "pack11200": {
       "name": "11,200 credits",
-      "cents": 10000,
+      "cents": 78000,
       "credits": 11200,
       "valid_days": 365,
       "bonus_pct": 12,
@@ -60,7 +60,7 @@
     },
     "pack143000": {
       "name": "143,000 credits",
-      "cents": 100000,
+      "cents": 780000,
       "credits": 143000,
       "valid_days": 365,
       "bonus_pct": 43,
@@ -68,7 +68,7 @@
     }
   },
   "team": {
-    "seat_cents": 2500,
+    "seat_cents": 19500,
     "min_seats": 3,
     "seat_credits": 2500,
     "seat_minutes": 1200,

@@ -3,8 +3,8 @@
   "nav.product": "Product",
   "nav.solutions": "Solutions",
   "nav.pricing": "Pricing",
-  "nav.desktop_cta": "Desktop Harness",
-  "nav.cloud_cta": "Cloud Harness",
+  "nav.desktop_cta": "Download desktop",
+  "nav.cloud_cta": "Try in cloud",
   "nav.signin": "Sign in",
   "nav.console": "Console",
   "nav.console_desc": "Balance, plan and usage",
@@ -591,5 +591,10 @@
   "pricing.tagline.free": "Try it out — nothing to set up",
   "pricing.tagline.plus": "Everyday personal work, zero configuration",
   "pricing.tagline.pro": "One person delivering what a team would",
-  "pricing.tagline.max": "Heavy use, in place of an outsourcing budget"
+  "pricing.tagline.max": "Heavy use, in place of an outsourcing budget",
+  "pricing.pack.pack1000": "1,000 credits",
+  "pricing.pack.pack11200": "11,200 credits",
+  "pricing.pack.pack143000": "143,000 credits",
+  "pricing.pack.bonus": "{pct}% extra",
+  "pricing.pack.custom": "Need a larger amount? Email support@agentsdance.ai"
 }
