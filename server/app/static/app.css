@@ -1178,7 +1178,16 @@ body:not([data-page="landing"]) .section:first-of-type { position: relative; z-i
   grid-column: 3; justify-self: end; font-style: normal;
   font-size: 11px; color: var(--faint);
 }
-.nav-menu-cur a.active { background: var(--brand-weak); }
+/* Hover and selected must not look alike. The shared `.nav-menu a:hover` paints
+   --brand-weak, the exact fill the selected row uses, so a pointer resting
+   anywhere in the list made it read as two currencies chosen at once. Hover
+   goes neutral; selected keeps the brand fill AND takes brand ink, so it is
+   still obvious once the pointer leaves. */
+.nav-menu-cur a:hover { background: color-mix(in srgb, var(--fg) 6%, transparent); }
+.nav-menu-cur a.active,
+.nav-menu-cur a.active:hover { background: var(--brand-weak); }
+.nav-menu-cur a.active b,
+.nav-menu-cur a.active span:not(.nav-ico) { color: var(--brand); font-weight: 700; }
 @media (max-width: 470px) {
   .cur-picker > button { padding: 6px 10px; font-size: 13px; }
 }
