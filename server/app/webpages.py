@@ -108,7 +108,8 @@ def _currency_ctx(request: Request) -> dict:
         # The picker exists because an explicit ?cur= sticks for a year in a
         # cookie: without a visible way back, one link pinned a visitor to a
         # currency their country would never have chosen.
-        "currency_options": [{"code": c, "symbol": _cur.symbol(c),
+        "currency_glyph": _cur.glyph(cur),
+        "currency_options": [{"code": c, "symbol": _cur.glyph(c),
                               "active": c == cur,
                               "href": _switch_url(request, cur=c)}
                              for c in _cur.SUPPORTED],

@@ -59,6 +59,18 @@ def symbol(cur: str) -> str:
     return SYMBOL.get(cur, cur + " ")
 
 
+def glyph(cur: str) -> str:
+    """The symbol without its country qualifier: HK$ -> $.
+
+    For a PRICE the qualifier is load-bearing — "$780" next to a Hong Kong
+    price reads as US dollars. In a list that already names the currency it is
+    noise, and it is the reason the picker's HKD row looked different from
+    every other row. CNY and JPY have shown the same ¥ from the start, so the
+    code beside it is what disambiguates there too.
+    """
+    return SYMBOL.get(cur, cur).lstrip("ABCDEFGHIJKLMNOPQRSTUVWXYZ") or SYMBOL.get(cur, cur)
+
+
 def price_file(cur: str) -> str:
     cur = cur if cur in SUPPORTED else DEFAULT
     return f"pricing.{cur.lower()}.json"

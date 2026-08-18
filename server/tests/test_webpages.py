@@ -317,6 +317,18 @@ def test_currency_picker_offers_every_currency_and_a_way_back(client):
     assert "按所在地" in body or "your region" in body
 
 
+def test_picker_drops_the_country_qualifier_but_prices_keep_it(client):
+    """HK$ next to the letters HKD repeats itself, and it was the only row wide
+    enough to collide with its own label. A price is the opposite case: "$780"
+    beside a Hong Kong price reads as US dollars."""
+    from app import currency
+
+    assert currency.glyph("HKD") == "$" and currency.symbol("HKD") == "HK$"
+    body = client.get("/pricing?cur=HKD").text
+    assert "HK$780" in body or "HK$</span>780" in body      # prices stay qualified
+    assert "<b>HK$</b>" not in body                          # the picker row does not
+
+
 def test_switchers_do_not_reset_each_other(client):
     """Bare `?lang=en` hrefs replace the whole query string; switching language
     on /pricing?cur=CNY used to silently drop the currency."""

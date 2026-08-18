@@ -1157,14 +1157,12 @@ body:not([data-page="landing"]) .section:first-of-type { position: relative; z-i
 .cur-picker .cur-code { white-space: nowrap; }
 .nav-menu-cur { width: 176px; left: 50%; transform: translateX(-50%); padding: 6px; text-align: left; }
 .nav-menu-cur a {
-  grid-template-columns: 30px auto 1fr; column-gap: 10px; align-items: center;
+  grid-template-columns: 16px auto 1fr; column-gap: 10px; align-items: center;
   padding: 8px 10px; border-radius: 9px;
 }
 /* Each row is its own grid, so an `auto` first column would size to that row's
-   own symbol and the codes would step in and out. The column is fixed and the
-   symbol right-aligned instead: one-character symbols and HK$ then end at the
-   same edge, a fixed gap from the code. At 22px and left-aligned, HK$ ran out
-   of its column and collided with HKD. */
+   own symbol and the codes would step in and out. Fixed column, symbol
+   right-aligned: every glyph ends at the same edge, a fixed gap from the code. */
 .nav-menu-cur b {
   grid-column: 1; justify-self: end; white-space: nowrap;
   font-size: 13.5px; font-weight: 600; color: var(--fg);
