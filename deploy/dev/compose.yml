@@ -1,0 +1,80 @@
+# Development stack. Everything is namespaced `dhc-dev-` so it cannot collide
+# with — or attach to — a production deployment on the same machine. 158 still
+# holds the retired production volumes, and a stack that reached them would be
+# a second live service writing to real balances.
+#
+#   cd deploy/dev && ./up.sh
+#
+# Postgres, not sqlite, on purpose. The two bugs that reached production this
+# month were BOTH postgres-only: query() calling fetchall() on a DELETE (which
+# sqlite tolerates and psycopg raises on), and a literal % in SQL being read as
+# a placeholder. A sqlite dev stack would have shipped both again.
+name: dhc-dev
+
+services:
+  dhc-dev-postgres:
+    image: postgres:18-alpine
+    container_name: dhc-dev-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-dhcdev}
+      POSTGRES_USER: ${POSTGRES_USER:-dhcdev}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in deploy/dev/.env}
+    volumes:
+      - dhc-dev-pgdata:/var/lib/postgresql
+    networks: [dhc-dev-net]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-dhcdev} -d ${POSTGRES_DB:-dhcdev}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  dhc-dev-server:
+    build:
+      context: ../..
+      dockerfile: server/Dockerfile
+    image: dhc-server:dev
+    container_name: dhc-dev-server
+    restart: unless-stopped
+    env_file: [".env"]
+    environment:
+      DHC_DATA_DIR: /app/data
+    volumes:
+      - dhc-dev-data:/app/data
+      - ${DOCKER_VOLUME_ROOT:-/var/lib/docker/volumes}:/hostvolumes:ro
+    # Loopback only. This box has no business answering the public internet
+    # about a half-finished branch, and there is no TLS in front of it.
+    ports:
+      - "127.0.0.1:18100:8100"
+    networks: [dhc-dev-net, dshwork-dev-net]
+    depends_on:
+      dhc-dev-postgres:
+        condition: service_healthy
+
+  # Same scoping as production: containers and networks, never exec, never the
+  # raw socket. Dev workspaces are real containers, so the same limits apply.
+  dhc-dev-docker-proxy:
+    image: tecnativa/docker-socket-proxy
+    container_name: dhc-dev-docker-proxy
+    restart: unless-stopped
+    environment:
+      CONTAINERS: 1
+      NETWORKS: 1
+      IMAGES: 1
+      INFO: 1
+      POST: 1
+      EXEC: 0
+      VOLUMES: 0
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks: [dhc-dev-net]
+
+networks:
+  dhc-dev-net:
+    name: dhc-dev-net
+  dshwork-dev-net:
+    name: dshwork-dev-net
+
+volumes:
+  dhc-dev-data:
+  dhc-dev-pgdata:
