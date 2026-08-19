@@ -32,6 +32,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
+from ._signup import signup, signup_with_password
 
 
 @pytest.fixture()
@@ -94,9 +95,7 @@ def test_pricing_headline_is_the_price_checkout_charges(client):
 
     from app import plans
 
-    r = client.post("/api/auth/register",
-                    json={"email": "headline@example.com", "password": "secret-pass-123"})
-    assert r.status_code == 200, r.text
+    signup(client, "headline@example.com")
 
     body = client.get("/pricing").text
     table = plans.pricing()["tiers"]
@@ -232,8 +231,7 @@ def test_register_login_console_flow(client):
     email = "webuser@example.com"
     password = "secret-pass-123"
 
-    r = client.post("/api/auth/register", json={"email": email, "password": password})
-    assert r.status_code == 200, r.text
+    signup_with_password(client, email, password)
     assert client.cookies.get("dhc_session")
 
     # fresh client: prove password login works, then browse the console

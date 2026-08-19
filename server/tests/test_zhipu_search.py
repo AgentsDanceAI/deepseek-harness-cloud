@@ -21,6 +21,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 from app import config, credits, db, rate_limit, zhipu_search  # noqa: E402
 from app.main import app  # noqa: E402
+from ._signup import signup
 
 
 @pytest.fixture(autouse=True)
@@ -71,9 +72,7 @@ def test_to_anthropic_response_empty_still_has_result_block():
 
 def _login() -> tuple[TestClient, str]:
     c = TestClient(app)
-    r = c.post("/api/auth/register", json={"email": "z@test.local", "password": "password123"})
-    if r.status_code == 409:  # already registered by an earlier test in this process
-        c.post("/api/auth/login", json={"email": "z@test.local", "password": "password123"})
+    signup(c, "z@test.local")
     uid = db.query_one("SELECT id FROM users WHERE email=?", ("z@test.local",))["id"]
     return c, uid
 

@@ -119,24 +119,12 @@ def find_or_create_oauth_user(email: str, display_name: str = "") -> dict | None
     return user
 
 
-@router.post("/register")
-def register(body: dict, request: Request, response: Response):
-    if not config.ALLOW_REGISTRATION:
-        raise HTTPException(403, "registration_disabled")
-    email = str(body.get("email", "")).strip().lower()
-    password = str(body.get("password", ""))
-    if not EMAIL_RE.match(email):
-        raise HTTPException(400, "invalid_email")
-    if len(password) < 8:
-        raise HTTPException(400, "password_too_short")
-    if not rate_limit.allow(f"reg:{_client_ip(request)}", 10, 3600):
-        raise HTTPException(429, "too_many_requests")
-    if db.query_one("SELECT id FROM users WHERE email=?", (email,)):
-        raise HTTPException(409, "email_exists")
-    user = _create_user(email, password)
-    set_session_cookie(response, user)
-    return {"ok": True, "user": public_user(user)}
-
+# /api/auth/register 已于 2026-08-18 移除 —— 它不验证邮箱就建号并当场发放
+# FREE_SIGNUP_CREDITS + WORK_FREE_MINUTES, 唯一的闸是"每 IP 每小时 10 个",
+# 换 IP 池即形同虚设 (实测: 一条 curl 用 @example.com 假邮箱就能建号拿额度)。
+# 新号一律走 /api/auth/email/login (验证码即注册, 邮箱所有权已验证) 或
+# Google/GitHub OAuth —— 这三条是登录页实际提供的全部入口。
+# /api/auth/login (密码登录) 保留: 历史用户可能已设密码。
 
 @router.post("/login")
 def login(body: dict, request: Request, response: Response):

@@ -26,6 +26,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 from app import config, credits, db, rate_limit, work_access, workspace  # noqa: E402
 from app.main import app  # noqa: E402
+from ._signup import signup
 
 
 class FakeDocker:
@@ -109,9 +110,7 @@ def fake(monkeypatch):
 
 def _user(email="w@test.local"):
     c = TestClient(app)
-    r = c.post("/api/auth/register", json={"email": email, "password": "password123"})
-    if r.status_code == 409:
-        c.post("/api/auth/login", json={"email": email, "password": "password123"})
+    signup(c, email)
     uid = db.query_one("SELECT id FROM users WHERE email=?", (email,))["id"]
     return c, uid
 

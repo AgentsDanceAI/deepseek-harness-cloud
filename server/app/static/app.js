@@ -321,13 +321,6 @@
         .catch(function (err) { showError(errEl, err); });
     });
 
-    $("#form-reg").addEventListener("submit", function (ev) {
-      ev.preventDefault();
-      var f = ev.target, errEl = $("#reg-error");
-      hideError(errEl);
-      api("/api/auth/register", { method: "POST", body: { email: f.email.value.trim(), password: f.password.value } })
-        .then(function () { location.href = safeNext(); })
-        .catch(function (err) { showError(errEl, err); });
     });
   }
 

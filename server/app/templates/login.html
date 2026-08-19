@@ -97,19 +97,6 @@
           {{ t("login.legal_prefix") }} <a href="/legal/terms">{{ t("common.terms") }}</a> {{ t("login.legal_join") }} <a href="/legal/privacy">{{ t("common.privacy") }}</a>{{ t("login.legal_end") }}
         </p>
 
-        <form id="form-reg" autocomplete="on" style="margin-top:10px">
-          <details>
-            <summary class="reg-link">{{ t("login.reg_toggle") }}</summary>
-            <label>{{ t("login.field.email") }}
-              <input type="email" name="email" required placeholder="you@example.com" autocomplete="email">
-            </label>
-            <label>{{ t("login.field.password") }}
-              <input type="password" name="password" required minlength="8" placeholder="{{ t('login.ph.new_password') }}" autocomplete="new-password">
-            </label>
-            <p class="form-error" id="reg-error" hidden></p>
-            <button class="btn btn-primary btn-block" type="submit">{{ t("login.submit_reg") }}</button>
-          </details>
-        </form>
       </div>
 
       {# an explicit way out: sign-in used to be a dead end with no route back #}

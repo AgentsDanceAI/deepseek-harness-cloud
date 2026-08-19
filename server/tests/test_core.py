@@ -25,6 +25,7 @@ import pytest  # noqa: E402
 
 from app import config, credits, db, gateway, plans, security  # noqa: E402
 from app.main import app  # noqa: E402
+from ._signup import signup, signup_with_password
 
 client = TestClient(app)
 
@@ -39,9 +40,10 @@ def _pin_gateway_config(monkeypatch):
 
 
 def _register(email: str = "u1@test.local", password: str = "password123") -> dict:
-    r = client.post("/api/auth/register", json={"email": email, "password": password})
-    assert r.status_code == 200, r.text
-    return r.json()["user"]
+    # 名字保留 _register 以免改动过多调用点; 实际走验证码路径 + 设密码
+    # (下游用例既测 /api/auth/me 又测密码登录)。
+    signup_with_password(client, email, password)
+    return client.get("/api/auth/me").json()["user"]
 
 
 def _user_id(email: str) -> str:
@@ -80,7 +82,7 @@ def test_bad_password_and_lockout():
 
 def test_device_flow_and_revocation():
     browser = TestClient(app)
-    browser.post("/api/auth/register", json={"email": "dev@test.local", "password": "password123"})
+    signup_with_password(browser, "dev@test.local")
 
     desktop = TestClient(app)
     start = desktop.post("/api/device/start", json={"name": "mac-mini", "platform": "darwin"}).json()
@@ -116,7 +118,7 @@ def test_device_password_login():
 
 def test_epoch_revocation_on_password_change():
     fresh = TestClient(app)
-    fresh.post("/api/auth/register", json={"email": "epoch@test.local", "password": "password123"})
+    signup_with_password(fresh, "epoch@test.local")
     token = fresh.post("/api/device/login", json={
         "email": "epoch@test.local", "password": "password123", "name": "x", "platform": "linux"}).json()["token"]
     assert fresh.post("/api/auth/password", json={"old": "password123", "new": "password456"}).status_code == 200
@@ -216,10 +218,9 @@ class _FakeClient:
 def gw_user():
     fresh = TestClient(app)
     email = "gw@test.local"
-    if db.query_one("SELECT id FROM users WHERE email=?", (email,)) is None:
-        fresh.post("/api/auth/register", json={"email": email, "password": "password123"})
-    else:
-        fresh.post("/api/auth/login", json={"email": email, "password": "password123"})
+    # signup() 幂等 (email/login 是"验证码即登录或注册"), 建号与再登录同一条路。
+    # 曾在 else 分支用密码登录 —— 但验证码注册的号没有密码, 第二个用例起全 401。
+    signup(fresh, email)
     return fresh, _user_id(email)
 
 
@@ -281,7 +282,7 @@ def test_gateway_upstream_auth_error_not_leaked(gw_user, monkeypatch):
 
 def test_gateway_blocks_when_credits_exhausted(monkeypatch):
     fresh = TestClient(app)
-    fresh.post("/api/auth/register", json={"email": "poor@test.local", "password": "password123"})
+    signup(fresh, "poor@test.local")
     uid = _user_id("poor@test.local")
     credits.spend(uid, 500, kind="llm", model="m")  # burn the signup grant
     assert credits.balance(uid) == 0
