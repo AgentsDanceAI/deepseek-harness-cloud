@@ -9,6 +9,7 @@ supposed to be a twelfth of. Both are pinned here.
 from __future__ import annotations
 
 import json
+import math
 import subprocess
 import sys
 from pathlib import Path
@@ -46,6 +47,32 @@ def test_yearly_is_twelve_months_at_a_discount(path):
         # Paying yearly must beat paying monthly, in every currency, at every
         # tier — rounding to whole units must never invert that.
         assert t["yearly_per_month_cents"] < monthly
+
+
+@pytest.mark.parametrize("path", TABLES, ids=lambda p: p.stem)
+def test_discounts_derive_from_the_dollar_card_not_the_nominal_percent(path):
+    """每个币种的首月价/年付折月价 = 本币月价 × **美元卡上的实际折扣比例**。
+
+    美元档也要取整到整元, 所以名义 7.5 折在 $10 上落成 $8 = 实际 8 折。若各币种各自
+    重新套名义 0.75, 同一个促销在不同币种上的力度就不一样 —— 人民币卡曾写「省 24%」
+    配 ¥53, 而美元卡写「20% Off」配 $8, 没有人决定过要多让人民币买家 4 个点, 那是
+    取整漏出来的。这条测试钉的是方法, 不是某个数字: 换回名义折扣, 表就会变, 它就会红。
+
+    注意残留漂移是**物理下限**不是 bug: £8 这种小额下一整英镑就占 12.5%, GBP Plus
+    的角标必然和美元卡差几个点。能保证的是"用同一个比例算", 不是"角标处处相等"。
+    """
+    usd = table(CONFIG / "pricing.usd.json")["tiers"]
+    t = table(path)
+    step = 100 if t["currency"] == "JPY" else 1          # 与 gen_pricing.STEP 同源
+    for tier in PAID:
+        u, loc = usd[tier], t["tiers"][tier]
+        monthly = loc["monthly_cents"] // 100
+        for field in ("monthly_intro_cents", "yearly_per_month_cents"):
+            ratio = u[field] / u["monthly_cents"]         # 美元卡上的实际比例
+            want = math.floor(monthly * ratio / step + 0.5) * step
+            assert loc[field] // 100 == want, (
+                f"{t['currency']} {tier} {field}: 表里是 {loc[field] // 100}, "
+                f"按美元卡比例 {ratio:.4f} 应为 {want} —— 折扣比例是不是又按名义值各算各的了?")
 
 
 @pytest.mark.parametrize("path", TABLES, ids=lambda p: p.stem)

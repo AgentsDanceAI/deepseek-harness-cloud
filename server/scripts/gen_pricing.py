@@ -27,12 +27,14 @@ Three rules the tables have to obey:
   path reads, so the ladder can be shown on the page without the risk of
   granting a different number than the one advertised.
 
-Discounts are flat across tiers. They used to deepen as the tier rose, which
-reads well on a page but priced the deepest discount exactly where the risk is:
-at full utilisation both the first-month and the yearly price are below cost, and
-the people who buy a year of the top tier are the ones most likely to burn their
-whole allowance. Flat 30% yearly / 25% first month keeps the offer while bounding
-that exposure.
+Discounts are flat across tiers rather than deepening as the tier rises. That is
+a commercial choice, not a margin guard: the multiplier system prices every model
+at 2.5x its cost (multiplier = ceil2(cost / $4.00), sell = multiplier x $10/M), so
+gross margin is 60% at list and no discount on this table comes close to cost.
+
+The nominal percentages here are what the DOLLAR card rounds to; every other
+currency derives from the dollar card's actual ratio, not from these numbers.
+See effective().
 
     python3 server/scripts/gen_pricing.py          # rewrite all six tables
     python3 server/scripts/gen_pricing.py --check  # fail if they are stale
@@ -90,8 +92,9 @@ TEAM = {"seat_usd": 25, "min_seats": 3, "seat_credits": 2500, "seat_minutes": 12
 
 COMMENT = ("由 server/scripts/gen_pricing.py 生成，请勿手改。基准 1 USD = 7 CNY = 100 积分；"
            "其余币种按对美元汇率折算后取整（日元取整到 100）。三档 $10 / $50 / $100，"
-           "年付一律 7 折、首月一律 7.5 折（原为最深 7 折 / 6 折：满用时首月与年付价"
-           "一律负毛利，而买年付的恰是最可能烧满额度的人）。积分包不再多送——"
+           "年付一律 7 折、首月一律 7.5 折（名义值；美元档要取整到整元，$10 的 7.5 折是 "
+           "$7.5 → $8，实际 8 折。其余币种一律按**美元卡上的实际比例**折算，不重新套名义值，"
+           "否则同一个促销在不同币种上力度不同）。积分包不再多送——"
            "100 积分/美元是公示承诺，包的价值在于不随月清零，同价的包也绝不能比"
            "同价套餐给得多，否则最高档被自己的加油包压制。")
 
@@ -110,6 +113,23 @@ def scale(local_units: int, factor: float, cur: str) -> int:
     return int(math.floor(local_units * factor / step + 0.5)) * step
 
 
+def effective(usd: float, off: int) -> float:
+    """The discount that ACTUALLY ends up on the dollar card, as a ratio.
+
+    Not the nominal one. USD prices are whole dollars too, so a nominal 25% off
+    $10 is $7.50 and ships as $8 — a real discount of 20%, and $8 is the number
+    the customer sees. Every other currency has to be derived from THAT ratio,
+    not from the nominal 0.75, or the same promotion advertises a different depth
+    depending on which currency you are quoted in: the yuan card said "省 24%"
+    beside ¥53 while the dollar card said "20% Off" beside $8, and nobody decided
+    to give yuan buyers four extra points — it fell out of the rounding.
+
+    Max is unaffected either way ($100 × 0.75 = $75 exactly); this only moves the
+    tiers whose discounted dollar price needed rounding."""
+    usd_monthly = units(usd, "USD")
+    return scale(usd_monthly, (100 - off) / 100, "USD") / usd_monthly
+
+
 def table(cur: str) -> dict:
     tiers: dict = {"free": {"name": "Free", "monthly_cents": 0, "monthly_credits": 0,
                             "concurrency": FREE["concurrency"],
@@ -117,7 +137,8 @@ def table(cur: str) -> dict:
                             "signup_credits": FREE["signup_credits"]}}
     for tid, name, usd, credits, conc, minutes, yoff, ioff in TIERS:
         monthly = units(usd, cur)
-        per_month = scale(monthly, (100 - yoff) / 100, cur)
+        # 折扣比例取**美元卡上的实际比例**, 不是名义百分比 —— 见 effective()
+        per_month = scale(monthly, effective(usd, yoff), cur)
         tiers[tid] = {
             "name": name,
             "monthly_cents": monthly * 100,
@@ -129,7 +150,7 @@ def table(cur: str) -> dict:
             "yearly_list_cents": monthly * 12 * 100,
             "yearly_cents": per_month * 12 * 100,
             "yearly_per_month_cents": per_month * 100,
-            "monthly_intro_cents": scale(monthly, (100 - ioff) / 100, cur) * 100,
+            "monthly_intro_cents": scale(monthly, effective(usd, ioff), cur) * 100,
         }
 
     packs = {}
