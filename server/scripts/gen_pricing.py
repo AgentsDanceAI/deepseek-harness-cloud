@@ -55,14 +55,14 @@ STEP = {"JPY": 100}
 # The master table, in whole US dollars. Aligned with a sibling production system
 # (2026-08-19): same ladder, same credits-per-dollar, same discount depth.
 #
-# $20 / $50 / $100 rather than $10 / $20 / $100. The old top tier sat at the same
-# price as Claude Max and ChatGPT Pro, which is a fight this product does not win;
-# and $20 -> $100 left a fivefold gap with nothing in it, so anyone needing more
-# than the middle tier's credits had to jump five times the price. $50 is a price
-# point neither of those two occupies.
+# $10 / $50 / $100. The old top tier sat at $200, the same price as Claude Max and
+# ChatGPT Pro, which is a fight this product does not win. $50 is a price point
+# neither of those two occupies, and it fills what used to be a bare fivefold gap
+# between the entry tier and the top one. The entry tier stays at $10 to sit under
+# every first-party subscription on the market.
 TIERS = [
     # id,   name,   $/mo, credits/mo, concurrency, minutes/mo, yearly off %, first-month off %
-    ("plus", "Plus",   20,      2000,           2,      10800,           30,                25),
+    ("plus", "Plus",   10,      1000,           2,      10800,           30,                25),
     ("pro",  "Pro",    50,      5000,           5,      21600,           30,                25),
     ("max",  "Max",   100,     10000,          10,      32400,           30,                25),
 ]
@@ -89,7 +89,7 @@ TEAM = {"seat_usd": 25, "min_seats": 3, "seat_credits": 2500, "seat_minutes": 12
         "volume_tiers": [[10, 10], [25, 15], [50, 20]]}
 
 COMMENT = ("由 server/scripts/gen_pricing.py 生成，请勿手改。基准 1 USD = 7 CNY = 100 积分；"
-           "其余币种按对美元汇率折算后取整（日元取整到 100）。三档 $20 / $50 / $100，"
+           "其余币种按对美元汇率折算后取整（日元取整到 100）。三档 $10 / $50 / $100，"
            "年付一律 7 折、首月一律 7.5 折（原为最深 7 折 / 6 折：满用时首月与年付价"
            "一律负毛利，而买年付的恰是最可能烧满额度的人）。积分包不再多送——"
            "100 积分/美元是公示承诺，包的价值在于不随月清零，同价的包也绝不能比"
