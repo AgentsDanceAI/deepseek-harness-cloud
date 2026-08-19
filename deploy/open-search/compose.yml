@@ -60,7 +60,11 @@ services:
       - dhc-data:/app/data
       # Read-only, and no new authority: dhc-server already drives container
       # creation through the socket proxy, which can bind-mount anything.
-      - /mnt/docker/volumes:/hostvolumes:ro
+      # The path is the HOST's docker volume root and differs per machine —
+      #   docker info -f '{{.DockerRootDir}}'
+      # is /mnt/docker here and /var/lib/docker on a default install. Wrong path
+      # = 個人成品 silently empty, so it comes from .env and is checked at boot.
+      - ${DOCKER_VOLUME_ROOT:-/var/lib/docker/volumes}:/hostvolumes:ro
     networks:
       - dhc-net
       - dshwork-net    # reach per-user dsh containers for readiness probes

@@ -9,6 +9,17 @@
 # Offsite by design: a copy on the same host dies with the host. R2 egress is
 # free and the dumps are small, so keeping 30 days costs cents.
 #
+# ENCRYPTED, always. The only R2 bucket this deployment has a token for is
+# dsh-releases, which is PUBLISHED at https://dl.dshcloud.online — so an object
+# written here is served to anyone who asks for its path. Plaintext dumps went
+# there for two days: accounts, emails, password hashes, orders and balances,
+# under a name derived from a fixed cron time. The dump is now encrypted before
+# it leaves the host, and this script refuses to run without a passphrase
+# rather than quietly fall back to plaintext.
+#
+#   BACKUP_PASSPHRASE — set it in .env AND keep a copy somewhere that survives
+#   this machine. Lose it and every offsite backup is unreadable.
+#
 #   ./backup-db.sh            # run one backup
 #   ./backup-db.sh --verify   # also download it back and check it restores
 #
@@ -23,7 +34,7 @@ PREFIX="backups/postgres"
 [ -f "$ENVFILE" ] || { echo "no .env beside this script" >&2; exit 1; }
 while IFS= read -r line; do
   case "$line" in
-    R2_*=*|POSTGRES_*=*)
+    R2_*=*|POSTGRES_*=*|BACKUP_PASSPHRASE=*)
       name="${line%%=*}"
       eval "current=\${$name:-}"
       [ -n "$current" ] || export "${name}=${line#*=}"
@@ -33,9 +44,10 @@ done < "$ENVFILE"
 
 : "${R2_ACCOUNT_ID:?}"; : "${R2_ACCESS_KEY_ID:?}"; : "${R2_SECRET_ACCESS_KEY:?}"
 : "${R2_BUCKET:?}"; : "${POSTGRES_USER:?}"; : "${POSTGRES_DB:?}"
+: "${BACKUP_PASSPHRASE:?set BACKUP_PASSPHRASE in .env — the destination bucket is public, so an unencrypted dump there is a public dump}"
 
 stamp="$(date -u +%Y%m%dT%H%M%SZ)"
-name="dhc-${stamp}.sql.gz"
+name="dhc-${stamp}.sql.gz.enc"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
@@ -46,28 +58,37 @@ echo "==> dump $POSTGRES_DB"
 docker exec dhc-postgres pg_dump \
   --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" \
   --clean --if-exists --no-owner --no-privileges \
-  | gzip -9 > "$tmp/$name"
+  | gzip -9 > "$tmp/plain.sql.gz"
 
-size=$(stat -c%s "$tmp/$name")
+size=$(stat -c%s "$tmp/plain.sql.gz")
 [ "$size" -gt 1024 ] || { echo "dump is only ${size}B — refusing to upload a truncated backup" >&2; exit 1; }
 echo "    $name  $(numfmt --to=iec "$size" 2>/dev/null || echo "${size}B")"
 
 # A dump that gunzips cleanly and contains the tables that carry money. Catching
 # a corrupt dump at 3am beats discovering it during a restore.
 echo "==> sanity-check the dump"
-gzip -t "$tmp/$name"
+gzip -t "$tmp/plain.sql.gz"
 # Decompress once and grep the file. Piping into `grep -q` closes the pipe on
 # the first match, gunzip takes SIGPIPE, and `set -o pipefail` reports that as
 # a failed check — so the tables appearing EARLIEST in the dump were the ones
 # that "failed". A backup checker that fails on healthy backups is worse than
 # no checker, because you learn to ignore it.
-gunzip -c "$tmp/$name" > "$tmp/plain.sql"
+gunzip -c "$tmp/plain.sql.gz" > "$tmp/plain.sql"
 for table in users orders credit_grants subscriptions; do
   grep -q "COPY public.${table} " "$tmp/plain.sql" \
     || { echo "dump has no data section for '$table' — not a usable backup" >&2; exit 1; }
 done
 rm -f "$tmp/plain.sql"
 echo "    tables present"
+
+# AES-256 with a KDF, so the object is inert wherever it lands. Done BEFORE the
+# upload, never after: the window between the two is exactly the exposure.
+echo "==> encrypt"
+openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt \
+  -in "$tmp/plain.sql.gz" -out "$tmp/$name" -pass env:BACKUP_PASSPHRASE
+shred -u "$tmp/plain.sql.gz" 2>/dev/null || rm -f "$tmp/plain.sql.gz"
+head -c 8 "$tmp/$name" | grep -q "Salted__" || { echo "encryption produced something unexpected" >&2; exit 1; }
+echo "    $(stat -c%s "$tmp/$name") bytes, AES-256"
 
 export RCLONE_CONFIG_R2_TYPE=s3
 export RCLONE_CONFIG_R2_PROVIDER=Cloudflare
@@ -86,7 +107,11 @@ echo "    $kept backup(s) retained"
 
 if [ "${1:-}" = "--verify" ]; then
   echo "==> verify: pull it back and restore into a scratch database"
-  rclone copyto "R2:$R2_BUCKET/$PREFIX/$name" "$tmp/verify.sql.gz"
+  rclone copyto "R2:$R2_BUCKET/$PREFIX/$name" "$tmp/verify.enc"
+  # Decrypting here is the point: it proves the passphrase in .env is the one
+  # the object was written with. A backup you cannot open is not a backup.
+  openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 \
+    -in "$tmp/verify.enc" -out "$tmp/verify.sql.gz" -pass env:BACKUP_PASSPHRASE
   docker exec dhc-postgres psql -U "$POSTGRES_USER" -d postgres \
     -c 'DROP DATABASE IF EXISTS dhc_restore_check' -c 'CREATE DATABASE dhc_restore_check' >/dev/null
   gunzip -c "$tmp/verify.sql.gz" | docker exec -i dhc-postgres psql -U "$POSTGRES_USER" -d dhc_restore_check -q >/dev/null 2>&1

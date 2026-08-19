@@ -68,6 +68,18 @@ def create_app() -> FastAPI:
             import asyncio
             app.state.workspace_loop = asyncio.create_task(billing_reaper_loop())
 
+    # A wrong WORK_VOLUME_ROOT does not fail anything — it just makes 個人成品
+    # show nothing for every user with a stopped workspace. That is exactly the
+    # kind of breakage a machine move introduces (the host's docker root is
+    # /mnt/docker here, /var/lib/docker on a default install), so say it once
+    # at boot rather than let it be discovered by a confused user.
+    if config.WORK_VOLUME_ROOT and not Path(config.WORK_VOLUME_ROOT).is_dir():
+        log.warning("WORK_VOLUME_ROOT=%s is not a directory in this container — "
+                    "个人成品 will be empty whenever a workspace is stopped. "
+                    "Check DOCKER_VOLUME_ROOT in .env against "
+                    "`docker info -f '{{.DockerRootDir}}'`/volumes on the host.",
+                    config.WORK_VOLUME_ROOT)
+
     static_dir = Path(__file__).parent / "static"
     if static_dir.is_dir():
         app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
