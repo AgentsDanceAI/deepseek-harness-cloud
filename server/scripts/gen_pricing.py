@@ -50,7 +50,11 @@ CONFIG = Path(__file__).resolve().parent.parent / "config"
 
 # Units of local currency per US dollar. Not live rates: prices are set, not
 # converted on the fly, or every FX tick would reprice the site.
-RATES = {"USD": 1.0, "CNY": 7.0, "EUR": 0.92, "GBP": 0.79, "HKD": 7.8, "JPY": 150.0}
+# 与 a sibling production system 的 backend/pricing.json currencies 同一组数字 —— 两个产品
+# 同一张价目表, 汇率分家就等于价目表分家。EUR 0.90 / GBP 0.78 (而不是 0.92 / 0.79)
+# 是刻意的: 它们让 $10/$50/$100 落成 €9/€45/€90 和 £8/£39/£78, 是整倍数阶梯;
+# 0.92/0.79 落成 €9/€46/€92 和 £8/£40/£79, 看上去像换算残留而不是定出来的价。
+RATES = {"USD": 1.0, "CNY": 7.0, "EUR": 0.90, "GBP": 0.78, "HKD": 7.8, "JPY": 150.0}
 # Quantisation step, in whole units of the currency.
 STEP = {"JPY": 100}
 

@@ -23,25 +23,25 @@
     },
     "pro": {
       "name": "Pro",
-      "monthly_cents": 4600,
+      "monthly_cents": 4500,
       "monthly_credits": 5000,
       "concurrency": 5,
       "work_minutes": 21600,
-      "yearly_list_cents": 55200,
-      "yearly_cents": 38400,
-      "yearly_per_month_cents": 3200,
-      "monthly_intro_cents": 3500
+      "yearly_list_cents": 54000,
+      "yearly_cents": 37200,
+      "yearly_per_month_cents": 3100,
+      "monthly_intro_cents": 3400
     },
     "max": {
       "name": "Max",
-      "monthly_cents": 9200,
+      "monthly_cents": 9000,
       "monthly_credits": 10000,
       "concurrency": 10,
       "work_minutes": 32400,
-      "yearly_list_cents": 110400,
-      "yearly_cents": 76800,
-      "yearly_per_month_cents": 6400,
-      "monthly_intro_cents": 6900
+      "yearly_list_cents": 108000,
+      "yearly_cents": 75600,
+      "yearly_per_month_cents": 6300,
+      "monthly_intro_cents": 6800
     }
   },
   "packs": {
@@ -56,7 +56,7 @@
     },
     "pack5000": {
       "name": "5,000 credits",
-      "cents": 4600,
+      "cents": 4500,
       "base_credits": 5000,
       "bonus_pct": 0,
       "credits": 5000,
@@ -65,7 +65,7 @@
     },
     "pack10000": {
       "name": "10,000 credits",
-      "cents": 9200,
+      "cents": 9000,
       "base_credits": 10000,
       "bonus_pct": 0,
       "credits": 10000,
