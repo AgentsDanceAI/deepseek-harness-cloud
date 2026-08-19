@@ -1206,3 +1206,17 @@ body:not([data-page="landing"]) .section:first-of-type { position: relative; z-i
 .dl-qr { margin-top: 14px; text-align: center; }
 .dl-qr canvas { border-radius: 8px; background: #fff; padding: 6px; box-shadow: 0 1px 4px rgb(15 23 42 / 10%); }
 .dl-qr-note { margin-top: 6px; font-size: 13px; }
+
+/* A visitor bounced here by a quota gate needs the reason before the prices. */
+.gate-notice {
+  max-width: 640px; margin: 14px auto 0; padding: 11px 16px;
+  border: 1px solid color-mix(in srgb, var(--brand) 30%, var(--border));
+  border-radius: 12px; background: var(--brand-weak);
+  color: var(--fg); font-size: 14px; line-height: 1.6; text-align: center;
+}
+
+.works-asleep {
+  max-width: 720px; margin: 22px auto 0; padding: 10px 16px;
+  border: 1px solid var(--border); border-radius: 12px; background: var(--card);
+  color: var(--muted); font-size: 13.5px; line-height: 1.6; text-align: center;
+}

@@ -145,6 +145,11 @@ DOCKER_PROXY_URL = _env("DOCKER_PROXY_URL", "http://dhc-docker-proxy:2375")
 # gateway. Reading a reply or leaving a tab open is free (an open tab polls
 # /api/work/route forever, so wall-clock billing charged people for nothing).
 WORK_CREDITS_PER_MIN = _env_int("WORK_CREDITS_PER_MIN", 2)
+# Host path where the per-user workspace volumes live, mounted read-only. The
+# workspace stops after 15 idle minutes but its volume outlives it, so this is
+# what lets 個人成品 keep showing a user's files instead of an empty page for
+# the 23 hours a day the container is asleep. Empty disables the offline view.
+WORK_VOLUME_ROOT = _env("WORK_VOLUME_ROOT", "")
 WORK_IDLE_STOP_MIN = _env_int("WORK_IDLE_STOP_MIN", 15)      # no browser traffic -> stop
 # Capacity backstop: idle minutes are free, RAM is not. A tab left open with the
 # agent doing nothing this long is stopped too (volumes persist, resume is fast).

@@ -52,8 +52,15 @@ services:
     env_file: [".env"]
     environment:
       DHC_DATA_DIR: /app/data
+      # Where the per-user workspace volumes are mounted below. Lets 個人成品
+      # list and open a user's files while their container is asleep, which is
+      # most of the time.
+      WORK_VOLUME_ROOT: /hostvolumes
     volumes:
       - dhc-data:/app/data
+      # Read-only, and no new authority: dhc-server already drives container
+      # creation through the socket proxy, which can bind-mount anything.
+      - /mnt/docker/volumes:/hostvolumes:ro
     networks:
       - dhc-net
       - dshwork-net    # reach per-user dsh containers for readiness probes

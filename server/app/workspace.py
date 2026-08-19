@@ -27,6 +27,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
+import pathlib
 import re
 import time
 from urllib.parse import quote, unquote
@@ -399,6 +400,44 @@ async def _port_open(user_id: str, port: int, timeout: float = 0.6) -> bool:
 
 
 _HREF_RE = re.compile(r'<a href="([^"?/][^"]*)"')
+# Names that are build plumbing, not something anyone made.
+_HIDDEN_NAMES = {"node_modules", "package-lock.json", "__pycache__", ".git"}
+
+
+def _ws_volume_dir(user_id: str):
+    """Read-only host path of this user's /workspace volume, or None.
+
+    The container is stopped most of the time — 15 idle minutes and it goes
+    away — but its volume does not. Reading the listing from the volume is what
+    makes 個人成品 a record of what the agent made rather than a live view that
+    is blank whenever nobody is working.
+    """
+    root = (config.WORK_VOLUME_ROOT or "").strip()
+    if not root:
+        return None
+    hexid = _cname(user_id)[len("dshwork-"):]
+    d = pathlib.Path(root) / f"dshwork-ws-{hexid}" / "_data"
+    return d if d.is_dir() else None
+
+
+def _workspace_files_offline(user_id: str, limit: int = 60) -> list[str]:
+    """Top-level names straight off the volume, in the same shape as the
+    directory-index parse: directories carry a trailing slash."""
+    d = _ws_volume_dir(user_id)
+    if d is None:
+        return []
+    try:
+        entries = sorted(d.iterdir(), key=lambda e: e.name.lower())
+    except OSError:
+        return []
+    names = []
+    for e in entries:
+        if e.name.startswith(".") or e.name in _HIDDEN_NAMES:
+            continue
+        names.append(e.name + "/" if e.is_dir() else e.name)
+        if len(names) >= limit:
+            break
+    return names
 
 
 async def _workspace_files(user_id: str, limit: int = 60) -> list[str]:
@@ -487,10 +526,10 @@ _KINDS = {
 }
 
 
-def _describe(name: str) -> dict:
+def _describe(name: str, href: str) -> dict:
     """Presentation facts for one workspace entry."""
     if name.endswith("/"):
-        return {"name": name, "label": name.rstrip("/"), "kind": "dir",
+        return {"name": name, "href": href, "label": name.rstrip("/"), "kind": "dir",
                 "glyph": _ICON_DIR, "type_label": "文件夹"}
     ext = ("." + name.rsplit(".", 1)[1].lower()) if "." in name else ""
     kind, glyph, type_label = _KINDS.get(ext, ("file", _ICON_CODE, ext.lstrip(".").upper() or "文件"))
@@ -501,7 +540,56 @@ def _describe(name: str) -> dict:
         label = unquote(name)
     except Exception:  # noqa: BLE001 - a malformed name must not blank the page
         label = name
-    return {"name": name, "label": label, "kind": kind, "glyph": glyph, "type_label": type_label}
+    return {"name": name, "href": href, "label": label, "kind": kind,
+            "glyph": glyph, "type_label": type_label}
+
+
+@router.get("/preview/file/{name:path}")
+async def preview_offline_file(request: Request, name: str):
+    """Open a workspace file without starting the container.
+
+    Served from the volume, so it costs no machine minutes — which matters
+    most for the user whose hours have run out and who just wants the thing
+    they already made.
+
+    Two guards. The path is resolved and checked to be inside the volume, so a
+    crafted name cannot walk out of it. And the response is sandboxed into an
+    opaque origin: this is agent-generated HTML on our own domain, and without
+    it a page the agent wrote could read the session cookie of the person
+    viewing it.
+    """
+    user = try_resolve_user(request)
+    site = config.PUBLIC_BASE.rstrip("/")
+    if user is None:
+        return RedirectResponse(f"{site}/login?next=/preview", status_code=302)
+    root = _ws_volume_dir(user["id"])
+    if root is None:
+        return JSONResponse(status_code=404, content={"detail": "no_workspace"})
+    try:
+        target = (root / unquote(name)).resolve()
+        target.relative_to(root.resolve())
+    except (ValueError, OSError):
+        return JSONResponse(status_code=400, content={"detail": "bad_path"})
+    sandbox = {"Content-Security-Policy": "sandbox allow-scripts allow-popups allow-forms",
+               "X-Content-Type-Options": "nosniff"}
+    if target.is_dir():
+        # A trailing slash is load-bearing: without it the page's relative links
+        # resolve one level too high and every asset 404s.
+        if not request.url.path.endswith("/"):
+            return RedirectResponse(request.url.path + "/", status_code=307)
+        index = target / "index.html"
+        if index.is_file():
+            from fastapi.responses import FileResponse
+            return FileResponse(index, headers=sandbox)
+        rows = "".join(
+            f'<li><a href="{quote(e.name, safe="")}{"/" if e.is_dir() else ""}">{e.name}</a></li>'
+            for e in sorted(target.iterdir(), key=lambda x: (not x.is_dir(), x.name.lower()))
+            if not e.name.startswith("."))
+        return HTMLResponse(f"<meta charset=utf-8><ul>{rows}</ul>", headers=sandbox)
+    if not target.is_file():
+        return JSONResponse(status_code=404, content={"detail": "not_found"})
+    from fastapi.responses import FileResponse
+    return FileResponse(target, headers=sandbox)
 
 
 @router.get("/preview")
@@ -522,8 +610,14 @@ async def preview_index(request: Request):
 
     files, ports = [], []
     if running:
-        files = [_describe(f) for f in await _workspace_files(user["id"])]
+        files = [_describe(f, f"/preview/{PREVIEW_STATIC_PORT}/{f}")
+                 for f in await _workspace_files(user["id"])]
         ports = [p for p in await _open_ports(user["id"]) if p != PREVIEW_STATIC_PORT]
+    else:
+        # Asleep is the normal state, not an error state: the files are still
+        # on the volume, so list them from there and open them from there too.
+        files = [_describe(f, "/preview/file/" + quote(f, safe="/"))
+                 for f in _workspace_files_offline(user["id"])]
 
     from .webpages import _render
     return _render(request, "works.html", "works",
@@ -615,10 +709,11 @@ async def work_route(request: Request):
         _last_seen[user["id"]] = now
         return Response(status_code=200, headers={"X-Work-Upstream": _upstream(user["id"])})
 
-    # Cold check: the free hours are spent and no pass is open -> the paywall,
-    # not a silent credit drain.
+    # Cold check: the month's machine hours are spent -> the plans, not a
+    # silent credit drain. (This used to send them to /work/upgrade, which was
+    # deleted with the workspace pass — every out-of-hours visitor got a 404.)
     if work_access.blocked_reason(user["id"]):
-        return RedirectResponse(f"{site}/work/upgrade", status_code=302)
+        return RedirectResponse(f"{site}/pricing?reason=work#plans", status_code=302)
 
     try:
         state = await ensure_workspace(user)
@@ -672,7 +767,7 @@ async def work_shell(request: Request):
     if credits.balance(user["id"]) <= 0:
         return RedirectResponse(f"{site}/pricing?reason=credits", status_code=302)
     if work_access.blocked_reason(user["id"]):
-        return RedirectResponse(f"{site}/work/upgrade", status_code=302)
+        return RedirectResponse(f"{site}/pricing?reason=work#plans", status_code=302)
     try:
         state = await ensure_workspace(user)
     except RuntimeError as e:
@@ -779,7 +874,7 @@ async def work_entry(request: Request):
     if credits.balance(user["id"]) <= 0:
         return RedirectResponse(f"{site}/pricing?reason=credits", status_code=302)
     if work_access.blocked_reason(user["id"]):
-        return RedirectResponse(f"{site}/work/upgrade", status_code=302)
+        return RedirectResponse(f"{site}/pricing?reason=work#plans", status_code=302)
     # Carry the homepage composer's task across the redirect; workspace-chrome.js
     # types it into dsh so the first prompt is not retyped.
     task = (request.query_params.get("task") or "").strip()

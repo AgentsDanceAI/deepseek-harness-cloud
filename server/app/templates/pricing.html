@@ -9,6 +9,9 @@
   <div class="container">
     <h1 class="section-title" id="plans">{{ t("pricing.h1") }}</h1>
     <p class="center muted">{{ t("pricing.lede") }}</p>
+    {% if reason %}
+      <p class="gate-notice">{{ t("pricing.gate." ~ reason) }}</p>
+    {% endif %}
 
     {# Billing period and currency are the two knobs on this page's prices, so
        they sit together. The picker is a link list, not a form: an explicit

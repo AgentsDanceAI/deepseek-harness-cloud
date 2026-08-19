@@ -517,7 +517,12 @@ def pricing_page(request: Request):
     cur, _ = _cur.resolve(request)
     pricing = _pricing_safe(cur)
     tier_order = [t for t in ("free", "plus", "pro", "max") if t in pricing.get("tiers", {})]
-    return _render(request, "pricing.html", "pricing", pricing=pricing, tier_order=tier_order)
+    # Arriving from a gate (out of credits, out of machine hours) without being
+    # told why makes the price list look like an ad. `reason` was already being
+    # passed on those redirects and had never been rendered.
+    reason = request.query_params.get("reason")
+    return _render(request, "pricing.html", "pricing", pricing=pricing, tier_order=tier_order,
+                   reason=reason if reason in ("work", "credits") else None)
 
 
 @router.get("/orders")

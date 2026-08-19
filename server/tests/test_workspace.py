@@ -357,3 +357,63 @@ def test_fallback_never_shadows_real_routes(fake, container_http):
 
 def test_unknown_path_without_cookie_is_404():
     assert TestClient(app).get("/no/such/thing").status_code == 404
+
+
+# --- outputs survive the container ------------------------------------------
+
+def test_products_are_listed_from_the_volume_when_the_container_is_asleep(tmp_path, monkeypatch):
+    """The workspace stops after 15 idle minutes, and 個人成品 read its listing
+    over HTTP from the container — so for most of the day the page told a user
+    their work was not there. The volume outlives the container; the listing
+    comes off it."""
+    from app import config, workspace
+
+    uid = "u_" + "a" * 24
+    vol = tmp_path / f"dshwork-ws-u{'a' * 24}" / "_data"
+    vol.mkdir(parents=True)
+    (vol / "report.html").write_text("<h1>hi</h1>")
+    (vol / "deck.pptx").write_bytes(b"PK")
+    (vol / "game").mkdir()
+    (vol / "node_modules").mkdir()          # plumbing, not a product
+    (vol / ".cache").mkdir()
+
+    monkeypatch.setattr(config, "WORK_VOLUME_ROOT", str(tmp_path))
+    names = workspace._workspace_files_offline(uid)
+    assert names == ["deck.pptx", "game/", "report.html"]
+
+    monkeypatch.setattr(config, "WORK_VOLUME_ROOT", "")
+    assert workspace._workspace_files_offline(uid) == []   # unset -> feature off
+
+
+def test_offline_file_route_cannot_walk_out_of_the_volume(tmp_path, monkeypatch):
+    from app import config, workspace
+
+    uid = "u_" + "b" * 24
+    vol = tmp_path / f"dshwork-ws-u{'b' * 24}" / "_data"
+    vol.mkdir(parents=True)
+    (tmp_path / "secret").write_text("nope")
+    monkeypatch.setattr(config, "WORK_VOLUME_ROOT", str(tmp_path))
+
+    root = workspace._ws_volume_dir(uid)
+    assert root is not None
+    for attempt in ("../secret", "../../etc/passwd", "%2e%2e%2fsecret"):
+        from urllib.parse import unquote
+        try:
+            target = (root / unquote(attempt)).resolve()
+            target.relative_to(root.resolve())
+            escaped = True
+        except ValueError:
+            escaped = False
+        assert not escaped, attempt
+
+
+def test_out_of_hours_lands_on_a_page_that_exists():
+    """The paywall redirected to /work/upgrade, deleted with the workspace pass:
+    every visitor whose hours ran out got a 404 instead of a way to fix it."""
+    import inspect
+    from app import workspace
+
+    src = inspect.getsource(workspace)
+    # the string as it appears in a redirect, not in prose about the old bug
+    assert 'f"{site}/work/upgrade"' not in src
+    assert src.count('f"{site}/pricing?reason=work#plans"') == 3
