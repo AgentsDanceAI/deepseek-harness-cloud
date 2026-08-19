@@ -562,5 +562,21 @@
   "admin.js.role_grant_confirm": "Make {email} an admin? They will be able to see and change every user's quota and status.",
   "admin.js.role_revoke_confirm": "Remove admin rights from {email}?",
   "download.android_qr": "Or scan with your phone to install directly",
-  "download.android_qr_alt": "QR code for the Android download"
+  "download.android_qr_alt": "QR code for the Android download",
+  "console.keys.title": "API keys",
+  "console.keys.lede": "Use any OpenAI-compatible client with our gateway. Usage draws on your plan's allowance; revoke a key at any time.",
+  "console.keys.create": "Create key",
+  "console.keys.ph_label": "Label (optional, e.g. my script)",
+  "console.keys.copy": "Copy",
+  "console.keys.reveal_note": "This key is shown once — we store only its hash and cannot show it again. Copy it now.",
+  "console.keys.usage": "Example:",
+  "console.keys.th.label": "Label",
+  "console.keys.th.key": "Key",
+  "console.keys.th.created": "Created",
+  "console.keys.th.last_used": "Last used",
+  "js.msg.never": "Never used",
+  "js.msg.nokeys": "No keys yet",
+  "js.msg.revoke": "Revoke",
+  "js.msg.revoke_confirm": "Integrations using this key stop working immediately. Continue?",
+  "js.msg.copied": "Copied"
 }

@@ -25,6 +25,10 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
+# API key 的形状: ak- 前缀让它与签名令牌一眼可分, 也便于用户在自己的配置里辨认。
+API_KEY_PREFIX = "ak-"
+API_KEY_MAX_PER_USER = 20
+
 
 # --- credential resolution ---------------------------------------------------
 
@@ -45,9 +49,15 @@ def try_resolve_user(request: Request) -> dict | None:
     if auth.lower().startswith("bearer "):
         token = auth[7:].strip()
     if not token:
+        token = request.headers.get("x-api-key", "").strip()
+    if not token:
         token = request.cookies.get(config.SESSION_COOKIE, "")
     if not token:
         return None
+    # API key 先判: 它有 ak- 前缀, 与签名令牌的形状不会混淆, 一眼分流不必两边都试。
+    # 放在最前是因为 verify_token 会做签名验算, 对一把 API key 是白费的开销。
+    if token.startswith(API_KEY_PREFIX):
+        return _user_from_api_key(token)
     payload = security.verify_token(token)
     if not payload:
         return None
@@ -327,4 +337,60 @@ def delete_account(body: dict, user: dict = Depends(resolve_user)):
         # orders / usage_log / credit_grants are deliberately KEPT: tax law
         # requires retaining payment records and the privacy policy says so
         # (5 years). Those rows carry a user id, not contact details.
+    return {"ok": True}
+
+
+# --- API keys ----------------------------------------------------------------
+# 为什么要有这个: 网关是 OpenAI 兼容的, 官网也这么宣传, 但在此之前用户拿不到可用
+# 凭据 —— 只能去桌面端的 cloud-auth.json 里把设备令牌抠出来。那样拦住的只有老实人,
+# 而且令牌与登录态绑定 (改密码即失效), 拿去做集成很脆。
+
+
+def _user_from_api_key(key: str) -> dict | None:
+    """API key → 用户。与 devices 一样只按哈希查, 明文不落库。"""
+    row = db.query_one(
+        "SELECT id, user_id, revoked FROM api_keys WHERE key_hash=?",
+        (security.token_hash(key),))
+    if row is None or int(row["revoked"]):
+        return None
+    user = _load_user(row["user_id"])
+    if user is None or user["status"] != "active":
+        return None
+    # last_used 是用户排查"这把还在用吗"的唯一依据, 也是将来做异常检测的原料
+    db.query("UPDATE api_keys SET last_used=? WHERE id=?", (time.time(), row["id"]))
+    out = dict(user)
+    out["device_id"] = ""          # API key 不绑设备
+    out["api_key_id"] = row["id"]
+    out["is_admin"] = user["email"].lower() in config.ADMIN_EMAILS or user["role"] == "admin"
+    return out
+
+
+@router.get("/api-keys")
+def list_api_keys(user: dict = Depends(resolve_user)):
+    rows = db.query(
+        "SELECT id, prefix, label, created, last_used FROM api_keys "
+        "WHERE user_id=? AND revoked=0 ORDER BY created DESC", (user["id"],))
+    return {"keys": [dict(r) for r in rows]}
+
+
+@router.post("/api-keys")
+def create_api_key(body: dict, user: dict = Depends(resolve_user)):
+    label = str(body.get("label", "")).strip()[:64]
+    live = db.query_one("SELECT COUNT(*) c FROM api_keys WHERE user_id=? AND revoked=0",
+                        (user["id"],))
+    if int(live["c"]) >= API_KEY_MAX_PER_USER:
+        raise HTTPException(400, "too_many_keys")
+    key = API_KEY_PREFIX + secrets.token_urlsafe(32)
+    db.query("INSERT INTO api_keys (id, user_id, key_hash, prefix, label, created) "
+             "VALUES (?,?,?,?,?,?)",
+             ("k_" + secrets.token_hex(12), user["id"], security.token_hash(key),
+              key[:12], label, time.time()))
+    # 明文只在这一次返回 —— 库里只有哈希, 之后任何人 (包括我们) 都取不回来
+    return {"ok": True, "key": key, "label": label}
+
+
+@router.post("/api-keys/revoke")
+def revoke_api_key(body: dict, user: dict = Depends(resolve_user)):
+    db.query("UPDATE api_keys SET revoked=1 WHERE id=? AND user_id=?",
+             (str(body.get("id", "")), user["id"]))
     return {"ok": True}

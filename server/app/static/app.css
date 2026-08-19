@@ -1220,3 +1220,16 @@ body:not([data-page="landing"]) .section:first-of-type { position: relative; z-i
   border: 1px solid var(--border); border-radius: 12px; background: var(--card);
   color: var(--muted); font-size: 13.5px; line-height: 1.6; text-align: center;
 }
+
+/* API 密钥 (2026-08-18) */
+.key-form { display: flex; gap: 8px; margin: 12px 0 4px; }
+.key-form input { flex: 1; min-width: 0; }
+.key-reveal { margin: 12px 0; padding: 12px 14px; border-radius: 10px;
+  background: #f0f7ff; border: 1px solid #cfe3ff; }
+.key-reveal-note { margin: 0 0 8px; font-size: 13px; color: #1b4a8a; }
+.key-reveal-row { display: flex; gap: 8px; align-items: center; }
+.key-reveal-row code { flex: 1; min-width: 0; overflow-x: auto; white-space: nowrap;
+  font-size: 13px; padding: 6px 8px; background: #fff; border-radius: 6px; }
+.key-usage { margin-top: 6px; padding: 12px; border-radius: 8px; background: #0f172a;
+  color: #e2e8f0; font-size: 12.5px; overflow-x: auto; }
+td.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }

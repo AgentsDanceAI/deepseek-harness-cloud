@@ -320,8 +320,6 @@
         .then(function () { location.href = safeNext(); })
         .catch(function (err) { showError(errEl, err); });
     });
-
-    });
   }
 
   // --- page: activate --------------------------------------------------------
@@ -547,6 +545,83 @@
     // which is visible. Rendering rather than recomputing keeps the struck-out
     // standard price and the discount badge consistent with what an order
     // would actually charge — the amounts come from the price table, not JS.
+    // --- API keys -------------------------------------------------------------
+    // 明文只在创建响应里出现一次 (库里只存 sha256), 所以"复制"按钮和那块提示是
+    // 功能的一部分, 不是装饰 —— 用户关掉就再也拿不回来, 只能重建一把。
+    function initApiKeys() {
+      var table = $("#keys-table");
+      if (!table) return;
+      var tbody = $("#keys-table tbody");
+      var errEl = $("#key-error");
+
+      function fmt(ts) { return ts ? new Date(ts * 1000).toLocaleString() : T("js.msg.never"); }
+
+      function render() {
+        api("/api/auth/api-keys").then(function (res) {
+          var keys = (res && res.keys) || [];
+          tbody.textContent = "";
+          if (!keys.length) {
+            var tr = document.createElement("tr"), td = document.createElement("td");
+            td.colSpan = 5; td.className = "muted"; td.textContent = T("js.msg.nokeys");
+            tr.appendChild(td); tbody.appendChild(tr); return;
+          }
+          keys.forEach(function (k) {
+            var tr = document.createElement("tr");
+            function cell(text, cls) {
+              var td = document.createElement("td");
+              td.textContent = text; if (cls) td.className = cls;
+              tr.appendChild(td); return td;
+            }
+            cell(k.label || "—");
+            cell(k.prefix + "…", "mono");
+            cell(fmt(k.created));
+            cell(fmt(k.last_used));
+            var act = document.createElement("td");
+            var btn = document.createElement("button");
+            btn.className = "btn btn-ghost btn-sm";
+            btn.textContent = T("js.msg.revoke");
+            btn.addEventListener("click", function () {
+              if (!confirm(T("js.msg.revoke_confirm"))) return;
+              api("/api/auth/api-keys/revoke", { method: "POST", body: { id: k.id } })
+                .then(render).catch(function (e) { showError(errEl, e); });
+            });
+            act.appendChild(btn); tr.appendChild(act);
+            tbody.appendChild(tr);
+          });
+        });
+      }
+
+      $("#form-newkey").addEventListener("submit", function (ev) {
+        ev.preventDefault();
+        hideError(errEl);
+        var label = ev.target.label.value.trim();
+        api("/api/auth/api-keys", { method: "POST", body: { label: label } })
+          .then(function (res) {
+            ev.target.reset();
+            $("#key-plain").textContent = res.key;
+            $("#key-reveal").hidden = false;
+            render();
+          })
+          .catch(function (e) { showError(errEl, e); });
+      });
+
+      $("#key-copy").addEventListener("click", function () {
+        var txt = $("#key-plain").textContent;
+        if (navigator.clipboard) navigator.clipboard.writeText(txt);
+        else {
+          // 老 Safari / 非安全上下文没有 clipboard API, 退回选中让用户自己 Cmd-C
+          var r = document.createRange();
+          r.selectNodeContents($("#key-plain"));
+          var sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(r);
+        }
+        this.textContent = T("js.msg.copied");
+        var self = this;
+        setTimeout(function () { self.textContent = T("console.keys.copy"); }, 1500);
+      });
+
+      render();
+    }
+
     function setCycle(next) {
       cycle = next;
       $$(".cycle-toggle .tab").forEach(function (t) {

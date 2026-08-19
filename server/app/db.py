@@ -41,6 +41,24 @@ SCHEMA = [
         attempts INTEGER NOT NULL DEFAULT 0,
         created REAL NOT NULL
     )""",
+    # API key: 给"用任意 OpenAI 兼容客户端接我们网关"这条路一个体面的入口。
+    # 在此之前用户只能去翻桌面端的 cloud-auth.json 把设备令牌抠出来 —— 官网宣传了
+    # OpenAI 兼容接口, 却没有领钥匙的地方, 拦住的只有老实人。
+    #
+    # 只存 sha256, 明文仅在创建时返回一次 —— 与 devices 表同一约定 (security.
+    # token_hash 的注释: plaintext never persisted)。AgentsDance 那边为了"页面随时
+    # 可查"额外存了 key_plain, 这里不跟: 库一旦泄露, 存哈希只丢"能否验证", 存明文
+    # 直接把所有人的可用凭据一起送出去。用户丢了 key 就重新建一把, 成本很低。
+    """CREATE TABLE IF NOT EXISTS api_keys (
+        id         TEXT PRIMARY KEY,
+        user_id    TEXT NOT NULL,
+        key_hash   TEXT NOT NULL UNIQUE,
+        prefix     TEXT NOT NULL,          -- 明文前 12 位, 供列表页辨认是哪一把
+        label      TEXT NOT NULL DEFAULT '',
+        created    REAL NOT NULL,
+        last_used  REAL,
+        revoked    INTEGER NOT NULL DEFAULT 0
+    )""",
     """CREATE TABLE IF NOT EXISTS devices (
         id TEXT PRIMARY KEY,
         user_id TEXT NOT NULL,
@@ -180,6 +198,7 @@ SCHEMA = [
     "CREATE INDEX IF NOT EXISTS idx_orders_user ON orders(user_id, created)",
     "CREATE INDEX IF NOT EXISTS idx_devices_user ON devices(user_id)",
     "CREATE INDEX IF NOT EXISTS idx_email_codes ON email_codes(email, purpose)",
+    "CREATE INDEX IF NOT EXISTS idx_api_keys_user ON api_keys(user_id, revoked)",
     "CREATE INDEX IF NOT EXISTS idx_passes_user ON work_passes(user_id, expires)",
     "CREATE INDEX IF NOT EXISTS idx_mgrants_user ON minute_grants(user_id, expires)",
     "CREATE INDEX IF NOT EXISTS idx_org_members_user ON org_members(user_id)",

@@ -104,6 +104,39 @@
     </div>
 
     <div class="card block">
+      <h2>{{ t("console.keys.title") }}</h2>
+      <p class="muted small">{{ t("console.keys.lede") }}</p>
+
+      {# 新建的 key 只在这里显示这一次 —— 库里只有哈希, 关掉就再也取不回来 #}
+      <div id="key-reveal" class="key-reveal" hidden>
+        <p class="key-reveal-note">{{ t("console.keys.reveal_note") }}</p>
+        <div class="key-reveal-row">
+          <code id="key-plain"></code>
+          <button class="btn btn-ghost btn-sm" id="key-copy" type="button">{{ t("console.keys.copy") }}</button>
+        </div>
+      </div>
+
+      <form id="form-newkey" class="key-form">
+        <input type="text" name="label" maxlength="64" placeholder="{{ t('console.keys.ph_label') }}">
+        <button class="btn btn-primary" type="submit">{{ t("console.keys.create") }}</button>
+      </form>
+      <p class="form-error" id="key-error" hidden></p>
+
+      <div class="table-wrap">
+        <table id="keys-table">
+          <thead><tr><th>{{ t("console.keys.th.label") }}</th><th>{{ t("console.keys.th.key") }}</th><th>{{ t("console.keys.th.created") }}</th><th>{{ t("console.keys.th.last_used") }}</th><th></th></tr></thead>
+          <tbody><tr><td colspan="5" class="muted">{{ t("console.loading") }}</td></tr></tbody>
+        </table>
+      </div>
+
+      <p class="muted small" style="margin-top:12px">{{ t("console.keys.usage") }}</p>
+      <pre class="key-usage"><code>curl {{ public_base }}/llm/v1/chat/completions \
+  -H "Authorization: Bearer ak-..." \
+  -H "Content-Type: application/json" \
+  -d '{"model":"deepseek-chat","messages":[{"role":"user","content":"hi"}]}'</code></pre>
+    </div>
+
+    <div class="card block">
       <h2>{{ t("console.pwd.title") }}</h2>
       <form id="form-password" class="form-narrow">
         <label>{{ t("console.pwd.current") }}
