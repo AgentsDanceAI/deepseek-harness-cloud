@@ -1,10 +1,10 @@
 # Build unsigned desktop installers on real macOS / Windows runners.
 # Trigger manually (workflow_dispatch); download the artifacts and publish them
-# under https://dshcloud.online/releases/ (see deploy/open-search/DEPLOY_STATE.md).
+# under your own deployment's /releases/ path.
 #
 # Unsigned: macOS users right-click-open on first launch (or `xattr -cr`),
 # Windows shows SmartScreen "more info -> run anyway". Proper signing needs the
-# Apple Developer / Windows code-signing certs from the launch checklist.
+# an Apple Developer ID and a Windows code-signing certificate.
 name: desktop-installers
 
 on:

@@ -36,7 +36,7 @@ curl -s https://<域名>/api/health   # {"ok":true,...}
 ## 5. 桌面安装包发布
 
 ```bash
-# 1) 构建（见 README 桌面端一节；mac 签名/公证与 win 签名见 中国大陆上线清单）
+# 1) 构建（见 README 桌面端一节；mac 需 Developer ID 签名+公证，win 需代码签名证书）
 # 2) 传到 Caddy 的 releases volume：
 docker cp DSH-Cloud-Desktop-2.0.0-mac.dmg <caddy容器>:/srv/releases/
 # 3) .env 里设 DOWNLOAD_URL_MAC=https://<域名>/releases/DSH-Cloud-Desktop-2.0.0-mac.dmg 并重启
