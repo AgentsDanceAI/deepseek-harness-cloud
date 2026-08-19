@@ -97,8 +97,14 @@ export RCLONE_CONFIG_R2_SECRET_ACCESS_KEY="$R2_SECRET_ACCESS_KEY"
 export RCLONE_CONFIG_R2_ENDPOINT="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
 export RCLONE_CONFIG_R2_NO_CHECK_BUCKET=true
 
+# no-store, because this bucket sits behind a public CDN hostname. Without it
+# the object inherits the bucket's 4-hour edge cache, and deleting it from R2
+# then leaves Cloudflare serving copies for another four hours — which is
+# exactly what happened to the plaintext dumps this replaced. Uncacheable means
+# a delete takes effect the moment it lands.
 echo "==> upload to r2://$R2_BUCKET/$PREFIX/"
-rclone copyto "$tmp/$name" "R2:$R2_BUCKET/$PREFIX/$name" --s3-chunk-size 16M
+rclone copyto "$tmp/$name" "R2:$R2_BUCKET/$PREFIX/$name" --s3-chunk-size 16M \
+  --header-upload "Cache-Control: no-store, private"
 
 echo "==> prune backups older than ${RETAIN_DAYS}d"
 rclone delete "R2:$R2_BUCKET/$PREFIX" --min-age "${RETAIN_DAYS}d" 2>/dev/null || true
