@@ -55,7 +55,9 @@ async def main(apply: bool) -> int:
             print(f"  keep as-is (unrefunded order against it): {p['name']}")
             skipped += 1
             continue
-        name = TAG + p["name"]
+        # Waffo caps a product name at 64 characters, and the prefix pushes the
+        # longer ones over — a rename that 400s leaves the store half-tagged.
+        name = w.fit_name(TAG + p["name"])
         print(f"  {p['id']}  -> {name}")
         done += 1
         if apply:
@@ -65,7 +67,7 @@ async def main(apply: bool) -> int:
                       for x in (p.get("prices") or [])}
             st, r = await w._waffo_request("/v1/actions/onetime-product/update-product", {
                 "id": p["id"], "name": name,
-                "description": TAG + (p.get("description") or p["name"]),
+                "description": w.fit_name(TAG + (p.get("description") or p["name"])),
                 "prices": prices})
             if st >= 300:
                 print(f"    FAILED {st} {json.dumps(r, ensure_ascii=False)[:200]}")

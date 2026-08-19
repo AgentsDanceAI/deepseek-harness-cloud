@@ -192,6 +192,16 @@ async def ensure_store_id() -> str:
     return sid
 
 
+# Waffo rejects a product name over 64 characters with a 400. Names are built
+# from the price table, so a longer plan or pack name would have failed at
+# create-product — i.e. at the moment someone first tried to buy it.
+NAME_MAX = 64
+
+
+def fit_name(name: str) -> str:
+    return name if len(name) <= NAME_MAX else name[:NAME_MAX - 1].rstrip() + "…"
+
+
 def catalog_prices(item: str) -> dict:
     """Catalog placeholder prices for every currency the site quotes.
 
@@ -255,7 +265,7 @@ async def ensure_product_id(item: str) -> str:
         logger.exception("[waffo] existing-product lookup failed, creating a new one")
     status, data = await _waffo_request("/v1/actions/onetime-product/create-product", {
         "storeId": store_id,
-        "name": name,
+        "name": fit_name(name),
         "description": name,
         # prices is keyed by ISO-4217 currency (not an array); each sellable
         # currency needs a key or its create-session is rejected. The site

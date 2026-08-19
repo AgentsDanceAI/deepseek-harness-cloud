@@ -91,3 +91,54 @@ def test_tax_copy_matches_what_we_tell_the_provider():
         note = catalog["pricing.tax_note"].lower()
         says_included = ("已含" in note) or ("include any applicable tax" in note)
         assert says_included == inclusive, f"{lang} tax copy disagrees with the payload"
+
+
+# --- the price table inside the Terms ----------------------------------------
+
+LEGAL = ROOT.parent / "legal"
+TIER_ROW = {"plus": "Plus", "pro": "Pro", "max": "Max"}
+
+
+def _usd():
+    return json.loads((ROOT / "config" / "pricing.usd.json").read_text())
+
+
+@pytest.mark.parametrize("doc", ["terms.zh.md", "terms.en.md"])
+def test_terms_quote_the_prices_actually_charged(doc):
+    """Section 5.2 of the Terms publishes a price table, and a payment
+    processor's review compares it line by line with the site. It has gone
+    stale twice in two days — the prices moved, the document did not, and
+    nothing failed. Now something does.
+    """
+    table = _usd()["tiers"]
+    text = (LEGAL / doc).read_text()
+
+    for tier, name in TIER_ROW.items():
+        row = next((ln for ln in text.splitlines() if ln.startswith(f"| {name} |")), None)
+        assert row, f"{doc}: no price row for {name}"
+        t = table[tier]
+        # `(?![\d,])` so $10 does not match inside $100
+        for amount in (t["monthly_cents"], t["yearly_cents"], t["yearly_per_month_cents"]):
+            pat = rf"\${amount // 100:,}(?![\d,])".replace(",", "[,]?")
+            assert re.search(pat, row), f"{doc}: {name} row is missing ${amount // 100:,} — {row}"
+        assert f"{t['monthly_credits']:,}" in row, f"{doc}: {name} row has the wrong credits"
+        assert str(t["work_minutes"] // 60) in row, f"{doc}: {name} row has the wrong hours"
+
+    for pack in _usd()["packs"].values():
+        assert f"{pack['credits']:,}" in text, f"{doc}: pack of {pack['credits']:,} credits missing"
+
+    # first-month prices are advertised in the same section
+    for tier in TIER_ROW:
+        intro = table[tier]["monthly_intro_cents"] // 100
+        assert re.search(rf"\${intro}(?![\d,])", text), f"{doc}: no first-month price ${intro}"
+
+
+def test_terms_do_not_advertise_a_withdrawn_plan():
+    """Anything the price table no longer sells must not still be quoted as
+    buyable — that is a claim we could not honour."""
+    packs = {f"{p['credits']:,}" for p in _usd()["packs"].values()}
+    for doc in ("terms.zh.md", "terms.en.md"):
+        text = (LEGAL / doc).read_text()
+        for gone in ("11,000", "125,000", "5,250"):
+            if gone not in packs:
+                assert gone not in text, f"{doc} still offers a withdrawn {gone}-credit pack"
