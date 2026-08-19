@@ -140,6 +140,42 @@ async def _inspect(user_id: str) -> dict | None:
     return r.json() if r.status_code == 200 else None
 
 
+def host_free_mb() -> int | None:
+    """宿主可用内存 (MB)。读不到返回 None。
+
+    容器里读 /proc/meminfo 拿到的就是**宿主**的数 (它不做 namespace 隔离, 实测
+    MemTotal 与宿主逐字节相同), 所以不需要把 /proc 挂进来或多开一个探针。
+    用 MemAvailable 而不是 MemFree: 后者把可回收的 page cache 算成"已用",
+    在一台跑了半个月的机器上会永远显示没内存, 于是这道闸门变成永远关闭。"""
+    try:
+        with open("/proc/meminfo", encoding="ascii") as f:
+            for line in f:
+                if line.startswith("MemAvailable:"):
+                    return int(line.split()[1]) // 1024
+    except Exception:
+        log.exception("[work] 读 /proc/meminfo 失败")
+    return None
+
+
+def _capacity_reason() -> str:
+    """起新工作台前的容量判定, 返回空串表示可以起。
+
+    两道: 静态并发上限, 和**动态**的宿主内存余量。只有前者是不够的 —— 它不知道
+    同机还跑着 a sibling production system 全栈, 8 × 512M 的额度在对方峰值时就是压垮线。
+
+    内存读不到时**放行**: 与本模块其余闸门同一姿态 (检查自身故障不该拦人), 而且
+    一个读不到 /proc 的进程更可能是环境异常而不是真的没内存。"""
+    free = host_free_mb()
+    if free is None:
+        return ""
+    need = config.WORK_MEM_LIMIT_MB + config.WORK_MIN_FREE_MB
+    if free < need:
+        log.warning("[work] 宿主可用内存 %dMB < 需要 %dMB (容器 %d + 保留 %d), 拒起新工作台",
+                       free, need, config.WORK_MEM_LIMIT_MB, config.WORK_MIN_FREE_MB)
+        return f"memory:{free}<{need}"
+    return ""
+
+
 async def _running_workspaces() -> list[dict]:
     r = await _docker("GET", "/containers/json",
                       params={"filters": '{"label":["%s"]}' % _LABEL})
@@ -281,6 +317,10 @@ async def _create(user: dict) -> None:
             "Memory": config.WORK_MEM_LIMIT_MB * 1024 * 1024,
             "NanoCpus": int(config.WORK_CPUS * 1e9),
             "PidsLimit": 512,
+            # 内存到悬崖时让 OOM killer 先挑工作台: 它可随时重启、卷还在, 而默认
+            # 规则是按占用挑, 会先杀同机最大的进程 (postgres / elasticsearch) ——
+            # 那是别人的数据库, 而且不是它闯的祸。
+            "OomScoreAdj": config.WORK_OOM_SCORE_ADJ,
             "NetworkMode": config.WORK_NETWORK,
             "RestartPolicy": {"Name": "no"},
             "Mounts": [
@@ -341,7 +381,7 @@ async def ensure_workspace(user: dict) -> str:
         info = None
     if info is None:
         running = await _running_workspaces()
-        if len(running) >= config.WORK_MAX_CONCURRENT:
+        if len(running) >= config.WORK_MAX_CONCURRENT or _capacity_reason():
             raise RuntimeError("capacity")
         await _create(user)
         await _start(uid)
@@ -350,7 +390,7 @@ async def ensure_workspace(user: dict) -> str:
     state = (info.get("State") or {}).get("Status", "")
     if state != "running":
         running = await _running_workspaces()
-        if len(running) >= config.WORK_MAX_CONCURRENT:
+        if len(running) >= config.WORK_MAX_CONCURRENT or _capacity_reason():
             raise RuntimeError("capacity")
         await _start(uid)
         _starting[uid] = time.time()

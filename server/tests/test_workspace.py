@@ -416,3 +416,45 @@ def test_out_of_hours_lands_on_a_page_that_exists():
     # the string as it appears in a redirect, not in prose about the old bug
     assert 'f"{site}/work/upgrade"' not in src
     assert src.count('f"{site}/pricing?reason=work#plans"') == 3
+
+
+# ── 容量闸门: 静态并发上限之外的那道内存闸 ────────────────────────────────
+
+def test_free_memory_is_read_from_the_host_not_the_container(monkeypatch, tmp_path):
+    """容器里的 /proc/meminfo 就是宿主的 —— 这道闸门的全部前提。
+
+    用 MemAvailable 而不是 MemFree: 后者把可回收的 page cache 算作已用, 在一台
+    跑了半个月的机器上会永远接近 0, 那样这道闸门就变成永远关闭。"""
+    meminfo = tmp_path / "meminfo"
+    meminfo.write_text(
+        "MemTotal:       15690236 kB\n"
+        "MemFree:          204800 kB\n"        # 只有 200M "空闲"
+        "MemAvailable:    7821312 kB\n")       # 但 7.4G 可用
+    real_open = open
+    monkeypatch.setattr("builtins.open",
+                        lambda p, *a, **k: real_open(meminfo, *a, **k)
+                        if p == "/proc/meminfo" else real_open(p, *a, **k))
+    assert workspace.host_free_mb() == 7638        # 取的是 MemAvailable
+
+
+def test_capacity_blocks_when_the_host_is_low_on_memory(monkeypatch):
+    monkeypatch.setattr(config, "WORK_MEM_LIMIT_MB", 512)
+    monkeypatch.setattr(config, "WORK_MIN_FREE_MB", 1536)
+    # 需要 512 + 1536 = 2048
+    monkeypatch.setattr(workspace, "host_free_mb", lambda: 2048)
+    assert workspace._capacity_reason() == ""          # 刚好够, 放行
+    monkeypatch.setattr(workspace, "host_free_mb", lambda: 2047)
+    assert workspace._capacity_reason().startswith("memory:")   # 差 1M, 拦下
+
+
+def test_unreadable_meminfo_lets_the_workspace_start(monkeypatch):
+    """读不到就放行 —— 与本模块其余闸门同一姿态。反过来的话, 一个读不到 /proc
+    的环境异常会把所有人挡在门外, 而那比偶尔一次内存紧张糟得多。"""
+    monkeypatch.setattr(workspace, "host_free_mb", lambda: None)
+    assert workspace._capacity_reason() == ""
+
+
+def test_workspace_containers_are_first_in_line_for_the_oom_killer():
+    """OOM killer 按内存占用挑, 同机最大的是 postgres / elasticsearch —— 那是别人
+    的数据库, 而且不是它闯的祸。工作台可随时重启、卷还在, 该它先死。"""
+    assert config.WORK_OOM_SCORE_ADJ > 0

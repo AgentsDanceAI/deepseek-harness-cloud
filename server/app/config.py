@@ -184,6 +184,15 @@ TEAM_DEFAULT_CREDIT_CAP_X = _env_float("TEAM_DEFAULT_CREDIT_CAP_X", 3.0)
 TEAM_DEFAULT_MINUTE_CAP_X = _env_float("TEAM_DEFAULT_MINUTE_CAP_X", 3.0)
 WORK_MAX_CONCURRENT = _env_int("WORK_MAX_CONCURRENT", 40)    # global running-container cap
 WORK_MEM_LIMIT_MB = _env_int("WORK_MEM_LIMIT_MB", 512)
+# 起新工作台前要求宿主至少还剩这么多可用内存(MB, 不含即将分配的那 512)。
+# WORK_MAX_CONCURRENT 是**静态**上限, 它不知道同机还跑着别的东西 —— 本机与
+# a sibling production system 全栈共用 14G, 8 × 512M 的额度在对方峰值时可能就是压垮线。
+# 而 Linux 的 OOM killer 不挑肇事者, 它按内存占用选, 最可能被杀的是 postgres
+# 或 elasticsearch 这种大块头, 而不是闯祸的工作台。所以在**分配之前**就拦。
+WORK_MIN_FREE_MB = _env_int("WORK_MIN_FREE_MB", 1536)
+# 工作台容器的 OOM 优先级(-1000..1000, 越大越先被杀)。真到了内存悬崖, 该死的是
+# 一个可随时重启、卷还在的工作台, 不是别人的数据库。0 = 与系统默认同权。
+WORK_OOM_SCORE_ADJ = _env_int("WORK_OOM_SCORE_ADJ", 800)
 WORK_CPUS = _env_float("WORK_CPUS", 1.0)
 WORK_START_TIMEOUT_S = _env_float("WORK_START_TIMEOUT_S", 45.0)
 
