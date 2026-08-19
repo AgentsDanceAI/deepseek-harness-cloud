@@ -1,0 +1,108 @@
+#!/usr/bin/env bash
+# Restore a migrate-out.sh bundle onto a fresh host.
+#
+#   R2_ACCOUNT_ID=... R2_ACCESS_KEY_ID=... R2_SECRET_ACCESS_KEY=... R2_BUCKET=... \
+#   BACKUP_PASSPHRASE=... ./migrate-in.sh dhc-migrate-<stamp>.tar.gz.enc
+#
+# Everything keyed to the DOMAIN survives a move untouched — Waffo's webhook,
+# the OAuth redirect URIs, the R2 download links, the session cookie domain.
+# Only what is keyed to the MACHINE has to be redone, and this script does the
+# parts it can: volumes, database, .env, networks. The rest is printed at the
+# end because it lives outside this host (DNS, the shared Caddy, cron).
+set -euo pipefail
+cd "$(dirname "$0")"
+
+bundle="${1:?usage: migrate-in.sh <bundle.tar.gz.enc>}"
+: "${R2_ACCOUNT_ID:?}"; : "${R2_ACCESS_KEY_ID:?}"; : "${R2_SECRET_ACCESS_KEY:?}"
+: "${R2_BUCKET:?}"; : "${BACKUP_PASSPHRASE:?}"
+
+[ -f .env ] && { echo ".env already exists here — refusing to overwrite a live config" >&2; exit 1; }
+
+tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
+
+export RCLONE_CONFIG_R2_TYPE=s3
+export RCLONE_CONFIG_R2_PROVIDER=Cloudflare
+export RCLONE_CONFIG_R2_ACCESS_KEY_ID="$R2_ACCESS_KEY_ID"
+export RCLONE_CONFIG_R2_SECRET_ACCESS_KEY="$R2_SECRET_ACCESS_KEY"
+export RCLONE_CONFIG_R2_ENDPOINT="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+
+echo "==> fetch and decrypt"
+rclone copyto "R2:$R2_BUCKET/migrations/$bundle" "$tmp/$bundle"
+openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 \
+  -in "$tmp/$bundle" -out "$tmp/bundle.tar.gz" -pass env:BACKUP_PASSPHRASE
+tar -C "$tmp" -xzf "$tmp/bundle.tar.gz"
+stage="$tmp/bundle"
+cat "$stage/MANIFEST"
+
+echo "==> .env"
+cp "$stage/env" .env
+chmod 600 .env
+# The one value that is genuinely per-machine. A wrong path here does not fail
+# anything — it just makes 個人成品 empty for every stopped workspace — so it is
+# derived rather than carried over.
+root="$(docker info --format '{{.DockerRootDir}}')/volumes"
+if grep -q '^DOCKER_VOLUME_ROOT=' .env; then
+  sed -i "s#^DOCKER_VOLUME_ROOT=.*#DOCKER_VOLUME_ROOT=${root}#" .env
+else
+  printf '\nDOCKER_VOLUME_ROOT=%s\n' "$root" >> .env
+fi
+echo "    DOCKER_VOLUME_ROOT=$root"
+
+echo "==> networks"
+docker network create dhc-net 2>/dev/null || true
+docker network create dshwork-net 2>/dev/null || true
+
+echo "==> workspace volumes"
+for tarball in "$stage"/volumes/*.tar.gz; do
+  [ -e "$tarball" ] || break
+  vol="$(basename "$tarball" .tar.gz)"
+  docker volume create "$vol" >/dev/null
+  # Unpacked by a throwaway container so the restore does not depend on
+  # knowing this host's volume path layout.
+  docker run --rm -v "$vol:/dst" -v "$tarball:/src.tar.gz:ro" alpine \
+    sh -c 'tar -C /dst -xzf /src.tar.gz' >/dev/null
+  echo "    $vol"
+done
+
+echo "==> postgres"
+docker compose -f compose.yml --env-file .env up -d dhc-postgres
+for i in $(seq 30); do
+  docker exec dhc-postgres pg_isready -q && break
+  sleep 2
+done
+POSTGRES_USER="$(grep -m1 '^POSTGRES_USER=' .env | cut -d= -f2-)"
+POSTGRES_DB="$(grep -m1 '^POSTGRES_DB=' .env | cut -d= -f2-)"
+gunzip -c "$stage/db.sql.gz" | docker exec -i dhc-postgres \
+  psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -q >/dev/null
+n=$(docker exec dhc-postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc 'SELECT COUNT(*) FROM users')
+echo "    restored, $n users"
+
+echo "==> build and start"
+docker compose -f compose.yml --env-file .env up -d --build
+
+echo "==> health"
+for i in $(seq 30); do
+  docker exec dhc-server python -c "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8100/api/health')" 2>/dev/null && break
+  sleep 2
+done
+docker logs dhc-server --tail 20 2>&1 | grep -i "work_volume_root" && echo "    ^ fix DOCKER_VOLUME_ROOT before you cut over" || echo "    volume root OK"
+
+cat <<'MSG'
+
+Restored. What is left is off this machine:
+
+  1. DNS — point dshcloud.online and work.dshcloud.online at this host's IP
+     (Cloudflare, proxied/orange). Everything else keyed to the domain — the
+     Waffo webhook, the Google and GitHub redirect URIs, dl.dshcloud.online —
+     needs no change precisely because the domain did not.
+  2. Caddy — 80/443 here must terminate TLS and route the two hostnames to
+     dhc-server:8100. On the old host that was a shared caddy container; see
+     cutover.sh, which injects the site blocks idempotently.
+  3. Backup cron —  15 4 * * *  cd <repo>/deploy/open-search && ./backup-db.sh
+  4. Workspace image — docker build the dsh image tagged as WORK_IMAGE in .env
+     (dsh-local:rc6), or the cloud workspace cannot start.
+  5. Old host — leave it stopped, not deleted, until a real user has signed in
+     and paid something here.
+
+Verify before DNS: curl -H 'Host: dshcloud.online' http://127.0.0.1:8100/api/health
+MSG
