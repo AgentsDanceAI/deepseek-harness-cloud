@@ -8,7 +8,7 @@ Security model:
     sign/sign_type and empty values, sort keys), require app_id to match, then
     confirm via alipay.trade.query before the caller fulfils. The query goes
     over TLS straight to the official gateway; its response signature is not
-    re-verified (transport trust, a sibling production system-proven).
+    re-verified (transport trust, proven in a sibling production system).
 Keys may be full PEM or the bare base64 body the Alipay console hands out.
 """
 from __future__ import annotations

@@ -1,6 +1,6 @@
 """Waffo (waffo.ai) — overseas merchant-of-record collection channel.
 
-Ported from a sibling production system production (backend/waffo_pay.py) onto this repo's
+Ported from a sibling production system's payment module onto this repo's
 order kernel (payments/base.py). Waffo mechanics kept verbatim; storage,
 fulfilment and idempotence are delegated to base.py — Waffo has NO table of its
 own, it rides the shared `orders` table like every other provider here.

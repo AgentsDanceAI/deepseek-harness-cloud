@@ -52,7 +52,7 @@ curl -X POST https://<域名>/api/admin/desktop-version \
 
 当前限流、并发闸、QPS 桶是**单进程语义**（uvicorn 单 worker 正确）。要开多
 worker 或多机，先把这三处换 Redis 实现（接口都在 `rate_limit.py` / `gateway.py`
-的 `_inflight`，a sibling production system 有生产验证过的 Redis Lua 版本可移植），
+的 `_inflight`，另一套自有生产系统有生产验证过的 Redis Lua 版本可移植），
 DB 同步切 PostgreSQL。单 worker + SQLite 支撑早期完全够用。
 
 ## 7. 监控与日志

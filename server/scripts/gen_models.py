@@ -13,7 +13,7 @@ Credit convention — identical to AgentsDance so entitlements stay portable:
 The multiplier is a RATIO, so changing the resale markup never moves it.
 
     python server/scripts/gen_models.py \
-        --catalog qm_models.json --prices ../a sibling production system/config/model_pricing.json
+        --catalog qm_models.json --prices /path/to/model_pricing.json
 
 Both inputs are optional: with no --catalog the script keeps whatever the
 gateway currently lists (requires UPSTREAM_* env), and with no --prices it

@@ -1,7 +1,7 @@
 """Plan definitions and entitlement checks.
 
 config/pricing.json is the single source of truth for prices and quotas.
-Principles carried over from a sibling production system production:
+Principles carried over from a sibling production system:
   - gates only block NEW requests, never kill in-flight work;
   - every check fails open if the check itself breaks;
   - amounts are always resolved server-side from the price table.

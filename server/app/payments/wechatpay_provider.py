@@ -8,7 +8,7 @@ Security model:
     key. Platform-certificate signature verification is deliberately skipped —
     instead the order is ALWAYS re-queried from the merchant API over TLS
     (GET /v3/pay/transactions/out-trade-no/...) and only trade_state=SUCCESS
-    fulfils. A forged notify therefore buys nothing (a sibling production system-proven).
+    fulfils. A forged notify therefore buys nothing (proven in a sibling production system).
 """
 from __future__ import annotations
 

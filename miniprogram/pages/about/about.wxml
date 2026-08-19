@@ -22,7 +22,7 @@
   <view class="card">
     <view class="card-title">客服邮箱</view>
     <view class="row" hover-class="tap" bindtap="copyMail">
-      <text class="mono">***REDACTED-EMAIL***</text>
+      <text class="mono">support@agentsdance.ai</text>
       <text class="copy-hint">点按复制</text>
     </view>
   </view>

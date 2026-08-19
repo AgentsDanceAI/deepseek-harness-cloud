@@ -5,7 +5,7 @@
 #
 #   bash deploy/open-search/cutover.sh
 #
-# Prereqs: deploy/open-search/.env filled in; the the shared Caddy container
+# Prereqs: deploy/open-search/.env filled in; the shared Caddy container ($CADDY_CTR)
 # running (it owns 80/443 and the domains' TLS + Cloudflare origin).
 set -euo pipefail
 
@@ -14,11 +14,11 @@ COMPOSE="$REPO/deploy/open-search/compose.yml"
 ENVFILE="$REPO/deploy/open-search/.env"
 # 这两个是**逐机器**的: 共享 Caddy 的配置文件路径与容器名。写死会让换机迁移时
 # 传进来的值被静默忽略 —— 脚本照旧去写源机的路径, 在新机上要么文件不存在直接
-# 退出, 要么(更糟)写错文件。所以留成可覆盖, 默认值仍是 158 那台。
-#   144: CADDYFILE=***REDACTED-PATH***/deploy/production/Caddyfile.sg \
-#        CADDY_CTR=agentsdance-caddy bash deploy/open-search/cutover.sh
-CADDYFILE="${CADDYFILE:-***REDACTED-PATH***/deploy/gpu-node/Caddyfile.gpu}"
-CADDY_CTR="${CADDY_CTR:-the shared Caddy}"
+# 退出, 要么(更糟)写错文件。所以两者都必须显式传入, 不给默认值 —— 写死或留默认
+# 都会在换机时指向上一台机器的路径。
+#   CADDYFILE=/path/to/Caddyfile CADDY_CTR=<caddy 容器名> bash deploy/open-search/cutover.sh
+CADDYFILE="${CADDYFILE:?set CADDYFILE to the shared Caddy's config path}"
+CADDY_CTR="${CADDY_CTR:?set CADDY_CTR to the shared Caddy's container name}"
 [ -f "$CADDYFILE" ] || { echo "Caddyfile 不存在: $CADDYFILE (换机时用 CADDYFILE= 指定)"; exit 1; }
 docker inspect "$CADDY_CTR" >/dev/null 2>&1 || { echo "Caddy 容器不存在: $CADDY_CTR (换机时用 CADDY_CTR= 指定)"; exit 1; }
 
@@ -44,7 +44,7 @@ for i in $(seq 1 30); do
   sleep 2
 done
 
-echo "==> 5/6 ensure DHC site blocks in Caddyfile.gpu (dshcloud-v3, backup kept)"
+echo "==> 5/6 ensure DHC site blocks in the shared Caddyfile (dshcloud-v3, backup kept)"
 # Declarative + idempotent: strip every previously managed block (all
 # generations), then append the current set:
 #   dshcloud.online        -> dhc-server (primary console/site)

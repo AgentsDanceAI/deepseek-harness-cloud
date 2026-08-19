@@ -1,6 +1,6 @@
 """Order kernel shared by every payment provider.
 
-Three iron rules (carried from a sibling production system production):
+Three iron rules (carried from a sibling production system):
   1. Amounts come from config/pricing.json only; the client picks an item id.
   2. A webhook is verified first, then the provider is queried for the order
      state before any fulfilment ("verify, then confirm").

@@ -39,7 +39,7 @@ FastAPI + SQLite（默认）/ PostgreSQL（`DB_BACKEND=postgres`），Python 3.1
 | 模块 | 职责 |
 |---|---|
 | `app/config.py` | 全部环境变量在此集中声明 |
-| `app/db.py` | SQLite/PG 双后端薄层（沿用 a sibling production system 验证过的模式） |
+| `app/db.py` | SQLite/PG 双后端薄层（沿用另一套自有生产系统验证过的模式） |
 | `app/security.py` | scrypt 口令哈希；HMAC-SHA256 会话 token（带 epoch 吊销门）；无第三方 JWT 依赖 |
 | `app/accounts.py` | 注册/登录（邮箱+密码、邮箱验证码）、me、登出、注销 |
 | `app/device_auth.py` | 设备授权流（RFC 8628 风格）：桌面端起授权 → 浏览器批准 → 轮询取 token |
@@ -87,7 +87,7 @@ POST /api/device/poll {device_code}─▶ approved → 签发设备 token
   `MODEL_PRICE_MARKUP` 默认 1.2。**$1 = 100 积分**，即 1 积分 = $0.01 牌价用量。
 - 错误映射（dsh 侧行为已核实）：401/403 → dsh 报 AUTH 不重试；429 → RATE_LIMIT；余额不足返回 **402 + OpenAI 风格 error body**（dsh 映射 QUOTA_EXCEEDED，不重试）。
 - 闸门顺序：token 有效 → 账号状态 → 并发上限（按套餐）→ QPS 桶 → 积分余额 > 0。
-  原则（沿用 a sibling production system）：**只拦新请求，绝不掐断进行中的流**；途中耗尽让它跑完如实入账（允许小额透支）。
+  原则（沿用另一套自有生产系统）：**只拦新请求，绝不掐断进行中的流**；途中耗尽让它跑完如实入账（允许小额透支）。
 - 模型路由：客户端请求的 model id 必须在目录内；目录条目可配 `upstream_model` 改写（对外名 → 上游真实名）。
 
 ### 2.4 积分模型
@@ -101,7 +101,7 @@ POST /api/device/poll {device_code}─▶ approved → 签发设备 token
 
 - `orders(id, user_id, provider, item, amount_cents, currency, status, provider_ref, created, paid_at)`，
   订单号前缀区分渠道（`DHS`=Stripe `DHA`=支付宝 `DHW`=微信）。
-- 三条铁律（a sibling production system 生产验证）：
+- 三条铁律（另一套自有生产系统的生产验证）：
   1. 金额只认服务端价目表 `config/pricing.json`，绝不信客户端；
   2. webhook 先验签、**再主动查单**确认才落账；
   3. 幂等：只有首个 `pending→paid` 迁移触发发货（套餐生效/积分入账），终态不可逆，退款是唯一 `paid→refunded` 出口。

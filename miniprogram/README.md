@@ -49,7 +49,7 @@ web-view 只能加载「业务域名」白名单内的页面, 且域名必须:
   **无需任何小程序侧桥接**, 脚手架不含登录代码是刻意的。
 - 后续如要「微信一键登录/绑定」(免去在内嵌页输邮箱验证码): 小程序侧
   `wx.login` 拿 code, 服务端加 `/api/auth/wechat/mini` 用 code 换
-  openid 并签发会话。a sibling production system 有同款实现
+  openid 并签发会话。另一套自有生产系统有同款实现
   (`miniprogram/utils/api.js` + 服务端 wechat mini login 端点) 可直接
   移植 — **列为后续项, 不阻塞首次上线**。
 

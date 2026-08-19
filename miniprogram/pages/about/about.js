@@ -10,7 +10,7 @@ Page({
 
   copyMail() {
     wx.setClipboardData({
-      data: '***REDACTED-EMAIL***',
+      data: 'support@agentsdance.ai',
       success() { wx.showToast({ title: '邮箱已复制', icon: 'none' }) },
     })
   },
