@@ -24,11 +24,27 @@ if [ ! -f .env ]; then
   cp .env.example .env
   pw="$(openssl rand -hex 16)"
   secret="$(openssl rand -base64 33 | tr -d '\n')"
-  sed -i "s#^POSTGRES_PASSWORD=.*#POSTGRES_PASSWORD=${pw}#" .env
-  sed -i "s#__PW__#${pw}#" .env
-  sed -i "s#^AUTH_SECRET=.*#AUTH_SECRET=${secret}#" .env
-  root="$(docker info --format '{{.DockerRootDir}}')/volumes"
-  sed -i "s#^DOCKER_VOLUME_ROOT=.*#DOCKER_VOLUME_ROOT=${root}#" .env
+  # BSD sed needs an argument to -i; GNU sed must not have one.
+  if [ "$(uname -s)" = "Darwin" ]; then inplace=(-i ''); else inplace=(-i); fi
+  edit() { sed "${inplace[@]}" "$1" .env; }
+
+  if [ "$(uname -s)" = "Darwin" ]; then
+    # Docker Desktop runs the engine in a VM, so DockerRootDir is a path INSIDE
+    # that VM — bind-mounting it from macOS yields an empty directory. The
+    # workspace features also need a locally built dsh image. Both go off here
+    # rather than half-work in a way that reads like a bug in the code.
+    mkdir -p .novolumes
+    root="$(cd .novolumes && pwd)"
+    edit "s#^WORK_ENABLED=.*#WORK_ENABLED=0#"
+    echo "    macOS: cloud workspaces off (the engine runs in a VM, so its"
+    echo "    volume root is not a path this host can mount)."
+  else
+    root="$(docker info --format '{{.DockerRootDir}}')/volumes"
+  fi
+  edit "s#^POSTGRES_PASSWORD=.*#POSTGRES_PASSWORD=${pw}#"
+  edit "s#__PW__#${pw}#"
+  edit "s#^AUTH_SECRET=.*#AUTH_SECRET=${secret}#"
+  edit "s#^DOCKER_VOLUME_ROOT=.*#DOCKER_VOLUME_ROOT=${root}#"
   chmod 600 .env
   echo "    generated a password, a session secret, and DOCKER_VOLUME_ROOT=${root}"
 fi
