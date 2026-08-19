@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import math
+from fractions import Fraction
 import subprocess
 import sys
 from pathlib import Path
@@ -68,8 +69,11 @@ def test_discounts_derive_from_the_dollar_card_not_the_nominal_percent(path):
         u, loc = usd[tier], t["tiers"][tier]
         monthly = loc["monthly_cents"] // 100
         for field in ("monthly_intro_cents", "yearly_per_month_cents"):
-            ratio = u[field] / u["monthly_cents"]         # 美元卡上的实际比例
-            want = math.floor(monthly * ratio / step + 0.5) * step
+            # 有理数, 不是浮点: €45 的 7 折真值是 31.5 应进到 32, 而 45*0.7 在
+            # IEEE754 里是 31.499999999999996, 用浮点重算这条断言会把 31 当成对的
+            # (2026-08-19 实际踩到: 生成器修好了, 测试反而红了)。
+            ratio = Fraction(u[field], u["monthly_cents"])
+            want = math.floor(Fraction(monthly) * ratio / step + Fraction(1, 2)) * step
             assert loc[field] // 100 == want, (
                 f"{t['currency']} {tier} {field}: 表里是 {loc[field] // 100}, "
                 f"按美元卡比例 {ratio:.4f} 应为 {want} —— 折扣比例是不是又按名义值各算各的了?")

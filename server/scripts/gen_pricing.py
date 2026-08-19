@@ -43,6 +43,7 @@ from __future__ import annotations
 
 import json
 import math
+from fractions import Fraction
 import sys
 from pathlib import Path
 
@@ -103,21 +104,31 @@ COMMENT = ("由 server/scripts/gen_pricing.py 生成，请勿手改。基准 1 U
            "同价套餐给得多，否则最高档被自己的加油包压制。")
 
 
+def _quantise(value: Fraction, cur: str) -> int:
+    """Round `value` to a whole step of `cur`, half up, in EXACT arithmetic.
+
+    Exact because the halves are real. €45 at 30% off is 31.5, which must round
+    to 32 — but 0.7 has no IEEE754 representation, so `45 * 0.7` evaluates to
+    31.499999999999996 and floor(+0.5) hands back 31. That is one euro off, on a
+    published price, from nothing but the order of two operations. Fractions
+    built from the decimal STRINGS keep the arithmetic exact end to end."""
+    step = STEP.get(cur, 1)
+    return math.floor(value / step + Fraction(1, 2)) * step
+
+
 def units(usd: float, cur: str) -> int:
     """Whole units of `cur` for a US-dollar amount, quantised for that currency."""
-    step = STEP.get(cur, 1)
-    return int(math.floor(usd * RATES[cur] / step + 0.5)) * step
+    return _quantise(Fraction(str(usd)) * Fraction(str(RATES[cur])), cur)
 
 
-def scale(local_units: int, factor: float, cur: str) -> int:
+def scale(local_units: int, factor: Fraction, cur: str) -> int:
     """A discounted price, quantised the same way — derived from the LOCAL price
     rather than from USD, so the discount the page shows is honest about the
-    number beside it."""
-    step = STEP.get(cur, 1)
-    return int(math.floor(local_units * factor / step + 0.5)) * step
+    number beside it. `factor` is a Fraction, never a float — see _quantise."""
+    return _quantise(Fraction(local_units) * factor, cur)
 
 
-def effective(usd: float, off: int) -> float:
+def effective(usd: float, off: int) -> Fraction:
     """The discount that ACTUALLY ends up on the dollar card, as a ratio.
 
     Not the nominal one. USD prices are whole dollars too, so a nominal 25% off
@@ -131,7 +142,7 @@ def effective(usd: float, off: int) -> float:
     Max is unaffected either way ($100 × 0.75 = $75 exactly); this only moves the
     tiers whose discounted dollar price needed rounding."""
     usd_monthly = units(usd, "USD")
-    return scale(usd_monthly, (100 - off) / 100, "USD") / usd_monthly
+    return Fraction(scale(usd_monthly, Fraction(100 - off, 100), "USD"), usd_monthly)
 
 
 def table(cur: str) -> dict:

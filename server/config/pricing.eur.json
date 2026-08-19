@@ -28,8 +28,8 @@
       "concurrency": 5,
       "work_minutes": 21600,
       "yearly_list_cents": 54000,
-      "yearly_cents": 37200,
-      "yearly_per_month_cents": 3100,
+      "yearly_cents": 38400,
+      "yearly_per_month_cents": 3200,
       "monthly_intro_cents": 3400
     },
     "max": {
