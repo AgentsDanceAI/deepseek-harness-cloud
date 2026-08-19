@@ -1,0 +1,21 @@
+# 云工作台的每用户容器镜像 (WORK_IMAGE)。
+#
+# 以前这个文件只以代码片段的形式存在于 deploy/selfhost/README.md 里, 于是换机时
+# 它不会被 git clone 带过来 —— migrate-in.sh 的收尾清单第 4 条 "docker build the
+# dsh image tagged as WORK_IMAGE, or the cloud workspace cannot start" 说的就是它。
+# 落进仓库, 换机时 build 一次即可。
+#
+#   docker build -t dsh-local:rc6 -f deploy/open-search/Dockerfile.dsh deploy/open-search
+#
+# 不写 CMD: 应用创建容器时自己下发启动命令 (workspace.py 的 "Cmd")。158 上那个
+# 镜像烤进了一条带 --trusted-host open-search.ai 的 CMD, 而旧域已于 2026-08-17
+# 撤除 —— 烤死的域名迟早过期, 交给应用下发才不会。
+# socat 是必需的 (把 3081 转到 dsh 的回环 3080); python3/make/g++ 供智能体装 npm 原生依赖。
+FROM node:24-bookworm-slim
+RUN apt-get update -qq \
+ && apt-get install -y -qq --no-install-recommends python3 make g++ socat ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+# 版本与 desktop/upstream.json 的 runtimePackageVersion 对齐
+RUN npm install -g @deepseek-ai/dsh@0.1.0-rc.6
+WORKDIR /workspace
+EXPOSE 3081

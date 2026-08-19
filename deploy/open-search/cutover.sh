@@ -12,8 +12,15 @@ set -euo pipefail
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 COMPOSE="$REPO/deploy/open-search/compose.yml"
 ENVFILE="$REPO/deploy/open-search/.env"
-CADDYFILE="***REDACTED-PATH***/deploy/gpu-node/Caddyfile.gpu"
-CADDY_CTR="the shared Caddy"
+# 这两个是**逐机器**的: 共享 Caddy 的配置文件路径与容器名。写死会让换机迁移时
+# 传进来的值被静默忽略 —— 脚本照旧去写源机的路径, 在新机上要么文件不存在直接
+# 退出, 要么(更糟)写错文件。所以留成可覆盖, 默认值仍是 158 那台。
+#   144: CADDYFILE=***REDACTED-PATH***/deploy/production/Caddyfile.sg \
+#        CADDY_CTR=agentsdance-caddy bash deploy/open-search/cutover.sh
+CADDYFILE="${CADDYFILE:-***REDACTED-PATH***/deploy/gpu-node/Caddyfile.gpu}"
+CADDY_CTR="${CADDY_CTR:-the shared Caddy}"
+[ -f "$CADDYFILE" ] || { echo "Caddyfile 不存在: $CADDYFILE (换机时用 CADDYFILE= 指定)"; exit 1; }
+docker inspect "$CADDY_CTR" >/dev/null 2>&1 || { echo "Caddy 容器不存在: $CADDY_CTR (换机时用 CADDY_CTR= 指定)"; exit 1; }
 
 [ -f "$ENVFILE" ] || { echo "missing $ENVFILE (copy .env.template and fill secrets)"; exit 1; }
 
