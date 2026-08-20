@@ -98,7 +98,7 @@ Restored. What is left is off this machine:
   2. Caddy — 80/443 here must terminate TLS and route the two hostnames to
      dhc-server:8100. On the old host that was a shared caddy container; see
      cutover.sh, which injects the site blocks idempotently.
-  3. Backup cron —  15 4 * * *  cd <repo>/deploy/open-search && ./backup-db.sh
+  3. Backup cron —  15 4 * * *  cd <repo>/deploy/prod && ./backup-db.sh
   4. Workspace image — docker build the dsh image tagged as WORK_IMAGE in .env
      (dsh-local:rc8), or the cloud workspace cannot start.
   5. Old host — leave it stopped, not deleted, until a real user has signed in

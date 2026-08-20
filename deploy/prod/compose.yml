@@ -1,17 +1,22 @@
 # dshcloud.online deployment — DHC server + scoped docker proxy (cloud workspaces).
-# (Directory keeps its historical "open-search" name: the compose project name —
-#  and therefore the data volume open-search_dhc-data — derives from it.)
+#
+# 项目名与卷名都写死在下面, 不再从目录名派生。以前它们是派生的, 于是"重命名
+# 目录"这件小事会让 compose 去找一个不存在的 <目录名>_dhc-pgdata, 找不到就
+# **新建一个空卷**, Postgres 空库启动 —— 数据没被删, 但站点看起来全没了,
+# 而且开始往新卷写。写死之后这条路彻底堵上。
 #
 # The host's 80/443 and the domains' TLS/Cloudflare origin are already owned
 # by the existing the shared Caddy. So we do NOT run our own Caddy here:
 # we run the app on shared docker networks, connect that Caddy to them, and
 # point the dshcloud.online / work.dshcloud.online site blocks at us
-# (legacy open-search.ai keeps /api /llm /releases passthrough + page redirects).
+# (旧域 open-search.ai 的兼容层已于 2026-08-17 撤除。)
 #
 #   docker network create dhc-net 2>/dev/null || true
 #   docker network create dshwork-net 2>/dev/null || true
-#   docker compose -f deploy/open-search/compose.yml --env-file deploy/open-search/.env up -d --build
-#   bash deploy/open-search/cutover.sh   # idempotent: networks + caddy blocks
+#   docker compose -f deploy/prod/compose.yml --env-file deploy/prod/.env up -d --build
+#   bash deploy/prod/cutover.sh   # idempotent: networks + caddy blocks
+name: dshcloud
+
 services:
   # Our own instance: the host also runs an unrelated postgres for a different
   # stack, and sharing it would couple two products' upgrade windows.
@@ -109,5 +114,8 @@ networks:
     name: dshwork-net
 
 volumes:
+  # 显式 name = 不带项目前缀, 因而与目录名、项目名都无关。
   dhc-data:
+    name: dhc-data
   dhc-pgdata:
+    name: dhc-pgdata

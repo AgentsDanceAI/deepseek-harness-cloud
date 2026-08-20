@@ -5,7 +5,7 @@
 # dsh image tagged as WORK_IMAGE, or the cloud workspace cannot start" 说的就是它。
 # 落进仓库, 换机时 build 一次即可。
 #
-#   docker build -t dsh-local:rc8 -f deploy/open-search/Dockerfile.dsh deploy/open-search
+#   docker build -t dsh-local:rc8 -f deploy/prod/Dockerfile.dsh deploy/prod
 #
 # 不写 CMD: 应用创建容器时自己下发启动命令 (workspace.py 的 "Cmd")。158 上那个
 # 镜像烤进了一条带 --trusted-host open-search.ai 的 CMD, 而旧域已于 2026-08-17

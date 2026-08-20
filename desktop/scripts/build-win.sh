@@ -13,7 +13,7 @@
 #
 # Artifacts land in desktop/build/upstream/dsh-plugin-desktop/dist/ and are
 # verified before the script reports success. Publish them with
-# deploy/open-search/publish-r2.sh.
+# deploy/prod/publish-r2.sh.
 set -euo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
@@ -139,4 +139,4 @@ fi
 
 echo
 echo "Done. Publish with:"
-echo "  deploy/open-search/publish-r2.sh"
+echo "  deploy/prod/publish-r2.sh"

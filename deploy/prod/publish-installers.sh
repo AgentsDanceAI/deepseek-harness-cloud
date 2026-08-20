@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Publish installers from green workflow runs:
-#   bash deploy/open-search/publish-installers.sh <desktop-run-id> [android-run-id]
+#   bash deploy/prod/publish-installers.sh <desktop-run-id> [android-run-id]
 # Downloads the artifacts, drops them into dhc-server's data volume (served at
 # /releases), points DOWNLOAD_URL_* at them, and restarts the app.
 #
@@ -12,7 +12,7 @@ set -euo pipefail
 RUN_ID="${1:?usage: publish-installers.sh <desktop-run-id> [android-run-id]}"
 ANDROID_RUN_ID="${2:-}"
 REPO_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
-ENVFILE="$REPO_DIR/deploy/open-search/.env"
+ENVFILE="$REPO_DIR/deploy/prod/.env"
 BASE="https://dshcloud.online"
 
 WORK=$(mktemp -d)
@@ -51,7 +51,7 @@ publish_one "$EXE"     DOWNLOAD_URL_WIN
 publish_one "$APK"     DOWNLOAD_URL_ANDROID
 
 echo "==> restart app with new env"
-docker compose -f "$REPO_DIR/deploy/open-search/compose.yml" --env-file "$ENVFILE" up -d
+docker compose -f "$REPO_DIR/deploy/prod/compose.yml" --env-file "$ENVFILE" up -d
 
 echo "==> verify"
 for i in $(seq 1 20); do

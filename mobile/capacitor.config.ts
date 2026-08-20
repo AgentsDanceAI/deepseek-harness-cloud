@@ -17,7 +17,7 @@ const config: CapacitorConfig = {
     url: liveUrl,
     cleartext: liveUrl.startsWith("http://"),
     // 控制台与云工作台同属 dshcloud.online; 其余域名 (OAuth 等) 交给系统浏览器
-    allowNavigation: ["dshcloud.online", "*.dshcloud.online", "open-search.ai", "*.open-search.ai"],
+    allowNavigation: ["dshcloud.online", "*.dshcloud.online"],
   },
   ios: {
     preferredContentMode: "mobile",

@@ -136,7 +136,7 @@ Done. $PREFIX/$bundle
 
 On the new host:
   git clone https://github.com/AgentsDanceAI/deepseek-harness-cloud
-  cd deepseek-harness-cloud/deploy/open-search
+  cd deepseek-harness-cloud/deploy/prod
   R2_ACCOUNT_ID=... R2_ACCESS_KEY_ID=... R2_SECRET_ACCESS_KEY=... R2_BUCKET=$R2_BUCKET \\
   BACKUP_PASSPHRASE=... ./migrate-in.sh $bundle
 

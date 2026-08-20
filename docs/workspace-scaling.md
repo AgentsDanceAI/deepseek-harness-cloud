@@ -102,7 +102,7 @@ autoscaler 要调参、没有控制面要养**。
 
 步骤与判据：
 
-1. `docker build -t <registry>/dsh-local:rc8 -f deploy/open-search/Dockerfile.dsh deploy/open-search` 并推送；
+1. `docker build -t <registry>/dsh-local:rc8 -f deploy/prod/Dockerfile.dsh deploy/prod` 并推送；
 2. 对该镜像创建 ImageCache，等其 Available；
 3. 用 ECI OpenAPI 创建一个 2 vCPU / 1GB 的实例，挂一个 NAS 子目录到 `/workspace`；
 4. 从「发起创建」到「`dsh web` 可访问」计时，重复 5 次取中位数与最差值。

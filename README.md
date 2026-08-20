@@ -198,7 +198,7 @@ DHC_DEV=1 AUTH_SECRET=dev .venv/bin/python -m uvicorn app.main:app --reload
 | `server/` | FastAPI 服务端：账号、网关、积分、支付、云工作台、网页 |
 | `desktop/` | 桌面端叠加层：上游 pin + 3 个补丁 + 自包含 cloud 插件 + 装配脚本 |
 | `deploy/selfhost/` | **自部署编排**（docker compose + Caddy + .env 模板） |
-| `deploy/open-search/` | 我们自己生产环境的编排，可作为进阶参考 |
+| `deploy/prod/` | 我们自己生产环境的编排，可作为进阶参考 |
 | `mobile/` `miniprogram/` | Capacitor 移动壳与微信小程序脚手架 |
 | `docs/` | 架构、上游兼容性、上线合规清单 |
 

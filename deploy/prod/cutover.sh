@@ -1,22 +1,22 @@
 #!/usr/bin/env bash
 # dshcloud.online cutover: bring up DHC and (re)write the DHC site blocks in the
-# shared Caddy (primary dshcloud.online + legacy open-search.ai compat layer).
+# shared Caddy (dshcloud.online + work.dshcloud.online 的站点块)。
 # Idempotent; safe to re-run. Run from the repo root.
 #
-#   bash deploy/open-search/cutover.sh
+#   bash deploy/prod/cutover.sh
 #
-# Prereqs: deploy/open-search/.env filled in; the shared Caddy container ($CADDY_CTR)
+# Prereqs: deploy/prod/.env filled in; the shared Caddy container ($CADDY_CTR)
 # running (it owns 80/443 and the domains' TLS + Cloudflare origin).
 set -euo pipefail
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
-COMPOSE="$REPO/deploy/open-search/compose.yml"
-ENVFILE="$REPO/deploy/open-search/.env"
+COMPOSE="$REPO/deploy/prod/compose.yml"
+ENVFILE="$REPO/deploy/prod/.env"
 # 这两个是**逐机器**的: 共享 Caddy 的配置文件路径与容器名。写死会让换机迁移时
 # 传进来的值被静默忽略 —— 脚本照旧去写源机的路径, 在新机上要么文件不存在直接
 # 退出, 要么(更糟)写错文件。所以两者都必须显式传入, 不给默认值 —— 写死或留默认
 # 都会在换机时指向上一台机器的路径。
-#   CADDYFILE=/path/to/Caddyfile CADDY_CTR=<caddy 容器名> bash deploy/open-search/cutover.sh
+#   CADDYFILE=/path/to/Caddyfile CADDY_CTR=<caddy 容器名> bash deploy/prod/cutover.sh
 CADDYFILE="${CADDYFILE:?set CADDYFILE to the shared Caddy's config path}"
 CADDY_CTR="${CADDY_CTR:?set CADDY_CTR to the shared Caddy's container name}"
 [ -f "$CADDYFILE" ] || { echo "Caddyfile 不存在: $CADDYFILE (换机时用 CADDYFILE= 指定)"; exit 1; }
@@ -139,5 +139,4 @@ docker stop dsh 2>/dev/null && echo "    dsh stopped" || echo "    dsh not runni
 echo
 echo "cutover done. Verify:"
 echo "  curl -s https://dshcloud.online/api/health"
-echo "  curl -sI https://open-search.ai/ | grep -i location   # 308 -> dshcloud.online"
 echo "  (dshcloud.online / www / work DNS records must point at this origin via Cloudflare)"

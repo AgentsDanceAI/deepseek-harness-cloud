@@ -27,7 +27,7 @@
 }
 
 # --- cloud workspaces: per-user dsh containers + PWA shell -------------------
-# Routing is identical to the production deployment (deploy/open-search/
+# Routing is identical to the production deployment (deploy/prod/
 # cutover.sh, "DHC sites v3"). The three header_up lines are load-bearing:
 #   header_up -Upgrade      on the AUTH subrequest only — dsh's chat uses
 #     WebSocket upgrades (/api/events.mux, /api/events.host). With Upgrade
