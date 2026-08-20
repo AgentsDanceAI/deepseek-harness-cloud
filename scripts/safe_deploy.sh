@@ -15,6 +15,7 @@
 #   3. 构建 + 重启
 #   4. 等健康
 #   5. **带鉴权的深链路冒烟** (见 smoke 函数)
+#   6. 工作台镜像缓存是否跟上 WORK_IMAGE_REF (只告警, 不拦部署)
 set -euo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
@@ -111,6 +112,21 @@ except Exception:
   esac
 }
 smoke
+
+# --- 闸门 6: 工作台镜像缓存有没有跟上 ------------------------------------
+# 只在 ECI 后端下有意义。缓存是**按镜像引用**建的, WORK_IMAGE_REF 一升而缓存
+# 没重建, 每个用户每次冷启动就从 ~25s 退回 ~50s —— 不报错、不告警, 只是慢,
+# 所以除非在这里问一句, 没人会发现。
+# 不因此让部署失败: 那是性能退化而不是故障, 拦下一次正常发版不成比例。
+if docker exec "$CONTAINER" sh -c '[ "$WORK_BACKEND" = eci ]' 2>/dev/null; then
+  if ! docker exec -w /srv/dhc "$CONTAINER" \
+        python3 -m scripts.eci_image_cache check >/dev/null 2>&1; then
+    echo
+    echo "⚠️  工作台镜像缓存与 WORK_IMAGE_REF 对不上 —— 冷启动会从 ~25s 退回 ~50s。" >&2
+    docker exec -w /srv/dhc "$CONTAINER" \
+      python3 -m scripts.eci_image_cache check 2>&1 | sed 's/^/    /' >&2
+  fi
+fi
 
 echo
 echo "✓ 部署完成并通过冒烟。"
