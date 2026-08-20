@@ -341,6 +341,17 @@
       show("act-done");
     }
 
+    // 授权在浏览器里完成, 焦点留在浏览器。桌面端**不能**自己抢回前台 ——
+    // macOS 不允许后台应用靠 app.focus() 跨应用抢焦点 (2026-08-19 实测:
+    // 代码确实在包里跑了, 现象照旧), 顶多让 Dock 图标跳一下。唯一可靠的
+    // 通路是自定义 scheme: 由用户所在的前台浏览器发起跳转, 系统才放行。
+    // 自动跳一次 + 常驻按钮兜底 (自动跳可能被浏览器拦, 或用户根本没装客户端)。
+    function backToApp() {
+      var wrap = $("#act-back-wrap");
+      if (wrap) wrap.hidden = false;
+      try { location.href = "dshcloud://auth-done"; } catch (e) { /* 没装客户端: 按钮还在 */ }
+    }
+
     function lookup(c) {
       api("/api/device/info?code=" + encodeURIComponent(c))
         .then(function (info) {
@@ -378,7 +389,7 @@
       api("/api/device/approve", { method: "POST", body: { user_code: code, deny: deny } })
         .then(function (res) {
           if (res.status === "denied") done(T("js.msg.14"), T("js.msg.15"));
-          else done(T("js.msg.16"), T("js.msg.17"));
+          else { done(T("js.msg.16"), T("js.msg.17")); backToApp(); }
         })
         .catch(function (err) {
           if (err.status === 401) { $("#act-login").hidden = false; $("#act-actions").hidden = true; authed = false; }
@@ -387,6 +398,8 @@
         });
     }
 
+    var backBtn = $("#btn-back-to-app");
+    if (backBtn) backBtn.addEventListener("click", function () { location.href = "dshcloud://auth-done"; });
     $("#btn-approve").addEventListener("click", function () { approve(false); });
     $("#btn-deny").addEventListener("click", function () { approve(true); });
 

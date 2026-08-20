@@ -59,6 +59,11 @@
       <div class="big-ok" aria-hidden="true">✓</div>
       <h2 id="act-done-title">{{ t("activate.done_title") }}</h2>
       <p class="muted" id="act-done-msg">{{ t("activate.done_msg") }}</p>
+      {# 授权是在浏览器里完成的, 焦点留在浏览器。桌面端无法自己抢回前台
+         (macOS 不允许后台应用靠 API 抢焦点), 唯一可靠的通路是自定义 scheme
+         深链 —— 由用户所在的前台浏览器发起, 系统才认。自动跳一次 + 保留按钮
+         兜底 (自动跳被浏览器拦、或 App 未安装时用户仍有出路)。 #}
+      <p id="act-back-wrap" hidden><button class="btn btn-primary" type="button" id="btn-back-to-app">{{ t("activate.back_to_app") }}</button></p>
     </div>
 
     <div id="act-notfound" class="center" hidden>

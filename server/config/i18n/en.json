@@ -531,6 +531,7 @@
   "activate.deny_btn": "Deny",
   "activate.done_title": "Device authorized",
   "activate.done_msg": "The device is authorized. Go back to the desktop app.",
+  "activate.back_to_app": "Open DSH Cloud",
   "activate.notfound_title": "That code is invalid or has expired",
   "activate.notfound_msg": "Go back to the desktop app, start sign-in again, and get a new code.",
   "activate.retry_btn": "Enter a different code",

@@ -26,6 +26,8 @@ const opt = (name, fallback) => {
 const dest = resolve(opt('--dest', join(desktopDir, 'build', 'upstream')))
 /** Packaging glob for the login-wall assets; asserted by verify-contract. */
 export const CLOUD_ASSET_GLOB = 'build/cloud/**'
+// 授权回跳深链的 scheme。改名要留兼容期: 已发出去的旧包只认旧 scheme。
+export const CLOUD_URL_SCHEME = 'dshcloud'
 export const WIN_ARCHES = ['x64', 'arm64']
 
 const run = (command, cmdArgs, cwd) => execFileSync(command, cmdArgs, { cwd, stdio: 'inherit' })
@@ -148,6 +150,36 @@ console.log('assemble: copied dsh-plugin-cloud sources and assets')
 // 多背几十 MB 是可承受的; 发一个装上去打不开的包不是。所以这里**不做任何裁剪**,
 // 由 verify-package.mjs 保证"包里目标平台的二进制齐全且无外来平台二进制"这条底线。
 // 将来若要重做裁剪, 必须先在真机上验证包能启动, 再看体积。
+
+// 4f. 注册自定义 scheme `dshcloud://` —— 设备授权后把桌面端拉回前台的唯一可靠通路。
+//
+// 设备授权是在**浏览器**里完成的, 焦点因此留在浏览器。2026-08-19 前的做法是在
+// 主进程调 app.focus({steal:true}) 自己抢前台: 代码确实随包发出去了 (2.0.0 的
+// lib/main.js:207 就有), 但 macOS 不允许后台应用靠 API 跨应用抢焦点, 顶多让 Dock
+// 图标跳一下 —— 用户看到的仍是"客户端不见了", 得自己去应用程序里翻。
+//
+// 可靠的方向反过来: 由用户所在的**前台浏览器**发起 scheme 跳转, 系统才放行唤起。
+// 授权成功页 (server/app/static/app.js 的 backToApp) 会自动跳 dshcloud://auth-done
+// 并保留一个手动按钮兜底。
+//
+// electron-builder 的 protocols 字段在 mac 上生成 CFBundleURLTypes、在 NSIS 上写
+// 注册表关联。**必须打包时写进 Info.plist**, 改代码不重新出包等于没改。
+// 与 4b/4c 同样程序化注册而非 patch: 上游改 package.json 不能把它悄悄带走。
+{
+  const manifestPath = join(dest, 'dsh-plugin-desktop', 'package.json')
+  const pkg = JSON.parse(readFileSync(manifestPath, 'utf8'))
+  if (pkg.build === undefined) {
+    throw new Error('assemble: upstream package.json has no build section — the '
+      + 'URL scheme can no longer be registered; re-check the packaging contract')
+  }
+  const existing = Array.isArray(pkg.build.protocols) ? pkg.build.protocols : []
+  if (!existing.some(entry => entry?.schemes?.includes(CLOUD_URL_SCHEME))) {
+    existing.push({ name: 'DSH Cloud', schemes: [CLOUD_URL_SCHEME] })
+    pkg.build.protocols = existing
+    writeFileSync(manifestPath, `${JSON.stringify(pkg, null, 2)}\n`)
+  }
+  console.log(`assemble: registered ${CLOUD_URL_SCHEME}:// in build.protocols`)
+}
 
 // 5. redistribution guard: the identity-scoped @anthropic-ai/claude-agent-sdk
 // authorization does not extend to us; the desktop tree must not depend on it.
