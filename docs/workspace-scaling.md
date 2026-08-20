@@ -173,13 +173,37 @@ vSwitch/安全组里起一个**独立的容器组**来拉镜像，查它 `Intern
 选 A 的话, 生产上工作台仍然各自自动创建 EIP（`npm install` 需要出网）,
 只有"重建镜像缓存"这一步需要那个独立 EIP。
 
-**当前结论**：无缓存冷启动 **50-52 秒**（≈18s 调度 + ≈32s 拉 218MB）。未达
-中位数 30s 的目标, 在最差 60s 以内。**缓存能不能把它压到 ≈18-20 秒, 还没验证** ——
-需要先按方案 A 拿到一个 EIP。这是继续推进前唯一未答的问题。
+### 实测：方案 A 落地，冷启动判据通过
 
-RAM 权限备注：`AliyunECIFullAccess` 够用 Create/Describe/Delete ContainerGroup 和
-CreateImageCache, 但**不含** `eci:DeleteImageCache`（实测 `Forbidden.Unauthorized`）,
-也不含 ECS 只读（读不了安全组规则）。方案 A 还需要 EIP 的申请/释放权限。
+按方案 A 做了一遍：申请一个 EIP → `CreateImageCache --EipInstanceId <eip>` →
+构建容器组这次 `InternetIp` 有值, 事件出现
+`Successfully pulled image ghcr.io/agentsdancepro/dsh-local:rc8` → 缓存 Ready
+（盘用了 3.52GB / 20GB, 所以 `ImageCacheSize` 给 10 就够, 20 是浪费）→ 测完释放 EIP。
+
+带缓存冷启动（`AutoMatchImageCache true`, 每台自动创建 EIP, 从发起创建到
+状态 Running）：
+
+| 轮次 | 耗时 |
+|---|---|
+| 1 | 19s |
+| 2 | 23s |
+| 3 | 17s |
+| **中位数** | **19s** |
+| **最差** | **23s** |
+
+**判据（中位数 ≤30s、最差 ≤60s）通过。** 对比无缓存的 50-52s, 省下的正是那
+≈32s 拉取。三台的 dsh web 都返回 200 / 14549 字节, 与本地 `dsh-local:rc8` 一致。
+
+19 秒里几乎全是 ECI 自身的调度开销, **再优化镜像也压不下去**。要继续提速只剩
+预热池, 而那会侵蚀按量计费的好处 —— 也就是说 19s 基本就是这条路线的下限。
+
+运维含义：**每次 bump 工作台镜像版本, 都要重建镜像缓存**, 否则退回 50s。步骤是
+申请 EIP → CreateImageCache → 等 Ready → 释放 EIP, 应当脚本化并挂进发版流程。
+
+RAM 权限备注（实测）：`AliyunECIFullAccess` + `AliyunVPCReadOnlyAccess` +
+`AliyunEIPFullAccess` 足够跑完全流程。不含 ECS 只读, 所以读不了安全组规则 ——
+无所谓。注意**两个 RAM 用户的权限可能不同**: 曾以为 `AliyunECIFullAccess` 不含
+`eci:DeleteImageCache`, 实为当时用的那把 AK 属于授权更窄的另一个用户。
 
 ## 六、什么时候才轮到 k8s
 
