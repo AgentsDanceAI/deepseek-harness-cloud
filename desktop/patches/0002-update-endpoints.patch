@@ -7,7 +7,7 @@ index f2e56f8..57041f2 100644
  
  /** Public endpoint returning the latest stable DSH Desktop version. */
 -export const DESKTOP_VERSION_ENDPOINT = 'https://www.dshdesktop.cn/api/desktop/version'
-+export const DESKTOP_VERSION_ENDPOINT = 'https://dshcloud.agentsdance.ai/api/desktop/version'
++export const DESKTOP_VERSION_ENDPOINT = 'https://dshcloud.online/api/desktop/version'
  
  /** Maximum response body bytes accepted from the version service. */
  export const MAX_VERSION_RESPONSE_BYTES = 4 * 1024
@@ -21,8 +21,8 @@ index 18e4fec..89d7171 100644
  export const DESKTOP_DOWNLOAD_URLS: Readonly<Record<DesktopDownloadPlatform, string>> = {
 -  darwin: 'https://www.dshdesktop.cn/api/downloads/mac',
 -  win32: 'https://www.dshdesktop.cn/api/downloads/windows',
-+  darwin: 'https://dshcloud.agentsdance.ai/api/downloads/mac',
-+  win32: 'https://dshcloud.agentsdance.ai/api/downloads/windows',
++  darwin: 'https://dshcloud.online/api/downloads/mac',
++  win32: 'https://dshcloud.online/api/downloads/windows',
  }
  
  /** Maximum accepted installer size, in bytes. */
