@@ -120,16 +120,9 @@ export async function cloudGate(): Promise<CloudSession | undefined> {
  * and tracking its exact shape here would couple us to internals we don't use.
  */
 export function cloudProfilePatches(): { id: string, disabled?: boolean, config?: object }[] {
+  // 目录拉到了才敢禁上游那行 —— 见下面两个分支的说明。
+  const catalogReady = discoveredModels.length > 0
   return [
-    {
-      // OpenAI-compatible chat completions -> our gateway. The user token is
-      // the "API key"; the upstream provider key never reaches this machine.
-      id: 'llm-deepseek',
-      config: {
-        baseURL: `${CLOUD_BASE}/llm/v1`,
-        apiKeyEnv: CLOUD_TOKEN_ENV,
-      },
-    },
     {
       // web_search speaks Anthropic Messages on a SEPARATE endpoint; without
       // this row it would leak to the official API with a useless token.
@@ -139,43 +132,55 @@ export function cloudProfilePatches(): { id: string, disabled?: boolean, config?
         apiKeyEnv: CLOUD_TOKEN_ENV,
       },
     },
-    // 网关有整整一份目录 (2026-08-19: 20 个模型 —— claude / gpt / gemini / grok /
-    // kimi / glm / qwen / minimax / deepseek …), 但上面那行 llm-deepseek 用的是
-    // **上游内置的 deepseek 清单**, 它不会去调 /llm/v1/models 做发现。结果桌面端
-    // 开箱只能选到其中 2 个, 用户想用别的只能自己去「添加自定义提供方」手配一个
-    // 网关 —— 这正是老板一直配着千面的原因, 他是在绕过这个缺陷, 而不是需要千面。
-    //
-    // 这里把网关声明成 pi-ai 的一条 hand-declared 路由 (pi-ai 不认识我们的端点,
-    // 所以端点/协议/模型都要自己给全), 模型清单用启动时拉到的真实目录, 服务端
-    // 上下架模型不需要用户换客户端。
-    //
-    // ⚠️ 出包后必须实测一件事: patch 层是「整 row config 替换」(docs/compatibility.md),
-    // 所以这一行会不会盖掉用户自己在设置里加的自定义提供方 (settings.yaml 的
-    // llm-pi-ai.providers) —— 用户层通常优先于 profile 层, 但没实证过就不能当真。
-    // 若确实会盖掉, 改用独立 row id 挂第二个 pi-ai 实例 (README 明说同一 seam 可以
-    // 并排挂多条路径, 只要提供方路由名不冲突)。
-    //
-    // 拉不到目录时 (离线 / 网关故障) 整行不注入 —— 宁可维持现状只有 deepseek 可选,
-    // 也不要注入一个模型列表为空的提供方, 那会让模型选择器变成一个空壳。
-    ...discoveredModels.length === 0 ? [] : [{
-      id: 'llm-pi-ai',
-      config: {
-        providers: {
-          'dsh-cloud': {
-            displayName: 'DSH Cloud',
-            apiKeyEnv: CLOUD_TOKEN_ENV,
-            api: 'openai-completions',
-            baseURL: `${CLOUD_BASE}/llm/v1`,
-            models: discoveredModels,
-          },
-        },
-      },
-    }],
     {
       // Upstream's telemetry defaults to DISABLED; pin the row off so a future
       // upstream default flip cannot ship user session events to a collector.
       id: 'session-telemetry-otel',
       disabled: true,
     },
+    ...catalogReady
+      ? [
+          {
+            // 目录到手, 网关的全部模型都由下面那条 pi-ai 路由提供 —— 这时必须把
+            // 上游内置的 deepseek 行**关掉**, 否则模型选择器里会并排出现「DeepSeek」
+            // 和「DSH Cloud」两组, 而且同一个 DeepSeek-V4-Flash 在两边各来一次。
+            //
+            // 那两组看着像"官方 vs 我们", 实则**都是我们**: 这一行的 baseURL 早就被
+            // 指到了网关, 用的是设备 token、扣的是我们的积分。让用户对着两个同名
+            // 模型猜哪个是哪个, 是白白制造困惑 (2026-08-20 老板实测提出)。
+            id: 'llm-deepseek',
+            disabled: true,
+          },
+          {
+            // 网关声明成 pi-ai 的一条 hand-declared 路由 (pi-ai 不认识我们的端点,
+            // 所以端点/协议/模型都要自己给全)。模型清单用启动时拉到的真实目录,
+            // 服务端上下架模型不需要用户换客户端 —— 写死必然漂移。
+            id: 'llm-pi-ai',
+            config: {
+              providers: {
+                'dsh-cloud': {
+                  displayName: 'DSH Cloud',
+                  apiKeyEnv: CLOUD_TOKEN_ENV,
+                  api: 'openai-completions',
+                  baseURL: `${CLOUD_BASE}/llm/v1`,
+                  models: discoveredModels,
+                },
+              },
+            },
+          },
+        ]
+      : [
+          {
+            // 降级路径: 目录没拉到 (离线 / 网关故障)。**绝不能**在这里禁掉这一行 ——
+            // pi-ai 那条也不会注入, 两边都没了就一个模型都不剩, 而上游在无可用模型时
+            // 会把输入框禁用, 用户连"换个模型"都打不出来 (2026-08-19 那次死锁就是
+            // 这么来的)。所以退回原来的做法: 这一行仍指向网关, 至少内置的两个能用。
+            id: 'llm-deepseek',
+            config: {
+              baseURL: `${CLOUD_BASE}/llm/v1`,
+              apiKeyEnv: CLOUD_TOKEN_ENV,
+            },
+          },
+        ],
   ]
 }
