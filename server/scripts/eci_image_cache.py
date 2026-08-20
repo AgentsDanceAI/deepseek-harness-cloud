@@ -47,8 +47,10 @@ def _call(product: str, version: str, action: str, params: dict | None = None) -
     p["Signature"] = base64.b64encode(
         hmac.new((config.ECI_ACCESS_KEY_SECRET + "&").encode(), sts.encode(),
                  hashlib.sha1).digest()).decode()
-    r = httpx.post(f"https://{product}.{config.ECI_REGION_ID}.aliyuncs.com/",
-                   data=p, timeout=60.0)
+    # quotas 是全局服务, 没有分地域的域名; 其余产品带地域。
+    host = "quotas.aliyuncs.com" if product == "quotas" \
+        else f"{product}.{config.ECI_REGION_ID}.aliyuncs.com"
+    r = httpx.post(f"https://{host}/", data=p, timeout=60.0)
     body = r.json()
     # 阿里云把错误也放在非 200 之外的地方, Code 字段才是权威的
     if r.status_code != 200 or body.get("Code"):
@@ -68,14 +70,56 @@ def _ref() -> str:
     return ref
 
 
+def eip_headroom() -> int | None:
+    """并发上限与 EIP 配额的余量; 读不到返回 **None**。
+
+    不要用 -1 表示"未知": 余量本身就可能是负数 (上限配得比配额还高), 而那正是
+    最该报警的情况 —— 用同一个哨兵值会把最坏的一种当成"不知道"直接放过。
+    第一版就是这么写的, 并发设成 185 时一声没吭。
+
+    每个工作台自动创建一个 EIP, 所以**并发的真正天花板是 EIP 配额**, 不是
+    WORK_MAX_CONCURRENT。把上限配得比配额高不会有任何提示: 前 N 个用户一切
+    正常, 第 N+1 个看到"启动失败", 而错误里不会提配额。
+    这条配额是**账号级**的 (给它传 regionId 会直接 QUOTA.DIMENSION.UNSUPPORT),
+    所以同账号下别的产品线用掉的 EIP 也算在里面。
+    """
+    try:
+        body = _call("quotas", "2020-05-10", "ListProductQuotas",
+                     {"ProductCode": "eip", "MaxResults": 50})
+    except Exception as e:  # noqa: BLE001
+        print(f"  (读不到 EIP 配额, 跳过并发检查: {e})", file=sys.stderr)
+        return None
+    for q in body.get("Quotas", []):
+        if q.get("QuotaActionCode") == "q_6arozx":
+            return int(q.get("TotalQuota", 0)) - int(config.WORK_MAX_CONCURRENT)
+    return None
+
+
 def check() -> int:
     ref = _ref()
     ready = [c for c in _caches()
              if c.get("Status") == "Ready" and ref in (c.get("Images") or [])]
+    rc = 0
+    # 至少留几个 EIP 给"重建镜像缓存"和人工排查 —— 前者恰好在升级镜像版本时跑,
+    # 是最不该因为抢不到 EIP 而失败的时刻。
+    head = eip_headroom()
+    if head is not None and head < 5:
+        if head < 0:
+            print(f"✗ WORK_MAX_CONCURRENT={config.WORK_MAX_CONCURRENT} **超过** EIP 配额 "
+                  f"{config.WORK_MAX_CONCURRENT + head} 个 —— 超出的那部分用户会看到"
+                  f"“启动失败”, 而错误里不会提配额。", file=sys.stderr)
+        else:
+            print(f"✗ WORK_MAX_CONCURRENT={config.WORK_MAX_CONCURRENT} 距 EIP 配额只剩 {head} 个。",
+                  file=sys.stderr)
+        print("  每个工作台占一个 EIP, 配额是**账号级**的 (别的产品线也算在里面)。"
+              "留不足 5 个时, 重建镜像缓存会抢不到 EIP 而失败。", file=sys.stderr)
+        rc = 1
     if ready:
         print(f"✓ 镜像缓存与 WORK_IMAGE_REF 一致: {ref}")
         print(f"  {ready[0].get('ImageCacheId')}  ({ready[0].get('ImageCacheName')})")
-        return 0
+        if head is not None and head >= 5:
+            print(f"✓ EIP 余量 {head} 个 (配额 - WORK_MAX_CONCURRENT)")
+        return rc
     print(f"✗ 没有对应 {ref} 的 Ready 镜像缓存。", file=sys.stderr)
     print("  后果不是报错, 是每个用户每次冷启动从 ~25s 退回 ~50s —— 只会慢, 不会响。",
           file=sys.stderr)
