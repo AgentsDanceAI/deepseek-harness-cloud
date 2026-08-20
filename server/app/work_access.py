@@ -10,9 +10,13 @@ So minutes are metered like GitHub Actions: every plan includes an allowance per
 billing period, and running out means "upgrade or buy more time", never "your
 credits quietly drained". Credits are never charged for a workspace minute.
 
-Only ACTIVE minutes count — a minute in which the agent actually called our
-gateway (see workspace.reaper_tick). Reading a reply or leaving a tab open is
-free, which is what makes an hourly allowance honest.
+每一分钟"容器存在"都算 —— 不是只算智能体干活的分钟 (见 workspace.reaper_tick)。
+2026-08-20 之前是后者, 理由是"读回复和走开不该扣时长"; 那在工作台跑在自己机器上
+时成立, 因为多存在一分钟不花钱。切到 ECI (按秒计费) 之后, 同一个决定变成由我们
+垫付闲置时间, 而且每次智能体活动都会重置回收窗口 —— 一个每 29 分钟发一条消息的
+用户可以让容器永不回收, 计量却几乎为零。
+配套地, 闲置回收收紧到 10 分钟: 计量口径变了之后, 早回收既省我们的钱, 也省用户
+的额度。
 
 Organisations pool minutes the same way they pool credits: seats contribute to
 one balance, drawn by whoever works, bounded per member so a single person

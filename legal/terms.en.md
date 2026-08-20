@@ -37,7 +37,7 @@ Built on the open-source project DeepSeek Harness (MIT License), the Service pro
 
 ## 4. Credits, Machine Hours, and Billing
 
-4.1 **Two separate quotas.** Credits measure model calls (counted by token), and machine hours measure the running time of the cloud workspace (counted only for the minutes during which the agent is **actually executing a task**; idle time is not billed). The two are not convertible into each other and do not draw on each other.
+4.1 **Two separate quotas.** Credits measure model calls (counted by token), and machine hours measure the **running time** of the cloud workspace — every minute the workspace is running counts, whether or not the agent is executing a task. Idle workspaces are reclaimed after about 10 minutes so that metering stops. The two are not convertible into each other and do not draw on each other.
 
 4.2 **How credits are deducted.** Each model has a published multiplier, with Claude Sonnet as the 1.00x baseline; 1.00x means a deduction of 1,000 credits per 1 million tokens. The full multiplier table is published in real time at https://dshcloud.online/pricing . When a multiplier changes because of an upstream price adjustment, we will update that page before the change takes effect.
 
@@ -121,7 +121,7 @@ You agree to comply with the Acceptable Use Policy set out at https://dshcloud.o
 
 9.1 We make reasonable efforts to keep the Service available, but **we do not commit to any specific availability rate**. Planned maintenance will be announced in advance.
 
-9.2 A cloud workspace container automatically pauses after about 15 minutes of idle time in order to save your machine hours. The data volume is retained, and the workspace resumes within seconds on your next visit.
+9.2 A cloud workspace is reclaimed after about 10 minutes of idle time so that it stops consuming your machine hours. Your files and sessions live on separate storage and are not lost when this happens; your next visit creates a new workspace, which usually takes 20–40 seconds.
 
 9.3 We may change, restrict, or discontinue a feature of the Service. For a materially adverse change, we will give at least 30 days' advance notice; if you do not accept it, you may request a pro rata refund for any period that has not yet started.
 

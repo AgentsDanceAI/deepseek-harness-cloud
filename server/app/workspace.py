@@ -1135,21 +1135,20 @@ async def work_starting(request: Request, state: str = ""):
 async def reaper_tick(now: float) -> None:
     """One meter/reaper pass over every running workspace."""
     for uid in await _running_workspaces():
-        # Meter only minutes the agent actually worked. An open tab keeps polling
-        # /api/work/route, so wall-clock metering charged people for reading a
-        # reply and for walking away; agent work is the honest meter.
-        # `agent_idle_s` is time since the container last called our gateway
-        # (LLM or search) — the only thing its device token is ever used for.
+        # 按**容器存在的时间**计量, 不是按智能体干活的时间。
         #
-        # Machine time costs MINUTES, never credits: the plan includes an
-        # allowance (GitHub-Actions style) and credits stay for tokens. The row
-        # is still written to usage_log — it is what work_access counts — but
-        # with credits=0 so a workspace minute can never drain a token balance.
-        agent_idle_s = now - agent_last_active(uid)
-        if agent_idle_s < 60:
-            credits.spend(uid, 0, kind=work_access.MINUTE_KIND,
-                          model="dshwork", request_id=f"ws-{int(now // 60)}")
-            work_access.consume_minute(uid)
+        # 原先只计"智能体 60 秒内调过网关"的分钟, 理由是"读回复和走开不该扣时长"。
+        # 那在工作台跑在自己机器上时是对的 —— 多存在一分钟的边际成本≈0。切到 ECI
+        # 之后同一个决定变成了直接补贴: 云厂商按秒收, 我们按"干活"收, 中间那段
+        # 由我们垫。而且窗口会被重置 —— 每 29 分钟发一条消息就能让容器长生不老,
+        # 计量却只有每条消息一分钟。
+        #
+        # 机时依然只扣 MINUTES, 永不扣积分: 套餐里机时是单独的额度 (GitHub
+        # Actions 那种口径), 积分留给 token。这里仍写一行 usage_log (work_access
+        # 数的就是它), 但 credits=0, 所以一分钟机时绝不会动到 token 余额。
+        credits.spend(uid, 0, kind=work_access.MINUTE_KIND,
+                      model="dshwork", request_id=f"ws-{int(now // 60)}")
+        work_access.consume_minute(uid)
         last = _last_seen.setdefault(uid, now)  # re-seed after restart
         # Two stop rules, because idle minutes are now free and RAM is not:
         #   - the user left (no browser traffic) — the original rule;

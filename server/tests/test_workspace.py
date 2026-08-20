@@ -180,28 +180,59 @@ def _mark_agent_active(uid, ago_s=0.0):
              (time.time() - ago_s, uid))
 
 
-def test_meters_only_minutes_the_agent_worked(fake):
-    """An open tab must be free: only a minute with a real gateway call counts."""
+def test_meters_every_minute_the_workspace_runs(fake):
+    """按**容器存在的时间**计量, 不是按智能体干活的时间。
+
+    2026-08-20 之前是后者 (这条测试原名 test_meters_only_minutes_the_agent_worked)。
+    那在工作台跑在自己机器上时成立 —— 多存在一分钟不花钱。切到 ECI 按秒计费之后,
+    同一个决定变成由我们垫付闲置时间, 而且每次智能体活动都会重置回收窗口: 一个每
+    29 分钟发一条消息的用户可以让容器永不回收, 计量却几乎为零。
+    """
     c, uid = _user("bill@test.local")
     c.get("/api/work/route"); c.get("/api/work/route")
 
-    # agent just called the gateway -> this minute is metered
+    # 智能体刚干过活 —— 计一分钟
     _mark_agent_active(uid, ago_s=5)
     before_minutes = work_access.used_minutes(uid)
     before_credits = credits.balance(uid)
     asyncio.run(workspace.reaper_tick(time.time()))
     assert work_access.used_minutes(uid) == before_minutes + 1
-    # …and machine time is NOT paid for in credits
+    # 机时永远不扣积分 —— 这条没变, 两种额度互不占用
     assert credits.balance(uid) == before_credits
 
-    # tab still open, agent quiet for 5 minutes -> free, container stays up
+    # 页面开着但智能体闲着 —— **也要计**, 因为云厂商照样在收我们的钱
     _mark_agent_active(uid, ago_s=300)
     workspace._last_seen[uid] = time.time()
+    workspace._started_at[uid] = time.time()
     before_minutes = work_access.used_minutes(uid)
     stops_before = fake.stops
     asyncio.run(workspace.reaper_tick(time.time()))
-    assert work_access.used_minutes(uid) == before_minutes
-    assert fake.stops == stops_before
+    assert work_access.used_minutes(uid) == before_minutes + 1, \
+        "闲置分钟没计量 —— 那部分成本会由我们垫"
+    assert fake.stops == stops_before          # 还没到回收窗口
+
+
+def test_idle_workspaces_are_reclaimed_within_the_stated_window(fake, monkeypatch):
+    """计量口径改了之后, 早回收既省我们的钱也省用户的额度。
+
+    条款里写着"闲置约 10 分钟后自动回收" —— 这条钉住那个承诺。
+    """
+    monkeypatch.setattr(config, "WORK_AGENT_IDLE_STOP_MIN", 10)
+    c, uid = _user("idle10@test.local")
+    c.get("/api/work/route"); c.get("/api/work/route")
+
+    now = time.time()
+    workspace._last_seen[uid] = now                    # 页面还开着
+    _mark_agent_active(uid, ago_s=9 * 60)
+    workspace._started_at[uid] = now - 9 * 60
+    stops = fake.stops
+    asyncio.run(workspace.reaper_tick(now))
+    assert fake.stops == stops, "9 分钟就回收了 —— 比承诺的还早"
+
+    _mark_agent_active(uid, ago_s=11 * 60)
+    workspace._started_at[uid] = now - 11 * 60
+    asyncio.run(workspace.reaper_tick(now))
+    assert fake.stops == stops + 1, "过了 10 分钟仍未回收 —— 闲置容器会一直计费"
 
 
 def test_agent_last_active_ignores_browser_polling(fake):
