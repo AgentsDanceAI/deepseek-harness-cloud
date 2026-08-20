@@ -84,7 +84,10 @@ echo "--- electron-builder --win nsis x64,arm64"
 # on non-Windows hosts by design, and it only knows about x64.
 yarn electron-builder --win nsis --x64 --arm64 --publish never --config.npmRebuild=false
 INNER
-docker run --rm \
+# BUILD_MEMORY 给容器设内存上限 (如 4g)。这个构建常在**同时跑着生产服务**的机器
+# 上做 —— electron-builder 打两个架构会吃掉好几个 G, 不设限就可能把同机的数据库
+# 或工作台挤出去 (那台机器的内存压力有案底)。不设则不限制。
+docker run --rm ${BUILD_MEMORY:+--memory "$BUILD_MEMORY" --memory-swap "$BUILD_MEMORY"} \
   -v "$tree:/project" \
   -v "$cache_dir:/root/.cache/electron-builder" \
   -w /project \
