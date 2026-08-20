@@ -128,8 +128,17 @@ done
 }
 
 echo "==> repoint DOWNLOAD_URL_* at R2"
+# ⚠️ mac 当前发的是 zip, 这是个待还的债 (2026-08-19 实测确认危害):
+# zip 没有拖拽引导, 用户解压后就地双击 → macOS App Translocation 把 App
+# 挂到 /private/var/.../AppTranslocation 的只读随机目录里跑, 自动更新失效,
+# 而且全程无提示。原来的结论是「Linux 打不出可公证的 UDIF, 那就发 zip」——
+# 前半句对, 后半句选错了方向: 正确做法是把最后这层封装放回 macOS。
+# 已验证 (拿线上 2.0.0 arm64 包实测): 重新封装**不损公证** —— 票据 staple 在
+# .app 本体, 外层容器换了照样 stapler validate 通过、spctl 判 Notarized。
+# 工具已备好: 在 macOS 上跑 desktop/scripts/wrap-signed-dmg.sh <signed.zip>,
+# 得到带拖拽引导的 DMG; 发布流接上产 DMG 后, 把下面两行改回 .dmg。
 declare -A MAP=(
-  [DOWNLOAD_URL_MAC]="mac-arm64.zip"   # 2026-08-18: dmg→zip (Linux 上打不出可公证的 UDIF; 票据 staple 在 .app 本体)
+  [DOWNLOAD_URL_MAC]="mac-arm64.zip"
   [DOWNLOAD_URL_MAC_X64]="mac-x64.zip"
   [DOWNLOAD_URL_WIN]="win-x64.exe"
   [DOWNLOAD_URL_WIN_ARM]="win-arm64.exe"
