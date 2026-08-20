@@ -44,6 +44,9 @@ def auth_secret() -> str:
 
 
 DEV_MODE = _env_bool("DHC_DEV", False)
+# dhc.* 日志级别。默认 INFO —— 全仓只有十来处 log.info 且都不在每请求路径上,
+# 不会淹掉容器日志 (5×20MB 轮转)。调成 WARNING 会让"工作台被回收"这类记录消失。
+LOG_LEVEL = _env("LOG_LEVEL", "INFO")
 SESSION_COOKIE = "dhc_session"
 SESSION_TTL = _env_int("AUTH_TOKEN_TTL", 90 * 24 * 3600)  # browser session tokens
 DEVICE_TOKEN_TTL = _env_int("DEVICE_TOKEN_TTL", 365 * 24 * 3600)  # desktop device tokens

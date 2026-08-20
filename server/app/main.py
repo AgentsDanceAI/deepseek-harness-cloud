@@ -13,7 +13,32 @@ from . import config, db
 log = logging.getLogger("dhc")
 
 
+def setup_logging() -> None:
+    """让 dhc.* 的日志真的有个出口。
+
+    此前应用从未配置过 logging。Python 在找不到任何 handler 时会用 lastResort
+    兜底, 但它**只输出 WARNING 及以上**, 而且不带时间、不带 logger 名。于是:
+      · log.info 全部落空 —— "谁的工作台什么时候被回收了"这类问题永远查不到,
+        而在 ECI 上回收就是销毁实例, 那正是要能对账的事;
+      · 侥幸可见的 WARNING/ERROR 也没有时间戳, 出事时对不上时间线。
+
+    只挂在 dhc 这一支上, 不碰 root: uvicorn 有自己的 access/error logger, 动
+    root 会把它们的格式一起改掉。propagate=False 是为了别再落到 lastResort 上
+    重复输出一遍。
+    """
+    level = (config.LOG_LEVEL or "INFO").upper()
+    handler = logging.StreamHandler()   # stderr, 与 docker logs 同一个出口
+    handler.setFormatter(logging.Formatter(
+        "%(asctime)s %(levelname)-7s %(name)s: %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S"))
+    root = logging.getLogger("dhc")
+    root.handlers[:] = [handler]        # 反复调用不叠加 handler
+    root.setLevel(getattr(logging, level, logging.INFO))
+    root.propagate = False
+
+
 def create_app() -> FastAPI:
+    setup_logging()
     if not config.auth_secret() and not config.DEV_MODE:
         raise RuntimeError("AUTH_SECRET must be set (or DHC_DEV=1 for local development)")
     if not config.UPSTREAM_API_KEY:

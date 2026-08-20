@@ -734,3 +734,42 @@ def test_the_origin_gate_is_actually_wired_into_auth(monkeypatch):
         r = c.post("/api/auth/password", json={"old": "", "new": "whatever-long"},
                    headers={"origin": bad})
         assert r.status_code == 401, f"来自 {bad} 的带凭据写入没有被拦下"
+
+
+# --- 日志得有个出口 ----------------------------------------------------------
+
+def test_info_logs_actually_reach_a_handler(capsys):
+    """应用此前从未配置 logging。Python 的 lastResort 兜底**只输出 WARNING 及
+    以上**, 于是 log.info 全部落空 —— "谁的工作台什么时候被回收了"这类问题永远
+    查不到, 而 ECI 上回收就是销毁实例, 那正是要能对账的事。
+    """
+    import logging
+    from app.main import setup_logging
+
+    setup_logging()
+    logging.getLogger("dhc.work").info("回收了 u_x")
+    err = capsys.readouterr().err
+    assert "回收了 u_x" in err, "INFO 没有出口"
+    assert "dhc.work" in err, "看不出是哪个模块打的"
+    assert "INFO" in err
+    # 时间戳: 出事时要能和别的日志对上时间线
+    import re
+    assert re.search(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}", err), "没有时间戳"
+
+
+def test_setting_up_twice_does_not_double_print():
+    """create_app 在测试里会被反复调用; handler 叠加会让每条日志重复 N 次。"""
+    import logging
+    from app.main import setup_logging
+    setup_logging(); setup_logging(); setup_logging()
+    assert len(logging.getLogger("dhc").handlers) == 1
+
+
+def test_uvicorns_own_loggers_are_left_alone(capsys):
+    """只挂在 dhc 这一支上。动 root 会把 uvicorn 的 access/error 格式一起改掉。"""
+    import logging
+    from app.main import setup_logging
+    setup_logging()
+    assert logging.getLogger().handlers == [] or \
+        logging.getLogger("dhc").handlers is not logging.getLogger().handlers
+    assert logging.getLogger("dhc").propagate is False
