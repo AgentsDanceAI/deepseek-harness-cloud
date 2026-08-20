@@ -135,6 +135,52 @@ autoscaler 要调参、没有控制面要养**。
 docker 网络；换到 ECI，挡住它的只有安全组，没有第二层。安全组只放行
 `172.29.181.212/32 → 3081`，不是保守，是唯一那层。
 
+### 实测：第 2 次，以及镜像缓存为什么没生效
+
+第 2 次（`eci-t4nd3f1bjw509v9vewvu`，配置与第 1 次相同）：**52 秒**，其中拉镜像
+32.7s —— 和第 1 次的 32.4s 几乎相同。**镜像缓存完全没起作用。**
+
+事件里写着原因：
+
+```
+[eci.imagecache]Image cache auto create failed for failed to pull images.
+[eci.imagecache]Missed image cache.
+```
+
+第 1 次那条 "Image cache ... is auto created" 只是**发起**了创建，并没有建成；
+`DescribeImageCaches` 返回 `TotalCount: 0` 就是证据。
+
+根因用显式 `CreateImageCache` 复现并定位到了：缓存构建会在你指定的
+vSwitch/安全组里起一个**独立的容器组**来拉镜像，查它 `InternetIp` 是
+**空的**——构建任务不共享我们挂在业务容器组上的 EIP，因此没有公网出口，
+拉不到 ghcr.io。它会一直卡在 `Preparing` / 进度 0% / "start to pull images"
+直到超时。不是 manifest 兼容性问题：同一个镜像、同一个仓库，业务容器组自己
+拉是成功的（32s），只有缓存构建这条路没有出口。
+
+`CreateImageCache` 有 `--EipInstanceId`，但**没有** `AutoCreateEip` ——
+必须先有一个现成的 EIP。
+
+三条出路：
+
+| 方案 | 代价 | 说明 |
+|---|---|---|
+| **A. 单独一个 EIP，建缓存时用 `--EipInstanceId`** | 一个 EIP | **推荐**。缓存只在镜像版本变更时重建，EIP 可以用完即释放 |
+| B. 镜像迁到 ACR（企业版，有 VPC 域名） | 固定月费 | 构建任务走内网，无需公网；但要为此买 ACR |
+| C. 交换机挂 NAT 网关 | 固定月费 | 同时解决工作台出网；但在中等规模下, 按实例分配 EIP 更便宜——NAT 是固定成本, 要跑满才划算 |
+
+（B/C 的具体价格以阿里云价格页为准, 这里不写死。）
+
+选 A 的话, 生产上工作台仍然各自自动创建 EIP（`npm install` 需要出网）,
+只有"重建镜像缓存"这一步需要那个独立 EIP。
+
+**当前结论**：无缓存冷启动 **50-52 秒**（≈18s 调度 + ≈32s 拉 218MB）。未达
+中位数 30s 的目标, 在最差 60s 以内。**缓存能不能把它压到 ≈18-20 秒, 还没验证** ——
+需要先按方案 A 拿到一个 EIP。这是继续推进前唯一未答的问题。
+
+RAM 权限备注：`AliyunECIFullAccess` 够用 Create/Describe/Delete ContainerGroup 和
+CreateImageCache, 但**不含** `eci:DeleteImageCache`（实测 `Forbidden.Unauthorized`）,
+也不含 ECS 只读（读不了安全组规则）。方案 A 还需要 EIP 的申请/释放权限。
+
 ## 六、什么时候才轮到 k8s
 
 k8s 买的是声明式调度、自愈、生态；代价是一整个新的运维面。而这个应用**已经在
