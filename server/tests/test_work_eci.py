@@ -306,3 +306,40 @@ async def test_a_healthy_pending_says_nothing(eci, caplog):
     with caplog.at_level("ERROR"):
         await b.inspect("u_abc")
     assert caplog.text == ""
+
+
+# --- 「個人成品」的离线视图: 走岔了不会报错, 只会永远空白 --------------------
+
+def test_offline_dir_layout_matches_what_gets_mounted(eci, monkeypatch, tmp_path):
+    """离线视图的路径和创建实例时的 SubPath 是同一个位置的两种写法。
+    走岔了不报错, 只是那个页面永远列不出东西 —— 而在 ECI 上容器闲置即销毁,
+    那个页面是用户唯一能看见自己文件的地方。"""
+    b, fake = eci
+    monkeypatch.setattr(config, "WORK_NAS_LOCAL_MOUNT", str(tmp_path))
+    monkeypatch.setattr(config, "WORK_NAS_SERVER", "nas.example.com")
+    hexid = cname("u_abc")[len("dshwork-"):]
+    (tmp_path / hexid / "workspace").mkdir(parents=True)
+
+    got = b.offline_workspace_dir("u_abc")
+    assert got == tmp_path / hexid / "workspace"
+
+    # 与 create() 真正下发的 SubPath 对齐
+    import asyncio
+    asyncio.get_event_loop_policy().new_event_loop().run_until_complete(
+        b.create("u_abc", boot="x", env={}, boot_fp="fp"))
+    p = fake.params_of("CreateContainerGroup")[0]
+    sub = p["Container.1.VolumeMount.2.SubPath"]          # /workspace 那条
+    assert p["Container.1.VolumeMount.2.MountPath"] == "/workspace"
+    assert str(got).endswith(sub), f"离线路径 {got} 与挂载 SubPath {sub} 对不上"
+
+
+def test_offline_dir_is_none_without_a_local_mount(eci, monkeypatch):
+    b, _ = eci
+    monkeypatch.setattr(config, "WORK_NAS_LOCAL_MOUNT", "")
+    assert b.offline_workspace_dir("u_abc") is None
+
+
+def test_offline_dir_is_none_when_the_user_has_nothing_yet(eci, monkeypatch, tmp_path):
+    b, _ = eci
+    monkeypatch.setattr(config, "WORK_NAS_LOCAL_MOUNT", str(tmp_path))
+    assert b.offline_workspace_dir("u_neverran") is None

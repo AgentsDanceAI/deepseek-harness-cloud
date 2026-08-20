@@ -19,6 +19,7 @@ import base64
 import hashlib
 import hmac
 import logging
+import pathlib
 import re
 import time
 import uuid
@@ -83,6 +84,15 @@ class Backend(abc.ABC):
 
     def capacity_reason(self) -> str:
         return ""
+
+    def offline_workspace_dir(self, user_id: str) -> pathlib.Path | None:
+        """应用机上能只读看到这个用户 /workspace 的路径, 没有则 None。
+
+        「個人成品」靠它: 用户不在时工作台是停着的 (docker) 或已经被删掉的
+        (ECI), 而那个页面正是他唯一能看见自己文件的地方 —— 尤其在 ECI 上,
+        容器根本不存在, 除了这条路没有别的办法列出他的东西。
+        """
+        return None
 
 
 # --- docker: the original backend, unchanged in behaviour --------------------
@@ -216,6 +226,14 @@ class DockerBackend(Backend):
                         free, need, config.WORK_MEM_LIMIT_MB, config.WORK_MIN_FREE_MB)
             return f"memory:{free}<{need}"
         return ""
+
+    def offline_workspace_dir(self, user_id: str) -> pathlib.Path | None:
+        root = (config.WORK_VOLUME_ROOT or "").strip()
+        if not root:
+            return None
+        hexid = cname(user_id)[len("dshwork-"):]
+        d = pathlib.Path(root) / f"dshwork-ws-{hexid}" / "_data"
+        return d if d.is_dir() else None
 
 
 # --- eci: 阿里云弹性容器实例 -------------------------------------------------
@@ -438,6 +456,19 @@ class EciBackend(Backend):
             return
         await self._call("DeleteContainerGroup",
                          {"ContainerGroupId": g["ContainerGroupId"]})
+
+    def offline_workspace_dir(self, user_id: str) -> pathlib.Path | None:
+        """NAS 上该用户的 workspace 子目录, 前提是应用机把同一个 NAS 挂了起来。
+
+        布局与 _volume_params 的 SubPath 必须一致 —— 两处写的是同一个位置,
+        走岔了不会报错, 只会让「個人成品」永远是空的。
+        """
+        root = (config.WORK_NAS_LOCAL_MOUNT or "").strip()
+        if not root:
+            return None
+        hexid = cname(user_id)[len("dshwork-"):]
+        d = pathlib.Path(root) / hexid / "workspace"
+        return d if d.is_dir() else None
 
     async def running_users(self) -> list[str]:
         """计量与回收都遍历这个列表, 所以**漏掉一条 = 有人白用且永不回收**。

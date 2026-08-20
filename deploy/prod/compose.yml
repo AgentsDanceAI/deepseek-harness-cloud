@@ -70,6 +70,11 @@ services:
       # is /mnt/docker here and /var/lib/docker on a default install. Wrong path
       # = 個人成品 silently empty, so it comes from .env and is checked at boot.
       - ${DOCKER_VOLUME_ROOT:-/var/lib/docker/volumes}:/hostvolumes:ro
+      # ECI 后端下用户的文件在 NAS 上, 不在本机卷里。只读挂进来同样是为了
+      # 「個人成品」—— 那边容器闲置即销毁, 用户不在时这是列出他文件的唯一路径。
+      # 宿主侧的挂载在 /etc/fstab (nofail,_netdev)。docker 后端下这个目录不存在
+      # 也无妨: WORK_NAS_LOCAL_MOUNT 留空即整条路径不启用。
+      - ${WORK_NAS_LOCAL_MOUNT_HOST:-/mnt/dshwork-nas}:/nas:ro
     networks:
       - dhc-net
       - dshwork-net    # reach per-user dsh containers for readiness probes

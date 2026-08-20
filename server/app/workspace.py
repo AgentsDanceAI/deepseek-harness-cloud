@@ -438,19 +438,15 @@ _HIDDEN_NAMES = {"node_modules", "package-lock.json", "__pycache__", ".git"}
 
 
 def _ws_volume_dir(user_id: str):
-    """Read-only host path of this user's /workspace volume, or None.
+    """Read-only path to this user's /workspace as seen from the app machine.
 
-    The container is stopped most of the time — 15 idle minutes and it goes
-    away — but its volume does not. Reading the listing from the volume is what
-    makes 個人成品 a record of what the agent made rather than a live view that
-    is blank whenever nobody is working.
+    Where that is depends on the backend (docker volume vs NAS), so the backend
+    owns it. What does not depend on the backend: the workspace is absent most
+    of the time — stopped after 15 idle minutes, or on ECI deleted outright —
+    and this is what keeps 個人成品 a record of what the agent made instead of a
+    page that is blank whenever nobody is working.
     """
-    root = (config.WORK_VOLUME_ROOT or "").strip()
-    if not root:
-        return None
-    hexid = _cname(user_id)[len("dshwork-"):]
-    d = pathlib.Path(root) / f"dshwork-ws-{hexid}" / "_data"
-    return d if d.is_dir() else None
+    return backend().offline_workspace_dir(user_id)
 
 
 def _workspace_files_offline(user_id: str, limit: int = 60) -> list[str]:

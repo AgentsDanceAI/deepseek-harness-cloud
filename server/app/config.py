@@ -164,6 +164,9 @@ ECI_EIP_BANDWIDTH = _env_int("ECI_EIP_BANDWIDTH", 100)
 # 每个用户在 WORK_NAS_PATH 下有 <hexid>/home 与 <hexid>/workspace 两个子目录。
 WORK_NAS_SERVER = _env("WORK_NAS_SERVER", "")
 WORK_NAS_PATH = _env("WORK_NAS_PATH", "/")
+# 应用机上把同一个 NAS 挂到哪 (只读即可)。ECI 后端下「個人成品」靠它列出用户的
+# 文件 —— 那边容器闲置即销毁, 不挂就意味着用户不在时那个页面永远是空的。
+WORK_NAS_LOCAL_MOUNT = _env("WORK_NAS_LOCAL_MOUNT", "")
 # Billed per ACTIVE minute — a minute in which the agent actually called our
 # gateway. Reading a reply or leaving a tab open is free (an open tab polls
 # /api/work/route forever, so wall-clock billing charged people for nothing).
