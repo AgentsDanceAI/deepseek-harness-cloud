@@ -28,6 +28,8 @@ deepseek-harness-desktop 也会跟着动。本项目的立场：**不 fork 上�
 | `dsh-llm-deepseek` config 字段 `baseURL` / `apiKeyEnv` | 同上 | verify-contract.mjs |
 | base bundle 里的 row id `web-search-deepseek` 及同名字段 | web_search 走网关（Anthropic Messages 面） | verify-contract.mjs |
 | base bundle 里的 row id `session-telemetry-otel` | 钉死遥测关闭 | verify-contract.mjs |
+| base bundle 里的 row id `llm-pi-ai` | 网关整份目录以 hand-declared 路由暴露 | verify-contract.mjs |
+| `dsh-llm-pi-ai` config 字段 `providers` / `apiKeyEnv` / `baseURL` / `models` | 同上（hand-declared 路由要自己给全端点/协议/模型） | verify-contract.mjs |
 | dsh 凭据 seam：env 源最高优先级、只读、按请求解析 | token 注入通道 | 行为契约（升级时人工确认 release note） |
 | `main.ts` 的 `try { loadLayeredEnv` 与 `prepareDesktopProfile(...)` 调用点 | 0003 补丁的两个锚 | git apply --check |
 | `prepareDesktopProfile` 返回的 `patches` 数组语义（后推入者胜） | 我们的 row 覆盖一切层 | 行为契约 |
@@ -66,6 +68,7 @@ cd dsh-plugin-desktop && yarn build && yarn package:dir
 | 风险 | 信号 | 预案 |
 |---|---|---|
 | patch 层是"整 row config 替换"，上游给 `llm-deepseek` row 新增默认 config 字段会被我们盖掉 | verify-contract 不报错但行为变化；升级时 diff base bundle 的该 row | 把上游新增字段并入 `cloudProfilePatches()` |
+| `llm-pi-ai` 注入失效而 `llm-deepseek` 仍被我们禁用 | **一个模型都不剩** —— 上游在无可用模型时禁用输入框, 用户连换模型都打不出来 (2026-08-19 死锁同款) | verify-contract 已断言 pi-ai 契约; 运行时另有兜底: 目录拉不到就不禁 deepseek 行 |
 | 上游把 web_search 换协议/换 row | verify-contract 失败 | 网关加对应面（服务端改动，客户端不动） |
 | 上游给 desktop 加自己的账号体系 | 装配后功能重叠 | 用 0003 同款手法禁掉上游 row，保留我们的 |
 | `main.ts` 重构导致 0003 锚点消失 | git apply 冲突 | 重找 boot 前/prepare 后两个语义锚，重生成补丁（逻辑都在 cloud/ 里，补丁只有 8 行） |
