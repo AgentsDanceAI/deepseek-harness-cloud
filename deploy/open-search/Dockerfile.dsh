@@ -16,6 +16,10 @@ RUN apt-get update -qq \
  && apt-get install -y -qq --no-install-recommends python3 make g++ socat ca-certificates \
  && rm -rf /var/lib/apt/lists/*
 # 版本与 desktop/upstream.json 的 runtimePackageVersion 对齐
-RUN npm install -g @deepseek-ai/dsh@0.1.0-rc.6
+# npm 装完就把缓存删掉: /root/.npm 在运行时没有任何东西读它, 但它会被烤进
+# 镜像层, 于是每次冷启动都要从仓库把这 ~290MB 拉一遍。删掉 1.37GB -> 1.08GB。
+RUN npm install -g @deepseek-ai/dsh@0.1.0-rc.6 \
+ && npm cache clean --force \
+ && rm -rf /root/.npm
 WORKDIR /workspace
 EXPOSE 3081

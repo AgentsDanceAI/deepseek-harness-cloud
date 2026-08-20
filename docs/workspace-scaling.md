@@ -67,6 +67,25 @@ autoscaler 要调参、没有控制面要养**。
 `DOCKER_PROXY_URL` 已经是 env，所以「换一个后端」这件事架构上是留了口子的——
 真正的工作量在卷和网络，不在调用方式。
 
+## 四·五、已确认的阿里云资源（新加坡）
+
+接入过程中逐项确认下来的，散在对话里容易丢，记这儿：
+
+| 资源 | ID / 值 | 备注 |
+|---|---|---|
+| 地域 | `ap-southeast-1`（新加坡） | 与应用机同地域，跨地域内网不通 |
+| VPC | `vpc-t4npjm6foh2kbdg59poy9` | |
+| 交换机 | `vsw-t4naki832gpc5r6fs3sxy` | |
+| 安全组 | `sg-t4ncj2p8oqqwhurroa2q` | **ECI 专用**，只放行 3081 ← `172.29.181.212/32` |
+| 应用机内网 IP | `172.29.181.212` | 反代与 `forward_auth` 所在 |
+
+⛔ **不要复用应用机的安全组**（那个开了 80/443 到 `0.0.0.0/0`，且没有 3081）。
+套上去的后果是：容器状态照样 Running、看不出错，但**应用连不上、公网连得上**——
+工作台跑的是 `danger-full-access` 的智能体沙箱，等于把它挂到公网。
+
+计价（经济型 0.5 vCPU / 1 GiB，2026-08 新加坡）：`¥0.00001963/秒` = **¥0.0707/小时**，
+不含 EIP。
+
 ## 五、动代码之前先做冷启动实测
 
 **这是 go / no-go 的判据**：用户点开工作台要等多久，直接决定这个方案能不能用。
@@ -80,7 +99,7 @@ autoscaler 要调参、没有控制面要养**。
 
 步骤与判据：
 
-1. `docker build -t <acr>/dsh-local:rc6 -f deploy/open-search/Dockerfile.dsh deploy/open-search` 并推送；
+1. `docker build -t <registry>/dsh-local:rc6 -f deploy/open-search/Dockerfile.dsh deploy/open-search` 并推送；
 2. 对该镜像创建 ImageCache，等其 Available；
 3. 用 ECI OpenAPI 创建一个 2 vCPU / 1GB 的实例，挂一个 NAS 子目录到 `/workspace`；
 4. 从「发起创建」到「`dsh web` 可访问」计时，重复 5 次取中位数与最差值。
