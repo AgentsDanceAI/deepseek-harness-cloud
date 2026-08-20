@@ -24,6 +24,15 @@
 # 公证一轮 3-5 分钟且只回一句"拒了"。verify-mac-signature.mjs 直接解析每个 Mach-O
 # 的 CodeDirectory flags, 几秒出结果, 且能指出是哪个文件没开 runtime。
 #
+# ⚠️ 从 macOS 把 .app 传过来时, tar 必须带 COPYFILE_DISABLE=1
+#    (2026-08-20 踩到): macOS 的 bsdtar 默认把扩展属性外化成 ._<同名> 的
+#    AppleDouble 文件, 在 Linux 上解开就会在每个目录里多出一份 —— 那次一个包里
+#    多了 25662 个。危害有两层: 它们会被一起签进封印 (体积/完整性都受影响), 而且
+#    Contents/MacOS/ 里的 ._ 排在真二进制前面, 让 verify-mac-signature 读错文件、
+#    把签好的包误报成 "0/4 缺 allow-jit"。正确姿势:
+#      COPYFILE_DISABLE=1 tar -czf app.tar.gz -C dist/mac-arm64 "DSH Cloud Desktop.app"
+#    传到之后先 `find <app> -name "._*" -delete` 复查一遍再签, 便宜且能兜住。
+#
 # ⚠️ zip 不能承载公证票据 (票据写进 bundle 的 CodeResources), 所以顺序必须是
 #    签名 → 公证 → staple 到 .app 本体 → 最后才打 zip。
 set -euo pipefail
