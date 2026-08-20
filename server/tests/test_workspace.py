@@ -606,3 +606,36 @@ def test_upstream_cannot_override_our_csp_or_set_cookies(fake, monkeypatch):
     assert "default-src *" not in csp
     assert "evil=1" not in "; ".join(r.headers.get_list("set-cookie")), \
         "智能体的服务在我们的域上种了 cookie"
+
+
+def test_both_listings_hide_the_same_noise(fake, monkeypatch, tmp_path):
+    """同一个工作台不该因为容器碰巧在不在跑就列出不同的东西。
+
+    ECI 上容器闲置即销毁, 这个来回比 docker 时代频繁得多 —— 用户会看见自己的
+    成品列表凭空多出 package-lock.json 又消失。
+    """
+    c, uid = _user("noise@test.local")
+    c.get("/api/work/route"); c.get("/api/work/route")
+
+    # 容器的目录索引: 名字按百分号编码给出, 中文名也走这条路
+    index = ('<a href="report.html">report.html</a>'
+             '<a href="package-lock.json">package-lock.json</a>'
+             '<a href="node_modules/">node_modules/</a>'
+             '<a href="AI-%E5%87%BA%E6%B5%B7.pptx">x</a>')
+
+    class Idx:
+        async def __aenter__(self): return self
+        async def __aexit__(self, *e): return False
+        async def get(self, url, **kw):
+            import httpx as _h
+            return _h.Response(200, text=index, request=_h.Request("GET", url))
+    monkeypatch.setattr(workspace.httpx, "AsyncClient", lambda **kw: Idx())
+
+    import asyncio
+    got = asyncio.get_event_loop_policy().new_event_loop().run_until_complete(
+        workspace._workspace_files(uid))
+    assert "package-lock.json" not in got
+    assert not any(n.startswith("node_modules") for n in got)
+    assert "report.html" in got
+    # 编码过的中文名要留下 —— 过滤是为了噪音, 不是为了非 ASCII
+    assert "AI-%E5%87%BA%E6%B5%B7.pptx" in got

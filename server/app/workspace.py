@@ -485,7 +485,14 @@ async def _workspace_files(user_id: str, limit: int = 60) -> list[str]:
     names = []
     for raw in _HREF_RE.findall(r.text):
         name = raw.strip()
-        if not name or name.startswith((".", "node_modules")):
+        # 与离线那条路用同一份过滤: 同一个工作台不该因为容器碰巧在不在跑就列出
+        # 不同的东西。ECI 上容器闲置即销毁, 这个来回比以前频繁得多。
+        # 名字从目录索引来时是百分号编码的, 先解回来再比对, 否则过滤形同虚设。
+        try:
+            plain = unquote(name).rstrip("/")
+        except Exception:  # noqa: BLE001 - 名字畸形不该让整页空掉
+            plain = name.rstrip("/")
+        if not name or plain.startswith(".") or plain in _HIDDEN_NAMES:
             continue
         names.append(name)
         if len(names) >= limit:
