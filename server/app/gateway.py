@@ -78,9 +78,20 @@ def _admit(user: dict) -> JSONResponse | None:
         return _openai_error(429, "rate_limit_exceeded", "Too many requests, slow down.")
     reason = plans.check_run_blocked(uid)
     if reason:
-        return _openai_error(402, "insufficient_quota",
-                             "Credit balance exhausted. Top up or upgrade at "
-                             f"{config.PUBLIC_BASE}/pricing to continue.")
+        # 这段文案会**原样显示在客户端的聊天窗口里** —— 它是用户在付费转化那一刻
+        # 唯一看到的东西, 所以要说人话、要给出下一步。客户端目前无法把它渲染成
+        # 带按钮的卡片 (dsh 的 LLM seam 没有暴露可监听的失败事件), 所以链接必须
+        # 写在正文里让人能复制。
+        #
+        # 两种阻断的处置**完全不同**, 不能压成同一句: 余额耗尽是自己充值就能解,
+        # 而团队成员额度上限要找管理员调 —— 告诉后者"去充值"是误导, 他充了也没用。
+        if reason == "member_cap_reached":
+            message = ("你在团队共享额度中的个人上限已用完。请联系团队管理员调高你的额度上限"
+                       f"（管理员可在 {config.PUBLIC_BASE}/team 调整）。")
+        else:
+            message = (f"账户余额已用完，无法继续。前往 {config.PUBLIC_BASE}/pricing "
+                       "充值或升级套餐后即可恢复。")
+        return _openai_error(402, "insufficient_quota", message)
     return None
 
 
