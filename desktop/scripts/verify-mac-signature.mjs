@@ -86,7 +86,23 @@ const noJit = []
 for (const h of helpers) {
   const exeDir = join(h, 'Contents', 'MacOS')
   let exe
-  try { exe = join(exeDir, readdirSync(exeDir)[0]) } catch { continue }
+  try {
+    // 主二进制按 Info.plist 的 CFBundleExecutable 定位, 不能取目录里的第一个文件。
+    // 2026-08-20 实测: 在 macOS 上用 tar 打包 .app、传到 Linux 上解开, 扩展属性会
+    // 被外化成 ._<同名> 的 AppleDouble 文件 (那次 25662 个) —— `.` 在 ASCII 里排在
+    // 字母前, readdirSync()[0] 于是读到那个空壳, 里面自然没有 entitlements 特征串,
+    // 把**签得好好的**包报成 "0/4 缺 allow-jit"。误报比漏报更贵: 它会让人回头去改
+    // 本来正确的签名参数。
+    const names = readdirSync(exeDir).filter(n => !n.startsWith('._'))
+    let exeName = names[0]
+    try {
+      const plist = readFileSync(join(h, 'Contents', 'Info.plist'), 'utf8')
+      const m = /<key>CFBundleExecutable<\/key>\s*<string>([^<]+)<\/string>/.exec(plist)
+      if (m !== null && names.includes(m[1])) exeName = m[1]
+    } catch { /* 读不到 plist 就用过滤后的第一个 */ }
+    if (exeName === undefined) continue
+    exe = join(exeDir, exeName)
+  } catch { continue }
   // entitlements 以明文 XML 嵌在签名超级块里, 直接找特征串即可
   const blob = readFileSync(exe).toString('latin1')
   if (!blob.includes('com.apple.security.cs.allow-jit')) noJit.push(h.slice(app.length + 1))
