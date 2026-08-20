@@ -178,7 +178,7 @@ vSwitch/安全组里起一个**独立的容器组**来拉镜像，查它 `Intern
 按方案 A 做了一遍：申请一个 EIP → `CreateImageCache --EipInstanceId <eip>` →
 构建容器组这次 `InternetIp` 有值, 事件出现
 `Successfully pulled image ghcr.io/agentsdancepro/dsh-local:rc8` → 缓存 Ready
-（盘用了 3.52GB / 20GB, 所以 `ImageCacheSize` 给 10 就够, 20 是浪费）→ 测完释放 EIP。
+（盘只用了 3.52GB, 但 `ImageCacheSize` 传 10 也会被 ECI 抬回 20 —— 有最小值, 压不下去）→ 测完释放 EIP。
 
 带缓存冷启动（`AutoMatchImageCache true`, 每台自动创建 EIP, 从发起创建到
 状态 Running）：
@@ -200,10 +200,51 @@ vSwitch/安全组里起一个**独立的容器组**来拉镜像，查它 `Intern
 运维含义：**每次 bump 工作台镜像版本, 都要重建镜像缓存**, 否则退回 50s。步骤是
 申请 EIP → CreateImageCache → 等 Ready → 释放 EIP, 应当脚本化并挂进发版流程。
 
-RAM 权限备注（实测）：`AliyunECIFullAccess` + `AliyunVPCReadOnlyAccess` +
-`AliyunEIPFullAccess` 足够跑完全流程。不含 ECS 只读, 所以读不了安全组规则 ——
-无所谓。注意**两个 RAM 用户的权限可能不同**: 曾以为 `AliyunECIFullAccess` 不含
-`eci:DeleteImageCache`, 实为当时用的那把 AK 属于授权更窄的另一个用户。
+### RAM 权限：逐个动作实测过的最小集
+
+单个 RAM 用户 `dshcloud-eci`, 只挂一条自定义策略。**十个动作全部逐个调用验证过**,
+不多不少：
+
+```json
+{
+  "Version": "1",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "eci:CreateContainerGroup",
+        "eci:DeleteContainerGroup",
+        "eci:DescribeContainerGroups",
+        "eci:DescribeContainerLog",
+        "eci:CreateImageCache",
+        "eci:DescribeImageCaches",
+        "eci:DeleteImageCache"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "vpc:AllocateEipAddress",
+        "vpc:ReleaseEipAddress",
+        "vpc:DescribeEipAddresses"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
+```
+
+**刻意不用 `AliyunECIFullAccess`**：那是 `eci:*`, 含 `ExecContainerCommand`
+（控制台「Workbench 远程连接」走的就是它）—— 等于这把钥匙能钻进任意用户的工作台
+执行命令。生产服务器上的凭据不该有这个能力。
+
+两条实测出来的细节：
+
+- `AutoCreateEip=true` 建实例**不需要调用方有 EIP 权限**, ECI 自己分配。证据是在
+  授予 EIP 权限之前, 用 API 带 `--AutoCreateEip true` 建的实例照样拿到公网并拉下了
+  镜像。`vpc:AllocateEipAddress` 只有**给镜像缓存构建任务显式要 EIP** 时才用得上。
+- 不含 ECS 任何权限, 所以读不了安全组规则。不影响运行。
 
 ## 六、什么时候才轮到 k8s
 
