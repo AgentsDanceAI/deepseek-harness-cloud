@@ -36,6 +36,39 @@ def _load_user(user_id: str):
     return db.query_one("SELECT * FROM users WHERE id=?", (user_id,))
 
 
+# 只有**用 cookie 认证的写操作**才有 CSRF 风险: Bearer / x-api-key 是调用方自己
+# 放进去的, 浏览器不会替第三方页面附上。
+_UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+
+
+def _write_origins() -> set[str]:
+    """允许发起 cookie 写操作的页面来源。
+
+    刻意是白名单而不是"同站即可": preview.<domain> 与主站是 same-site, 所以
+    SameSite=Lax **不会**拦住从预览页发出的带凭据 POST, 而 CORS 只挡"读响应",
+    挡不住"请求已经执行" —— 改密码这种操作读不到响应也照样成立。
+    预览页上跑的是智能体生成的内容, 它必须不在这个集合里。
+    """
+    base = config.PUBLIC_BASE.rstrip("/")
+    out = {base}
+    if config.WORK_DOMAIN:
+        # 工作台外壳 (work.<domain>) 上的按钮会调 /api/work/stop 与 /api/auth/logout
+        scheme = "http" if base.startswith("http://") else "https"
+        out.add(f"{scheme}://{config.WORK_DOMAIN}")
+    return out
+
+
+def _cookie_write_allowed(request: Request) -> bool:
+    if request.method.upper() not in _UNSAFE_METHODS:
+        return True
+    origin = request.headers.get("origin", "").rstrip("/")
+    # 没有 Origin 的一律放行: 非浏览器客户端 (桌面端、CLI) 不发这个头, 而浏览器
+    # 在**跨源**写入时一定会发 —— 攻击场景里它必然存在, 所以这里不会漏。
+    if not origin:
+        return True
+    return origin in _write_origins()
+
+
 def resolve_user(request: Request) -> dict:
     user = try_resolve_user(request)
     if user is None:
@@ -50,9 +83,16 @@ def try_resolve_user(request: Request) -> dict | None:
         token = auth[7:].strip()
     if not token:
         token = request.headers.get("x-api-key", "").strip()
+    from_cookie = False
     if not token:
         token = request.cookies.get(config.SESSION_COOKIE, "")
+        from_cookie = bool(token)
     if not token:
+        return None
+    if from_cookie and not _cookie_write_allowed(request):
+        log.warning("[auth] 拒绝跨源 cookie 写入: %s %s origin=%r",
+                    request.method, request.url.path,
+                    request.headers.get("origin", ""))
         return None
     # API key 先判: 它有 ak- 前缀, 与签名令牌的形状不会混淆, 一眼分流不必两边都试。
     # 放在最前是因为 verify_token 会做签名验算, 对一把 API key 是白费的开销。

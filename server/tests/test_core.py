@@ -654,3 +654,83 @@ def test_existing_product_scan_sees_the_whole_store():
     assert "limit:200" in src
     scan = src[src.index("onetimeProducts"):src.index('"/v1/actions/onetime-product/create-product"')]
     assert 'p.get("status") != "active"' in scan
+
+
+# --- CSRF: 只有 cookie 认证的写操作才有风险 ---------------------------------
+
+def test_cookie_write_from_a_foreign_origin_is_refused():
+    """预览页跑的是智能体生成的内容。
+
+    它和主站是 same-site, 所以 SameSite=Lax **不会**拦住它发出的带凭据 POST;
+    CORS 只挡"读响应", 挡不住"请求已经执行" —— 改密码这种操作读不到响应也照样
+    成立。所以只能在服务端按 Origin 白名单拒。
+    """
+    from app import accounts, config
+    from fastapi import Request
+
+    def req(method, origin):
+        scope = {"type": "http", "method": method, "path": "/api/auth/password",
+                 "headers": [(b"origin", origin.encode())] if origin else [],
+                 "query_string": b"", "scheme": "https", "server": ("x", 443)}
+        return Request(scope)
+
+    base = config.PUBLIC_BASE.rstrip("/")
+    assert accounts._cookie_write_allowed(req("POST", base)) is True
+    assert accounts._cookie_write_allowed(req("POST", base + "/")) is True    # 尾斜杠
+    assert accounts._cookie_write_allowed(req("POST", "https://preview.dshcloud.online")) is False
+    assert accounts._cookie_write_allowed(req("POST", "null")) is False       # 沙箱不透明源
+    assert accounts._cookie_write_allowed(req("POST", "https://evil.example")) is False
+
+
+def test_reads_and_headerless_clients_are_untouched():
+    """GET 不改状态; 桌面端/CLI 不发 Origin 且用 Bearer —— 都不该被这道闸拦住。"""
+    from app import accounts, config
+    from fastapi import Request
+
+    def req(method, origin):
+        scope = {"type": "http", "method": method, "path": "/api/x",
+                 "headers": [(b"origin", origin.encode())] if origin else [],
+                 "query_string": b"", "scheme": "https", "server": ("x", 443)}
+        return Request(scope)
+
+    assert accounts._cookie_write_allowed(req("GET", "https://evil.example")) is True
+    assert accounts._cookie_write_allowed(req("POST", "")) is True
+
+
+def test_the_workspace_shell_origin_stays_allowed(monkeypatch):
+    """work.<domain> 上的外壳会调 /api/work/stop 与 /api/auth/logout。
+    白名单漏了它, 用户点"停止"就静默 401。"""
+    from app import accounts, config
+    monkeypatch.setattr(config, "WORK_DOMAIN", "work.dshcloud.online")
+    monkeypatch.setattr(config, "PUBLIC_BASE", "https://dshcloud.online")
+    assert "https://work.dshcloud.online" in accounts._write_origins()
+    assert "https://preview.dshcloud.online" not in accounts._write_origins()
+
+
+def test_the_origin_gate_is_actually_wired_into_auth(monkeypatch):
+    """上面三条只验了判定函数本身 —— 它可以完全正确却从没被调用。
+
+    这条走真实请求: 同一个会话 cookie, 只有 Origin 不同, 结果必须不同。
+    """
+    from fastapi.testclient import TestClient
+    from app import config
+    from app.main import app
+    from ._signup import signup
+
+    # PUBLIC_BASE 必须与浏览器实际的 Origin 一字不差, 否则站点自己的写操作全部
+    # 401。生产上 www 是 308 跳到 apex, 所以只有一个 origin; 测试里 TestClient
+    # 用的是 http://testserver, 对齐它。
+    monkeypatch.setattr(config, "PUBLIC_BASE", "http://testserver")
+    c = TestClient(app)
+    signup(c, "csrf-probe@test.local")
+
+    # 自家页面: 正常受理 (密码太短 -> 400, 说明已经进到业务逻辑里了)
+    ok = c.post("/api/auth/password", json={"old": "", "new": "x"},
+                headers={"origin": "http://testserver"})
+    assert ok.status_code != 401, "自家 Origin 被误伤了"
+
+    # 预览域 / 沙箱不透明源: 必须在认证阶段就被拒
+    for bad in ("https://preview.dshcloud.online", "null", "https://evil.example"):
+        r = c.post("/api/auth/password", json={"old": "", "new": "whatever-long"},
+                   headers={"origin": bad})
+        assert r.status_code == 401, f"来自 {bad} 的带凭据写入没有被拦下"
