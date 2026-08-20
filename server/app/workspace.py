@@ -924,14 +924,25 @@ async def work_entry(request: Request):
 
 
 @router.get("/work/starting")
+def _boot_wait_hint() -> str:
+    """等多久, 按后端说实话。
+
+    docker 是 stop/start, 卷和镜像都在本机, 几秒就回来。ECI 每次都是全新实例:
+    实测约 25 秒 (18s 起实例 + 7s dsh 绑端口), 而镜像缓存没命中时会退回 50 秒。
+    照着 docker 的数字写"5–20 秒", 到了 ECI 上就是每次都超时的承诺。
+    """
+    return "20–40 秒" if not backend().resumable else "5–20 秒"
+
+
 async def work_starting(request: Request, state: str = ""):
-    """Minimal polling page shown while the container boots (~5-20s)."""
+    """Minimal polling page shown while the workspace boots."""
     if state == "busy":
         title, body, poll = "云工作台当前繁忙", "在线名额已满，请稍后再试或使用桌面版。", "false"
     elif state == "error":
         title, body, poll = "启动失败", "云工作台启动失败，请稍后重试；问题持续请联系支持。", "false"
     else:
-        title, body, poll = "云工作台启动中…", "正在为你准备云端工作区，通常需要 5–20 秒。", "true"
+        title, body, poll = ("云工作台启动中…",
+                             f"正在为你准备云端工作区，通常需要 {_boot_wait_hint()}。", "true")
     html = f"""<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{title}</title><link rel="stylesheet" href="/static/app.css">

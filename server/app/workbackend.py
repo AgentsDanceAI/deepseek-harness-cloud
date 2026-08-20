@@ -262,6 +262,7 @@ class EciBackend(Backend):
         self._sk = config.ECI_ACCESS_KEY_SECRET
         self._region = config.ECI_REGION_ID
         self._warned_no_nas = False
+        self._mount_reported: set[str] = set()
 
     # -- transport ----------------------------------------------------------
     async def _call(self, action: str, params: dict | None = None) -> dict:
@@ -302,6 +303,9 @@ class EciBackend(Backend):
                 self._warned_no_nas = True
             return {}
         hexid = cname(user_id)[len("dshwork-"):]
+        # 这个目录**必须已经存在于 NAS 上** —— ECI 不会替你建, 挂载会以
+        # "file does not exist" 失败, 而实例只是一直 Pending, 不报错。
+        # (SubPath 的嵌套目录倒是会自动创建, 实测过。)
         root = (config.WORK_NAS_PATH or "/").rstrip("/") or "/"
         p = {
             "Volume.1.Name": "dshwork-nas",
@@ -346,6 +350,10 @@ class EciBackend(Backend):
             log.info("[work] %s 处于终态 %s, 清掉以便重建", user_id, status)
             await self.destroy(user_id)
             return None
+        if status in _ECI_COMING_UP:
+            self._report_stuck_mount(user_id, g)
+        else:
+            self._mount_reported.discard(user_id)
         containers = g.get("Containers") or [{}]
         return WorkInfo(
             running=status in _ECI_RUNNING,
@@ -354,6 +362,26 @@ class EciBackend(Backend):
             host=g.get("IntranetIp", ""),
             state=status,
         )
+
+    def _report_stuck_mount(self, user_id: str, group: dict) -> None:
+        """挂载失败不会让实例退出, 它会一直 Pending。
+
+        对上层来说这和"正在启动"长得一模一样, 于是 ensure_workspace 永远返回
+        starting, 用户永远看着转圈, 日志里一个字都没有。实测踩过一次:
+        WORK_NAS_PATH 指了个 NAS 上不存在的目录 ("file does not exist") ——
+        注意 SubPath 的嵌套目录 ECI 会自动建, 但基础 Path 必须先存在。
+        """
+        if user_id in self._mount_reported:
+            return
+        for e in group.get("Events") or []:
+            msg = e.get("Message", "")
+            if e.get("Type") == "Warning" and "MountVolume" in msg:
+                self._mount_reported.add(user_id)
+                log.error("[work] %s 卡在 %s: 挂载失败 —— %s。"
+                          "检查 WORK_NAS_PATH=%r 在 NAS 上是否存在, "
+                          "以及挂载点权限组是否放行本交换机网段",
+                          user_id, group.get("Status"), msg[:200], config.WORK_NAS_PATH)
+                return
 
     async def current_image_id(self) -> str:
         """ECI 上镜像身份就是仓库引用本身。

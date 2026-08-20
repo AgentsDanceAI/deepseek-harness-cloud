@@ -262,3 +262,47 @@ async def test_eci_is_not_resumable():
     """workspace.py 靠这个区分"能 start"和"只能重建"。"""
     assert EciBackend.resumable is False
     assert workbackend.DockerBackend.resumable is True
+
+
+# --- 用户看到的等待时间, 必须跟后端一致 --------------------------------------
+
+def test_boot_wait_hint_follows_the_backend(monkeypatch):
+    """docker 是 stop/start, 几秒回来; ECI 每次都是全新实例, 实测约 25s。
+    照着 docker 的数字承诺"5–20 秒", 到了 ECI 上就是每次都食言。"""
+    from app import workspace
+    monkeypatch.setattr(workspace, "_backend", workbackend.DockerBackend())
+    assert workspace._boot_wait_hint() == "5–20 秒"
+    monkeypatch.setattr(workspace, "_backend", EciBackend())
+    assert workspace._boot_wait_hint() == "20–40 秒"
+
+
+# --- 挂载失败: 唯一的症状是"一直在启动" --------------------------------------
+
+@pytest.mark.asyncio
+async def test_a_stuck_mount_is_reported_once(eci, caplog):
+    """挂载失败不会让实例退出 —— 它一直 Pending, 而 Pending 和"正在启动"
+    在上层看来一模一样: 用户永远看着转圈, 日志里一个字都没有。实测踩过
+    (WORK_NAS_PATH 指了 NAS 上不存在的目录)。"""
+    b, fake = eci
+    g = _group(status="Pending", ip="")
+    g["Events"] = [{"Type": "Warning",
+                    "Message": 'MountVolume.SetUp failed for volume "dshwork-nas" : file does not exist'}]
+    fake.groups = [g]
+    with caplog.at_level("ERROR"):
+        info = await b.inspect("u_abc")
+    assert info is not None and info.running is False   # 仍然报"在起", 别把它当不存在
+    assert "WORK_NAS_PATH" in caplog.text
+
+    caplog.clear()
+    with caplog.at_level("ERROR"):
+        await b.inspect("u_abc")
+    assert caplog.text == ""            # 冷路径每 30 秒来一次, 不能每次都刷
+
+
+@pytest.mark.asyncio
+async def test_a_healthy_pending_says_nothing(eci, caplog):
+    b, fake = eci
+    fake.groups = [_group(status="Pending", ip="")]
+    with caplog.at_level("ERROR"):
+        await b.inspect("u_abc")
+    assert caplog.text == ""

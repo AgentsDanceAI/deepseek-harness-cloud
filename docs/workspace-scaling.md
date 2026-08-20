@@ -213,6 +213,44 @@ dsh 应答 @ 25s  HTTP 200 / 14549 字节               <- 用户真正能用
 运维含义：**每次 bump 工作台镜像版本, 都要重建镜像缓存**, 否则退回 50s。步骤是
 申请 EIP → CreateImageCache → 等 Ready → 释放 EIP, 应当脚本化并挂进发版流程。
 
+### 实测：NAS 持久化、隔离与小文件性能
+
+文件系统 `07117n2vfal0nenu65c`（通用型 NAS / 容量型 / 新加坡可用区A / NFS /
+NAS 托管密钥 / 按量付费），挂载点在 `vsw-t4naki832gpc5r6fs3sxy`、权限组"全部允许"。
+
+**持久化成立** —— 这是 ECI 方案能不能用的前提：
+
+```
+run 1: 写 /workspace/proof.txt 与 /root/.dsh/marker, 然后 release() 销毁实例
+run 2: 重建同一用户 -> proof.txt = hello-from-run-1, marker = session-1
+```
+
+`release()` 用的就是生产里闲置回收那个动作, 所以这条验的是真实路径, 不是模拟。
+
+**隔离成立**: 另一个用户的容器读 `/workspace/proof.txt` 得到
+`No such file or directory`, 其 `/workspace` 是空的。挂载点显示为
+`...nas.aliyuncs.com:/<hexid>/workspace` —— **SubPath 的嵌套目录 ECI 会自动创建**。
+
+**但基础 `Path` 不会自动创建。** `WORK_NAS_PATH=/dshwork` 时挂载失败:
+
+```
+MountVolume.SetUp failed for volume "dshwork-nas" : file does not exist
+```
+
+而失败的形态很难查: 实例**不会退出, 只是一直 Pending**, 对上层跟"正在启动"
+一模一样, 用户永远看着转圈。已在 `EciBackend._report_stuck_mount` 里加了面包屑,
+默认也改成 `/`。
+
+**小文件性能**: 同一个容器里各跑一次 `npm install express`（595 个文件）:
+
+| 位置 | 耗时 |
+|---|---|
+| NFS (`/workspace`) | **10s** |
+| 容器本地盘 (`/tmp`) | **3s** |
+
+约 **3.3 倍**。对智能体偶尔装个包来说可以接受; 大仓库 (上万文件) 会明显难受,
+到那时的手段是把 npm 缓存挪到本地盘 —— 但那会牺牲跨实例复用, 届时再按数据定。
+
 ### RAM 权限：逐个动作实测过的最小集
 
 单个 RAM 用户 `dshcloud-eci`, 只挂一条自定义策略。**十个动作全部逐个调用验证过**,
