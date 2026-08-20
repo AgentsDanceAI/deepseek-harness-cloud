@@ -167,6 +167,12 @@ WORK_NAS_PATH = _env("WORK_NAS_PATH", "/")
 # 应用机上把同一个 NAS 挂到哪 (只读即可)。ECI 后端下「個人成品」靠它列出用户的
 # 文件 —— 那边容器闲置即销毁, 不挂就意味着用户不在时那个页面永远是空的。
 WORK_NAS_LOCAL_MOUNT = _env("WORK_NAS_LOCAL_MOUNT", "")
+# 智能体生成的内容单独放一个域, 与会话源隔开。留空 = 仍在主站上提供 (靠
+# Content-Security-Policy: sandbox 兜底)。
+# ⚠️ 它与主站是 same-site, 所以**只有子域是不够的**: SameSite=Lax 拦不住从这里
+# 发出的带凭据 POST。真正吃重的是 accounts._cookie_write_allowed 那道 Origin
+# 白名单 —— 这个域绝不能出现在白名单里。
+PREVIEW_DOMAIN = _env("PREVIEW_DOMAIN", "")
 # Billed per ACTIVE minute — a minute in which the agent actually called our
 # gateway. Reading a reply or leaving a tab open is free (an open tab polls
 # /api/work/route forever, so wall-clock billing charged people for nothing).

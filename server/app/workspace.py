@@ -411,6 +411,27 @@ _PREVIEW_PORT_COOKIE = "dhc_preview_port"
 # Ports we will never expose: dsh's own UI (its API drives the agent with the
 # session's authority) and the socat bridge in front of it.
 _PREVIEW_BLOCKED_PORTS = {3080, 3081}
+# /preview/file/... 与 /preview/<port>/... 吐的是**智能体生成的字节**;
+# /preview 本身是我们自己的界面, 不在此列。
+_AGENT_CONTENT_RE = re.compile(r"^/preview/(file/|\d+(/|$))")
+
+
+def preview_origin(path: str = "/") -> str:
+    """智能体内容该从哪个源提供。未配置隔离域时就是本站。"""
+    dom = (config.PREVIEW_DOMAIN or "").strip()
+    if not dom:
+        return path
+    scheme = "http" if config.PUBLIC_BASE.startswith("http://") else "https"
+    return f"{scheme}://{dom}{path}"
+
+
+def is_agent_content(path: str) -> bool:
+    return bool(_AGENT_CONTENT_RE.match(path))
+
+
+def on_preview_host(request: Request) -> bool:
+    dom = (config.PREVIEW_DOMAIN or "").strip()
+    return bool(dom) and request.headers.get("host", "").split(":")[0] == dom
 _HOP_HEADERS = {"connection", "keep-alive", "transfer-encoding", "upgrade",
                 "proxy-authenticate", "proxy-authorization", "te", "trailer",
                 "content-encoding", "content-length"}
@@ -606,8 +627,10 @@ async def preview_offline_file(request: Request, name: str):
         target.relative_to(root.resolve())
     except (ValueError, OSError):
         return JSONResponse(status_code=400, content={"detail": "bad_path"})
-    sandbox = {"Content-Security-Policy": "sandbox allow-scripts allow-popups allow-forms",
-               "X-Content-Type-Options": "nosniff"}
+    sandbox = {"X-Content-Type-Options": "nosniff"}
+    if not config.PREVIEW_DOMAIN:
+        # 与代理那条路同一个口径: 没有独立预览域时, 靠沙箱把文档打进不透明源。
+        sandbox["Content-Security-Policy"] = "sandbox allow-scripts allow-popups allow-forms"
     if target.is_dir():
         # A trailing slash is load-bearing: without it the page's relative links
         # resolve one level too high and every asset 404s.
@@ -646,7 +669,7 @@ async def preview_index(request: Request):
 
     files, ports = [], []
     if running:
-        files = [_describe(f, f"/preview/{PREVIEW_STATIC_PORT}/{f}")
+        files = [_describe(f, preview_origin(f"/preview/{PREVIEW_STATIC_PORT}/{f}"))
                  for f in await _workspace_files(user["id"])]
         ports = [p for p in await _open_ports(user["id"]) if p != PREVIEW_STATIC_PORT]
         if not files:
@@ -660,12 +683,12 @@ async def preview_index(request: Request):
                 log.warning("[work] %s 工作台在跑, 但 :%d 读不到文件而存储里有 %d 个 —— "
                             "检查安全组是否只放行了 3081", user["id"],
                             PREVIEW_STATIC_PORT, len(offline))
-                files = [_describe(f, "/preview/file/" + quote(f, safe="/"))
+                files = [_describe(f, preview_origin("/preview/file/" + quote(f, safe="/")))
                          for f in offline]
     else:
         # Asleep is the normal state, not an error state: the files are still
         # on the volume, so list them from there and open them from there too.
-        files = [_describe(f, "/preview/file/" + quote(f, safe="/"))
+        files = [_describe(f, preview_origin("/preview/file/" + quote(f, safe="/")))
                  for f in _workspace_files_offline(user["id"])]
 
     from .webpages import _render
@@ -727,7 +750,11 @@ async def preview_proxy(request: Request, port: int, path: str):
     _agent_controlled = {"content-security-policy", "content-security-policy-report-only",
                          "set-cookie"}
     headers = {k: v for k, v in headers.items() if k.lower() not in _agent_controlled}
-    headers["content-security-policy"] = "sandbox allow-scripts allow-popups allow-forms"
+    # 沙箱只在**没有**独立预览域时才用: 它把文档打进不透明源, 代价是 dev server
+    # 的 localStorage 与 HMR 都废掉。有了独立域 + Origin 白名单, 跨源写入这条路
+    # 已经断了, 就不必再付这个代价。
+    if not config.PREVIEW_DOMAIN:
+        headers["content-security-policy"] = "sandbox allow-scripts allow-popups allow-forms"
     resp = Response(content=body, status_code=upstream.status_code, headers=headers)
     # Assets requested with an absolute path ("/style.css") land outside this
     # prefix; the cookie lets the fallback handler route them back here.
@@ -749,6 +776,11 @@ async def preview_fallback(request: Request):
     port_raw = request.cookies.get(_PREVIEW_PORT_COOKIE, "")
     path = request.path_params.get("path", "")
     if not port_raw.isdigit() or path.startswith("preview"):
+        return JSONResponse(status_code=404, content={"detail": "not_found"})
+    # 预览 cookie 的域是整个站点 (COOKIE_DOMAIN=.<domain>), 所以主站也收得到它。
+    # 隔离开启后必须在这里拦一道, 否则绝对路径的资源照样从**会话源**吐出来,
+    # 隔离就只挡住了带 /preview/ 前缀的那一半。
+    if config.PREVIEW_DOMAIN and not on_preview_host(request):
         return JSONResponse(status_code=404, content={"detail": "not_found"})
     return await preview_proxy(request, int(port_raw), path)
 

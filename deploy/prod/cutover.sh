@@ -54,10 +54,13 @@ echo "==> 5/6 ensure DHC site blocks in the shared Caddyfile (dshcloud-v3, backu
 #  对应的清理分支也随之删掉: 实测本机 Caddyfile 里已无该域的活站点块。)
 PRIMARY_HOST="${PRIMARY_DOMAIN:-dshcloud.online}"
 WORK_HOST="${WORK_DOMAIN:-work.dshcloud.online}"
+# 智能体生成内容的隔离域。留空则不生成对应站点块 (内容仍从主站提供, 靠沙箱兜底)。
+# 开启前 DNS 要先有这条记录, 否则 Caddy 申请证书会一直失败。
+PREVIEW_HOST="${PREVIEW_DOMAIN:-}"
 cp "$CADDYFILE" "$CADDYFILE.bak.$(date +%s 2>/dev/null || echo bak)"
-python3 - "$CADDYFILE" "$PRIMARY_HOST" "$WORK_HOST" <<'PY'
+python3 - "$CADDYFILE" "$PRIMARY_HOST" "$WORK_HOST" "$PREVIEW_HOST" <<'PY'
 import re, sys
-p, primary, work = sys.argv[1:4]
+p, primary, work, preview = sys.argv[1:5]
 s = open(p, encoding="utf-8").read()
 # 1) strip the marker-wrapped v3 section from previous runs (must run first so
 #    the host-pattern strips below never touch v3-managed content)
@@ -107,6 +110,19 @@ www.{primary} {{
 \t\t}}
 \t}}
 }}
+"""
+if preview:
+    block += f"""
+# 智能体生成内容的隔离域。这里**只负责把流量送到应用**, 路径限制 (预览域上不
+# 提供 /api/) 由应用的中间件做 —— 安全属性放在有测试覆盖的地方, 而不是一段
+# 谁都能手改的反代配置里。
+{preview} {{
+\treverse_proxy dhc-server:8100 {{
+\t\tflush_interval -1
+\t}}
+}}
+"""
+block += f"""
 # 上一代品牌的旧域名, 其兼容层已于 2026-08-17 按站主决定撤除 (前期无用户,
 # 无已分发的、指向旧域的客户端需要照顾)。撤除后该域不再由本机提供任何服务
 # —— Caddy 没有它的站点块, CF 回源会拿到 SNI 不匹配而握手失败。

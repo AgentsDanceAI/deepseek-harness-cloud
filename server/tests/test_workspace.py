@@ -639,3 +639,66 @@ def test_both_listings_hide_the_same_noise(fake, monkeypatch, tmp_path):
     assert "report.html" in got
     # 编码过的中文名要留下 —— 过滤是为了噪音, 不是为了非 ASCII
     assert "AI-%E5%87%BA%E6%B5%B7.pptx" in got
+
+
+# --- 预览源隔离 --------------------------------------------------------------
+
+@pytest.fixture()
+def isolated(monkeypatch):
+    monkeypatch.setattr(config, "PREVIEW_DOMAIN", "preview.dshcloud.online")
+    monkeypatch.setattr(config, "PUBLIC_BASE", "https://dshcloud.online")
+    return "preview.dshcloud.online"
+
+
+def test_agent_content_on_the_main_host_is_sent_to_the_preview_host(fake, isolated):
+    """智能体生成的字节不能从会话源吐出来 —— 那正是要隔离掉的东西。"""
+    c, uid = _user("iso1@test.local")
+    for p in ("/preview/file/report.html", "/preview/8088/index.html"):
+        r = c.get(p, follow_redirects=False)
+        assert r.status_code == 307, f"{p} 没有被送去预览域"
+        assert r.headers["location"].startswith(f"https://{isolated}{p}")
+
+
+def test_our_own_ui_page_stays_on_the_main_host(fake, isolated):
+    """/preview 是我们自己的界面, 不是智能体的内容 —— 不该被赶走。"""
+    c, uid = _user("iso2@test.local")
+    r = c.get("/preview", follow_redirects=False)
+    assert r.status_code != 307
+
+
+def test_the_preview_host_serves_no_api(fake, isolated):
+    """否则智能体页面对着自己的源就能带凭据调接口, 而**同源请求连 Origin
+    白名单那道闸都不会触发**。"""
+    c, uid = _user("iso3@test.local")
+    r = c.get("/api/work/status", headers={"host": "preview.dshcloud.online"})
+    assert r.status_code == 404
+
+
+def test_the_absolute_asset_fallback_refuses_on_the_main_host(fake, isolated):
+    """预览 cookie 的域是整个站点, 主站也收得到。
+
+    不在兜底处理器里拦一道, 绝对路径的资源照样从会话源吐出来 —— 隔离就只挡住了
+    带 /preview/ 前缀的那一半。
+    """
+    c, uid = _user("iso4@test.local")
+    c.cookies.set(workspace._PREVIEW_PORT_COOKIE, "8088")
+    r = c.get("/style.css", follow_redirects=False)
+    assert r.status_code == 404, "智能体的资源从主站源吐出来了"
+
+
+def test_isolation_off_keeps_the_sandbox(fake, container_http, monkeypatch):
+    """没有独立预览域时, 沙箱是唯一的防线, 不能跟着一起去掉。"""
+    monkeypatch.setattr(config, "PREVIEW_DOMAIN", "")
+    c, uid = _user("iso5@test.local")
+    c.get("/api/work/route"); c.get("/api/work/route")
+    r = c.get("/preview/8080/")
+    assert "sandbox" in r.headers.get("content-security-policy", "")
+
+
+def test_isolation_on_drops_the_sandbox(fake, container_http, isolated):
+    """有了独立域 + Origin 白名单, 跨源写入那条路已经断了, 就不必再为沙箱付
+    掉 dev server 的 localStorage 与 HMR。"""
+    c, uid = _user("iso6@test.local")
+    c.get("/api/work/route"); c.get("/api/work/route")
+    r = c.get("/preview/8080/", headers={"host": "preview.dshcloud.online"})
+    assert "sandbox" not in r.headers.get("content-security-policy", "")

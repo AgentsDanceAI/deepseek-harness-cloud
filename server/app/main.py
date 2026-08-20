@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 
 from fastapi import FastAPI
+from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 
@@ -98,6 +99,28 @@ def create_app() -> FastAPI:
     except OSError:
         log.warning("releases dir unavailable at %s", releases_dir)
     app.include_router(pages_router)  # last: contains catch-all-ish page routes
+
+    @app.middleware("http")
+    async def preview_origin_isolation(request, call_next):
+        """智能体生成的内容与会话源分开, 两个方向都要管。
+
+        向内: 预览域上不提供 API。否则智能体写的页面对着自己的源就能带凭据调
+              我们的接口 —— 而同源请求连 Origin 白名单那道闸都不会触发。
+        向外: 主站上不提供智能体内容, 改为 307 到预览域。旧链接、书签、以及
+              页面里残留的相对路径都会被顺过去。
+
+        PREVIEW_DOMAIN 留空时整段是空操作, 行为与配置前完全一致。
+        """
+        from . import workspace as _ws
+        if config.PREVIEW_DOMAIN:
+            path = request.url.path
+            if _ws.on_preview_host(request):
+                if path.startswith("/api/"):
+                    return JSONResponse(status_code=404, content={"detail": "not_found"})
+            elif _ws.is_agent_content(path):
+                q = ("?" + request.url.query) if request.url.query else ""
+                return RedirectResponse(_ws.preview_origin(path) + q, status_code=307)
+        return await call_next(request)
 
     @app.get("/api/health")
     def health():
