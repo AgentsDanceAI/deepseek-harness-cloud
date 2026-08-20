@@ -97,16 +97,38 @@ cat <<'MSG'
 
 Restored. What is left is off this machine:
 
-  1. DNS — point dshcloud.online and work.dshcloud.online at this host's IP
-     (Cloudflare, proxied/orange). Everything else keyed to the domain — the
-     Waffo webhook, the Google and GitHub redirect URIs, dl.dshcloud.online —
-     needs no change precisely because the domain did not.
-  2. Caddy — 80/443 here must terminate TLS and route the two hostnames to
+  1. DNS — point dshcloud.online, work.dshcloud.online and (if PREVIEW_DOMAIN
+     is set) preview.dshcloud.online at this host's IP (Cloudflare,
+     proxied/orange). Everything else keyed to the domain — the Waffo webhook,
+     the Google and GitHub redirect URIs, dl.dshcloud.online — needs no change
+     precisely because the domain did not.
+  2. Caddy — 80/443 here must terminate TLS and route those hostnames to
      dhc-server:8100. On the old host that was a shared caddy container; see
-     cutover.sh, which injects the site blocks idempotently.
-  3. Backup cron —  15 4 * * *  cd <repo>/deploy/prod && ./backup-db.sh
-  4. Workspace image — docker build the dsh image tagged as WORK_IMAGE in .env
-     (dsh-local:rc8), or the cloud workspace cannot start.
+     cutover.sh, which injects the site blocks idempotently (pass
+     PREVIEW_DOMAIN= to get the preview block too).
+  3. Backup cron — BOTH, and both need the `cd`: a relative path runs from
+     $HOME under cron and silently never fires.
+       15 4 * * *  cd <repo>/deploy/prod && ./backup-db.sh
+       45 4 * * *  cd <repo>/deploy/prod && ./backup-workspaces.sh
+     The second one is the only offsite copy of what users actually made; the
+     database backup does not cover it.
+  4. Workspace runtime — depends on WORK_BACKEND in .env:
+       docker — docker build the dsh image tagged as WORK_IMAGE
+                (deploy/prod/Dockerfile.dsh), or the workspace cannot start.
+       eci    — nothing to build here (the image is pulled from WORK_IMAGE_REF),
+                but two things ARE machine-local:
+                  a) NAS mount. Add to /etc/fstab with nofail,_netdev — this
+                     host runs other production services and must not hang at
+                     boot when the NAS is unreachable:
+                       <nas>:/ /mnt/dshwork-nas nfs vers=3,nolock,proto=tcp,\
+                         hard,timeo=600,retrans=2,noresvport,nofail,_netdev 0 0
+                     Needs nfs-common. Without it 個人成品 is empty for every
+                     user whose workspace is asleep — and nothing errors.
+                  b) Check the region's image cache still matches WORK_IMAGE_REF:
+                       docker exec -w /srv/dhc dhc-server \
+                         python3 -m scripts.eci_image_cache check
+                     A miss is not an error, just ~25s -> ~50s on every cold
+                     start, for everyone, silently.
   5. Old host — leave it stopped, not deleted, until a real user has signed in
      and paid something here.
 

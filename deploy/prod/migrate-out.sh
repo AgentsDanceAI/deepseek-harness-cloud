@@ -9,6 +9,7 @@
 #   .env          secrets, and the only copy — it is gitignored on purpose
 #   db.sql.gz     accounts, orders, credits. The money. 18KB compressed.
 #   volumes/      per-user workspaces: /workspace files and ~/.dsh history
+#                 (仅 WORK_BACKEND=docker; ECI 后端下这些在 NAS 上, 不随包走)
 #
 # What is deliberately NOT in it:
 #
@@ -84,8 +85,23 @@ done
 rm -f "$tmp/plain.sql"
 echo "    $(stat -c%s "$stage/db.sql.gz") bytes, tables present"
 
+# 工作台文件在哪, 取决于后端 —— 而两种情况下这个循环都"成功"地跑完:
+# ECI 后端下本机根本没有 dshwork-* 卷, 循环转一圈什么都不打包, 包里安安静静地
+# 少了用户的全部产出, 而头注释还写着 volumes/ 里有它们。所以这里必须出声。
+work_backend="$(grep -E '^WORK_BACKEND=' "$ENVFILE" 2>/dev/null | cut -d= -f2- | tr -d ' \r')"
+if [ "${work_backend:-docker}" = "eci" ]; then
+  cat <<'EOWS'
+==> workspace volumes: 跳过 (WORK_BACKEND=eci)
+    用户的 /workspace 与 ~/.dsh 在 **NAS** 上, 不在本机, 因此不随这个包走。
+    换机只要新机能挂上同一个 NAS 就什么都不用做; 但**换地域**要先把 NAS 数据
+    复制过去 (NAS 是地域内资源), 否则新机起来是空的。
+    另有一份加密副本在 R2: backups/workspaces (见 backup-workspaces.sh)。
+EOWS
+else
 echo "==> workspace volumes"
+found=0
 for vol in $(docker volume ls --format '{{.Name}}' | grep -E '^dshwork-(ws|home)-'); do
+  found=1
   src="$(docker volume inspect "$vol" --format '{{.Mountpoint}}')"
   [ -d "$src" ] || { echo "    skip $vol (no mountpoint)"; continue; }
   # ~/.npm and ~/.cache are package caches that rebuild on first use; ~/.dsh is
@@ -94,6 +110,9 @@ for vol in $(docker volume ls --format '{{.Name}}' | grep -E '^dshwork-(ws|home)
       --exclude='./.npm' --exclude='./.cache' --exclude='./node_modules' . 2>/dev/null
   echo "    $vol  $(du -h "$stage/volumes/${vol}.tar.gz" | cut -f1)"
 done
+# docker 后端却一个卷都没有, 多半是名字变了或引擎不对 —— 安静地打个空包比报错糟。
+[ "$found" = 1 ] || echo "    !! 一个 dshwork-* 卷都没找到 —— 包里不会有任何用户文件, 先查清楚再迁"
+fi
 
 cp "$ENVFILE" "$stage/env"
 {
