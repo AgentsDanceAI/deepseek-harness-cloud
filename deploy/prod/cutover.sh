@@ -50,15 +50,14 @@ echo "==> 5/6 ensure DHC site blocks in the shared Caddyfile (dshcloud-v3, backu
 #   dshcloud.online        -> dhc-server (primary console/site)
 #   www.dshcloud.online    -> 308 to apex
 #   work.dshcloud.online   -> dshwork-v2 routing (PWA shell + forward_auth)
-# (旧域 open-search.ai 的兼容层已于 2026-08-17 撤除 —— 站主确认前期无用户。
-#  LEGACY_HOST 仍保留, 因为下面第 2/3 步要用它把历史遗留的块清理干净。)
+# (上一代品牌的旧域名及其兼容层已于 2026-08-17 撤除 —— 站主确认前期无用户。
+#  对应的清理分支也随之删掉: 实测本机 Caddyfile 里已无该域的活站点块。)
 PRIMARY_HOST="${PRIMARY_DOMAIN:-dshcloud.online}"
-LEGACY_HOST="${LEGACY_DOMAIN:-open-search.ai}"
 WORK_HOST="${WORK_DOMAIN:-work.dshcloud.online}"
 cp "$CADDYFILE" "$CADDYFILE.bak.$(date +%s 2>/dev/null || echo bak)"
-python3 - "$CADDYFILE" "$PRIMARY_HOST" "$LEGACY_HOST" "$WORK_HOST" <<'PY'
+python3 - "$CADDYFILE" "$PRIMARY_HOST" "$WORK_HOST" <<'PY'
 import re, sys
-p, primary, legacy, work = sys.argv[1:5]
+p, primary, work = sys.argv[1:4]
 s = open(p, encoding="utf-8").read()
 # 1) strip the marker-wrapped v3 section from previous runs (must run first so
 #    the host-pattern strips below never touch v3-managed content)
@@ -67,8 +66,6 @@ s = re.sub(r"\n?# ── DHC sites v3 BEGIN ──.*?# ── DHC sites v3 END �
 # 2) strip the pre-v3 work block (comment + block)
 s = re.sub(r"\n?# ── DSH Cloud workspaces[^\n]*\nwork\.[^\s{]+\s*\{.*?\n\}\n?",
            "\n", s, flags=re.DOTALL)
-# 3) strip the pre-v3 legacy-domain proxy block
-s = re.sub(r"(?ms)^" + re.escape(legacy) + r"\s*\{.*?\n\}\n?", "", s)
 s = s.rstrip("\n") + "\n"
 block = f"""
 # ── DHC sites v3 BEGIN ── (managed by deepseek-harness-cloud cutover.sh; do not hand-edit)
@@ -110,16 +107,17 @@ www.{primary} {{
 \t\t}}
 \t}}
 }}
-# 旧域 open-search.ai 兼容层已于 2026-08-17 按站主决定撤除 (前期无用户,
-# 无已分发的、指向旧域的客户端需要照顾)。撤除后 open-search.ai 不再由本机
-# 提供任何服务 —— Caddy 没有它的站点块, CF 回源会拿到 SNI 不匹配而握手失败。
-# ⚠️ 若将来发现仍有旧客户端在打旧域, 恢复方式是把下面这段取消注释后重跑本脚本:
-#   {legacy} {{
+# 上一代品牌的旧域名, 其兼容层已于 2026-08-17 按站主决定撤除 (前期无用户,
+# 无已分发的、指向旧域的客户端需要照顾)。撤除后该域不再由本机提供任何服务
+# —— Caddy 没有它的站点块, CF 回源会拿到 SNI 不匹配而握手失败。
+# ⚠️ 若将来发现仍有旧客户端在打它, 恢复方式是把下面这段取消注释、把 {{OLD_DOMAIN}}
+# 换成那个域名后重跑本脚本:
+#   {{OLD_DOMAIN}} {{
 #     @passthrough path /api/* /llm/* /releases/*
 #     handle @passthrough {{ reverse_proxy dhc-server:8100 {{ flush_interval -1 }} }}
 #     handle {{ redir https://{primary}{{uri}} 308 }}
 #   }}
-#   work.{legacy} {{ redir https://{work}{{uri}} 308 }}
+#   work.{{OLD_DOMAIN}} {{ redir https://{work}{{uri}} 308 }}
 # ── DHC sites v3 END ──
 """
 open(p, "w", encoding="utf-8").write(s + block)

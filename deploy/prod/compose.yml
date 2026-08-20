@@ -9,7 +9,7 @@
 # by the existing the shared Caddy. So we do NOT run our own Caddy here:
 # we run the app on shared docker networks, connect that Caddy to them, and
 # point the dshcloud.online / work.dshcloud.online site blocks at us
-# (旧域 open-search.ai 的兼容层已于 2026-08-17 撤除。)
+# (上一代品牌旧域名的兼容层已于 2026-08-17 撤除。)
 #
 #   docker network create dhc-net 2>/dev/null || true
 #   docker network create dshwork-net 2>/dev/null || true
@@ -114,8 +114,11 @@ networks:
     name: dshwork-net
 
 volumes:
-  # 显式 name = 不带项目前缀, 因而与目录名、项目名都无关。
+  # 与上面的网络同款: external + 显式 name, 因而与目录名、项目名都无关。
+  # 新机由 migrate-in.sh 的 "data volumes" 一步先建出来。
   dhc-data:
+    external: true
     name: dhc-data
   dhc-pgdata:
+    external: true
     name: dhc-pgdata

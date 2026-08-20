@@ -8,7 +8,7 @@
 #   docker build -t dsh-local:rc8 -f deploy/prod/Dockerfile.dsh deploy/prod
 #
 # 不写 CMD: 应用创建容器时自己下发启动命令 (workspace.py 的 "Cmd")。158 上那个
-# 镜像烤进了一条带 --trusted-host open-search.ai 的 CMD, 而旧域已于 2026-08-17
+# 镜像烤进了一条带 --trusted-host <上一代品牌旧域名> 的 CMD, 而该域已于 2026-08-17
 # 撤除 —— 烤死的域名迟早过期, 交给应用下发才不会。
 # socat 是必需的 (把 3081 转到 dsh 的回环 3080); python3/make/g++ 供智能体装 npm 原生依赖。
 FROM node:24-bookworm-slim

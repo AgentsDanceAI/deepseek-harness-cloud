@@ -52,6 +52,12 @@ echo "==> networks"
 docker network create dhc-net 2>/dev/null || true
 docker network create dshwork-net 2>/dev/null || true
 
+# compose 里这两个卷声明为 external, 和上面的网络同一个理由: 名字要与目录名、
+# 项目名完全无关, 免得改个目录就让 compose 去建一个空卷、Postgres 空库启动。
+echo "==> data volumes"
+docker volume create dhc-data >/dev/null 2>&1 || true
+docker volume create dhc-pgdata >/dev/null 2>&1 || true
+
 echo "==> workspace volumes"
 for tarball in "$stage"/volumes/*.tar.gz; do
   [ -e "$tarball" ] || break
