@@ -23,7 +23,12 @@ if (!existsSync(modules)) {
 
 // 1. the Cordis rows we patch must still exist in the base bundle
 const basePatch = readFileSync(join(modules, '@deepseek-ai', 'dsh-base', 'cordis.patch.yml'), 'utf8')
-for (const rowId of ['llm-deepseek', 'web-search-deepseek', 'session-telemetry-otel']) {
+// llm-pi-ai 是 2026-08-20 起新增的依赖: 网关的整份目录靠它以 hand-declared
+// 路由暴露, 同时我们**禁用** llm-deepseek 以免同一个模型在选择器里出现两次。
+// 这两件事是一对 —— 若上游改掉 pi-ai 的 row id, 注入静默失效而禁用照旧生效,
+// 结果是一个模型都不剩, 而无可用模型时上游会禁用输入框 (2026-08-19 那次死锁)。
+// 所以这一行必须在构建期就拦住, 不能等用户装上才发现。
+for (const rowId of ['llm-deepseek', 'web-search-deepseek', 'session-telemetry-otel', 'llm-pi-ai']) {
   check(basePatch.includes(`id: ${rowId}`), `base bundle lost row id '${rowId}'`)
 }
 
@@ -31,6 +36,9 @@ for (const rowId of ['llm-deepseek', 'web-search-deepseek', 'session-telemetry-o
 for (const [pkg, fields] of [
   ['dsh-llm-deepseek', ['baseURL', 'apiKeyEnv']],
   ['dsh-web-search-deepseek', ['baseURL', 'apiKeyEnv']],
+  // hand-declared 路由要自己给全端点/协议/模型 —— 少任何一个字段, 注入的
+  // provider 都会瘸着上线 (可能列不出模型, 或整条路由被上游忽略)。
+  ['dsh-llm-pi-ai', ['providers', 'apiKeyEnv', 'baseURL', 'models']],
 ]) {
   const dir = join(modules, '@deepseek-ai', pkg)
   check(existsSync(dir), `package @deepseek-ai/${pkg} is gone`)
