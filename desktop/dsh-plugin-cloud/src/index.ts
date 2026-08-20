@@ -152,6 +152,25 @@ export function cloudProfilePatches(): { id: string, disabled?: boolean, config?
             disabled: true,
           },
           {
+            // 默认模型必须跟着一起改。base bundle 的默认是
+            // `provider: deepseek-official / model: deepseek-v4-flash`, 而
+            // deepseek-official 是 llm-deepseek 独占的路由 —— 我们在上面把那行
+            // 关掉之后, 默认模型就指向了一个**不存在的 provider**: 客户端解析不到,
+            // 于是首次启动直接"当前模型不可用", 输入框锁死, 新用户装完就卡在这里
+            // (2026-08-20 老板全新安装实测)。这与 8-19 那次退掉千面后的死锁同一个
+            // 模式 —— provider 没了, 指向它的默认值成了悬空引用。
+            //
+            // 插件 config 只是**底座**: 用户在 UI 里选过之后, settings provider 会
+            // 把用户的选择层叠在上面 (见 dsh-agent-default-model 的 README), 所以
+            // 这里写死一个默认不会抢掉任何人已有的选择。
+            //
+            // ⚠️ 该服务**不校验**模型是否在目录里 —— kimi-k3 若哪天下架, 这里不会
+            // 报错, 只会在用户真正发第一条消息时才暴露。换默认模型时要对着
+            // /api/models 确认 id 还在。
+            id: 'agent-default-model',
+            config: { provider: 'dsh-cloud', model: 'kimi-k3' },
+          },
+          {
             // 网关声明成 pi-ai 的一条 hand-declared 路由 (pi-ai 不认识我们的端点,
             // 所以端点/协议/模型都要自己给全)。模型清单用启动时拉到的真实目录,
             // 服务端上下架模型不需要用户换客户端 —— 写死必然漂移。
@@ -170,6 +189,13 @@ export function cloudProfilePatches(): { id: string, disabled?: boolean, config?
           },
         ]
       : [
+          {
+            // 降级路径下默认模型必须**指回上游路由**: 这时 llm-deepseek 仍然启用、
+            // pi-ai 那条不注入, 若默认还指着 dsh-cloud 就又成了悬空引用 —— 同一个
+            // 坑换个方向再踩一次。写回 base bundle 的原值。
+            id: 'agent-default-model',
+            config: { provider: 'deepseek-official', model: 'deepseek-v4-flash' },
+          },
           {
             // 降级路径: 目录没拉到 (离线 / 网关故障)。**绝不能**在这里禁掉这一行 ——
             // pi-ai 那条也不会注入, 两边都没了就一个模型都不剩, 而上游在无可用模型时

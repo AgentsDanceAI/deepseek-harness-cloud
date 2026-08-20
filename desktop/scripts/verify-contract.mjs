@@ -28,7 +28,11 @@ const basePatch = readFileSync(join(modules, '@deepseek-ai', 'dsh-base', 'cordis
 // 这两件事是一对 —— 若上游改掉 pi-ai 的 row id, 注入静默失效而禁用照旧生效,
 // 结果是一个模型都不剩, 而无可用模型时上游会禁用输入框 (2026-08-19 那次死锁)。
 // 所以这一行必须在构建期就拦住, 不能等用户装上才发现。
-for (const rowId of ['llm-deepseek', 'web-search-deepseek', 'session-telemetry-otel', 'llm-pi-ai']) {
+// agent-default-model 是 2026-08-20 起新增的依赖: 我们禁用 llm-deepseek 之后
+// 必须把默认模型改指到 dsh-cloud 路由, 否则默认值指向一个不存在的 provider,
+// 客户端首次启动就"当前模型不可用"、输入框锁死。上游若改掉这个 row id, 我们的
+// 注入静默失效而禁用照旧生效 —— 又是那个死锁。
+for (const rowId of ['llm-deepseek', 'web-search-deepseek', 'session-telemetry-otel', 'llm-pi-ai', 'agent-default-model']) {
   check(basePatch.includes(`id: ${rowId}`), `base bundle lost row id '${rowId}'`)
 }
 
