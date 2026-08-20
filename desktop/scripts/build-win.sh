@@ -21,6 +21,20 @@ desktop_dir="$(dirname "$here")"
 tree="$desktop_dir/build/upstream"
 image="electronuserland/builder:wine"
 
+# ⚠️ 必须在 **x86_64** 主机上跑。该镜像只有 linux/amd64, 在 Apple Silicon 上
+# Docker 会用 qemu 模拟, 而 wine 在模拟层下必崩 (2026-08-20 实测):
+#   wine: dlls/ntdll/unix/virtual.c: anon_mmap_fixed:
+#         Assertion `!((UINT_PTR)start & host_page_mask)' failed.
+#   qemu: uncaught target signal 6 (Aborted) - core dumped
+# 崩在 NSIS 打包阶段, 前面的 yarn build 全绿, 所以看着像"构建完了没产物"。
+# 在 arm64 Mac 上直接拦下, 别浪费一轮镜像拉取和构建。
+if [ "$(uname -m)" != "x86_64" ] && [ "${ALLOW_EMULATED_WINE:-0}" != "1" ]; then
+  echo "!! 本机是 $(uname -m); $image 只有 amd64, qemu 模拟下 wine 会崩。" >&2
+  echo "   在 x86_64 Linux 主机上跑本脚本, 或用 CI 的 windows job。" >&2
+  echo "   (确知要试模拟可 ALLOW_EMULATED_WINE=1 覆盖)" >&2
+  exit 1
+fi
+
 [ -d "$tree/dsh-plugin-desktop" ] || {
   echo "desktop/build/upstream is not assembled. Run:" >&2
   echo "  node $here/assemble.mjs" >&2
@@ -37,41 +51,48 @@ cache_dir="$desktop_dir/.cache-electron"
 mkdir -p "$cache_dir"
 
 echo "==> building Windows x64 + arm64 in $image"
+# ⚠️ 容器里跑的脚本必须**单引号 heredoc** (<<'INNER') 传进来, 不能直接写在
+# bash -lc "..." 的双引号里 —— 2026-08-20 踩到: 里面一句注释写了
+# yarn install 并用反引号括起来, 而双引号内的反引号会被**宿主**当命令替换先执行掉,
+# 于是 docker run 根本没跑, 宿主莫名其妙跑了一遍 yarn, 替换结果又被当成命令
+# 报 "info: command not found", set -e 就地退出 —— 全程看着像"构建完成了但
+# 没有产物"。单引号 heredoc 内一切照字面传递, 变量则显式用 -e 注入。
+IFS='' read -r -d '' INNER_SCRIPT <<'INNER' || true
+set -euo pipefail
+corepack enable
+if [ "${SKIP_INSTALL:-0}" != "1" ]; then
+  echo "--- yarn install"
+  yarn install --immutable || yarn install
+fi
+echo "--- yarn build (plugin sources -> lib/)"
+cd dsh-plugin-desktop
+yarn build
+# node-pty is the only native dependency, and it already ships prebuilt
+# binaries for win32-x64 AND win32-arm64. @electron/rebuild does not know
+# that and tries to compile from source, which node-gyp cannot cross-compile
+# — that is the whole reason upstream restricts this build to Windows hosts.
+# Skipping the rebuild uses the shipped prebuilds instead.
+#
+# One trap: node-pty resolves build/Release BEFORE prebuilds/<platform>-<arch>,
+# and on this host build/Release holds the Linux ELF from yarn install. Ship
+# that and the app dies on launch. Removing it makes the runtime fall through
+# to the correct Windows prebuild. (Restore it by re-running yarn install
+# before building for mac or linux from this same tree.)
+rm -rf node_modules/node-pty/build/Release ../node_modules/node-pty/build/Release 2>/dev/null || true
+echo "--- electron-builder --win nsis x64,arm64"
+# Invoke electron-builder directly: upstream's dist:win wrapper hard-fails
+# on non-Windows hosts by design, and it only knows about x64.
+yarn electron-builder --win nsis --x64 --arm64 --publish never --config.npmRebuild=false
+INNER
 docker run --rm \
   -v "$tree:/project" \
   -v "$cache_dir:/root/.cache/electron-builder" \
   -w /project \
   -e ELECTRON_CACHE=/root/.cache/electron-builder \
   -e CSC_IDENTITY_AUTO_DISCOVERY=false \
-  "$image" bash -lc "
-    set -euo pipefail
-    corepack enable
-    if [ '$skip_install' != '1' ]; then
-      echo '--- yarn install'
-      yarn install --immutable || yarn install
-    fi
-    echo '--- yarn build (plugin sources -> lib/)'
-    cd dsh-plugin-desktop
-    yarn build
-    # node-pty is the only native dependency, and it already ships prebuilt
-    # binaries for win32-x64 AND win32-arm64. @electron/rebuild does not know
-    # that and tries to compile from source, which node-gyp cannot cross-compile
-    # — that is the whole reason upstream restricts this build to Windows hosts.
-    # Skipping the rebuild uses the shipped prebuilds instead.
-    #
-    # One trap: node-pty resolves build/Release BEFORE prebuilds/<platform>-<arch>,
-    # and on this host build/Release holds the Linux ELF from yarn install. Ship
-    # that and the app dies on launch. Removing it makes the runtime fall through
-    # to the correct Windows prebuild. (Restore it with `yarn install` before
-    # building for mac or linux from this same tree.)
-    rm -rf node_modules/node-pty/build/Release ../node_modules/node-pty/build/Release 2>/dev/null || true
-    echo '--- electron-builder --win nsis x64,arm64'
-    # Invoke electron-builder directly: upstream's dist:win wrapper hard-fails
-    # on non-Windows hosts by design, and it only knows about x64.
-    yarn electron-builder --win nsis --x64 --arm64 --publish never --config.npmRebuild=false
-  "
+  -e SKIP_INSTALL="$skip_install" \
+  "$image" bash -lc "$INNER_SCRIPT"
 
-echo
 echo "==> artifacts"
 dist="$tree/dsh-plugin-desktop/dist"
 # Building two arches also produces a combined dual-arch installer (~291MB).
