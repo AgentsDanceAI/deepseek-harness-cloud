@@ -79,10 +79,14 @@ smoke() {
   code="$(docker exec "$CONTAINER" python -c "
 import json, urllib.request, urllib.error
 from app import db, security
-row = db.query_one(\"SELECT id FROM users WHERE status='active' ORDER BY created LIMIT 1\")
+row = db.query_one(\"SELECT id, session_epoch FROM users WHERE status='active' ORDER BY created LIMIT 1\")
 if not row:
     print('nouser'); raise SystemExit
-token = security.sign_token(row['id'])
+# epoch 必须带上: try_resolve_user 会逐位比对它, 而 sign_token 默认给 0。
+# 那个用户一旦改过密码 (或任何让 session_epoch 自增的操作), 不带 epoch 的
+# token 就会被拒 -> 401 -> 这道冒烟每次部署都喊"线上带病"。
+# 一个会狼来了的告警, 比没有告警更糟。
+token = security.sign_token(row['id'], epoch=int(row['session_epoch']))
 req = urllib.request.Request(
     'http://127.0.0.1:$PORT/llm/v1/chat/completions',
     data=json.dumps({'model': '__deploy_smoke_not_offered__',
