@@ -642,6 +642,19 @@ async def preview_index(request: Request):
         files = [_describe(f, f"/preview/{PREVIEW_STATIC_PORT}/{f}")
                  for f in await _workspace_files(user["id"])]
         ports = [p for p in await _open_ports(user["id"]) if p != PREVIEW_STATIC_PORT]
+        if not files:
+            # 容器在跑却一个文件都读不到, 而存储里明明有 —— 那不是"用户还没
+            # 产出东西", 是我们够不着容器的静态服务。ECI 上最常见的原因是安全
+            # 组只放行了 3081, 于是 8088 的包被直接丢弃 (表现为超时, 不是拒绝)。
+            # 空白页看起来像"你还没做过什么", 是最难查的那种错。退回存储侧的
+            # 列表, 并且喊一声。
+            offline = _workspace_files_offline(user["id"])
+            if offline:
+                log.warning("[work] %s 工作台在跑, 但 :%d 读不到文件而存储里有 %d 个 —— "
+                            "检查安全组是否只放行了 3081", user["id"],
+                            PREVIEW_STATIC_PORT, len(offline))
+                files = [_describe(f, "/preview/file/" + quote(f, safe="/"))
+                         for f in offline]
     else:
         # Asleep is the normal state, not an error state: the files are still
         # on the volume, so list them from there and open them from there too.

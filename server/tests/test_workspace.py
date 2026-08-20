@@ -528,3 +528,36 @@ def test_workspace_containers_are_first_in_line_for_the_oom_killer():
     """OOM killer 按内存占用挑, 同机最大的是 postgres / elasticsearch —— 那是别人
     的数据库, 而且不是它闯的祸。工作台可随时重启、卷还在, 该它先死。"""
     assert config.WORK_OOM_SCORE_ADJ > 0
+
+
+def test_running_workspace_falls_back_to_storage_when_unreachable(fake, monkeypatch, caplog):
+    """容器在跑却读不到文件, 而存储里有 —— 那不是"用户还没产出东西"。
+
+    ECI 上最常见的原因是安全组只放行 3081, 于是预览端口的包被直接丢弃。
+    症状是「個人成品」一片空白, 看起来像用户什么都没做过 —— 最难查的那种错。
+
+    这条必须能和"容器不在"那条路分开: 两者渲染出的链接完全相同 (都是
+    /preview/file/...), 只有那句告警能区分。第一版测试就是因为没分开而
+    在撤掉修复后照样通过。
+    """
+    c, uid = _user("fallback@test.local")
+    c.get("/api/work/route"); c.get("/api/work/route")
+    # 先确认容器确实在跑 —— 否则下面测的是另一条分支
+    assert c.get("/api/work/status").json()["state"] in ("running", "starting")
+
+    async def unreachable(user_id, limit=60):
+        return []
+    monkeypatch.setattr(workspace, "_workspace_files", unreachable)
+
+    async def no_ports(user_id):
+        return []
+    monkeypatch.setattr(workspace, "_open_ports", no_ports)
+    monkeypatch.setattr(workspace, "_workspace_files_offline",
+                        lambda user_id, limit=60: ["report.html", "src/"])
+
+    with caplog.at_level("WARNING"):
+        r = c.get("/preview")
+    assert r.status_code == 200
+    assert "report.html" in r.text, "存储里有文件却没列出来 —— 用户会以为东西丢了"
+    assert "/preview/file/report.html" in r.text
+    assert "安全组" in caplog.text, "降级了却没喊 —— 那就没人会去修安全组"
