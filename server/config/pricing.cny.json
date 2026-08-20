@@ -15,7 +15,7 @@
       "monthly_cents": 7000,
       "monthly_credits": 1000,
       "concurrency": 2,
-      "work_minutes": 10800,
+      "work_minutes": 6000,
       "yearly_list_cents": 84000,
       "yearly_cents": 58800,
       "yearly_per_month_cents": 4900,

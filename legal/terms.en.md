@@ -62,7 +62,7 @@ The prices below are current (in US dollars). RMB prices and the latest price li
 | Plan | Monthly | Annual | Credits per month | Machine hours per month | Concurrency |
 |---|---|---|---|---|---|
 | Free | $0 | — | 0 (one-time grant of 500 at registration) | 3 hours | 1 |
-| Plus | $10 | $84 ($7/month) | 1,000 | 180 hours | 2 |
+| Plus | $10 | $84 ($7/month) | 1,000 | 100 hours | 2 |
 | Pro | $50 | $420 ($35/month) | 5,000 | 360 hours | 5 |
 | Max | $100 | $840 ($70/month) | 10,000 | 540 hours | 10 |
 

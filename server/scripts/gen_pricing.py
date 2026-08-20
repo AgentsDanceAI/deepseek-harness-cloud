@@ -67,9 +67,20 @@ STEP = {"JPY": 100}
 # neither of those two occupies, and it fills what used to be a bare fivefold gap
 # between the entry tier and the top one. The entry tier stays at $10 to sit under
 # every first-party subscription on the market.
+# 机时额度是在"工作台跑在自己机器上"的年代定的 —— 那时多跑一小时的边际成本≈0,
+# 所以送得很慷慨。切到 ECI 之后每一分钟都是真钱, 而这几个数没跟着改。
+# 按 1 vCPU / 2 GiB 经济型算 (实测 0.5vCPU/1GiB = ¥0.0707/h, 线性推得
+# ¥0.1414/h), 在**积分也用满**的前提下, 各档的盈亏平衡机时:
+#     Plus 月付 272h / 首月 178h / 年付 131h
+#     Pro       656h 起
+#     Max      1312h 起
+# 原来 Plus 含 180h —— 月付尚有余量, 但首月与年付的含量已经**越过平衡点**,
+# 重度用户是净亏。Pro/Max 余量以千小时计, 不受影响。
+# 所以只降 Plus: 180h -> 100h (每天 3.3 小时, 对 $10 档合理), 年付重新有
+# 31 小时余量。超出的人走加油包。
 TIERS = [
     # id,   name,   $/mo, credits/mo, concurrency, minutes/mo, yearly off %, first-month off %
-    ("plus", "Plus",   10,      1000,           2,      10800,           30,                25),
+    ("plus", "Plus",   10,      1000,           2,       6000,           30,                25),
     ("pro",  "Pro",    50,      5000,           5,      21600,           30,                25),
     ("max",  "Max",   100,     10000,          10,      32400,           30,                25),
 ]

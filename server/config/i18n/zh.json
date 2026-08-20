@@ -45,7 +45,7 @@
   "home.chip.code": "读代码",
   "home.check.nokey": "无需自购 API Key",
   "home.check.browser": "浏览器与手机直接用",
-  "home.check.free_hours": "每人 {hours} 小时免费机时",
+  "home.check.free_hours": "每人 {hours} 小时免费运行机时",
   "home.check.oss": "代码开源，可私有化部署",
   "home.dl.mac": "下载 Mac 版",
   "home.dl.win": "下载 Windows 版",
