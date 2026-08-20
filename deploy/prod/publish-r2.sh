@@ -135,11 +135,17 @@ echo "==> repoint DOWNLOAD_URL_* at R2"
 # 前半句对, 后半句选错了方向: 正确做法是把最后这层封装放回 macOS。
 # 已验证 (拿线上 2.0.0 arm64 包实测): 重新封装**不损公证** —— 票据 staple 在
 # .app 本体, 外层容器换了照样 stapler validate 通过、spctl 判 Notarized。
-# 工具已备好: 在 macOS 上跑 desktop/scripts/wrap-signed-dmg.sh <signed.zip>,
-# 得到带拖拽引导的 DMG; 发布流接上产 DMG 后, 把下面两行改回 .dmg。
+# mac 发 DMG (2026-08-20 改回)。发 zip 会同时坏掉两件事:
+#   1) zip 里没有 /Applications 软链, 用户解压后就地双击 → App Translocation,
+#      应用跑在只读随机目录里、自动更新失效, 且全程无提示;
+#   2) **应用内更新根本走不通** —— update-download.ts 读安装包尾部比对 'koly'
+#      (UDIF 结尾标记), 不匹配就抛 "The downloaded file is not a UDIF disk image."
+#      zip 永远过不了这道校验, 于是"检查更新"下载完必定失败。
+# 产 DMG 的方式: 签名公证后在 **macOS** 上跑 desktop/scripts/wrap-signed-dmg.sh
+# (Linux 打不出 UDIF, hdiutil 只有 macOS 才有), 再把 DMG 放进发布目录。
 declare -A MAP=(
-  [DOWNLOAD_URL_MAC]="mac-arm64.zip"
-  [DOWNLOAD_URL_MAC_X64]="mac-x64.zip"
+  [DOWNLOAD_URL_MAC]="mac-arm64.dmg"
+  [DOWNLOAD_URL_MAC_X64]="mac-x64.dmg"
   [DOWNLOAD_URL_WIN]="win-x64.exe"
   [DOWNLOAD_URL_WIN_ARM]="win-arm64.exe"
   [DOWNLOAD_URL_ANDROID]="android.apk"
@@ -152,8 +158,9 @@ for var in "${!MAP[@]}"; do
   # 官网 macOS 下载按钮会给出一个安卓安装包, 而脚本一行报错都没有。
   pat=""
   case "${MAP[$var]}" in
-    mac-arm64.zip) pat="*mac-arm64.zip" ;;
     mac-arm64.dmg) pat="*mac-arm64.dmg" ;;
+    mac-x64.dmg)   pat="*mac-x64.dmg" ;;
+    mac-arm64.zip) pat="*mac-arm64.zip" ;;
     mac-x64.zip)   pat="*mac-x64.zip" ;;
     win-x64.exe)   pat="*-x64-Setup.exe" ;;
     win-arm64.exe) pat="*-arm64-Setup.exe" ;;
@@ -163,6 +170,21 @@ for var in "${!MAP[@]}"; do
   # shellcheck disable=SC2086
   found="$(cd "$STAGE" && ls -1 $pat 2>/dev/null | head -1 || true)"
   [ -n "$found" ] || { echo "    skip $var (no artifact)"; continue; }
+  # mac 安装包必须是真 UDIF: 应用内更新会读尾部 512 字节比对 'koly', 过不了就
+  # 报 "not a UDIF disk image" —— 发错格式的代价是更新功能整个失效, 而且只有
+  # 用户点了更新才会暴露。宁可在这里挡下发布, 也不要发一个注定更新失败的包。
+  case "$found" in
+    *.dmg)
+      if [ "$(tail -c 512 "$STAGE/$found" | head -c 4)" != "koly" ]; then
+        echo "    !! $found 尾部没有 koly 标记 —— 不是 UDIF 磁盘映像, 拒绝发布。" >&2
+        echo "       用 desktop/scripts/wrap-signed-dmg.sh 在 macOS 上重新封装。" >&2
+        exit 1
+      fi ;;
+    *mac*.zip)
+      echo "    !! $found 是 zip: 用户会吃 App Translocation, 且应用内更新过不了" >&2
+      echo "       UDIF 校验。改用 wrap-signed-dmg.sh 产 DMG 后再发。" >&2
+      exit 1 ;;
+  esac
   sed -i "/^${var}=/d" "$ENVFILE"
   echo "${var}=${R2_PUBLIC_BASE}/${KEY_OF[$found]}" >> "$ENVFILE"
   echo "    $var -> $R2_PUBLIC_BASE/${KEY_OF[$found]}"

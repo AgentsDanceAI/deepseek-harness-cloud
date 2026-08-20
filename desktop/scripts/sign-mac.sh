@@ -85,3 +85,10 @@ for dir in "$@"; do
 
   echo "    ✅ $dir 完成"
 done
+
+echo
+echo "下一步 (必须在 macOS 上做, 本机是 Linux 就把 .app 传过去):"
+echo "  bash desktop/scripts/wrap-signed-dmg.sh <signed.app|signed.zip> <输出目录>"
+echo "发布必须是 DMG 而非 zip —— zip 会让用户吃 App Translocation, 且应用内更新"
+echo "读安装包尾部比对 'koly' (UDIF 标记), zip 过不了, 更新下载完必定失败。"
+echo "publish-r2.sh 已加闸: 发现 mac 产物是 zip 或尾部无 koly 会直接拒绝发布。"
