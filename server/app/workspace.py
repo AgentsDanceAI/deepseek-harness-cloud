@@ -937,7 +937,15 @@ async def work_status(request: Request):
     info = await _inspect(user["id"])
     state = (info.state or "unknown") if info else "none"
     ready = bool(info) and info.running and await _ready(user["id"])
+    # 启动页画的是**真实阶段**, 不是按秒数假装的进度。后端本来就知道自己走到哪
+    # 一步 (ECI 会报 Scheduling/Pending/Running), 之前被压成一个字符串扔掉了。
+    # 用一套与后端无关的词暴露出来, 免得页面去解析 docker/ECI 各自的状态名。
+    phase = ("ready" if ready
+             else "warming" if info and info.running   # 实例起来了, dsh 还在绑端口
+             else "booting" if info                     # 实例在调度/启动
+             else "queued")                             # 还没有实例
     out = {"enabled": True,
+           "phase": phase,
            "state": "running" if ready else ("starting" if info and info.running else state),
            "url": _work_url("/"),
            "credits_per_min": config.WORK_CREDITS_PER_MIN,
@@ -988,7 +996,81 @@ async def work_entry(request: Request):
     return RedirectResponse(f"{site}/work/starting{suffix}", status_code=302)
 
 
-@router.get("/work/starting")
+# 启动页的样式/脚本单独放, 不塞进那段 f-string —— 里面全是 CSS 与 JS 的大括号,
+# 逐个转义会把它变成没人愿意改的东西。
+_BOOT_CSS = """
+.boot{max-width:430px;margin:0 auto;text-align:center}
+.boot .track{position:relative;height:8px;margin:30px 0 12px;border-radius:999px;
+  background:var(--brand-weak)}
+.boot .fill{height:100%;width:0;border-radius:999px;background:var(--brand);
+  transition:width .5s cubic-bezier(.22,.61,.36,1)}
+/* 鲸鱼骑在进度条头上: 它和填充用的是同一个百分比, 不会各走各的 */
+.boot .swimmer{position:absolute;top:50%;left:0;width:0;
+  transition:left .5s cubic-bezier(.22,.61,.36,1)}
+.boot .whale{position:absolute;left:-19px;top:-14px;width:38px;height:26px;
+  color:var(--brand);animation:bob 2.6s ease-in-out infinite}
+.boot .whale .fluke{transform-origin:78% 50%;animation:flick 1.15s ease-in-out infinite}
+@keyframes bob{0%,100%{transform:translateY(0) rotate(-2deg)}
+  50%{transform:translateY(-3px) rotate(2deg)}}
+@keyframes flick{0%,100%{transform:rotate(-10deg)}50%{transform:rotate(10deg)}}
+.boot .phase{margin:2px 0 0;font-size:13px;color:var(--muted)}
+.boot .slow{margin:12px 0 0;font-size:13px;color:var(--warn)}
+/* 动效敏感的人只看进度, 不看游动 */
+@media (prefers-reduced-motion: reduce){
+  .boot .whale,.boot .whale .fluke{animation:none}
+  .boot .fill,.boot .swimmer{transition:none}
+}
+"""
+
+# 自己画的鲸鱼, 不是 DeepSeek 的商标。页脚已经声明"与其无背书关系", 把对方的
+# 标识摆进自家加载动画会正好抵消那句声明。
+_BOOT_WHALE = """
+<svg class="whale" viewBox="0 0 38 26" fill="none" aria-hidden="true">
+<path class="fluke" d="M27 13c3-3 6-5 8-5 .8 0 1.1.7.7 1.4L34.2 13l1.5 3.6c.4.7.1 1.4-.7 1.4-2 0-5-2-8-5z" fill="currentColor" opacity=".72"/>
+<path d="M5 14.4C5 9.7 10.4 6.4 17 6.4c6.3 0 11 3.2 11 7.3 0 4-4.7 6.8-11 6.8-6.6 0-12-2.5-12-6.1z" fill="currentColor"/>
+<circle cx="11.4" cy="12.3" r="1.35" fill="var(--card)"/>
+<path d="M17.6 6.1c.4-1.6 1.7-2.6 3.1-2.6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" opacity=".5"/>
+</svg>
+"""
+
+_BOOT_JS = """
+(function(){
+var track=document.getElementById('track'),fill=document.getElementById('fill'),
+    swim=document.getElementById('swim'),phaseEl=document.getElementById('phase'),
+    slowEl=document.getElementById('slow');
+// 每个阶段一个区间: [下界, 上界, 时间常数]。阶段跳变才是大跨步; 区间内按停留
+// 时长渐近逼近上界, 永远不撞天花板 —— 慢的时候表现为"变慢"而不是"卡死",
+// 也不会在还没好的时候假装做完了。
+var BAND={queued:[2,12,6],booting:[12,68,9],warming:[68,94,4],ready:[100,100,1]};
+var LABEL={queued:'正在排队',booting:'正在分配算力',warming:'工作台就绪中',ready:'就绪'};
+var cur=0,phase='queued',since=Date.now(),t0=Date.now();
+function paint(){
+  var b=BAND[phase]||BAND.queued,el=(Date.now()-since)/1000,
+      target=b[0]+(b[1]-b[0])*(1-Math.exp(-el/b[2]));
+  if(target>cur)cur=target;              // 只前进, 不回退
+  fill.style.width=cur+'%';swim.style.left=cur+'%';
+  track.setAttribute('aria-valuenow',Math.round(cur));
+  phaseEl.textContent=LABEL[phase]||'';
+  // 比平时久就直说。一条不动的进度条只会让人以为坏了。
+  if(slowEl)slowEl.hidden=(Date.now()-t0)<60000||phase==='ready';
+}
+setInterval(paint,120);paint();
+(async function poll(){
+  try{
+    var s=await (await fetch('/api/work/status')).json();
+    if(s.phase&&s.phase!==phase){phase=s.phase;since=Date.now();}
+    if(s.state==='running'){
+      phase='ready';cur=100;paint();
+      var t=new URLSearchParams(location.search).get('task');
+      location.href=s.url+(t?'?task='+encodeURIComponent(t):'');return;
+    }
+  }catch(e){}
+  setTimeout(poll,1500);
+})();
+})();
+"""
+
+
 def _boot_wait_hint() -> str:
     """等多久, 按后端说实话。
 
@@ -999,42 +1081,46 @@ def _boot_wait_hint() -> str:
     return "20–40 秒" if not backend().resumable else "5–20 秒"
 
 
+@router.get("/work/starting")
 async def work_starting(request: Request, state: str = ""):
-    """Minimal polling page shown while the workspace boots."""
+    """启动等待页。
+
+    ECI 上"恢复"是一次完整冷启动 (到用户能用约 25s), 一个只会转圈的图标在这个
+    时长上会让人以为卡住了。所以画真实进度: 后端已经知道自己走到哪一步
+    (/api/work/status 的 phase), 页面按阶段推进, 阶段内渐近而不撞满格。
+    """
     if state == "busy":
-        title, body, poll = "云工作台当前繁忙", "在线名额已满，请稍后再试或使用桌面版。", "false"
+        title, body, poll = "云工作台当前繁忙", "在线名额已满，请稍后再试或使用桌面版。", False
     elif state == "error":
-        title, body, poll = "启动失败", "云工作台启动失败，请稍后重试；问题持续请联系支持。", "false"
+        title, body, poll = "启动失败", "云工作台启动失败，请稍后重试；问题持续请联系支持。", False
     else:
         title, body, poll = ("云工作台启动中…",
-                             f"正在为你准备云端工作区，通常需要 {_boot_wait_hint()}。", "true")
+                             f"正在为你准备云端工作区，通常需要 {_boot_wait_hint()}。", True)
+
+    if poll:
+        progress = (
+            '<div class="track" id="track" role="progressbar" aria-valuemin="0" '
+            'aria-valuemax="100" aria-valuenow="0" aria-label="启动进度">'
+            '<div class="fill" id="fill"></div>'
+            f'<div class="swimmer" id="swim">{_BOOT_WHALE}</div>'
+            '</div>'
+            '<p class="phase" id="phase">正在排队</p>'
+            '<p class="slow" id="slow" hidden>比平时久一些，仍在继续。</p>'
+        )
+        tail = f"<style>{_BOOT_CSS}</style><script>{_BOOT_JS}</script>"
+    else:
+        progress, tail = "", ""
+
     html = f"""<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{title}</title><link rel="stylesheet" href="/static/app.css">
 </head><body data-page="work">
-<section class="auth-wrap"><div class="card auth-card center">
+<section class="auth-wrap"><div class="card auth-card center boot">
 <h1 class="auth-title">{title}</h1>
 <p class="muted">{body}</p>
-<div class="spinner" aria-hidden="true" style="margin:18px auto"></div>
-<p class="muted small"><a href="/console">返回控制台</a></p>
-</div></section>
-<script>
-if ({poll}) {{
-  (async function poll() {{
-    try {{
-      const r = await fetch('/api/work/status');
-      const s = await r.json();
-      // carry the composer task through the boot wait, so it still lands in dsh
-      if (s.state === 'running') {{
-        const t = new URLSearchParams(location.search).get('task');
-        location.href = s.url + (t ? '?task=' + encodeURIComponent(t) : '');
-        return;
-      }}
-    }} catch (e) {{}}
-    setTimeout(poll, 2000);
-  }})();
-}}
-</script></body></html>"""
+{progress}
+<p class="muted small" style="margin-top:18px"><a href="/console">返回控制台</a></p>
+</div></section>{tail}</body></html>"""
     return HTMLResponse(html)
 
 

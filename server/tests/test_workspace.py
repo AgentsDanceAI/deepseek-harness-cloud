@@ -702,3 +702,74 @@ def test_isolation_on_drops_the_sandbox(fake, container_http, isolated):
     c.get("/api/work/route"); c.get("/api/work/route")
     r = c.get("/preview/8080/", headers={"host": "preview.dshcloud.online"})
     assert "sandbox" not in r.headers.get("content-security-policy", "")
+
+
+def test_the_starting_page_is_a_real_page_not_a_stray_string():
+    """装饰器贴错函数不会报错, 只会让路由指向另一个东西。
+
+    实际发生过: @router.get("/work/starting") 一度贴在 _boot_wait_hint 上,
+    于是这条路由返回 13 字节的 "20–40 秒", 而真正的轮询页根本没注册 ——
+    工作台没就绪的用户看到一个裸字符串, 不轮询、不会自动进去。
+    直接调函数的端到端测试全都够不着这一层, 只有走真实路由才能发现。
+    """
+    r = TestClient(app).get("/work/starting")
+    assert r.status_code == 200
+    assert "text/html" in r.headers.get("content-type", "")
+    assert "/api/work/status" in r.text, "页面没有轮询逻辑 —— 用户会永远停在这里"
+    assert len(r.text) > 500, f"返回体只有 {len(r.text)} 字节, 不像一个页面"
+
+
+def test_the_progress_bar_is_driven_by_real_phases(fake, monkeypatch):
+    """进度条要跟着后端真实阶段走, 不是按秒数假装。
+
+    /api/work/status 必须给出与后端无关的 phase, 否则页面只能去解析
+    docker/ECI 各自的状态名, 换后端就悄悄失准。
+    """
+    c, uid = _user("phase@test.local")
+    s0 = c.get("/api/work/status").json()
+    assert s0["phase"] in ("queued", "booting", "warming", "ready"), s0
+
+    c.get("/api/work/route"); c.get("/api/work/route")
+    s1 = c.get("/api/work/status").json()
+    assert s1["phase"] == "ready"          # FakeDocker 里容器瞬间就绪
+
+    # 页面把这套词汇用起来了吗 —— 后端给了而页面不认, 等于没给
+    page = c.get("/work/starting").text
+    for p in ("queued", "booting", "warming", "ready"):
+        assert p in page, f"页面没有处理 phase={p}"
+
+
+def test_the_bar_never_claims_to_be_done_early():
+    """未就绪的阶段, 上界必须小于 100。
+
+    一条走到满格却还没进去的进度条, 比没有进度条更让人以为坏了。
+    """
+    import re
+    from app import workspace as w
+    bands = re.findall(r"(\w+):\[(\d+),(\d+),", w._BOOT_JS.replace(" ", ""))
+    assert bands, "解析不到 BAND 定义"
+    got = {name: (int(lo), int(hi)) for name, lo, hi in bands}
+    assert set(got) == {"queued", "booting", "warming", "ready"}, got
+    for name, (lo, hi) in got.items():
+        assert lo <= hi, f"{name} 区间反了: {lo}..{hi}"
+        if name != "ready":
+            assert hi < 100, f"{name} 上界是 {hi}, 会在未就绪时走满"
+    assert got["ready"][1] == 100
+
+
+def test_the_loading_animation_does_not_ship_someone_elses_logo():
+    """页脚已经声明"与 DeepSeek 无背书关系"。把对方的标识摆进自家加载动画,
+    会正好抵消那句声明 —— 这里用的是自己画的鲸鱼。"""
+    from app import workspace as w
+    assert "<svg" in w._BOOT_WHALE
+    assert "deepseek" not in w._BOOT_WHALE.lower()
+    assert "currentColor" in w._BOOT_WHALE, "颜色要跟随 --brand, 不写死"
+
+
+def test_reduced_motion_users_still_get_the_progress():
+    """关掉游动动画, 但进度本身不能一起关掉。"""
+    from app import workspace as w
+    assert "prefers-reduced-motion" in w._BOOT_CSS
+    tail = w._BOOT_CSS[w._BOOT_CSS.index("prefers-reduced-motion"):]
+    assert "animation:none" in tail.replace(" ", "")
+    assert ".fill{height" in w._BOOT_CSS.replace(" ", "")   # 填充本身照常存在
