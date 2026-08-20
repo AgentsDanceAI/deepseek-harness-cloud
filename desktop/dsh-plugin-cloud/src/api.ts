@@ -91,3 +91,38 @@ export async function deviceLogin(input: {
   if (status !== 200) throw new CloudApiError(status, String(json.detail ?? 'login_failed'))
   return json as unknown as { token: string, user: CloudUser }
 }
+
+/** 网关目录里的一个模型, 已转成 pi-ai profile 要的形状。 */
+export interface CloudModel {
+  id: string
+  name: string
+  contextWindow?: number
+}
+
+/**
+ * 拉取网关**当前**提供的模型目录 (GET /llm/v1/models, pi-ai discovery 兼容)。
+ *
+ * 为什么动态拉而不是把清单写死在客户端: 目录是服务端的
+ * (server/config 下的 catalog), 服务端上/下架模型不该要求用户换客户端。
+ * 写死必然漂移 —— 2026-08-19 桌面端只能用到 20 个模型里的 2 个, 根子就是
+ * 客户端只认上游内置的那份 deepseek 清单。
+ */
+export async function fetchModels(token: string): Promise<CloudModel[]> {
+  const { status, json } = await request('/llm/v1/models', { token })
+  if (status !== 200) throw new CloudApiError(status, 'models_unavailable')
+  const rows = Array.isArray(json.data) ? json.data : []
+  const models: CloudModel[] = []
+  for (const row of rows) {
+    const entry = row as Record<string, unknown>
+    const id = typeof entry.id === 'string' ? entry.id : ''
+    if (id === '') continue
+    const name = typeof entry.display_name === 'string' && entry.display_name !== ''
+      ? entry.display_name
+      : id
+    const ctx = typeof entry.context_window === 'number' && entry.context_window > 0
+      ? entry.context_window
+      : undefined
+    models.push({ id, name, ...ctx === undefined ? {} : { contextWindow: ctx } })
+  }
+  return models
+}

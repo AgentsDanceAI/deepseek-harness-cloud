@@ -531,6 +531,7 @@
   "activate.deny_btn": "拒绝",
   "activate.done_title": "已授权",
   "activate.done_msg": "已授权，回到桌面应用即可。",
+  "activate.back_to_app": "返回桌面应用",
   "activate.notfound_title": "授权码无效或已过期",
   "activate.notfound_msg": "请回到桌面应用重新发起登录，获取新的授权码。",
   "activate.retry_btn": "重新输入授权码",
