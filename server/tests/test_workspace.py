@@ -773,3 +773,27 @@ def test_reduced_motion_users_still_get_the_progress():
     tail = w._BOOT_CSS[w._BOOT_CSS.index("prefers-reduced-motion"):]
     assert "animation:none" in tail.replace(" ", "")
     assert ".fill{height" in w._BOOT_CSS.replace(" ", "")   # 填充本身照常存在
+
+
+def test_the_whale_faces_the_way_it_swims():
+    """它沿进度条从左往右移动, 所以头必须朝右, 否则是倒着游。
+
+    原始路径是头朝左画的 (眼睛 cx=11.4 在左, 尾鳍 x≈27-36 在右), 靠一个镜像
+    组翻过来。谁把这个组去掉, 鲸鱼就会倒着游而不会报任何错。
+    """
+    from app import workspace as w
+    assert "scale(-1,1)" in w._BOOT_WHALE, "镜像组没了 —— 鲸鱼会倒着游"
+    # 眼睛仍画在 x<19 (左半), 说明确实靠镜像而不是重画; 两者一起变才是对的
+    assert 'cx="11.4"' in w._BOOT_WHALE
+
+
+def test_the_fluke_pivots_on_its_own_box_not_the_viewbox():
+    """transform-origin 的百分比默认按 viewBox 解析, 不是按元素自身。
+
+    之前写的 78% 是撞上的 (78%×38≈29.6 恰好落在尾鳍附近), 换个 viewBox 就会
+    歪到别处 —— 尾巴会绕着一个不相干的点甩。
+    """
+    from app import workspace as w
+    css = w._BOOT_CSS.replace(" ", "").replace("\n", "")
+    assert "transform-box:fill-box" in css, "没有 fill-box, 支点会按 viewBox 算"
+    assert "transform-origin:0%50%" in css, "支点要在尾鳍与身体的连接处"

@@ -1009,7 +1009,11 @@ _BOOT_CSS = """
   transition:left .5s cubic-bezier(.22,.61,.36,1)}
 .boot .whale{position:absolute;left:-19px;top:-14px;width:38px;height:26px;
   color:var(--brand);animation:bob 2.6s ease-in-out infinite}
-.boot .whale .fluke{transform-origin:78% 50%;animation:flick 1.15s ease-in-out infinite}
+/* 支点要落在尾鳍与身体的连接处。transform-origin 的百分比默认按 viewBox 解析
+   (transform-box 默认 view-box), 不是按元素自身 —— 之前那个 78% 是撞上的,
+   换个 viewBox 就会歪到别处。用 fill-box 显式按元素自身的包围盒算。 */
+.boot .whale .fluke{transform-box:fill-box;transform-origin:0% 50%;
+  animation:flick 1.15s ease-in-out infinite}
 @keyframes bob{0%,100%{transform:translateY(0) rotate(-2deg)}
   50%{transform:translateY(-3px) rotate(2deg)}}
 @keyframes flick{0%,100%{transform:rotate(-10deg)}50%{transform:rotate(10deg)}}
@@ -1026,10 +1030,12 @@ _BOOT_CSS = """
 # 标识摆进自家加载动画会正好抵消那句声明。
 _BOOT_WHALE = """
 <svg class="whale" viewBox="0 0 38 26" fill="none" aria-hidden="true">
+<g transform="translate(38,0) scale(-1,1)">
 <path class="fluke" d="M27 13c3-3 6-5 8-5 .8 0 1.1.7.7 1.4L34.2 13l1.5 3.6c.4.7.1 1.4-.7 1.4-2 0-5-2-8-5z" fill="currentColor" opacity=".72"/>
 <path d="M5 14.4C5 9.7 10.4 6.4 17 6.4c6.3 0 11 3.2 11 7.3 0 4-4.7 6.8-11 6.8-6.6 0-12-2.5-12-6.1z" fill="currentColor"/>
 <circle cx="11.4" cy="12.3" r="1.35" fill="var(--card)"/>
-<path d="M17.6 6.1c.4-1.6 1.7-2.6 3.1-2.6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" opacity=".5"/>
+<path d="M14 6.1c.4-1.6 1.7-2.6 3.1-2.6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" opacity=".5"/>
+</g>
 </svg>
 """
 
