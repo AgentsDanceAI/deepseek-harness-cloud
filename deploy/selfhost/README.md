@@ -209,13 +209,13 @@ code-executing sandbox and costs RAM, so it is **off by default**.
     && apt-get install -y -qq --no-install-recommends python3 make g++ socat ca-certificates \
     && rm -rf /var/lib/apt/lists/*
    # 版本与 desktop/upstream.json 的 runtimePackageVersion 对齐
-   RUN npm install -g @deepseek-ai/dsh@0.1.0-rc.6
+   RUN npm install -g @deepseek-ai/dsh@0.1.0-rc.8
    WORKDIR /workspace
    EXPOSE 3081
    ```
 
    ```bash
-   docker build -t dsh-local:rc6 -f Dockerfile.dsh .
+   docker build -t dsh-local:rc8 -f Dockerfile.dsh .
    ```
 
    镜像里不需要写 `CMD`：应用创建容器时会自己下发启动命令（写入 `settings.yaml`
@@ -232,7 +232,7 @@ WORK_ENABLED=1                      # 应用开关
 COMPOSE_PROFILES=work               # 启动 docker-socket-proxy（编排开关）
 WORK_DOMAIN=work.dsh.example.com    # Caddy 的 work 站点 + 应用跳转目标
 COOKIE_DOMAIN=.dsh.example.com      # 会话 cookie 必须能带到子域，注意前导点
-WORK_IMAGE=dsh-local:rc6
+WORK_IMAGE=dsh-local:rc8
 ```
 
 ```bash
@@ -359,7 +359,7 @@ docker compose -f deploy/selfhost/docker-compose.yml logs dhc-server | grep -i w
 逐项对照 / Check list:
 
 - `COMPOSE_PROFILES=work` 是否生效（`docker compose ps` 里要有 `dhc-docker-proxy`）；
-- `WORK_IMAGE` 是否真的在**本机**（`docker image inspect dsh-local:rc6`）；没人会替你拉；
+- `WORK_IMAGE` 是否真的在**本机**（`docker image inspect dsh-local:rc8`）；没人会替你拉；
 - `work.<域名>` 的 DNS 记录与证书是否就绪；
 - `COOKIE_DOMAIN=.<域名>`（带前导点）——否则会话带不到子域，表现为无限跳登录页；
 - 页面能开但**回复永远不来** → 多半是有人删了 Caddyfile 里 `forward_auth` 的

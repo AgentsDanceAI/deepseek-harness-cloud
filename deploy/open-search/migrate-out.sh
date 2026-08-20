@@ -17,7 +17,7 @@
 #   ~/.npm, ~/.cache   261MB of rebuildable package cache against 3.6MB of
 #                 actual session history — carrying it would make the bundle
 #                 35x bigger for nothing
-#   images        dsh-local:rc6 rebuilds from the dsh repo; dhc-server builds
+#   images        dsh-local:rc8 rebuilds from the dsh repo; dhc-server builds
 #                 from this one
 #
 # Transport is R2 because the two hosts have no direct link. That bucket is

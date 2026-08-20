@@ -7,7 +7,7 @@ Architecture (all pieces already proven in production separately):
                X-Work-Upstream: dshwork-<uid>:3081
              reverse_proxy {X-Work-Upstream} with Host/Origin rewritten to
                127.0.0.1:3080 (dsh's reachability fence trusts loopback)
-  container: image dsh-local:rc6, `dsh web` bound to in-container loopback,
+  container: image dsh-local:rc8, `dsh web` bound to in-container loopback,
              socat relaying :3081 on an isolated docker network; the user's
              GATEWAY token is injected as DEEPSEEK_API_KEY with our gateway as
              DEEPSEEK_BASE_URL / DEEPSEEK_SEARCH_BASE_URL, so all model+search
@@ -300,9 +300,9 @@ async def _create(user: dict) -> None:
             "DSH_TELEMETRY_DISABLED=1",
             # The per-user container IS the sandbox boundary (512MB/1CPU/pids512,
             # isolated network, no docker.sock, non-privileged, ephemeral). dsh's
-            # own bash sandbox needs bubblewrap or a Landlock kernel (5.13+) —
-            # neither exists in dsh-local:rc6 on this al8 5.10 host, so under the
-            # default "workspace-write" mode EVERY bash call died with "no sandbox
+            # own bash sandbox needs bubblewrap or a Landlock kernel (5.13+).
+            # On 158 (al8, 5.10) it had neither, so under the default
+            # "workspace-write" mode EVERY bash call died with "no sandbox
             # backend is usable on this host" and the agent then stalled on an
             # approval prompt no cloud UI can answer. dsh's web profile keys both
             # the sandbox-policy mode AND the approval policy off this one env
@@ -311,6 +311,15 @@ async def _create(user: dict) -> None:
             # danger-full-access makes tools run unconfined and prompt-free —
             # correct when the container is the sandbox. DSH_ is bootstrap-only
             # (a workspace .env cannot forge it); only we set it, here.
+            #
+            # STALE PREMISE, half of it: 144 runs 6.8 and Landlock IS reachable
+            # from inside this very container (probed 2026-08-20: ABI v4). The
+            # kernel objection died with the move off 158. What still forces
+            # danger-full-access is the *other* half — the two policies share
+            # one env var, so any tighter mode also flips approval back to
+            # 'ask' and re-creates the unanswerable prompt. Worth revisiting if
+            # dsh ever lets sandbox mode and approval policy be set apart; the
+            # image still ships no bubblewrap either way.
             "DSH_PERMISSION_MODE=danger-full-access",
         ],
         "HostConfig": {
@@ -367,18 +376,47 @@ def _boot_is_stale(info: dict) -> bool:
     return labels.get(_CFG_LABEL) != _boot_fingerprint(_boot_script())
 
 
+async def _image_is_stale(info: dict) -> bool:
+    """True when the container runs an image other than what WORK_IMAGE now is.
+
+    Compares resolved image *IDs*, not the tag string. The upgrade here is
+    usually `docker build -t dsh-local:rc8 ...` — and sometimes the same tag
+    rebuilt — so a tag-string comparison would call a rebuilt image unchanged
+    and leave every existing workspace on the old runtime forever. That is not
+    hypothetical: the boot fingerprint alone does not move when only the image
+    does, so before this check a runtime bump reached new users only.
+
+    Unresolvable (engine hiccup, tag not pulled yet) => *not* stale: tearing a
+    working container down over a failed lookup trades a cosmetic staleness for
+    a real outage.
+    """
+    r = await _docker("GET", f"/images/{config.WORK_IMAGE}/json")
+    if r.status_code != 200:
+        log.warning("workspace: cannot resolve %s (%s); skipping image check",
+                    config.WORK_IMAGE, r.status_code)
+        return False
+    want = (r.json() or {}).get("Id")
+    have = info.get("Image")
+    return bool(want) and bool(have) and want != have
+
+
 async def ensure_workspace(user: dict) -> str:
     """Idempotent create+start; returns 'running' | 'starting'. Raises on
     hard failures (cap reached, engine down)."""
     uid = user["id"]
     info = await _inspect(uid)
-    if info is not None and _boot_is_stale(info):
+    if info is not None:
         # Rebuild rather than restart: the settings the user would get are baked
-        # into the old Cmd. Volumes are named, so files and history persist.
-        log.info("workspace %s has stale boot config; recreating", uid)
-        await _docker("POST", f"/containers/{_cname(uid)}/stop", params={"t": "5"})
-        await _docker("DELETE", f"/containers/{_cname(uid)}")
-        info = None
+        # into the old Cmd, and the runtime into the old image. Volumes are
+        # named, so files and history persist across the recreate.
+        stale = ("boot config" if _boot_is_stale(info)
+                 else "image" if await _image_is_stale(info)
+                 else None)
+        if stale is not None:
+            log.info("workspace %s has stale %s; recreating", uid, stale)
+            await _docker("POST", f"/containers/{_cname(uid)}/stop", params={"t": "5"})
+            await _docker("DELETE", f"/containers/{_cname(uid)}")
+            info = None
     if info is None:
         running = await _running_workspaces()
         if len(running) >= config.WORK_MAX_CONCURRENT or _capacity_reason():

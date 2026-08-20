@@ -37,7 +37,13 @@ class FakeDocker:
         self.creates = 0
         self.starts = 0
         self.stops = 0
+        self.deletes = 0
         self.created_cmd = []   # boot script of each created container
+        # WORK_IMAGE's currently resolved id. Rebuilding or retagging the image
+        # moves this without moving the tag, which is the case the real engine
+        # hits on every runtime bump.
+        self.image_id = "sha256:img-old"
+        self.image_lookup_ok = True
 
     async def docker(self, method, path, *, json_body=None, params=None):
         import httpx
@@ -52,6 +58,7 @@ class FakeDocker:
             # carry the caller's labels verbatim: the real _LABEL value is the
             # user id, and the reaper bills whoever that label names
             self.containers[cname] = {"State": {"Status": "created"},
+                                      "Image": self.image_id,
                                       "Config": {"Labels": (json_body or {}).get("Labels", {})}}
             self.created_cmd.append(((json_body or {}).get("Cmd") or ["", "", ""])[-1])
             return resp(201, {"Id": cname})
@@ -76,6 +83,16 @@ class FakeDocker:
             self.stops += 1
             if cname in self.containers:
                 self.containers[cname]["State"]["Status"] = "exited"
+            self.ready.discard(cname)
+            return resp(204)
+        if path.startswith("/images/") and path.endswith("/json"):
+            if not self.image_lookup_ok:
+                return resp(404)
+            return resp(200, {"Id": self.image_id})
+        if method == "DELETE" and path.startswith("/containers/"):
+            cname = path.split("/")[2]
+            self.deletes += 1
+            self.containers.pop(cname, None)
             self.ready.discard(cname)
             return resp(204)
         return resp(500)
@@ -248,6 +265,51 @@ def test_status_reports_state(fake):
     assert s["enabled"] is True
     assert s["credits_per_min"] == 2
     assert s["state"] in ("running", "starting")
+
+
+# --- runtime upgrades: a new image has to actually reach existing workspaces --
+
+def test_existing_workspace_is_recreated_when_the_image_changes(fake):
+    """Bumping WORK_IMAGE must rebuild the container, not just restart it.
+
+    The boot fingerprint does not move when only the image does. Before the
+    image check, a runtime bump (rc6 -> rc8) reached brand-new users only:
+    anyone who already had a container got it started again on the old image,
+    with nothing in the logs to say so.
+    """
+    c, uid = _user("upgrade@test.local")
+    c.get("/api/work/route"); c.get("/api/work/route")
+    assert fake.creates == 1
+
+    fake.image_id = "sha256:img-new"      # operator rebuilt / retagged WORK_IMAGE
+    # Staleness is a cold-path check: /route's 30s fast path returns without
+    # touching the engine at all, deliberately, because it gates every asset
+    # and WebSocket frame. Backdate last_seen so this request is a cold one —
+    # without it this test passes no matter what ensure_workspace does.
+    workspace._last_seen[uid] = time.time() - 31
+    c.get("/api/work/route")
+
+    assert fake.creates == 2, "restarted on the stale image instead of rebuilding"
+    assert fake.deletes == 1
+    assert fake.containers[workspace._cname(uid)]["Image"] == "sha256:img-new"
+
+
+def test_image_lookup_failure_leaves_the_workspace_alone(fake):
+    """An unresolvable WORK_IMAGE must not tear down a working container.
+
+    Treating a failed lookup as "stale" would turn a transient engine hiccup
+    into every session on the host being destroyed at once — a far worse
+    outcome than running one build behind.
+    """
+    c, uid = _user("hiccup@test.local")
+    c.get("/api/work/route"); c.get("/api/work/route")
+    assert fake.creates == 1
+
+    fake.image_lookup_ok = False
+    workspace._last_seen[uid] = time.time() - 31   # cold path; see the test above
+    c.get("/api/work/route")
+
+    assert fake.creates == 1 and fake.deletes == 0
 
 
 # --- port preview: the agent's server runs on the CONTAINER's loopback -------

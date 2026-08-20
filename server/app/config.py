@@ -138,7 +138,7 @@ WECHAT_PAY_APPID = _env("WECHAT_PAY_APPID")
 # --- cloud workspaces (dshwork: per-user dsh containers, phone-usable) ------
 WORK_ENABLED = _env_bool("WORK_ENABLED", False)
 WORK_DOMAIN = _env("WORK_DOMAIN", "")  # dsh UI host; empty = workspace off (self-host safe default)
-WORK_IMAGE = _env("WORK_IMAGE", "dsh-local:rc6")
+WORK_IMAGE = _env("WORK_IMAGE", "dsh-local:rc8")
 WORK_NETWORK = _env("WORK_NETWORK", "dshwork-net")
 DOCKER_PROXY_URL = _env("DOCKER_PROXY_URL", "http://dhc-docker-proxy:2375")
 # Billed per ACTIVE minute — a minute in which the agent actually called our

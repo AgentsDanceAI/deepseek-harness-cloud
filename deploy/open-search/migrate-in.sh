@@ -100,7 +100,7 @@ Restored. What is left is off this machine:
      cutover.sh, which injects the site blocks idempotently.
   3. Backup cron —  15 4 * * *  cd <repo>/deploy/open-search && ./backup-db.sh
   4. Workspace image — docker build the dsh image tagged as WORK_IMAGE in .env
-     (dsh-local:rc6), or the cloud workspace cannot start.
+     (dsh-local:rc8), or the cloud workspace cannot start.
   5. Old host — leave it stopped, not deleted, until a real user has signed in
      and paid something here.
 
