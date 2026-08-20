@@ -7,11 +7,16 @@ Architecture (all pieces already proven in production separately):
                X-Work-Upstream: dshwork-<uid>:3081
              reverse_proxy {X-Work-Upstream} with Host/Origin rewritten to
                127.0.0.1:3080 (dsh's reachability fence trusts loopback)
-  container: image dsh-local:rc8, `dsh web` bound to in-container loopback,
-             socat relaying :3081 on an isolated docker network; the user's
-             GATEWAY token is injected as DEEPSEEK_API_KEY with our gateway as
-             DEEPSEEK_BASE_URL / DEEPSEEK_SEARCH_BASE_URL, so all model+search
-             traffic is metered exactly like the desktop app.
+  container: `dsh web` bound to in-container loopback, socat relaying :3081;
+             the user's GATEWAY token is injected as DEEPSEEK_API_KEY with our
+             gateway as DEEPSEEK_BASE_URL / DEEPSEEK_SEARCH_BASE_URL, so all
+             model+search traffic is metered exactly like the desktop app.
+
+Where that container runs is WORK_BACKEND (see workbackend.py):
+  docker  本机引擎, 隔离网络 + 命名卷。可 stop/start, 恢复几秒。自部署只有这条。
+  eci     阿里云弹性容器实例, 按秒计费。**没有"停止但保留"** —— 闲置回收就是
+          删除, 所以 /root 与 /workspace 必须落在 NAS 上, 而"恢复"是一次完整
+          冷启动 (实测到用户可用约 25s: 18s 起实例 + 7s dsh 绑端口)。
 
 Security model:
   - dsh executes arbitrary code -> one container per user, memory/cpu/pids
@@ -36,20 +41,33 @@ import httpx
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 
-from . import config, credits, db, model_catalog, security, work_access
+from . import config, credits, db, model_catalog, security, work_access, workbackend
 from .accounts import resolve_user, try_resolve_user
 
 log = logging.getLogger("dhc.work")
 router = APIRouter(tags=["workspace"])
 
-_LABEL = "dshwork.user"
-# The boot script is baked into the container's Cmd at CREATE time, so an
-# existing container keeps rewriting the settings.yaml it was born with — the
-# catalog grew from 2 models to 20 and every already-provisioned workspace
-# stayed on the old two. Stamping the script's digest lets ensure_workspace spot
-# a stale container and rebuild it; the /root and /workspace volumes are named
-# and survive, so nothing the user made is lost.
-_CFG_LABEL = "dshwork.bootcfg"
+# 标签常量与容器命名都在 workbackend 里 —— 两个后端要用同一套, 否则
+# "同一个工作台" 在两边不是同一个东西。
+_LABEL = workbackend.LABEL
+_CFG_LABEL = workbackend.CFG_LABEL
+_cname = workbackend.cname
+
+_backend: workbackend.Backend | None = None
+
+
+def backend() -> workbackend.Backend:
+    """选中的后端 (WORK_BACKEND)。惰性建, 于是测试可以先替换 config 再取。"""
+    global _backend
+    if _backend is None:
+        _backend = workbackend.make_backend()
+        log.info("[work] 后端 = %s", type(_backend).__name__)
+    return _backend
+
+
+# 工作台在哪个主机名/IP 上应答。docker 后端恒等于容器名; ECI 后端是实例的
+# VPC IP —— 直到实例真的起来才知道, 所以由 inspect 回填。
+_host: dict[str, str] = {}
 # in-process activity + start-state tracking (single-worker semantics, like the
 # rest of the gateway guards; the reaper re-seeds after a server restart)
 _last_seen: dict[str, float] = {}
@@ -72,20 +90,14 @@ def _boot_fingerprint(boot: str) -> str:
     return hashlib.sha256(boot.encode()).hexdigest()[:16]
 
 
-def _cname(user_id: str) -> str:
-    # container names double as docker-DNS hostnames for Caddy's dynamic
-    # upstream; strip the "u_" prefix so the name stays hostname-safe
-    return "dshwork-" + re.sub(r"[^a-zA-Z0-9]", "", user_id)
+def _upstream_host(user_id: str) -> str:
+    """Where :3081 answers. Falls back to the container name so the docker
+    backend keeps working before anything has been inspected."""
+    return _host.get(user_id) or _cname(user_id)
 
 
 def _upstream(user_id: str) -> str:
-    return f"{_cname(user_id)}:3081"
-
-
-async def _docker(method: str, path: str, *, json_body: dict | None = None,
-                  params: dict | None = None) -> httpx.Response:
-    async with httpx.AsyncClient(base_url=config.DOCKER_PROXY_URL, timeout=30.0) as client:
-        return await client.request(method, path, json=json_body, params=params)
+    return f"{_upstream_host(user_id)}:3081"
 
 
 def _mint_workspace_token(user: dict) -> str:
@@ -135,51 +147,20 @@ def agent_last_active(user_id: str) -> float:
     return float((row["ts"] if row is not None else None) or 0.0)
 
 
-async def _inspect(user_id: str) -> dict | None:
-    r = await _docker("GET", f"/containers/{_cname(user_id)}/json")
-    return r.json() if r.status_code == 200 else None
-
-
-def host_free_mb() -> int | None:
-    """宿主可用内存 (MB)。读不到返回 None。
-
-    容器里读 /proc/meminfo 拿到的就是**宿主**的数 (它不做 namespace 隔离, 实测
-    MemTotal 与宿主逐字节相同), 所以不需要把 /proc 挂进来或多开一个探针。
-    用 MemAvailable 而不是 MemFree: 后者把可回收的 page cache 算成"已用",
-    在一台跑了半个月的机器上会永远显示没内存, 于是这道闸门变成永远关闭。"""
-    try:
-        with open("/proc/meminfo", encoding="ascii") as f:
-            for line in f:
-                if line.startswith("MemAvailable:"):
-                    return int(line.split()[1]) // 1024
-    except Exception:
-        log.exception("[work] 读 /proc/meminfo 失败")
-    return None
+async def _inspect(user_id: str) -> workbackend.WorkInfo | None:
+    info = await backend().inspect(user_id)
+    if info is not None and info.host:
+        _host[user_id] = info.host
+    return info
 
 
 def _capacity_reason() -> str:
-    """起新工作台前的容量判定, 返回空串表示可以起。
-
-    两道: 静态并发上限, 和**动态**的宿主内存余量。只有前者是不够的 —— 它不知道
-    同机还跑着 a sibling production system 全栈, 8 × 512M 的额度在对方峰值时就是压垮线。
-
-    内存读不到时**放行**: 与本模块其余闸门同一姿态 (检查自身故障不该拦人), 而且
-    一个读不到 /proc 的进程更可能是环境异常而不是真的没内存。"""
-    free = host_free_mb()
-    if free is None:
-        return ""
-    need = config.WORK_MEM_LIMIT_MB + config.WORK_MIN_FREE_MB
-    if free < need:
-        log.warning("[work] 宿主可用内存 %dMB < 需要 %dMB (容器 %d + 保留 %d), 拒起新工作台",
-                       free, need, config.WORK_MEM_LIMIT_MB, config.WORK_MIN_FREE_MB)
-        return f"memory:{free}<{need}"
-    return ""
+    """后端自己的容量判定。docker 看宿主内存余量; ECI 没有宿主可看, 恒为空。"""
+    return backend().capacity_reason()
 
 
-async def _running_workspaces() -> list[dict]:
-    r = await _docker("GET", "/containers/json",
-                      params={"filters": '{"label":["%s"]}' % _LABEL})
-    return r.json() if r.status_code == 200 else []
+async def _running_workspaces() -> list[str]:
+    return await backend().running_users()
 
 
 def _boot_script() -> str:
@@ -285,74 +266,51 @@ def _boot_script() -> str:
 async def _create(user: dict) -> None:
     token = _mint_workspace_token(user)
     gateway = config.PUBLIC_BASE.rstrip("/")
-    hexid = _cname(user["id"])[len("dshwork-"):]
     boot = _boot_script()
-    body = {
-        "Image": config.WORK_IMAGE,
-        "Cmd": ["sh", "-c", boot],
-        "WorkingDir": "/workspace",
-        "Labels": {_LABEL: user["id"], _CFG_LABEL: _boot_fingerprint(boot)},
-        "Env": [
-            f"DSH_CLOUD_TOKEN={token}",
-            f"DEEPSEEK_API_KEY={token}",
-            f"DEEPSEEK_BASE_URL={gateway}/llm/v1",
-            f"DEEPSEEK_SEARCH_BASE_URL={gateway}/llm/anthropic/v1",
-            "DSH_TELEMETRY_DISABLED=1",
-            # The per-user container IS the sandbox boundary (512MB/1CPU/pids512,
-            # isolated network, no docker.sock, non-privileged, ephemeral). dsh's
-            # own bash sandbox needs bubblewrap or a Landlock kernel (5.13+).
-            # On 158 (al8, 5.10) it had neither, so under the default
-            # "workspace-write" mode EVERY bash call died with "no sandbox
-            # backend is usable on this host" and the agent then stalled on an
-            # approval prompt no cloud UI can answer. dsh's web profile keys both
-            # the sandbox-policy mode AND the approval policy off this one env
-            # var (dump-config: mode = DSH_PERMISSION_MODE ?? 'workspace-write';
-            # approval = mode==='danger-full-access' ? 'never' : 'ask'), so
-            # danger-full-access makes tools run unconfined and prompt-free —
-            # correct when the container is the sandbox. DSH_ is bootstrap-only
-            # (a workspace .env cannot forge it); only we set it, here.
-            #
-            # STALE PREMISE, half of it: 144 runs 6.8 and Landlock IS reachable
-            # from inside this very container (probed 2026-08-20: ABI v4). The
-            # kernel objection died with the move off 158. What still forces
-            # danger-full-access is the *other* half — the two policies share
-            # one env var, so any tighter mode also flips approval back to
-            # 'ask' and re-creates the unanswerable prompt. Worth revisiting if
-            # dsh ever lets sandbox mode and approval policy be set apart; the
-            # image still ships no bubblewrap either way.
-            "DSH_PERMISSION_MODE=danger-full-access",
-        ],
-        "HostConfig": {
-            "Memory": config.WORK_MEM_LIMIT_MB * 1024 * 1024,
-            "NanoCpus": int(config.WORK_CPUS * 1e9),
-            "PidsLimit": 512,
-            # 内存到悬崖时让 OOM killer 先挑工作台: 它可随时重启、卷还在, 而默认
-            # 规则是按占用挑, 会先杀同机最大的进程 (postgres / elasticsearch) ——
-            # 那是别人的数据库, 而且不是它闯的祸。
-            "OomScoreAdj": config.WORK_OOM_SCORE_ADJ,
-            "NetworkMode": config.WORK_NETWORK,
-            "RestartPolicy": {"Name": "no"},
-            "Mounts": [
-                {"Type": "volume", "Source": f"dshwork-home-{hexid}", "Target": "/root"},
-                {"Type": "volume", "Source": f"dshwork-ws-{hexid}", "Target": "/workspace"},
-            ],
-        },
+    env = {
+        "DSH_CLOUD_TOKEN": token,
+        "DEEPSEEK_API_KEY": token,
+        "DEEPSEEK_BASE_URL": f"{gateway}/llm/v1",
+        "DEEPSEEK_SEARCH_BASE_URL": f"{gateway}/llm/anthropic/v1",
+        "DSH_TELEMETRY_DISABLED": "1",
+        # The per-user container IS the sandbox boundary (memory/cpu/pids
+        # limits, isolated network, no docker.sock, non-privileged, ephemeral).
+        # dsh's own bash sandbox needs bubblewrap or a Landlock kernel (5.13+).
+        # On 158 (al8, 5.10) it had neither, so under the default
+        # "workspace-write" mode EVERY bash call died with "no sandbox backend
+        # is usable on this host" and the agent then stalled on an approval
+        # prompt no cloud UI can answer. dsh's web profile keys both the
+        # sandbox-policy mode AND the approval policy off this one env var
+        # (dump-config: mode = DSH_PERMISSION_MODE ?? 'workspace-write';
+        # approval = mode==='danger-full-access' ? 'never' : 'ask'), so
+        # danger-full-access makes tools run unconfined and prompt-free —
+        # correct when the container is the sandbox. DSH_ is bootstrap-only
+        # (a workspace .env cannot forge it); only we set it, here.
+        #
+        # STALE PREMISE, half of it: 144 runs 6.8 and Landlock IS reachable
+        # from inside this very container (probed 2026-08-20: ABI v4). The
+        # kernel objection died with the move off 158. What still forces
+        # danger-full-access is the *other* half — the two policies share one
+        # env var, so any tighter mode also flips approval back to 'ask' and
+        # re-creates the unanswerable prompt. Worth revisiting if dsh ever lets
+        # sandbox mode and approval policy be set apart; the image still ships
+        # no bubblewrap either way.
+        "DSH_PERMISSION_MODE": "danger-full-access",
     }
-    r = await _docker("POST", "/containers/create", json_body=body,
-                      params={"name": _cname(user["id"])})
-    if r.status_code not in (201, 409):  # 409 = already exists (race)
-        raise RuntimeError(f"container create failed: {r.status_code} {r.text[:200]}")
+    await backend().create(user["id"], boot=boot, env=env,
+                           boot_fp=_boot_fingerprint(boot))
 
 
 async def _start(user_id: str) -> None:
-    r = await _docker("POST", f"/containers/{_cname(user_id)}/start")
-    if r.status_code not in (204, 304):
-        raise RuntimeError(f"container start failed: {r.status_code} {r.text[:200]}")
+    await backend().start(user_id)
     _started_at[user_id] = time.time()
 
 
 async def _stop(user_id: str) -> None:
-    await _docker("POST", f"/containers/{_cname(user_id)}/stop", params={"t": 5})
+    """闲置回收。docker 上是 stop (卷还在, 恢复几秒); ECI 上是删除 —— 那边没有
+    "停止但保留"这个状态, 用户的东西靠 NAS 活下来。"""
+    await backend().release(user_id)
+    _host.pop(user_id, None)
 
 
 async def _ready(user_id: str) -> bool:
@@ -366,38 +324,32 @@ async def _ready(user_id: str) -> bool:
         return False
 
 
-def _boot_is_stale(info: dict) -> bool:
-    """True when the container was built from a different boot configuration.
+def _boot_is_stale(info: workbackend.WorkInfo) -> bool:
+    """True when the workspace was built from a different boot configuration.
 
-    A container with no stamp at all predates the mechanism, so it is stale by
+    One with no stamp at all predates the mechanism, so it is stale by
     definition — that is exactly the population stuck on the old 2-model list.
     """
-    labels = ((info.get("Config") or {}).get("Labels") or {})
-    return labels.get(_CFG_LABEL) != _boot_fingerprint(_boot_script())
+    return info.boot_fp != _boot_fingerprint(_boot_script())
 
 
-async def _image_is_stale(info: dict) -> bool:
-    """True when the container runs an image other than what WORK_IMAGE now is.
+async def _image_is_stale(info: workbackend.WorkInfo) -> bool:
+    """True when the workspace runs an image other than what it would be born
+    from now.
 
-    Compares resolved image *IDs*, not the tag string. The upgrade here is
-    usually `docker build -t dsh-local:rc8 ...` — and sometimes the same tag
-    rebuilt — so a tag-string comparison would call a rebuilt image unchanged
-    and leave every existing workspace on the old runtime forever. That is not
-    hypothetical: the boot fingerprint alone does not move when only the image
-    does, so before this check a runtime bump reached new users only.
+    The boot fingerprint does NOT move when only the image does, so without
+    this a runtime bump (rc6 -> rc8) reaches brand-new users only: anyone who
+    already had a workspace gets it started again on the old image, with
+    nothing in the logs to say so.
 
-    Unresolvable (engine hiccup, tag not pulled yet) => *not* stale: tearing a
-    working container down over a failed lookup trades a cosmetic staleness for
-    a real outage.
+    What "the image" means differs per backend — docker resolves the tag to an
+    image ID (so a same-tag rebuild counts), ECI can only compare the registry
+    reference. Either way an EMPTY answer means "could not resolve", and that
+    is deliberately *not* stale: tearing a working workspace down over a failed
+    lookup trades a cosmetic staleness for a real outage.
     """
-    r = await _docker("GET", f"/images/{config.WORK_IMAGE}/json")
-    if r.status_code != 200:
-        log.warning("workspace: cannot resolve %s (%s); skipping image check",
-                    config.WORK_IMAGE, r.status_code)
-        return False
-    want = (r.json() or {}).get("Id")
-    have = info.get("Image")
-    return bool(want) and bool(have) and want != have
+    want = await backend().current_image_id()
+    return bool(want) and bool(info.image_id) and want != info.image_id
 
 
 async def ensure_workspace(user: dict) -> str:
@@ -407,15 +359,16 @@ async def ensure_workspace(user: dict) -> str:
     info = await _inspect(uid)
     if info is not None:
         # Rebuild rather than restart: the settings the user would get are baked
-        # into the old Cmd, and the runtime into the old image. Volumes are
-        # named, so files and history persist across the recreate.
+        # into the old Cmd, and the runtime into the old image. Storage is
+        # named volumes (docker) or NAS (ECI), so files and history persist
+        # across the recreate.
         stale = ("boot config" if _boot_is_stale(info)
                  else "image" if await _image_is_stale(info)
                  else None)
         if stale is not None:
             log.info("workspace %s has stale %s; recreating", uid, stale)
-            await _docker("POST", f"/containers/{_cname(uid)}/stop", params={"t": "5"})
-            await _docker("DELETE", f"/containers/{_cname(uid)}")
+            await backend().destroy(uid)
+            _host.pop(uid, None)
             info = None
     if info is None:
         running = await _running_workspaces()
@@ -425,8 +378,10 @@ async def ensure_workspace(user: dict) -> str:
         await _start(uid)
         _starting[uid] = time.time()
         return "starting"
-    state = (info.get("State") or {}).get("Status", "")
-    if state != "running":
+    if not info.running:
+        # docker: 停着的容器 start 一下就回来。ECI: 没有 start 这个动作 ——
+        # info 存在但没 running 说明它已经在 Pending/Scheduling, 该做的只是等,
+        # backend.start() 在那边是空操作。
         running = await _running_workspaces()
         if len(running) >= config.WORK_MAX_CONCURRENT or _capacity_reason():
             raise RuntimeError("capacity")
@@ -465,7 +420,7 @@ async def _port_open(user_id: str, port: int, timeout: float = 0.6) -> bool:
     """TCP-connect probe. The docker socket proxy denies exec (by design), so
     reachability is tested the same way the proxy itself would reach it."""
     try:
-        fut = asyncio.open_connection(_cname(user_id), port)
+        fut = asyncio.open_connection(_upstream_host(user_id), port)
         reader, writer = await asyncio.wait_for(fut, timeout=timeout)
         writer.close()
         try:
@@ -526,7 +481,7 @@ async def _workspace_files(user_id: str, limit: int = 60) -> list[str]:
     """
     try:
         async with httpx.AsyncClient(timeout=4.0) as http:
-            r = await http.get(f"http://{_cname(user_id)}:{PREVIEW_STATIC_PORT}/")
+            r = await http.get(f"http://{_upstream_host(user_id)}:{PREVIEW_STATIC_PORT}/")
         if r.status_code != 200:
             return []
     except httpx.HTTPError:
@@ -684,7 +639,7 @@ async def preview_index(request: Request):
     if user is None:
         return RedirectResponse(f"{site}/login?next=/preview", status_code=302)
     info = await _inspect(user["id"])
-    running = bool(info) and (info.get("State") or {}).get("Status") == "running"
+    running = bool(info) and info.running
 
     files, ports = [], []
     if running:
@@ -713,10 +668,10 @@ async def preview_proxy(request: Request, port: int, path: str):
     if not (1 <= port <= 65535) or port in _PREVIEW_BLOCKED_PORTS:
         return JSONResponse(status_code=400, content={"detail": "port_not_previewable"})
     info = await _inspect(user["id"])
-    if not info or (info.get("State") or {}).get("Status") != "running":
+    if not info or not info.running:
         return RedirectResponse(f"{site}/work", status_code=302)
 
-    url = f"http://{_cname(user['id'])}:{port}/{path}"
+    url = f"http://{_upstream_host(user['id'])}:{port}/{path}"
     fwd = {k: v for k, v in request.headers.items()
            if k.lower() not in _HOP_HEADERS and k.lower() not in ("host", "cookie")}
     try:
@@ -915,9 +870,10 @@ async def work_status(request: Request):
     if not config.WORK_ENABLED:
         return {"enabled": False}
     info = await _inspect(user["id"])
-    state = (info.get("State") or {}).get("Status", "none") if info else "none"
-    ready = state == "running" and await _ready(user["id"])
-    out = {"enabled": True, "state": "running" if ready else ("starting" if state == "running" else state),
+    state = (info.state or "unknown") if info else "none"
+    ready = bool(info) and info.running and await _ready(user["id"])
+    out = {"enabled": True,
+           "state": "running" if ready else ("starting" if info and info.running else state),
            "url": _work_url("/"),
            "credits_per_min": config.WORK_CREDITS_PER_MIN,
            "idle_stop_min": config.WORK_IDLE_STOP_MIN,
@@ -1010,10 +966,7 @@ if ({poll}) {{
 
 async def reaper_tick(now: float) -> None:
     """One meter/reaper pass over every running workspace."""
-    for container in await _running_workspaces():
-        uid = (container.get("Labels") or {}).get(_LABEL, "")
-        if not uid:
-            continue
+    for uid in await _running_workspaces():
         # Meter only minutes the agent actually worked. An open tab keeps polling
         # /api/work/route, so wall-clock metering charged people for reading a
         # reply and for walking away; agent work is the honest meter.

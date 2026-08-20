@@ -141,6 +141,29 @@ WORK_DOMAIN = _env("WORK_DOMAIN", "")  # dsh UI host; empty = workspace off (sel
 WORK_IMAGE = _env("WORK_IMAGE", "dsh-local:rc8")
 WORK_NETWORK = _env("WORK_NETWORK", "dshwork-net")
 DOCKER_PROXY_URL = _env("DOCKER_PROXY_URL", "http://dhc-docker-proxy:2375")
+# 工作台跑在哪:
+#   docker  本机引擎, 经受限 socket 代理。可 stop/start, 恢复几秒。自部署只有这条路。
+#   eci     阿里云弹性容器实例。**没有"停止但保留"**, 闲置回收就是删除, 因此
+#           WORK_NAS_* 必须配上, 否则用户的文件和会话会随回收消失。
+WORK_BACKEND = _env("WORK_BACKEND", "docker")
+# ECI 拉的是仓库引用 (ghcr.io/... 或 ACR), 本机 docker 拉的是本地 tag ——
+# 两者不是一回事, 所以分开配。留空则回落到 WORK_IMAGE。
+WORK_IMAGE_REF = _env("WORK_IMAGE_REF", "")
+ECI_REGION_ID = _env("ECI_REGION_ID", "")
+ECI_ZONE_ID = _env("ECI_ZONE_ID", "")
+ECI_VSWITCH_ID = _env("ECI_VSWITCH_ID", "")
+# 只放行 3081 <- 应用机那一个 IP。ECI 上安全组是**唯一**那层边界: 3081 那一跳
+# 没有任何应用层鉴权 (socat 从容器回环连向 dsh, dsh 的可达性围栏恒真), 所以
+# 能连上它的就能完全操作该用户的工作台。绝不要复用应用机的安全组。
+ECI_SECURITY_GROUP_ID = _env("ECI_SECURITY_GROUP_ID", "")
+ECI_ACCESS_KEY_ID = _env("ECI_ACCESS_KEY_ID", "")
+ECI_ACCESS_KEY_SECRET = _env("ECI_ACCESS_KEY_SECRET", "")
+ECI_COMPUTE_CATEGORY = _env("ECI_COMPUTE_CATEGORY", "economy")
+ECI_EIP_BANDWIDTH = _env_int("ECI_EIP_BANDWIDTH", 100)
+# NAS。ECI 后端下这不是可选项 —— 容器一删, 容器里的一切都不再存在。
+# 每个用户在 WORK_NAS_PATH 下有 <hexid>/home 与 <hexid>/workspace 两个子目录。
+WORK_NAS_SERVER = _env("WORK_NAS_SERVER", "")
+WORK_NAS_PATH = _env("WORK_NAS_PATH", "/")
 # Billed per ACTIVE minute — a minute in which the agent actually called our
 # gateway. Reading a reply or leaving a tab open is free (an open tab polls
 # /api/work/route forever, so wall-clock billing charged people for nothing).

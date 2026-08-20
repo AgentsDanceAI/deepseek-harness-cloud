@@ -24,7 +24,7 @@ os.environ.update({
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
-from app import config, credits, db, rate_limit, work_access, workspace  # noqa: E402
+from app import config, credits, db, rate_limit, work_access, workspace, workbackend  # noqa: E402
 from app.main import app  # noqa: E402
 from ._signup import signup
 
@@ -113,7 +113,15 @@ def _work_config(monkeypatch):
 @pytest.fixture()
 def fake(monkeypatch):
     fd = FakeDocker()
-    monkeypatch.setattr(workspace, "_docker", fd.docker)
+
+    # 打在 DockerBackend._api 上, 不是打在某个模块级函数上: 这样跑过的是后端
+    # 真正的请求构造与响应解析, 而不只是 workspace.py 的调用顺序。
+    async def api(self, method, path, *, json_body=None, params=None):
+        return await fd.docker(method, path, json_body=json_body, params=params)
+    monkeypatch.setattr(workbackend.DockerBackend, "_api", api)
+    monkeypatch.setattr(config, "WORK_BACKEND", "docker")
+    monkeypatch.setattr(workspace, "_backend", workbackend.DockerBackend())
+    workspace._host.clear()
 
     async def ready(uid):
         return workspace._cname(uid) in fd.ready
@@ -496,23 +504,23 @@ def test_free_memory_is_read_from_the_host_not_the_container(monkeypatch, tmp_pa
     monkeypatch.setattr("builtins.open",
                         lambda p, *a, **k: real_open(meminfo, *a, **k)
                         if p == "/proc/meminfo" else real_open(p, *a, **k))
-    assert workspace.host_free_mb() == 7638        # 取的是 MemAvailable
+    assert workbackend.host_free_mb() == 7638        # 取的是 MemAvailable
 
 
 def test_capacity_blocks_when_the_host_is_low_on_memory(monkeypatch):
     monkeypatch.setattr(config, "WORK_MEM_LIMIT_MB", 512)
     monkeypatch.setattr(config, "WORK_MIN_FREE_MB", 1536)
     # 需要 512 + 1536 = 2048
-    monkeypatch.setattr(workspace, "host_free_mb", lambda: 2048)
+    monkeypatch.setattr(workbackend, "host_free_mb", lambda: 2048)
     assert workspace._capacity_reason() == ""          # 刚好够, 放行
-    monkeypatch.setattr(workspace, "host_free_mb", lambda: 2047)
+    monkeypatch.setattr(workbackend, "host_free_mb", lambda: 2047)
     assert workspace._capacity_reason().startswith("memory:")   # 差 1M, 拦下
 
 
 def test_unreadable_meminfo_lets_the_workspace_start(monkeypatch):
     """读不到就放行 —— 与本模块其余闸门同一姿态。反过来的话, 一个读不到 /proc
     的环境异常会把所有人挡在门外, 而那比偶尔一次内存紧张糟得多。"""
-    monkeypatch.setattr(workspace, "host_free_mb", lambda: None)
+    monkeypatch.setattr(workbackend, "host_free_mb", lambda: None)
     assert workspace._capacity_reason() == ""
 
 

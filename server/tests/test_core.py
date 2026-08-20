@@ -418,8 +418,10 @@ def test_boot_fingerprint_tracks_configuration_not_the_user():
     a = workspace._boot_fingerprint(workspace._boot_script())
     b = workspace._boot_fingerprint(workspace._boot_script())
     assert a == b
-    assert workspace._boot_is_stale({"Config": {"Labels": {}}}) is True
-    assert workspace._boot_is_stale({"Config": {"Labels": {workspace._CFG_LABEL: a}}}) is False
+    from app.workbackend import WorkInfo
+    blank = WorkInfo(running=True, boot_fp="", image_id="i", host="h")
+    assert workspace._boot_is_stale(blank) is True          # 没盖过戳 = 早于这套机制
+    assert workspace._boot_is_stale(WorkInfo(True, a, "i", "h")) is False
 
 
 def test_smtp_rejection_is_a_client_error_not_a_500():
