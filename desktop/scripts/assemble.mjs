@@ -181,6 +181,37 @@ console.log('assemble: copied dsh-plugin-cloud sources and assets')
   console.log(`assemble: registered ${CLOUD_URL_SCHEME}:// in build.protocols`)
 }
 
+// 4g. 产品版本号 = 我们集成的 dsh 运行时版本, 从 runtimePackageVersion 派生。
+//
+// 上游外壳自己的版本 (2.0.x) 是 anywhere-labs 的节奏, 对我们的用户没有意义 ——
+// 他们关心的是"这个客户端跑的是哪个版本的 DeepSeek Harness"。所以对外发版号
+// 跟运行时走: 0.1.0-rc.7 -> 0.1.7。
+//
+// 自动派生而不是手写: 版本号写死在两个地方就一定会漂 —— 升了 rc 忘了改版本,
+// 用户看到的版本与实际跑的运行时对不上, 而这种错没有任何测试会红。
+//
+// ⚠️ 必须是 stable SemVer (三段纯数字): 服务端 /api/desktop/version 用
+// ^\d+\.\d+\.\d+$ 校验, 客户端 updates.ts 的 isStableVersion 要求
+// prerelease 段为空 —— 带 -rc.N 的版本会被更新链路两头拒绝。上游是有意
+// 只让稳定版进自动更新通道的, 所以这里把 rc 号折进 patch 位, 而不是照搬。
+{
+  const pinned = JSON.parse(readFileSync(join(desktopDir, 'upstream.json'), 'utf8'))
+  const runtime = String(pinned.runtimePackageVersion ?? '')
+  const m = /^(\d+)\.(\d+)\.\d+-rc\.(\d+)$/.exec(runtime)
+  if (m === null) {
+    throw new Error(`assemble: runtimePackageVersion '${runtime}' 不是 x.y.z-rc.N 形式, `
+      + '无法派生对外版本号; 若上游改了版本规则, 请同步改这里的派生规则')
+  }
+  const productVersion = `${m[1]}.${m[2]}.${m[3]}`
+  const manifestPath = join(dest, 'dsh-plugin-desktop', 'package.json')
+  const pkg = JSON.parse(readFileSync(manifestPath, 'utf8'))
+  if (pkg.version !== productVersion) {
+    pkg.version = productVersion
+    writeFileSync(manifestPath, `${JSON.stringify(pkg, null, 2)}\n`)
+  }
+  console.log(`assemble: product version ${productVersion} (from runtime ${runtime})`)
+}
+
 // 5. redistribution guard: the identity-scoped @anthropic-ai/claude-agent-sdk
 // authorization does not extend to us; the desktop tree must not depend on it.
 const manifest = JSON.parse(readFileSync(join(dest, 'dsh-plugin-desktop', 'package.json'), 'utf8'))
