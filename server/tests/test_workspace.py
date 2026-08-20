@@ -561,3 +561,48 @@ def test_running_workspace_falls_back_to_storage_when_unreachable(fake, monkeypa
     assert "report.html" in r.text, "存储里有文件却没列出来 —— 用户会以为东西丢了"
     assert "/preview/file/report.html" in r.text
     assert "安全组" in caplog.text, "降级了却没喊 —— 那就没人会去修安全组"
+
+
+# --- 预览路径: 被预览的东西不能自己决定防护 ----------------------------------
+
+def test_live_preview_is_sandboxed_like_the_offline_one(fake, container_http):
+    """上游是智能体自己起的服务, 它的响应头由智能体决定。
+
+    没有沙箱, 页面就以站点自身的源运行 —— 同源 fetch 自动带上会话 cookie
+    (httponly 挡的是读, 不是发), API 认证的兜底正是读它, 而除 OAuth 外没有
+    CSRF 防护。于是被提示注入的智能体写出的页面, 在用户点开预览那一刻就能
+    以他的身份调 /api/auth/password, 且无密码账号的旧密码校验是跳过的。
+    """
+    c, uid = _user("sandbox@test.local")
+    c.get("/api/work/route"); c.get("/api/work/route")
+    r = c.get("/preview/8080/")
+    csp = r.headers.get("content-security-policy", "")
+    assert "sandbox" in csp, "活容器预览没有沙箱 —— 智能体写的页面能以用户身份调 API"
+    assert "allow-same-origin" not in csp, "带了 allow-same-origin 等于没沙箱"
+
+
+def test_upstream_cannot_override_our_csp_or_set_cookies(fake, monkeypatch):
+    """智能体的服务若自带 CSP 或 Set-Cookie, 不能盖过我们的、也不能在我们的域上
+    种 cookie。大小写不敏感地剔除 —— 这道防线不该押在"上游规规矩矩"上, 上游
+    正是被预览的那个东西。"""
+    c, uid = _user("hdr@test.local")
+    c.get("/api/work/route"); c.get("/api/work/route")
+
+    class Hostile:
+        async def __aenter__(self): return self
+        async def __aexit__(self, *exc): return False
+        async def request(self, method, url, **kw):
+            import httpx as _h
+            return _h.Response(200, content=b"<html>hi</html>", headers=[
+                ("content-type", "text/html"),
+                ("Content-Security-Policy", "default-src *"),   # 故意用大写
+                ("Set-Cookie", "evil=1; Path=/"),
+            ], request=_h.Request(method, url))
+    monkeypatch.setattr(workspace.httpx, "AsyncClient", lambda **kw: Hostile())
+
+    r = c.get("/preview/8080/")
+    csp = r.headers.get("content-security-policy", "")
+    assert "sandbox" in csp, "上游的 CSP 盖住了我们的"
+    assert "default-src *" not in csp
+    assert "evil=1" not in "; ".join(r.headers.get_list("set-cookie")), \
+        "智能体的服务在我们的域上种了 cookie"

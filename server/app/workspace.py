@@ -704,6 +704,23 @@ async def preview_proxy(request: Request, port: int, path: str):
     location = upstream.headers.get("location")
     if location and location.startswith("/"):
         headers["location"] = f"/preview/{port}{location}"
+    # 上游是**智能体自己起的服务**, 它的响应头由智能体决定 —— 原样转发等于让被
+    # 预览的东西自己决定防护。两样必须由我们说了算:
+    #
+    # 1) 沙箱。没有它, 页面就以 dshcloud.online 这个源运行, 同源 fetch 会自动
+    #    带上 dhc_session (httponly 挡的是读, 不是发), 而 API 认证的兜底正是读
+    #    它, 且除 OAuth 外没有 CSRF 防护。于是一个被提示注入的智能体写出的页面,
+    #    在用户点开预览的那一刻就能以他的身份调 /api/auth/password —— 而无密码
+    #    账号那条旧密码校验是跳过的。sandbox 不带 allow-same-origin, 文档落到
+    #    不透明源, 这条路就断了。
+    # 2) 上游的 set-cookie。智能体的服务没有资格在我们的域上种 cookie。
+    #
+    # 按大小写不敏感剔除后再写入: httpx 通常给小写键, 但这道防线不该押在
+    # "上游和客户端库都规规矩矩"上。
+    _agent_controlled = {"content-security-policy", "content-security-policy-report-only",
+                         "set-cookie"}
+    headers = {k: v for k, v in headers.items() if k.lower() not in _agent_controlled}
+    headers["content-security-policy"] = "sandbox allow-scripts allow-popups allow-forms"
     resp = Response(content=body, status_code=upstream.status_code, headers=headers)
     # Assets requested with an absolute path ("/style.css") land outside this
     # prefix; the cookie lets the fallback handler route them back here.
