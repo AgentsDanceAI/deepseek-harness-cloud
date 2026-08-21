@@ -50,16 +50,15 @@
     min-width: 0;
     margin-left: 60px;          /* the collapsed rail keeps its own space */
   }
-  /* Scrim, so an open drawer reads as a layer over the chat rather than as a
-     half-covered page. Only while expanded — dsh marks the collapsed rail with
-     a `…_collapsed` class on its inner root. Sits inside the sidebar's own
-     stacking context at z-index -1: above the chat, beneath the drawer. */
-  [class*="sidebarCol"]:not(:has([class*="collapsed"]))::after {
-    content: "";
+  /* 遮罩不做成 sidebarCol 的 ::after —— dsh 的 .pI_x6G_sidebarCol 和父容器
+     .pI_x6G_frame **都是 overflow:hidden**, 而遮罩要放在侧栏之外 (left:100%),
+     会被整个裁掉, 从来没渲染过。改由 workspace-chrome.js 在 body 上挂一层
+     #dhc-scrim, 位置贴着抽屉右边, 由 JS 按实际宽度设定。 */
+  #dhc-scrim {
     position: fixed;
-    top: 0; bottom: 0; left: 100%;
-    width: 100vw;
-    z-index: -1;
+    top: 0; bottom: 0; right: 0;
+    z-index: 59;                     /* 抽屉是 60, 压在它下面 */
     background: rgba(8, 16, 30, .38);
+    display: none;                   /* JS 只在窄屏且抽屉展开时显示 */
   }
 }

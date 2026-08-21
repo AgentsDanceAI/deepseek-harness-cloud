@@ -21,29 +21,80 @@
   var SITE = 'https://dshcloud.online';
   var TASK_KEY = 'dhc.pending_task';
 
-  /* ------------------------------------------------------- 手机: 点遮罩收起侧栏 */
+  /* --------------------------------------------------- 手机: 点抽屉外收起它 */
 
-  /* mobile.css 在窄屏下把侧栏改成浮层, 并用 sidebarCol 的 ::after 画一层遮罩。
-     伪元素不能单独接事件 —— 点在遮罩上时事件目标是**侧栏元素本身**, 于是"点空白
-     处"看起来毫无反应, 只能去按收起按钮。这里按坐标补上那一下:
-     落在侧栏右边界之外 = 落在遮罩上。
+  /* 第一版把遮罩做成 sidebarCol 的 ::after, 并假设点击会落在侧栏元素上 —— 两条都
+     错了。dsh 的 .pI_x6G_sidebarCol 和它的父容器 .pI_x6G_frame **都是
+     overflow:hidden**, 而遮罩定位在 left:100% (侧栏之外), 直接被裁掉, 从来没
+     渲染过; 于是点右边时事件目标是聊天区, 处理函数第一步就返回了。
 
-     两个选择器都用属性包含匹配, 与 mobile.css 保持同一套依赖 (上游的类名带
-     构建哈希, 只有 sidebarCol / toggle 这两个后缀是稳定的)。任一失配时退化成
-     "只能按按钮", 也就是修之前的行为, 不会更糟。 */
-  function sidebarTapOutside(e) {
-    var col = document.querySelector('[class*="sidebarCol"]');
-    if (!col || !col.contains(e.target)) return;
-    if (col.querySelector('[class*="collapsed"]')) return;      // 已经收着
-    var rect = col.getBoundingClientRect();
-    var x = e.clientX != null ? e.clientX : (e.touches && e.touches[0] || {}).clientX;
-    if (x == null || x <= rect.right) return;                   // 点的是抽屉里面
+     现在分成两件独立的事, 关键的那件不依赖另一件:
+       行为 — document 上的点击处理: 只要落点不在侧栏里就收起。不碰遮罩,
+              所以遮罩渲不渲染都不影响。
+       观感 — 我们自己挂在 body 上的遮罩层 (不在 dsh 那两个 overflow:hidden
+              容器里, 裁不掉), 并且**贴着抽屉右边**放, 万一层级判断有误也绝不会
+              盖住抽屉本身。
+
+     只在窄屏生效 —— 桌面端点聊天区收起侧栏是错的。760px 与 mobile.css 同一个断点。 */
+
+  var NARROW = '(max-width: 760px)';
+
+  function sidebarEl() { return document.querySelector('[class*="sidebarCol"]'); }
+  function sidebarOpen(col) {
+    return !!col && !col.querySelector('[class*="collapsed"]');
+  }
+
+  function collapseSidebar(col) {
     var toggle = col.querySelector('[class*="_toggle"]');
-    if (toggle) {
-      e.preventDefault();
-      e.stopPropagation();
-      toggle.click();
+    if (toggle) toggle.click();
+  }
+
+  function scrimEl() {
+    var el = document.getElementById('dhc-scrim');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'dhc-scrim';
+      el.addEventListener('click', function () {
+        var col = sidebarEl();
+        if (col) collapseSidebar(col);
+      });
+      document.body.appendChild(el);
     }
+    return el;
+  }
+
+  function syncScrim() {
+    var col = sidebarEl();
+    var el = scrimEl();
+    if (!col || !window.matchMedia(NARROW).matches || !sidebarOpen(col)) {
+      el.style.display = 'none';
+      return;
+    }
+    // 贴着抽屉右边: 即使层级判断有误, 也不可能盖住抽屉
+    el.style.left = Math.round(col.getBoundingClientRect().right) + 'px';
+    el.style.display = 'block';
+  }
+
+  /* 落点不在侧栏里 -> 收起。**不 preventDefault**: 点输入框那一下要既收抽屉又
+     聚焦输入框, 吞掉它会让人以为没反应。 */
+  function tapOutsideSidebar(e) {
+    if (!window.matchMedia(NARROW).matches) return;
+    var col = sidebarEl();
+    if (!col || !sidebarOpen(col)) return;
+    if (col.contains(e.target)) return;
+    collapseSidebar(col);
+  }
+
+  function watchSidebar() {
+    document.addEventListener('click', tapOutsideSidebar, true);
+    window.addEventListener('resize', syncScrim);
+    // dsh 收起/展开时改的是 class, 用 MutationObserver 跟住; 另加一个低频兜底,
+    // 免得它换成别的机制时遮罩永远停在错的状态。
+    var mo = new MutationObserver(syncScrim);
+    mo.observe(document.body, { subtree: true, attributes: true,
+                                attributeFilter: ['class'] });
+    setInterval(syncScrim, 1000);
+    syncScrim();
   }
 
   /* ---------------------------------------------------------------- exit */
@@ -173,7 +224,7 @@
   function start() {
     buildChrome();
     // 捕获阶段绑定: 抽屉里的项自己会 stopPropagation, 冒泡阶段收不到遮罩那一下。
-    document.addEventListener('click', sidebarTapOutside, true);
+    watchSidebar();
     // dsh boots asynchronously; poll briefly for its composer, then give up
     // quietly (the text stays in the box for the person to send themselves).
     var tries = 0;

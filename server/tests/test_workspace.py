@@ -832,32 +832,69 @@ def test_the_fluke_pivots_on_its_own_box_not_the_viewbox():
 
 # --- 手机端外壳与 dsh 的接缝 -------------------------------------------------
 
-def test_the_scrim_and_the_tap_handler_target_the_same_element():
-    """mobile.css 用 sidebarCol 的 ::after 画遮罩, workspace-chrome.js 靠同一个
-    选择器判断"点到遮罩了没有"。
+def _pwa(name):
+    from pathlib import Path
+    return (Path(__file__).resolve().parent.parent / "app" / "static" / "pwa"
+            / name).read_text(encoding="utf-8")
 
-    伪元素接不到独立事件 —— 点在遮罩上时事件目标是侧栏本身, 所以只能按坐标判断,
-    而坐标要从**同一个元素**量。两边写岔了不会报错, 只会让"点空白处收起"再次失效。
+
+def test_sidebar_tap_behaviour_actually_runs(tmp_path):
+    """真的执行那段 JS, 而不是在源码里找子串。
+
+    这个 bug 修了两次都没修好, 而两次的"测试"都是子串匹配 —— 第二次断言
+    `col.contains(e.target)`, 连 `!col.contains(e.target)` (正是第一版的错误
+    写法) 都能通过。字符串匹配对判定方向的错误完全无能为力。
+
+    node 不在 dhc-server 镜像里, 所以这里在没有 node 时跳过; 手动跑:
+        docker run --rm -v $PWD/server:/srv:ro --entrypoint node \
+            dsh-local:rc8 /srv/tests/js/sidebar_tap.test.mjs
+    """
+    import shutil
+    import subprocess
+    from pathlib import Path
+
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("没有 node —— 用 dsh-local 镜像手动跑 tests/js/sidebar_tap.test.mjs")
+    script = Path(__file__).resolve().parent / "js" / "sidebar_tap.test.mjs"
+    r = subprocess.run([node, str(script)], capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, r.stdout + r.stderr
+
+
+def test_the_scrim_is_not_a_pseudo_element_on_a_clipped_container():
+    """遮罩曾是 sidebarCol 的 ::after —— 而 dsh 的 .pI_x6G_sidebarCol 与父容器
+    .pI_x6G_frame **都是 overflow:hidden**, 定位在侧栏之外的伪元素被整个裁掉,
+    从未渲染。改成挂在 body 上的真实元素。
     """
     from pathlib import Path
     pwa = Path(__file__).resolve().parent.parent / "app" / "static" / "pwa"
     css = (pwa / "mobile.css").read_text(encoding="utf-8")
-    js = (pwa / "workspace-chrome.js").read_text(encoding="utf-8")
+    assert "#dhc-scrim" in css
+    assert "sidebarCol" not in css[css.index("#dhc-scrim"):], "遮罩又挂回侧栏里了"
 
-    assert 'sidebarCol' in css and '::after' in css, "遮罩不在了"
-    assert 'sidebarCol' in js, "点击处理没有用同一个选择器定位侧栏"
-    # 上游类名带构建哈希, 只有这两个后缀稳定 —— 用包含匹配而不是全等
-    assert '[class*="sidebarCol"]' in js
-    assert '_toggle' in js, "找不到收起按钮的选择器 —— 点了遮罩也收不起来"
-    assert 'collapsed' in js, "没有判断当前是否已收起, 会在收起状态下误触发"
+
+def test_tap_outside_is_scoped_to_narrow_screens():
+    """桌面端点聊天区收起侧栏是错的 —— 断点要和 mobile.css 一致。"""
+    js, css = _pwa("workspace-chrome.js"), _pwa("mobile.css")
+    assert "max-width: 760px" in js
+    assert "max-width: 760px" in css, "两处断点不一致, 会出现只改一半的行为"
+
+
+def test_the_tap_must_still_reach_what_it_hit():
+    """点输入框那一下要既收抽屉又聚焦输入框。
+
+    吞掉它会让人以为"点了没反应" —— 而那正是这次要修的毛病。
+    """
+    js = _pwa("workspace-chrome.js")
+    body = js[js.index("function tapOutsideSidebar"):js.index("function watchSidebar")]
+    assert "preventDefault" not in body, "吞掉了原本的点击"
+    assert "stopPropagation" not in body
 
 
 def test_the_tap_handler_runs_in_capture_phase():
-    """抽屉里的条目自己会 stopPropagation, 冒泡阶段收不到遮罩那一下。"""
-    from pathlib import Path
-    js = (Path(__file__).resolve().parent.parent / "app" / "static" / "pwa"
-          / "workspace-chrome.js").read_text(encoding="utf-8")
+    """抽屉里的条目自己会 stopPropagation, 冒泡阶段收不到抽屉外那一下。"""
     import re
-    m = re.search(r"addEventListener\(\s*['\"]click['\"]\s*,\s*sidebarTapOutside\s*,\s*(\w+)\s*\)", js)
-    assert m, "没有注册遮罩点击处理"
+    js = _pwa("workspace-chrome.js")
+    m = re.search(r"addEventListener\(\s*['\"]click['\"]\s*,\s*tapOutsideSidebar\s*,\s*(\w+)\s*\)", js)
+    assert m, "没有注册抽屉外点击处理"
     assert m.group(1) == "true", "不是捕获阶段 —— 会被抽屉内部的 stopPropagation 吃掉"
