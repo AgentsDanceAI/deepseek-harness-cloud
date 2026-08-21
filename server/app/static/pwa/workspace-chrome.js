@@ -21,6 +21,31 @@
   var SITE = 'https://dshcloud.online';
   var TASK_KEY = 'dhc.pending_task';
 
+  /* ------------------------------------------------------- 手机: 点遮罩收起侧栏 */
+
+  /* mobile.css 在窄屏下把侧栏改成浮层, 并用 sidebarCol 的 ::after 画一层遮罩。
+     伪元素不能单独接事件 —— 点在遮罩上时事件目标是**侧栏元素本身**, 于是"点空白
+     处"看起来毫无反应, 只能去按收起按钮。这里按坐标补上那一下:
+     落在侧栏右边界之外 = 落在遮罩上。
+
+     两个选择器都用属性包含匹配, 与 mobile.css 保持同一套依赖 (上游的类名带
+     构建哈希, 只有 sidebarCol / toggle 这两个后缀是稳定的)。任一失配时退化成
+     "只能按按钮", 也就是修之前的行为, 不会更糟。 */
+  function sidebarTapOutside(e) {
+    var col = document.querySelector('[class*="sidebarCol"]');
+    if (!col || !col.contains(e.target)) return;
+    if (col.querySelector('[class*="collapsed"]')) return;      // 已经收着
+    var rect = col.getBoundingClientRect();
+    var x = e.clientX != null ? e.clientX : (e.touches && e.touches[0] || {}).clientX;
+    if (x == null || x <= rect.right) return;                   // 点的是抽屉里面
+    var toggle = col.querySelector('[class*="_toggle"]');
+    if (toggle) {
+      e.preventDefault();
+      e.stopPropagation();
+      toggle.click();
+    }
+  }
+
   /* ---------------------------------------------------------------- exit */
 
   function buildChrome() {
@@ -147,6 +172,8 @@
 
   function start() {
     buildChrome();
+    // 捕获阶段绑定: 抽屉里的项自己会 stopPropagation, 冒泡阶段收不到遮罩那一下。
+    document.addEventListener('click', sidebarTapOutside, true);
     // dsh boots asynchronously; poll briefly for its composer, then give up
     // quietly (the text stays in the box for the person to send themselves).
     var tries = 0;

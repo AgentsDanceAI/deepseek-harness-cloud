@@ -828,3 +828,36 @@ def test_the_fluke_pivots_on_its_own_box_not_the_viewbox():
     css = w._BOOT_CSS.replace(" ", "").replace("\n", "")
     assert "transform-box:fill-box" in css, "没有 fill-box, 支点会按 viewBox 算"
     assert "transform-origin:0%50%" in css, "支点要在尾鳍与身体的连接处"
+
+
+# --- 手机端外壳与 dsh 的接缝 -------------------------------------------------
+
+def test_the_scrim_and_the_tap_handler_target_the_same_element():
+    """mobile.css 用 sidebarCol 的 ::after 画遮罩, workspace-chrome.js 靠同一个
+    选择器判断"点到遮罩了没有"。
+
+    伪元素接不到独立事件 —— 点在遮罩上时事件目标是侧栏本身, 所以只能按坐标判断,
+    而坐标要从**同一个元素**量。两边写岔了不会报错, 只会让"点空白处收起"再次失效。
+    """
+    from pathlib import Path
+    pwa = Path(__file__).resolve().parent.parent / "app" / "static" / "pwa"
+    css = (pwa / "mobile.css").read_text(encoding="utf-8")
+    js = (pwa / "workspace-chrome.js").read_text(encoding="utf-8")
+
+    assert 'sidebarCol' in css and '::after' in css, "遮罩不在了"
+    assert 'sidebarCol' in js, "点击处理没有用同一个选择器定位侧栏"
+    # 上游类名带构建哈希, 只有这两个后缀稳定 —— 用包含匹配而不是全等
+    assert '[class*="sidebarCol"]' in js
+    assert '_toggle' in js, "找不到收起按钮的选择器 —— 点了遮罩也收不起来"
+    assert 'collapsed' in js, "没有判断当前是否已收起, 会在收起状态下误触发"
+
+
+def test_the_tap_handler_runs_in_capture_phase():
+    """抽屉里的条目自己会 stopPropagation, 冒泡阶段收不到遮罩那一下。"""
+    from pathlib import Path
+    js = (Path(__file__).resolve().parent.parent / "app" / "static" / "pwa"
+          / "workspace-chrome.js").read_text(encoding="utf-8")
+    import re
+    m = re.search(r"addEventListener\(\s*['\"]click['\"]\s*,\s*sidebarTapOutside\s*,\s*(\w+)\s*\)", js)
+    assert m, "没有注册遮罩点击处理"
+    assert m.group(1) == "true", "不是捕获阶段 —— 会被抽屉内部的 stopPropagation 吃掉"
