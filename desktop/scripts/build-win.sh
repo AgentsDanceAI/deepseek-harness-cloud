@@ -102,8 +102,16 @@ dist="$tree/dsh-plugin-desktop/dist"
 # Name the two we actually ship rather than globbing *.exe: the glob neither
 # verified nor excluded the combined build, so "some .exe exists" was passing
 # for a success check even if a per-arch one was missing.
-x64_exe="$dist/DSH-Cloud-Desktop-2.0.0-x64-Setup.exe"
-arm_exe="$dist/DSH-Cloud-Desktop-2.0.0-arm64-Setup.exe"
+# 版本号从装配树的 package.json 读, **不要写死** —— assemble 会按
+# runtimePackageVersion 派生对外版本 (0.1.0-rc.6 -> 0.1.6), 写死的话版本一变
+# 产物名就对不上, 于是三个 exe 明明都打出来了, 脚本却在最后一步报
+# "missing expected artifact" 退出 (2026-08-20 实测: 版本从 2.0.0 改成 0.1.6
+# 当天就踩到)。这正是加版本派生时写下的那句"版本号写死在两处就一定会漂"。
+ver="$(node -p "require('$tree/dsh-plugin-desktop/package.json').version" 2>/dev/null)"
+[ -n "$ver" ] || { echo "!! 读不出装配树的版本号, 先跑 assemble.mjs" >&2; exit 1; }
+echo "    版本: $ver"
+x64_exe="$dist/DSH-Cloud-Desktop-$ver-x64-Setup.exe"
+arm_exe="$dist/DSH-Cloud-Desktop-$ver-arm64-Setup.exe"
 for exe in "$x64_exe" "$arm_exe"; do
   [ -f "$exe" ] || { echo "missing expected artifact: $exe" >&2; exit 1; }
   ls -lh "$exe"
