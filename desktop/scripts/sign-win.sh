@@ -29,6 +29,16 @@ PKCS11_MODULE="${PKCS11_MODULE:-/usr/local/lib/SimplySignPKCS/SimplySignPKCS-MS-
 }
 command -v osslsigncode >/dev/null || { echo "!! 需要 osslsigncode (brew install osslsigncode)" >&2; exit 1; }
 
+# osslsigncode 要通过 OpenSSL 的 pkcs11 engine 才能用硬件/云密钥, 而 brew 装的
+# openssl@3 默认只在自己 Cellar 里找 engine —— libp11 装到 /opt/homebrew/lib,
+# 两者对不上, 报 "Failed to find and load 'pkcs11' engine"。显式指过去。
+if [ -z "${OPENSSL_ENGINES:-}" ] && [ -d /opt/homebrew/lib/engines-3 ]; then
+  export OPENSSL_ENGINES=/opt/homebrew/lib/engines-3
+  export OPENSSL_MODULES=/opt/homebrew/lib/ossl-modules
+fi
+[ -f "${OPENSSL_ENGINES:-/nonexistent}/pkcs11.dylib" ] || \
+  echo "   (提示: 若报找不到 pkcs11 engine, 装 libp11: brew install libp11)" >&2
+
 echo "==> 检查证书是否已挂出 (需要 SimplySign Desktop 已登录)"
 slots="$(pkcs11-tool --module "$PKCS11_MODULE" -L 2>/dev/null || true)"
 if ! printf '%s' "$slots" | grep -qiE "slot [0-9]|token"; then
@@ -54,10 +64,21 @@ for exe in "$@"; do
   # 确认签名存在**且带时间戳**。没时间戳的签名在证书过期那天会集体失效。
   echo "==> 复验"
   v="$(osslsigncode verify -in "$out" 2>&1 || true)"
-  printf '%s' "$v" | grep -qiE "signature verified|succeeded" || {
-    echo "!! 验签未通过:" >&2; printf '%s\n' "$v" | tail -5 >&2; exit 1; }
-  printf '%s' "$v" | grep -qiE "timestamp|counter" || {
-    echo "!! 签名里没有时间戳 —— 证书过期后签名会失效, 拒绝交付。" >&2; exit 1; }
+  # ⚠️ **不要**拿 "Signature verification: failed" 当失败依据 —— 本机没有 Certum
+  # 的中间证书链时它必然这么报 (unable to get local issuer certificate), 而签名
+  # 本身完全有效。2026-08-21 第一版就是这么误判的, 差点把签好的包判成坏包。
+  # 真正该验的是这三件事实:
+  #   1. 摘要匹配 (Current == Calculated) —— 签名覆盖的确实是这个文件
+  #   2. 签发者是我们的 CA
+  #   3. 带 RFC3161 时间戳 —— 没有它, 证书到期那天所有已发布的包集体失效
+  cur="$(printf '%s' "$v" | grep -oE 'Current message digest *: *[0-9A-F]+' | grep -oE '[0-9A-F]{40,}' | head -1)"
+  cal="$(printf '%s' "$v" | grep -oE 'Calculated message digest *: *[0-9A-F]+' | grep -oE '[0-9A-F]{40,}' | head -1)"
+  [ -n "$cur" ] && [ "$cur" = "$cal" ] || {
+    echo "!! 摘要不匹配 —— 签名没有覆盖这个文件" >&2; printf '%s\n' "$v" | tail -6 >&2; exit 1; }
+  printf '%s' "$v" | grep -qiE "Issuer *:.*Certum Code Signing" || {
+    echo "!! 签发者不是预期的 Certum Code Signing CA" >&2; exit 1; }
+  printf '%s' "$v" | grep -qiE "Timestamp time *:" || {
+    echo "!! 签名里没有 RFC3161 时间戳 —— 证书过期后签名会失效, 拒绝交付。" >&2; exit 1; }
   mv -f "$out" "$exe"
   echo "    ✓ $(basename "$exe") 已签名并带时间戳"
 done
