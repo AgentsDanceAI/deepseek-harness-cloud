@@ -7,6 +7,12 @@
 # 本脚本只通过它挂出来的 PKCS#11 token 签名。会话过期要重登 —— Certum 的云签名
 # 没有纯程序化凭据, 所以签名做不到完全无人值守。
 #
+# ⚠️ "SimplySign Desktop 双击打不开"不等于它没在跑。装好后它由 LaunchAgent 拉起,
+# 常驻在**菜单栏**; Gatekeeper 只拦双击那条启动路径, launchd 那条照走。2026-08-21
+# 为这个假象绕了一大圈去啃 Linux 容器方案, 而进程 (PID 51171) 从头到尾好好活着。
+# 先确认: pgrep -f "SimplySign Desktop" —— 有输出就直接点菜单栏图标里的
+# "Connect with cloud" 登录, 别去修 dylib、别关 SIP、别重装。
+#
 # ⚠️ 为什么不在构建机 (Linux) 上签: Certum 确实提供 Linux 版 PKCS#11 库
 # (SimplySignPKCS_64-MS-*.so, 随 Linux 版安装包发布), 而且 p11-kit 能把 token
 # 从容器转出给宿主 —— 这条链 2026-08-21 实测打通到"宿主能问到库、返回 No slots"。
