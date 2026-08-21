@@ -193,6 +193,60 @@ done
 echo "==> restart the app so it picks up the new targets"
 docker compose up -d dhc-server
 
+# 下载地址和更新通道是两个独立开关。应用问的是 /api/desktop/version, 只有那个
+# 数字比自己高才会去下安装包 —— 只传包不翻版本号, 等于发了一版谁也收不到的更新
+# (0.1.6 就这么静默躺了一轮)。放在重启之后翻: 客户端要是先知道了 0.1.6, 而 .env
+# 里的 DOWNLOAD_URL_* 还没生效, 它会照着旧地址把上一版当新版下回去。
+echo "==> announce the new version to existing installs"
+ver=""
+for name in "${!KEY_OF[@]}"; do
+  # 带 -rc. 的名字要挡下来: sed 只会截到 rc 前面那截 (0.1.0-rc.6 -> 0.1.0),
+  # 公告出去是个比现装版本还低的号, 客户端直接忽略, 更新通道静默失效。
+  case "$name" in *-rc.*)
+    echo "    !! $name 是预发布命名 —— 版本号会被截成主版本, 公告出去必然失效。" >&2
+    echo "       打包时 assemble.mjs 应已把 rc 号折成稳定号, 检查那一步。" >&2
+    exit 1 ;;
+  esac
+  v="$(printf '%s' "$name" | sed -n 's/^DSH-Cloud-Desktop-\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)-.*/\1/p')"
+  [ -n "$v" ] || continue
+  if [ -n "$ver" ] && [ "$v" != "$ver" ]; then
+    echo "    !! 暂存目录里同时有 $ver 和 $v 的安装包 —— 版本号判不出来。" >&2
+    echo "       先把旧版本从 releases 目录清掉, 否则更新指向哪一版全看遍历顺序。" >&2
+    exit 1
+  fi
+  ver="$v"
+done
+[ -n "$ver" ] || {
+  echo "    !! 没有安装包的文件名里带稳定版本号, 无法公告版本。" >&2
+  echo "       文件名须形如 DSH-Cloud-Desktop-<x.y.z>-<平台>.<后缀>。" >&2
+  exit 1
+}
+
+# 重启后容器要几秒才起得来, 这里等它能 import 到 app.db 再写。
+for _ in $(seq 1 30); do
+  docker compose exec -T dhc-server python -c "import app.db" >/dev/null 2>&1 && break
+  sleep 1
+done
+
+docker compose exec -T dhc-server python - "$ver" <<'PY'
+import sys
+from app import db
+version = sys.argv[1]
+with db.tx() as conn:
+    conn.execute("DELETE FROM kv WHERE k='desktop_version'")
+    conn.execute("INSERT INTO kv (k, v) VALUES ('desktop_version', ?)", (version,))
+PY
+echo "    desktop_version -> $ver"
+
+# 端到端确认: 直接问线上那个端点, 它同时验证了写库、SemVer 格式和路由。
+live="$(curl -fsS --max-time 20 https://dshcloud.online/api/desktop/version || true)"
+case "$live" in
+  *"\"$ver\""*) echo "    /api/desktop/version 已返回 $ver" ;;
+  *) echo "    !! /api/desktop/version 返回的是 '${live:-<空>}', 不是 $ver。" >&2
+     echo "       更新通道没通, 但安装包已经上线 —— 手动排查后再收工。" >&2
+     exit 1 ;;
+esac
+
 echo
 echo "Done. The site now redirects downloads to R2; /releases stays as a fallback"
 echo "(and remains the only path for self-hosters). Check the counter still moves:"
