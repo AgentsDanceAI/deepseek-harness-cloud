@@ -7,6 +7,12 @@
 # 本脚本只通过它挂出来的 PKCS#11 token 签名。会话过期要重登 —— Certum 的云签名
 # 没有纯程序化凭据, 所以签名做不到完全无人值守。
 #
+# ⚠️ "SimplySign Desktop 双击打不开"不等于它没在跑。装好后它由 LaunchAgent 拉起,
+# 常驻在**菜单栏**; Gatekeeper 只拦双击那条启动路径, launchd 那条照走。2026-08-21
+# 为这个假象绕了一大圈去啃 Linux 容器方案, 而进程 (PID 51171) 从头到尾好好活着。
+# 先确认: pgrep -f "SimplySign Desktop" —— 有输出就直接点菜单栏图标里的
+# "Connect with cloud" 登录, 别去修 dylib、别关 SIP、别重装。
+#
 # ⚠️ 为什么不在构建机 (Linux) 上签: Certum 确实提供 Linux 版 PKCS#11 库
 # (SimplySignPKCS_64-MS-*.so, 随 Linux 版安装包发布), 而且 p11-kit 能把 token
 # 从容器转出给宿主 —— 这条链 2026-08-21 实测打通到"宿主能问到库、返回 No slots"。
@@ -22,6 +28,13 @@ set -euo pipefail
 # 时间戳服务器: 证书是 Certum 签发的, 用它自家的。时间戳让签名在证书过期后依然
 # 有效 —— 没有它, 证书一到期所有已发布的包都会变成"签名无效"。
 TS_URL="${TS_URL:-http://time.certum.pl/}"
+
+# 签名里带的产品名和主页 —— Windows 的 UAC 提示框会把 PRODUCT_NAME 显给用户看,
+# 所以换产品线签的时候必须一起换, 否则装 A 产品弹出的是 B 产品的名字。
+# 证书是公司主体的 (Beijing AgentsDance AI Technology Co., Ltd.), 给自家任何
+# 产品签都合规, 这两个值只是描述, 不影响证书链。
+PRODUCT_NAME="${PRODUCT_NAME:-DSH Cloud Desktop}"
+PRODUCT_URL="${PRODUCT_URL:-https://dshcloud.online}"
 PKCS11_MODULE="${PKCS11_MODULE:-/usr/local/lib/SimplySignPKCS/SimplySignPKCS-MS-1.1.24.dylib}"
 [ -f "$PKCS11_MODULE" ] || {
   PKCS11_MODULE="$(ls /usr/local/lib/SimplySignPKCS/*.dylib 2>/dev/null | head -1)"
@@ -57,7 +70,7 @@ for exe in "$@"; do
     -pkcs11cert 'pkcs11:model=SimplySign%20C' \
     -key 'pkcs11:model=SimplySign%20C' \
     -h sha256 -ts "$TS_URL" \
-    -n "DSH Cloud Desktop" -i "https://dshcloud.online" \
+    -n "$PRODUCT_NAME" -i "$PRODUCT_URL" \
     -in "$exe" -out "$out"
 
   # 验签: 光看 osslsigncode 退出码不够 —— 它对某些失败也返回 0。真去读回签名,
