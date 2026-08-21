@@ -28,6 +28,13 @@ set -euo pipefail
 # 时间戳服务器: 证书是 Certum 签发的, 用它自家的。时间戳让签名在证书过期后依然
 # 有效 —— 没有它, 证书一到期所有已发布的包都会变成"签名无效"。
 TS_URL="${TS_URL:-http://time.certum.pl/}"
+
+# 签名里带的产品名和主页 —— Windows 的 UAC 提示框会把 PRODUCT_NAME 显给用户看,
+# 所以换产品线签的时候必须一起换, 否则装 A 产品弹出的是 B 产品的名字。
+# 证书是公司主体的 (Beijing AgentsDance AI Technology Co., Ltd.), 给自家任何
+# 产品签都合规, 这两个值只是描述, 不影响证书链。
+PRODUCT_NAME="${PRODUCT_NAME:-DSH Cloud Desktop}"
+PRODUCT_URL="${PRODUCT_URL:-https://dshcloud.online}"
 PKCS11_MODULE="${PKCS11_MODULE:-/usr/local/lib/SimplySignPKCS/SimplySignPKCS-MS-1.1.24.dylib}"
 [ -f "$PKCS11_MODULE" ] || {
   PKCS11_MODULE="$(ls /usr/local/lib/SimplySignPKCS/*.dylib 2>/dev/null | head -1)"
@@ -63,7 +70,7 @@ for exe in "$@"; do
     -pkcs11cert 'pkcs11:model=SimplySign%20C' \
     -key 'pkcs11:model=SimplySign%20C' \
     -h sha256 -ts "$TS_URL" \
-    -n "DSH Cloud Desktop" -i "https://dshcloud.online" \
+    -n "$PRODUCT_NAME" -i "$PRODUCT_URL" \
     -in "$exe" -out "$out"
 
   # 验签: 光看 osslsigncode 退出码不够 —— 它对某些失败也返回 0。真去读回签名,
