@@ -221,7 +221,7 @@ WORK_MAX_CONCURRENT = _env_int("WORK_MAX_CONCURRENT", 40)    # global running-co
 WORK_MEM_LIMIT_MB = _env_int("WORK_MEM_LIMIT_MB", 512)
 # 起新工作台前要求宿主至少还剩这么多可用内存(MB, 不含即将分配的那 512)。
 # WORK_MAX_CONCURRENT 是**静态**上限, 它不知道同机还跑着别的东西 —— 本机与
-# a sibling production system 全栈共用 14G, 8 × 512M 的额度在对方峰值时可能就是压垮线。
+# 另一套自有生产系统全栈共用 14G, 8 × 512M 的额度在对方峰值时可能就是压垮线。
 # 而 Linux 的 OOM killer 不挑肇事者, 它按内存占用选, 最可能被杀的是 postgres
 # 或 elasticsearch 这种大块头, 而不是闯祸的工作台。所以在**分配之前**就拦。
 WORK_MIN_FREE_MB = _env_int("WORK_MIN_FREE_MB", 1536)

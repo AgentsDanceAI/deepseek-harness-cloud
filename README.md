@@ -104,12 +104,15 @@ rather than silently.
 cd server
 python -m venv .venv && .venv/bin/pip install -e .
 DHC_DEV=1 AUTH_SECRET=dev .venv/bin/python -m uvicorn app.main:app --reload
-.venv/bin/python -m pytest tests -q      # 103 tests
+.venv/bin/python -m pytest tests -q      # 267 tests
 ```
 
 ### Licence and attribution
 
-MIT. Built on DeepSeek Harness (MIT). This is an independent project — not
+[AGPL-3.0](LICENSE). Built on DeepSeek Harness (MIT, assembled at build
+time — not vendored). Self-hosting is free; if you run a modified version as
+a network service, the AGPL requires you to publish your modifications.
+Contact us for commercial licensing. This is an independent project — not
 affiliated with, nor endorsed by, DeepSeek. "DeepSeek" belongs to its owner.
 
 ---
@@ -188,7 +191,7 @@ bash scripts/quickstart.sh --domain localhost --admin-email you@example.com
 cd server
 python -m venv .venv && .venv/bin/pip install -e .
 DHC_DEV=1 AUTH_SECRET=dev .venv/bin/python -m uvicorn app.main:app --reload
-.venv/bin/python -m pytest tests -q      # 103 个测试
+.venv/bin/python -m pytest tests -q      # 267 个测试
 ```
 
 ### 仓库布局
@@ -204,5 +207,7 @@ DHC_DEV=1 AUTH_SECRET=dev .venv/bin/python -m uvicorn app.main:app --reload
 
 ### 许可与声明
 
-MIT。基于 DeepSeek Harness（MIT）构建。本项目独立运营，与 DeepSeek
-无隶属或背书关系，「DeepSeek」为其权利人所有的商标。
+[AGPL-3.0](LICENSE)。基于 DeepSeek Harness（MIT，构建时装配，不随仓库
+分发）。自部署免费；若将修改后的版本作为网络服务运营，AGPL 要求公开你的
+修改。商业授权请联系我们。本项目独立运营，与 DeepSeek 无隶属或背书关系，
+「DeepSeek」为其权利人所有的商标。
