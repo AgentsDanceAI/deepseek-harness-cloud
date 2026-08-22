@@ -25,6 +25,15 @@ def test_runtime_image_uses_only_operator_neutral_legal_assets():
     assert (ROOT / "server/legal/README.md").is_file()
 
 
+def test_hosted_production_mounts_its_legal_documents_explicitly():
+    production = (ROOT / "deploy/prod/compose.yml").read_text(encoding="utf-8")
+    selfhost = (ROOT / "deploy/selfhost/docker-compose.yml").read_text(encoding="utf-8")
+
+    assert "DHC_LEGAL_DIR: /srv/operator-legal" in production
+    assert "../../legal:/srv/operator-legal:ro" in production
+    assert "../../legal:/srv/operator-legal:ro" not in selfhost
+
+
 def test_selfhost_compose_defaults_are_safe_and_image_first():
     compose = (ROOT / "deploy/selfhost/docker-compose.yml").read_text(encoding="utf-8")
     assert "image: ${DHC_SERVER_IMAGE" in compose

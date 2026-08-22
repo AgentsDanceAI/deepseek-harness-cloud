@@ -57,12 +57,16 @@ services:
     env_file: [".env"]
     environment:
       DHC_DATA_DIR: /app/data
+      # Hosted legal documents are intentionally excluded from the neutral
+      # runtime image and must be supplied only by the Hosted deployment.
+      DHC_LEGAL_DIR: /srv/operator-legal
       # Where the per-user workspace volumes are mounted below. Lets 個人成品
       # list and open a user's files while their container is asleep, which is
       # most of the time.
       WORK_VOLUME_ROOT: /hostvolumes
     volumes:
       - dhc-data:/app/data
+      - ../../legal:/srv/operator-legal:ro
       # Read-only, and no new authority: dhc-server already drives container
       # creation through the socket proxy, which can bind-mount anything.
       # The path is the HOST's docker volume root and differs per machine —
