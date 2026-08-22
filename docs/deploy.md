@@ -1,5 +1,7 @@
 # Self-host deployment
 
+English | [简体中文](deploy.zh-CN.md)
+
 This guide covers the public Community Edition. It does not describe any live DSH
 Cloud environment. For the managed service, use
 [DSH Cloud Hosted](https://dshcloud.online/login?next=%2Fwork); the remaining
@@ -14,11 +16,9 @@ steps are intentionally neutral self-host instructions.
 | npm/npx or uv/uvx CLI | Guided configuration and lifecycle commands | Generates and operates the same versioned stack |
 | Source development | Contributors changing server behavior | Development mode; never expose publicly |
 
-Published packages and images are usable only after their immutable version is
-present in the relevant registry. Before that publication gate, build from this
-source checkout. The repository currently coordinates version `0.2.0` in
-`release/release.json`; a version number in source is not proof that an artifact
-has been published.
+Release `0.2.0` coordinates packages and images through `release/release.json`.
+Use exact package versions or image digests in automation. Source builds remain
+available for development and independent verification.
 
 ## Prerequisites
 

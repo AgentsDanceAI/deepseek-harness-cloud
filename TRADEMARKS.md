@@ -1,5 +1,7 @@
 # Trademark policy
 
+English | [简体中文](TRADEMARKS.zh-CN.md)
+
 The software license in [LICENSE](LICENSE) grants copyright permissions. It
 does not grant rights to use project names, logos, domains, or other source
 identifiers as the identity of a different product or service. This policy
@@ -32,9 +34,9 @@ Do not, without written permission:
   social accounts, or application-store listings; or
 - alter notices in a way that creates a false origin or sponsorship claim.
 
-Forks can exercise all rights granted by AGPL-3.0 while choosing distinct
-branding. Removing project marks where technically practical does not remove
-license notices or attribution obligations.
+Forks can exercise the rights granted by the DSH Cloud Community License while
+using distinct branding where that license permits. Removing project marks does
+not remove license notices or attribution obligations.
 
 “DeepSeek” and related identifiers belong to their respective owners. DSH Cloud
 is an independent project and does not claim affiliation with or endorsement by

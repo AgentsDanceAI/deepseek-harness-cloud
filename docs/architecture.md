@@ -1,5 +1,7 @@
 # Architecture
 
+English | [简体中文](architecture.zh-CN.md)
+
 DSH Cloud adds accounts, policy, metering, a model gateway, and an optional
 browser workspace around the DeepSeek Harness agent runtime. The same public
 service can be operated by a self-hoster or used through DSH Cloud Hosted.

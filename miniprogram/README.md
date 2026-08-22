@@ -1,71 +1,27 @@
-# DSH Cloud 微信小程序
+# DSH Cloud WeChat Mini Program
 
-原生小程序工程 (无构建步骤), 用微信开发者工具「导入项目」本目录即可。
+English | [简体中文](README.zh-CN.md)
 
-定位: **web-view 壳** — 首页/关于页是原生静态页, 云工作台内嵌
-`https://dshcloud.online/work` 网页版。因为业务域名必须是 ICP 备案域名
-(见下), 而 dshcloud.online 是境外域名无备案, **本工程目前是可提交的
-脚手架, 待国内域名 + 备案就绪后才能真机可用**。
+This directory is a native WeChat Mini Program scaffold with no build step. The
+home and about pages are native; the workspace is a `web-view` that loads the DSH
+Cloud web application.
 
-## 页面
+## Production prerequisites
 
-| 页面 | 内容 |
-|---|---|
-| `pages/index` | 品牌首页: wxss 画的 logo (圆角方块 + 白色 `>`)、简介、两个入口按钮; web-view 打开失败后显示兜底提示 |
-| `pages/webview` | `<web-view>` 壳页, `url` 参数指定目标页; `binderror` 弹窗提示业务域名未配置并返回 |
-| `pages/about` | 产品说明、官网地址、客服邮箱 (点按复制) |
+1. Register and verify an enterprise Mini Program account.
+2. Replace the placeholder AppID in `project.config.json`.
+3. Use an ICP-filed mainland domain owned by the same entity and configure it as
+   a WeChat business domain.
+4. Host WeChat's ownership-verification file at the domain root.
+5. Replace the current workspace URL in the index and webview page scripts.
+6. Test login, cookie persistence, failure fallback, and every review path on a
+   real device.
 
-视觉: 品牌蓝 `#2663c9` 与站点一致; 基线样式在 `app.wxss`, 各页只写差异。
+The existing `dhc_session` cookie remains inside the embedded browser; no Mini
+Program credential bridge is included. A future WeChat sign-in flow would need a
+server-validated code-to-openid exchange and explicit account binding.
 
-## 上线步骤清单
-
-### a. 注册小程序、替换 AppID
-
-1. [mp.weixin.qq.com](https://mp.weixin.qq.com) 注册**小程序**账号, 主体选
-   **企业** (个人主体不能配置业务域名, web-view 用不了)。
-2. 完成**微信认证** (¥300/年) — 业务域名等能力要求认证后的企业主体。
-3. 拿到真实 AppID 后替换 `project.config.json` 里的占位
-   `wx0000000000000000`。
-
-### b. 业务域名 (web-view 的硬前置)
-
-web-view 只能加载「业务域名」白名单内的页面, 且域名必须:
-
-- **已 ICP 备案** — 所以必须先有国内域名并完成备案, 境外域名用不了;
-- **备案主体与小程序主体一致**;
-- 通过**校验文件**验证归属: 在微信公众平台下载校验文件
-  (形如 `WxxxxxxxT.txt`), 放到域名**根路径**下可直接访问 —
-  我们服务端加一条静态路由返回该文件即可 (Caddy/FastAPI 一行的事)。
-
-配置位置: 微信公众平台 → **设置 → 开发设置 → 业务域名** (每自然年可
-修改 50 次)。配置完成后把 `pages/index/index.js` 与
-`pages/webview/webview.js` 里的 `https://dshcloud.online/work` 换成国内
-域名地址。
-
-### c. web-view 内登录态
-
-- 站点登录态是 **`dhc_session` cookie**, 属于 web-view 内嵌浏览器自己的
-  会话: 用户在内嵌页登录一次, cookie 就一直在, 后续打开仍是登录态。
-  **无需任何小程序侧桥接**, 脚手架不含登录代码是刻意的。
-- 后续如要「微信一键登录/绑定」(免去在内嵌页输邮箱验证码): 小程序侧
-  `wx.login` 拿 code，服务端增加受验证的 code-to-openid 交换与会话签发端点。
-  该能力列为后续项，不属于当前脚手架的认证边界。
-
-### d. 审核注意
-
-- 类目选**工具**类 (如 工具 → 效率), 避免涉及需资质的类目。
-- **iOS 内不得出现任何虚拟支付引导** (苹果限制, 微信审核红线):
-  内嵌页在小程序环境里不能展示充值/购买套餐入口, 或按 UA 判断在
-  小程序 web-view 内时隐藏支付相关页面。
-- 首页与截图文案避免出现「充值」等字样 (当前脚手架文案已规避)。
-- 提审前确认 web-view 目标页在真机上可打开, 否则会以「无法体验核心
-  功能」被驳回。
-
-### e. 当前状态
-
-- 脚手架可在**微信开发者工具**中直接导入预览: index / about 页正常;
-- webview 页需在开发者工具「详情 → 本地设置」勾选
-  **「不校验合法域名、web-view (业务域名)、TLS 版本以及 HTTPS 证书」**
-  后可预览 dshcloud.online 页面;
-- 真机上 webview 页会因业务域名未配置而失败 → 已有兜底提示
-  (弹窗 + 首页提示条), 不会白屏。
+Before submission, choose an appropriate tools/productivity category and remove
+virtual-payment prompts from the iOS Mini Program experience. The scaffold can be
+previewed in WeChat Developer Tools with domain validation disabled, but it is not
+production-ready until the verified business domain is configured.

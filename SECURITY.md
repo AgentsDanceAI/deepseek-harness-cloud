@@ -1,5 +1,7 @@
 # Security policy
 
+English | [简体中文](SECURITY.zh-CN.md)
+
 We welcome responsible vulnerability reports and coordinate fixes privately.
 
 ## Supported versions

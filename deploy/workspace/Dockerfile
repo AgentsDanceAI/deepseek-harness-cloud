@@ -7,7 +7,7 @@ ARG REVISION=unknown
 LABEL org.opencontainers.image.source="https://github.com/AgentsDanceAI/deepseek-harness-cloud" \
       org.opencontainers.image.version="${VERSION}" \
       org.opencontainers.image.revision="${REVISION}" \
-      org.opencontainers.image.licenses="AGPL-3.0-only"
+      org.opencontainers.image.licenses="LicenseRef-DSH-Cloud-Community-1.0"
 
 RUN test -n "${HARNESS_RUNTIME}" \
  && apt-get update -qq \

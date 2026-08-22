@@ -82,6 +82,7 @@ export async function loadManifest() {
   return {
     schemaVersion: 1,
     version: source.version,
+    license: source.license,
     stackSchema: source.stackSchema,
     databaseSchema: source.databaseSchema,
     minCliVersion: source.minCliVersion,

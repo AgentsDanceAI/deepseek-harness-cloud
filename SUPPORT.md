@@ -1,5 +1,7 @@
 # Support
 
+English | [简体中文](SUPPORT.zh-CN.md)
+
 Choose the route that matches your request. Public support is community-based
 and has no response-time commitment unless a separate agreement says otherwise.
 
@@ -16,9 +18,10 @@ and has no response-time commitment unless a separate agreement says otherwise.
 ## DSH Cloud Hosted
 
 [DSH Cloud Hosted](https://dshcloud.online/login?next=%2Fwork) is a managed
-subscription service, not a token-resale service. Individual and team offerings
-include managed access and plan allowances. Current public offers are paid once
-for the selected monthly or annual term and **do not renew automatically**.
+subscription service. Individual and team offerings include managed model access,
+workspace capacity, upgrades, monitoring, backups, account support, and plan
+allowances. Current public offers are paid once for the selected monthly or annual
+term and **do not renew automatically**.
 
 - [Individual plans](https://dshcloud.online/pricing#plans)
 - [Team plans](https://dshcloud.online/pricing#team)

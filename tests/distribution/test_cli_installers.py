@@ -1,7 +1,9 @@
+import hashlib
 import json
 import os
 import subprocess
 import sys
+import tarfile
 import zipfile
 from pathlib import Path
 
@@ -134,6 +136,15 @@ def test_staged_packages_ship_templates_and_release_manifest(tmp_path: Path):
     files = {item["path"] for item in json.loads(packed.stdout)[0]["files"]}
     assert "templates/docker-compose.yml" in files
     assert "release-manifest.json" in files
+    package = json.loads((npm / "package.json").read_text(encoding="utf-8"))
+    assert package["license"] == "SEE LICENSE IN LICENSE"
+    assert package["homepage"].startswith("https://github.com/AgentsDanceAI/")
+    assert package["bugs"].endswith("/issues")
+    assert package["author"] == "AgentsDance AI"
+    assert package["publishConfig"] == {
+        "access": "public",
+        "registry": "https://registry.npmjs.org/",
+    }
 
 
 def test_package_staging_excludes_local_caches_and_virtualenvs(tmp_path: Path):
@@ -166,9 +177,51 @@ def test_python_wheel_contains_deployment_assets(tmp_path: Path):
     assert "dsh_cloud_cli/templates/config/i18n/en.json" in names
     assert "dsh_cloud_cli/templates/config/pricing.eur.json" in names
     assert metadata.metadata_version == "2.4"
-    assert metadata.license_expression == "AGPL-3.0-only"
+    assert metadata.license_expression == "LicenseRef-DSH-Cloud-Community-1.0"
     assert "LICENSE" in metadata.license_files
     assert any(name.endswith(".dist-info/licenses/LICENSE") for name in names)
+
+
+def test_python_release_artifacts_are_reproducible_and_publishable(tmp_path: Path):
+    stage = tmp_path / "stage"
+    subprocess.run(["node", "scripts/release/build-packages.mjs", str(stage)], cwd=ROOT, check=True)
+    hashes = []
+    outputs = []
+    for build_number in (1, 2):
+        output = tmp_path / f"build-{build_number}"
+        env = {
+            **os.environ,
+            "SOURCE_DATE_EPOCH": "0",
+            "UV_CACHE_DIR": str(tmp_path / "uv-cache"),
+        }
+        result = subprocess.run(
+            ["uv", "build", "--sdist", "--wheel", "--project", str(stage / "python"), "--out-dir", str(output)],
+            cwd=ROOT,
+            env=env,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr
+        artifacts = sorted(output.iterdir())
+        outputs.append(artifacts)
+        hashes.append([hashlib.sha256(path.read_bytes()).hexdigest() for path in artifacts])
+
+    assert hashes[0] == hashes[1]
+    wheel = next(path for path in outputs[0] if path.suffix == ".whl")
+    sdist = next(path for path in outputs[0] if path.name.endswith(".tar.gz"))
+    with zipfile.ZipFile(wheel) as archive:
+        metadata_name = next(name for name in archive.namelist() if name.endswith(".dist-info/METADATA"))
+        metadata_text = archive.read(metadata_name).decode()
+    assert "Description-Content-Type: text/markdown" in metadata_text
+    assert "Author: AgentsDance AI" in metadata_text
+    assert "Project-URL: Homepage," in metadata_text
+    assert "# `dsh-cloud`" in metadata_text
+    with tarfile.open(sdist, "r:gz") as archive:
+        members = archive.getmembers()
+    assert all(member.uid == 0 and member.gid == 0 for member in members)
+    assert all(not member.uname and not member.gname for member in members)
+    assert all(member.mtime == 0 for member in members)
 
 
 def test_install_documentation_distinguishes_source_and_registry_commands():
@@ -179,7 +232,8 @@ def test_install_documentation_distinguishes_source_and_registry_commands():
     assert "uv run --project packages/cli-python" in text
     assert "npm pack dist/packages/npm --dry-run --json" in text
     assert "npm pack --dry-run --json --prefix" not in text
-    assert "not published" in text.lower()
+    assert "not published" not in text.lower()
+    assert "after publication" not in text.lower()
     assert "http://localhost:8787" in text
     assert "http://127.0.0.1:8787" not in text
 

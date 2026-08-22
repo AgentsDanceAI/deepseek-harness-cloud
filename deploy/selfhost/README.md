@@ -1,5 +1,7 @@
 # 自部署 DSH Cloud / Self-host DSH Cloud
 
+English / 中文说明 | [简体中文独立版](README.zh-CN.md)
+
 **中文** — 一条命令，在自己的服务器上跑起一套私有的 dsh 云平台：账号体系、统一
 LLM 网关（上游 key 永不下发到客户端）、积分与套餐计费、Web 控制台，以及可选的
 「云工作台」（每个用户一个浏览器里可用的 dsh 容器）。

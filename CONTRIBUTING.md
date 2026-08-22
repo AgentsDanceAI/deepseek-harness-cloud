@@ -1,5 +1,7 @@
 # Contributing to DSH Cloud
 
+English | [简体中文](CONTRIBUTING.zh-CN.md)
+
 Thank you for improving DSH Cloud. Small, focused pull requests with tests and
 clear provenance are easiest to review.
 
@@ -78,8 +80,8 @@ git commit -s
 ```
 
 The resulting `Signed-off-by` line certifies the origin of the contribution. It
-does not override AGPL-3.0, transfer trademarks, or by itself authorize a future
-license change. Prefer a GitHub noreply address if you do not want a personal
+does not override the DSH Cloud Community License, transfer trademarks, or by
+itself authorize a license change. Prefer a GitHub noreply address if you do not want a personal
 mailbox published permanently in Git history.
 
 ## Provenance and generated material

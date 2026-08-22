@@ -1,0 +1,221 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Verify and build exact artifacts
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+      created: ${{ steps.release.outputs.created }}
+      python_image: ${{ steps.release.outputs.python_image }}
+      uv_image: ${{ steps.release.outputs.uv_image }}
+      node_image: ${{ steps.release.outputs.node_image }}
+      harness_runtime: ${{ steps.release.outputs.harness_runtime }}
+      server_image: ${{ steps.release.outputs.server_image }}
+      workspace_image: ${{ steps.release.outputs.workspace_image }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "22"
+          registry-url: https://registry.npmjs.org/
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e
+        with:
+          version: "0.11.6"
+          enable-cache: true
+      - name: Resolve and validate release identity
+        id: release
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./release/release.json').version")"
+          test "${GITHUB_REF_NAME}" = "v${version}"
+          test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"
+          created="$(git show -s --format=%cI HEAD)"
+          epoch="$(git show -s --format=%ct HEAD)"
+          {
+            echo "version=${version}"
+            echo "created=${created}"
+            echo "epoch=${epoch}"
+            echo "python_image=$(node -p "require('./release/release.json').baseImages.python")"
+            echo "uv_image=$(node -p "require('./release/release.json').baseImages.uv")"
+            echo "node_image=$(node -p "require('./release/release.json').baseImages.node")"
+            echo "harness_runtime=$(node -p "require('./release/release.json').harnessRuntime")"
+            echo "server_image=$(node -p "require('./release/release.json').productImages.server.split(':')[0]")"
+            echo "workspace_image=$(node -p "require('./release/release.json').productImages.workspace.split(':')[0]")"
+          } >> "${GITHUB_OUTPUT}"
+          echo "SOURCE_DATE_EPOCH=${epoch}" >> "${GITHUB_ENV}"
+      - name: Install locked test dependencies
+        run: uv sync --project server --all-extras --locked
+      - name: Run release verification
+        run: |
+          PYTHON=server/.venv/bin/python bash scripts/release/check.sh
+          server/.venv/bin/python -m pytest server/tests tests/repository -q
+          server/.venv/bin/python -m ruff format --check server/app server/tests server/scripts
+          server/.venv/bin/python -m ruff check server/app server/tests server/scripts
+          node --test server/tests/js/*.test.mjs
+      - name: Build CLI artifacts once
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist/release
+          node scripts/release/build-packages.mjs dist/packages
+          npm pack dist/packages/npm --pack-destination dist/release --json
+          uv build --sdist --wheel --project dist/packages/python --out-dir dist/release
+          node scripts/release/generate-sbom.mjs dist/packages \
+            "dist/release/dsh-cloud-${{ steps.release.outputs.version }}.spdx.json"
+          (
+            cd dist/release
+            find . -maxdepth 1 -type f ! -name SHA256SUMS -print0 \
+              | sort -z | xargs -0 sha256sum > SHA256SUMS
+          )
+      - name: Smoke test exact CLI artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --global --prefix "${RUNNER_TEMP}/npm-smoke" dist/release/*.tgz
+          "${RUNNER_TEMP}/npm-smoke/bin/dsh-cloud" --version | grep -Fx "${{ steps.release.outputs.version }}"
+          uv venv "${RUNNER_TEMP}/python-smoke"
+          uv pip install --python "${RUNNER_TEMP}/python-smoke/bin/python" dist/release/*.whl
+          "${RUNNER_TEMP}/python-smoke/bin/dsh-cloud" --version | grep -Fx "${{ steps.release.outputs.version }}"
+          (cd dist/release && sha256sum --check SHA256SUMS)
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: release-${{ steps.release.outputs.version }}
+          path: dist/release/*
+          if-no-files-found: error
+          retention-days: 30
+      - uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be
+        with:
+          subject-path: dist/release/*
+
+  publish:
+    name: Publish registries and GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: write
+      packages: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "22"
+          registry-url: https://registry.npmjs.org/
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e
+        with:
+          version: "0.11.6"
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: release-${{ needs.build.outputs.version }}
+          path: dist/release
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and publish server image
+        id: server
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
+        with:
+          context: .
+          file: server/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ needs.build.outputs.server_image }}:${{ needs.build.outputs.version }}
+            ${{ needs.build.outputs.server_image }}:sha-${{ github.sha }}
+          build-args: |
+            VERSION=${{ needs.build.outputs.version }}
+            REVISION=${{ github.sha }}
+            CREATED=${{ needs.build.outputs.created }}
+            PYTHON_IMAGE=${{ needs.build.outputs.python_image }}
+            UV_IMAGE=${{ needs.build.outputs.uv_image }}
+          provenance: mode=max
+          sbom: true
+      - uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be
+        with:
+          subject-name: ${{ needs.build.outputs.server_image }}
+          subject-digest: ${{ steps.server.outputs.digest }}
+          push-to-registry: true
+      - name: Build and publish workspace image
+        id: workspace
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
+        with:
+          context: .
+          file: deploy/workspace/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ needs.build.outputs.workspace_image }}:${{ needs.build.outputs.version }}
+            ${{ needs.build.outputs.workspace_image }}:sha-${{ github.sha }}
+          build-args: |
+            VERSION=${{ needs.build.outputs.version }}
+            REVISION=${{ github.sha }}
+            NODE_IMAGE=${{ needs.build.outputs.node_image }}
+            HARNESS_RUNTIME=${{ needs.build.outputs.harness_runtime }}
+          provenance: mode=max
+          sbom: true
+      - uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be
+        with:
+          subject-name: ${{ needs.build.outputs.workspace_image }}
+          subject-digest: ${{ steps.workspace.outputs.digest }}
+          push-to-registry: true
+      - name: Publish npm package with trusted publishing
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --global npm@11.5.1
+          npm publish dist/release/*.tgz --access public --provenance \
+            --registry=https://registry.npmjs.org/
+      - name: Publish Python package with trusted publishing
+        run: uv publish --trusted-publishing always dist/release/*.whl dist/release/*.tar.gz
+      - name: Verify public registries anonymously
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker logout ghcr.io
+          for attempt in $(seq 1 18); do
+            if docker buildx imagetools inspect \
+                 "${{ needs.build.outputs.server_image }}:${{ needs.build.outputs.version }}" >/dev/null \
+               && docker buildx imagetools inspect \
+                 "${{ needs.build.outputs.workspace_image }}:${{ needs.build.outputs.version }}" >/dev/null \
+               && npx --yes "@agentsdanceai/dsh-cloud@${{ needs.build.outputs.version }}" --version \
+                    | grep -Fx "${{ needs.build.outputs.version }}" \
+               && uvx "dsh-cloud==${{ needs.build.outputs.version }}" --version \
+                    | grep -Fx "${{ needs.build.outputs.version }}"; then
+              exit 0
+            fi
+            sleep 10
+          done
+          exit 1
+      - name: Publish immutable GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" dist/release/* \
+            --verify-tag \
+            --title "DSH Cloud ${{ needs.build.outputs.version }}" \
+            --notes-file "release/notes/v${{ needs.build.outputs.version }}.md" \
+            --latest

@@ -1,62 +1,41 @@
 # DSH Cloud editions
 
-This document separates a software license from a deployment and support model.
-The repository is currently **AGPL-3.0-only**. DSH Cloud Hosted is an operated
-service, not a different retroactive license for the public code. Any future
-source-available license would be prospective and remains blocked on counsel and
-copyright-chain approval; see [LICENSING.md](../LICENSING.md).
+English | [简体中文](editions.zh-CN.md)
+
+The Community Edition is source-available under the
+[DSH Cloud Community License 1.0](../LICENSE). DSH Cloud Hosted is the operated
+subscription at `dshcloud.online`. Commercial authorization is available for
+uses outside the Community License.
 
 ## Comparison
 
-| Area | Community Edition | DSH Cloud Hosted | Enterprise discussions |
+| Area | Community Edition | DSH Cloud Hosted | Commercial authorization |
 |---|---|---|---|
-| What it is | The useful, self-hosted public repository | The managed service at `dshcloud.online` | Potential net-new extensions, commercial rights, and support scoped by a signed agreement |
-| Start path | Docker/Compose, npm, or uv installation | [Sign in and open a managed workspace](https://dshcloud.online/login?next=%2Fwork) | Contact support with requirements |
-| License | AGPL-3.0-only for the current repository | Service use is governed by Hosted terms; this does not alter the repository license | No public-code right is removed; separate rights exist only in a signed agreement |
-| Models | Operator selects and pays an OpenAI-compatible upstream | Managed model access and plan allowances | Private-provider and governance integration may be scoped |
-| Operations | Operator owns TLS, identity, email, data, backups, monitoring, and upgrades | Managed capacity, upgrades, backups, monitoring, billing operations, and incident response | Deployment and support scope defined per agreement |
-| Workspaces | Optional self-hosted path, off by default; operator must review its trust model | Managed workspace capacity and storage | Net-new governance, private networking, HA, or compliance options may be considered |
-| Support | Community Issues; no response-time commitment | Account and billing support for the managed service | Response and service commitments only when written into an agreement |
-| Billing | Optional generic provider integrations controlled by the operator | Individual and team plans; one-time prepaid term with no automatic renewal | Contract-specific if offered |
+| Use | Single-organization internal use, self-hosting, development, evaluation, and API integrations | Managed service for individual and team subscribers | Managed multi-tenant services, rebranding of official frontends, or negotiated rights |
+| Start | Docker/Compose, npm/npx, or uv/uvx | [Open a managed workspace](https://dshcloud.online/login?next=%2Fwork) | Contact `support@agentsdance.ai` |
+| License | DSH Cloud Community License 1.0 | Hosted terms govern the service | A signed commercial agreement |
+| Models | Operator chooses and pays the upstream | Managed model access and plan allowances | Provider and governance integrations may be scoped |
+| Operations | Operator owns TLS, identity, email, data, backups, monitoring, and upgrades | Managed capacity, upgrades, backups, monitoring, billing operations, and incident response | Scope and service commitments are contractual |
+| Workspaces | Optional and off by default; operator reviews the trust model | Managed workspace capacity and storage | Private networking, HA, or compliance options may be scoped |
+| Billing | Optional provider integrations controlled by the operator | Monthly or annual prepaid term; no automatic renewal | Contract-specific |
 
-- [View individual Hosted plans](https://dshcloud.online/pricing#plans)
-- [View team plans](https://dshcloud.online/pricing#team)
-- [Read support routes](../SUPPORT.md)
+- [Individual Hosted plans](https://dshcloud.online/pricing#plans)
+- [Team Hosted plans](https://dshcloud.online/pricing#team)
+- [Support routes](../SUPPORT.md)
+- [License guide](../LICENSING.md)
 
-## Community baseline rule
+“Commercial authorization” describes rights available by signed agreement; it
+does not promise a particular feature, SLA, certification, or package.
 
-[legal/licensing/COMMUNITY_BASELINE.manifest](../legal/licensing/COMMUNITY_BASELINE.manifest)
-records the adoption baseline at commit
-`945439f346a291722f8f0883e3c3c789d3c0463c`. Product capabilities represented by
-that baseline cannot be reclassified solely to monetize them. Environment-specific
-credentials, topology, backup media, cutover procedures, capacity/cost records,
-customer identifiers, and incident records are private operations, not product
-features.
+The public Community baseline is recorded at commit
+`945439f346a291722f8f0883e3c3c789d3c0463c` in
+[`legal/licensing/COMMUNITY_BASELINE.manifest`](../legal/licensing/COMMUNITY_BASELINE.manifest).
+That record is provenance evidence; the current rights and restrictions are
+defined by the active license.
 
-Use this decision table for later changes:
+## Contribution boundary
 
-| Question | Community | Hosted operations | Enterprise |
-|---|---|---|---|
-| Present in the baseline as product code or capability? | Remains Community | Not applicable | Cannot be reclassified solely for monetization |
-| Environment-specific credentials, topology, backup/cutover, quotas, customer identifiers, or incident records? | Excluded from the public repository | Private | Not a product feature |
-| Net-new capability after the baseline? | Community by default unless an approved boundary says otherwise | Private only when environment-specific operation | May be a separate extension only through an explicit interface and review |
-| Required to build, test, self-host, secure, migrate/export data, back up, restore, or satisfy AGPL? | Must remain available | Private values may be omitted | Cannot be withheld |
-| Shared by public and private implementations? | Neutral interface and useful Community implementation remain public | Environment adapter may remain private | Separate implementation may use the public interface |
-
-“Enterprise” in this document is a product-planning category, not evidence that a
-particular capability, license, SLA, certification, or package is currently
-available.
-
-## Pull request boundary checklist
-
-For a change that affects edition placement, the pull request must:
-
-- identify related paths in the Community baseline manifest;
-- explain why the Community path remains complete, secure, buildable, testable,
-  self-hostable, upgradeable, and able to export its data;
-- describe the stable extension interface instead of scattering private-edition
-  checks through public code;
-- identify shared schema, migration, API, configuration, and downgrade effects;
-- keep environment-specific Hosted operations outside the public tree; and
-- attach qualified legal review when copyright, contribution terms, notices, or
-  licensing are affected.
+Changes should keep Community Edition complete, secure, buildable, testable,
+self-hostable, upgradeable, and able to export its data. Pull requests that alter
+license boundaries, notices, contribution terms, schemas, migrations, or public
+extension interfaces require explicit maintainer review.

@@ -1,6 +1,7 @@
 {
   "$schema": "./release-source.schema.json",
   "version": "0.2.0",
+  "license": "LicenseRef-DSH-Cloud-Community-1.0",
   "stackSchema": 1,
   "databaseSchema": 1,
   "minCliVersion": "0.2.0",

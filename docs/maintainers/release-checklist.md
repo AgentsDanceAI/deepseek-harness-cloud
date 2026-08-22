@@ -1,5 +1,7 @@
 # Release checklist
 
+English | [简体中文](release-checklist.zh-CN.md)
+
 This checklist prepares evidence; it does not authorize publication or
 deployment.
 

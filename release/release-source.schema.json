@@ -2,10 +2,11 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/AgentsDanceAI/deepseek-harness-cloud/release/release-source.schema.json",
   "type": "object",
-  "required": ["version", "stackSchema", "databaseSchema", "minCliVersion", "minUpgradeFrom", "legacyCompatibility", "harnessRuntime", "desktopRuntime", "productImages", "baseImages"],
+  "required": ["version", "license", "stackSchema", "databaseSchema", "minCliVersion", "minUpgradeFrom", "legacyCompatibility", "harnessRuntime", "desktopRuntime", "productImages", "baseImages"],
   "properties": {
     "$schema": {"type": "string"},
     "version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"},
+    "license": {"const": "LicenseRef-DSH-Cloud-Community-1.0"},
     "stackSchema": {"type": "integer", "minimum": 1},
     "databaseSchema": {"type": "integer", "minimum": 1},
     "minCliVersion": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"},

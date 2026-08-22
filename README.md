@@ -8,22 +8,16 @@ Accounts, a server-side model gateway, usage policy, teams, and an optional
 browser workspace—without distributing an upstream model key to every client.
 
 [![CI](https://github.com/AgentsDanceAI/deepseek-harness-cloud/actions/workflows/ci.yml/badge.svg)](https://github.com/AgentsDanceAI/deepseek-harness-cloud/actions/workflows/ci.yml)
-[![License: AGPL-3.0-only](https://img.shields.io/badge/license-AGPL--3.0--only-4c6ef5.svg)](LICENSE)
+[![License: DSH Cloud Community 1.0](https://img.shields.io/badge/license-DSH%20Cloud%20Community%201.0-4c6ef5.svg)](LICENSE)
 [![Security policy](https://img.shields.io/badge/security-private%20reporting-2f9e44.svg)](SECURITY.md)
 
-Source candidate: [`0.2.0`](release/release.json) · Registry artifacts not yet published
+Release: [`0.2.0`](release/release.json)
 
 [中文](README.zh-CN.md) · [Architecture](docs/architecture.md) ·
 [Self-host](docs/deploy.md) · [Editions](docs/editions.md) ·
 [Security](SECURITY.md) · [Support](SUPPORT.md)
 
 </div>
-
-> [!IMPORTANT]
-> The repository is currently licensed **AGPL-3.0-only**. A future Open Core /
-> source-available model is only a non-operative plan subject to counsel and a
-> complete rights audit. It does not change this code's current license or revoke
-> rights already granted for AGPL versions. See [Licensing](LICENSING.md).
 
 ## Choose your path
 
@@ -32,12 +26,9 @@ Source candidate: [`0.2.0`](release/release.json) · Registry artifacts not yet 
 ### Use DSH Cloud Hosted
 
 [DSH Cloud Hosted](https://dshcloud.online/login?next=%2Fwork) is the managed
-subscription service: no server installation, managed model and workspace
-capacity, upgrades, monitoring, backups, and account support. It is not a token
-resale service.
-
-Current public offers are paid once for the selected monthly or annual term and
-**do not renew automatically**.
+subscription service: no server installation, with model access, workspace
+capacity, upgrades, monitoring, backups, and account support. Current plans are
+paid once for the selected monthly or annual term and **do not renew automatically**.
 
 [**Start on DSH Cloud Hosted**](https://dshcloud.online/login?next=%2Fwork) ·
 [Individual plans](https://dshcloud.online/pricing#plans) ·
@@ -47,7 +38,7 @@ Current public offers are paid once for the selected monthly or annual term and
 
 ### Self-host Community Edition
 
-Run the AGPL-3.0 Community Edition with your own domain, database, identity
+Run the source-available Community Edition with your own domain, database, identity
 providers, model upstream, storage, and operational controls. Docker Compose is
 the canonical persistent path; Docker, npm/npx, and uv/uvx use the same versioned
 stack contract.
@@ -87,10 +78,7 @@ backups, monitoring, and applicable law.
 
 ## Quick start
 
-The source checkout is available now. Registry artifacts named `0.2.0` are
-candidate release coordinates and are usable only after the first `v0.2.0`
-publication is visible in npm, PyPI, or GHCR. A source version is not evidence of
-a published package.
+All commands below pin release `0.2.0`; pin exact versions in automation.
 
 <!-- distribution-install:start -->
 
@@ -145,7 +133,7 @@ to `.dsh-cloud/docker.env` before model calls. The single container does not
 terminate TLS; keep the loopback bind and use a reviewed reverse proxy for
 network access.
 
-### npm and npx (after `0.2.0` is published)
+### npm and npx
 
 One-shot:
 
@@ -160,7 +148,7 @@ npm install --global @agentsdanceai/dsh-cloud@0.2.0
 dsh-cloud start --mode trial --wait
 ```
 
-### uv and uvx (after `0.2.0` is published)
+### uv and uvx
 
 One-shot:
 
@@ -269,16 +257,12 @@ tests, security routing, and edition-boundary review.
 
 ## Versions, licensing, and marks
 
-- Current software license: [GNU AGPL v3 only](LICENSE).
-- Human-readable license status and future gates: [LICENSING.md](LICENSING.md).
+- Current software license: [DSH Cloud Community License 1.0](LICENSE).
+- Human-readable license guide: [LICENSING.md](LICENSING.md).
 - Community, Hosted, and Enterprise boundary: [docs/editions.md](docs/editions.md).
 - Trademark use: [TRADEMARKS.md](TRADEMARKS.md).
 - Third-party notices: [legal/THIRD_PARTY_NOTICES.md](legal/THIRD_PARTY_NOTICES.md).
 - Release changes: [CHANGELOG.md](CHANGELOG.md).
-
-Current AGPL rights remain in force for versions received under AGPL-3.0. Any
-future Dify-style Open Core/source-available terms would be prospective only,
-after qualified legal approval and proof of relicensing authority.
 
 DSH Cloud is independently developed and operated. It is not affiliated with or
 endorsed by DeepSeek. “DeepSeek” and related marks belong to their respective

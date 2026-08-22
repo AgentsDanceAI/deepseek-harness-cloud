@@ -8,32 +8,24 @@
 无需把模型上游密钥分发给每个客户端。
 
 [![CI](https://github.com/AgentsDanceAI/deepseek-harness-cloud/actions/workflows/ci.yml/badge.svg)](https://github.com/AgentsDanceAI/deepseek-harness-cloud/actions/workflows/ci.yml)
-[![License: AGPL-3.0-only](https://img.shields.io/badge/license-AGPL--3.0--only-4c6ef5.svg)](LICENSE)
-[![Security policy](https://img.shields.io/badge/security-private%20reporting-2f9e44.svg)](SECURITY.md)
+[![License: DSH Cloud Community 1.0](https://img.shields.io/badge/license-DSH%20Cloud%20Community%201.0-4c6ef5.svg)](LICENSE)
+[![Security policy](https://img.shields.io/badge/security-private%20reporting-2f9e44.svg)](SECURITY.zh-CN.md)
 
-源码候选版本：[`0.2.0`](release/release.json) · Registry 产物尚未发布
+发行版本：[`0.2.0`](release/release.json)
 
-[English](README.md) · [架构](docs/architecture.md) ·
-[自部署](docs/deploy.md) · [版本边界](docs/editions.md) ·
-[安全](SECURITY.md) · [支持](SUPPORT.md)
+[English](README.md) · [架构](docs/architecture.zh-CN.md) ·
+[自部署](docs/deploy.zh-CN.md) · [版本边界](docs/editions.zh-CN.md) ·
+[安全](SECURITY.zh-CN.md) · [支持](SUPPORT.zh-CN.md)
 
 </div>
-
-> [!IMPORTANT]
-> 本仓库当前采用 **AGPL-3.0-only**。未来 Open Core / source-available 仅为
-> 尚未生效的规划，必须经过律师审批和完整权利链审计；该规划不会改变当前代码
-> 的许可证，也不能撤销既有 AGPL 版本已经授予的权利。详见
-> [许可说明](LICENSING.md)。
 
 ## 选择使用方式
 
 ### DSH Cloud 托管版
 
 [DSH Cloud 托管版](https://dshcloud.online/login?next=%2Fwork)是托管订阅服务：
-无需安装服务器，由服务方管理模型与工作台容量、升级、监控、备份和账号支持。
-它不是 Token 转售服务。
-
-当前公开方案按所选月度或年度周期一次性预付，**到期不自动续费**。
+无需安装服务器，按月度或年度服务期提供模型访问、工作台容量、升级、监控、
+备份与账号支持。当前方案按所选服务期一次性付费，**到期不自动续费**。
 
 [**开始使用 DSH Cloud 托管版**](https://dshcloud.online/login?next=%2Fwork) ·
 [个人套餐](https://dshcloud.online/pricing#plans) ·
@@ -42,20 +34,20 @@
 ### 自部署 Community Edition
 
 使用自己的域名、数据库、身份提供方、模型上游、存储和运维控制运行
-AGPL-3.0 Community Edition。Docker Compose 是标准持久化路径；Docker、
+source-available Community Edition。Docker Compose 是标准持久化路径；Docker、
 npm/npx、uv/uvx 遵循同一套版本化安装契约。
 
-[**自部署指南**](docs/deploy.md) ·
+[**自部署指南**](docs/deploy.zh-CN.md) ·
 [配置模板](deploy/selfhost/.env.example) ·
-[安全清单](docs/security.md)
+[安全清单](docs/security.zh-CN.md)
 
 ### 开发与贡献
 
 公开仓库包含 FastAPI 服务、Web 控制台、模型网关、部署定义、桌面叠加层、
 移动端外壳、测试和发行契约。
 
-[**开发环境**](#开发) · [贡献指南](CONTRIBUTING.md) ·
-[架构](docs/architecture.md) · [变更日志](CHANGELOG.md)
+[**开发环境**](#开发) · [贡献指南](CONTRIBUTING.zh-CN.md) ·
+[架构](docs/architecture.zh-CN.md) · [变更日志](CHANGELOG.zh-CN.md)
 
 ## 主要能力
 
@@ -76,8 +68,7 @@ npm/npx、uv/uvx 遵循同一套版本化安装契约。
 
 ## 快速开始
 
-源码现在即可使用。`0.2.0` 的 registry 坐标是候选发行坐标，只有在 npm、
-PyPI 或 GHCR 可见首次 `v0.2.0` 发布后才能使用；源码中的版本号不代表包已发布。
+以下命令均固定使用 `0.2.0`；自动化环境也应固定精确版本。
 
 ### 从源码使用 Docker Compose（现在可用）
 
@@ -128,7 +119,7 @@ docker run --rm --name dsh-cloud \
 `.dsh-cloud/docker.env`。单容器不负责 TLS；对外访问时应保留回环绑定，并使用
 经过审核的反向代理。
 
-### npm 与 npx（`0.2.0` 发布后）
+### npm 与 npx
 
 ```bash
 npx --yes @agentsdanceai/dsh-cloud@0.2.0 start --mode trial --wait
@@ -137,7 +128,7 @@ npm install --global @agentsdanceai/dsh-cloud@0.2.0
 dsh-cloud start --mode trial --wait
 ```
 
-### uv 与 uvx（`0.2.0` 发布后）
+### uv 与 uvx
 
 ```bash
 uvx dsh-cloud==0.2.0 start --mode trial --wait
@@ -150,7 +141,7 @@ dsh-cloud start --mode trial --wait
 自动化必须固定不可变版本；启动前应审核生成的站点、密钥、提供方、存储和工作台配置。
 
 完整部署指南包含 GHCR 版本化路径、备份、升级、回滚、扩容和排障：
-[docs/deploy.md](docs/deploy.md)。
+[部署文档](docs/deploy.zh-CN.md)。
 
 ## 架构概览
 
@@ -174,19 +165,19 @@ dsh-cloud start --mode trial --wait
 
 网关负责认证与授权、验证已配置的模型 ID、把客户端凭证替换为自部署方的上游
 凭证、流式返回响应并记录标准化用量。完整流程和信任边界见
-[架构文档](docs/architecture.md)。
+[架构文档](docs/architecture.zh-CN.md)。
 
 ## 安全边界
 
 工作台会执行用户控制的代码，因此默认关闭。容器和 Docker socket proxy 本身
 并不等于恶意多租户安全边界；公网运营方必须评估镜像信任、Docker 权限、网络、
 挂载、特权、出网、预览源、凭证和资源隔离。详见
-[docs/security.md](docs/security.md)。
+[安全指南](docs/security.zh-CN.md)。
 
 漏洞请通过
 [GitHub 私密安全报告](https://github.com/AgentsDanceAI/deepseek-harness-cloud/security/advisories/new)
 或 `security@agentsdance.ai` 私下提交。不要公开未修复漏洞，也不要附带真实凭证和
-用户数据。详见 [SECURITY.md](SECURITY.md)。
+用户数据。详见 [安全政策](SECURITY.zh-CN.md)。
 
 ## 开发
 
@@ -216,19 +207,16 @@ uv run --project packages/cli-python dsh-cloud start --dry-run --json
 ```
 
 DCO 签署、来源披露、测试、安全报告和版本边界要求见
-[CONTRIBUTING.md](CONTRIBUTING.md)。
+[贡献指南](CONTRIBUTING.zh-CN.md)。
 
 ## 版本、许可与商标
 
-- 当前软件许可证：[GNU AGPL v3 only](LICENSE)
-- 许可状态与未来门禁：[LICENSING.md](LICENSING.md)
-- Community / Hosted / Enterprise 边界：[docs/editions.md](docs/editions.md)
-- 商标使用：[TRADEMARKS.md](TRADEMARKS.md)
+- 当前软件许可证：[DSH Cloud Community License 1.0](LICENSE)
+- 许可说明：[LICENSING.zh-CN.md](LICENSING.zh-CN.md)
+- Community / Hosted / Enterprise 边界：[版本说明](docs/editions.zh-CN.md)
+- 商标使用：[商标政策](TRADEMARKS.zh-CN.md)
 - 第三方声明：[legal/THIRD_PARTY_NOTICES.md](legal/THIRD_PARTY_NOTICES.md)
-- 发行变更：[CHANGELOG.md](CHANGELOG.md)
-
-已经按 AGPL-3.0 获得的版本继续享有既有权利。未来 Dify 风格 Open Core /
-source-available 条款只能向未来生效，并以合格律师批准和充分再许可权证明为前提。
+- 发行变更：[变更日志](CHANGELOG.zh-CN.md)
 
 DSH Cloud 为独立开发与运营的项目，与 DeepSeek 无隶属或背书关系。
 “DeepSeek”及相关标识归其各自权利人所有。

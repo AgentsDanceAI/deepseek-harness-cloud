@@ -1,10 +1,8 @@
-<!-- 本文为草案，正式发布前请经法律专业人士审阅 -->
-
 # DSH Cloud — Third-Party Notices / 第三方声明
 
-版本 1.0，生效日期【上线日期】
+版本 1.0，生效日期 2026-08-21 / Version 1.0, effective 2026-08-21
 
-DSH Cloud 桌面应用由**【运营主体】**（当前为AgentsDance AI / Beijing AgentsDance AI Technology Co., Ltd.）基于下列 MIT 许可的开源项目构建并再分发。我们按许可要求完整保留其版权与许可声明。
+DSH Cloud 桌面应用由 **AgentsDance AI（北京灵舞人工智能科技有限公司 / Beijing AgentsDance AI Technology Co., Ltd.）** 基于下列 MIT 许可的开源项目构建并再分发。我们按许可要求完整保留其版权与许可声明。
 
 The DSH Cloud desktop application is built upon and redistributes the following MIT-licensed open-source projects. Their copyright and permission notices are reproduced in full below, as required by the license.
 
@@ -60,9 +58,9 @@ The DSH Cloud desktop application is built upon and redistributes the following 
 
 ## 2. Trademark Notice / 商标声明
 
-"DeepSeek"及相关标识为其权利人的商标，上述 MIT 开源许可**不包含任何商标授权**。DSH Cloud 由【运营主体】独立开发与运营，**与 DeepSeek 不存在隶属、合作、赞助或背书关系**；本产品名称与品牌中对开源项目名的提及仅用于说明来源（nominative use）。
+"DeepSeek"及相关标识为其权利人的商标，上述 MIT 开源许可**不包含任何商标授权**。DSH Cloud 由 AgentsDance AI 独立开发与运营，**与 DeepSeek 不存在隶属、合作、赞助或背书关系**；本产品名称与品牌中对开源项目名的提及仅用于说明来源（nominative use）。
 
-"DeepSeek" and related marks are trademarks of their respective owner. The MIT licenses above grant **no trademark rights**. DSH Cloud is independently developed and operated by 【运营主体】 and is **not affiliated with, sponsored by, or endorsed by DeepSeek**. References to the upstream project names are made solely to describe the software's origin (nominative use).
+"DeepSeek" and related marks are trademarks of their respective owner. The MIT licenses above grant **no trademark rights**. DSH Cloud is independently developed and operated by AgentsDance AI / Beijing AgentsDance AI Technology Co., Ltd. and is **not affiliated with, sponsored by, or endorsed by DeepSeek**. References to the upstream project names are made solely to describe the software's origin (nominative use).
 
 ## 3. Excluded Component / 再分发剔除组件说明
 

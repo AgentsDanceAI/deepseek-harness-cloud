@@ -3,7 +3,7 @@ schema_version = 1
 [repository]
 canonical_remote = "https://github.com/AgentsDanceAI/deepseek-harness-cloud.git"
 public_branch = "main"
-current_license = "AGPL-3.0-only"
+current_license = "LicenseRef-DSH-Cloud-Community-1.0"
 licensing_state = "legal/licensing/LICENSE_STATE.toml"
 community_baseline = "legal/licensing/COMMUNITY_BASELINE.manifest"
 
@@ -40,15 +40,15 @@ forbidden_operational_categories = [
 ]
 
 [licensing]
-future_source_available_requirements_are_operative = false
-existing_agpl_rights_revocable = false
-transition_requires_counsel = true
-transition_requires_complete_rights_audit = true
-transition_is_prospective_only = true
+license_name = "DSH Cloud Community License 1.0"
+effective_release = "0.2.0"
+managed_multi_tenant_service_requires_commercial_license = true
+official_frontend_rebranding_requires_commercial_license = true
+third_party_components_keep_their_licenses = true
 
 [external_gates]
-license_replacement = "closed"
+license_replacement = "owner-approved-2026-08-21"
 production_change = "closed"
-registry_publish = "closed"
+registry_publish = "owner-approved-2026-08-21"
 public_history_rewrite = "closed"
 github_team_or_ruleset_change = "closed"

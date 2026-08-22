@@ -1,5 +1,7 @@
 # Documentation review
 
+English | [简体中文](documentation-review.zh-CN.md)
+
 Use this checklist for user-facing documentation changes.
 
 - [ ] Every command exists in the same candidate tree and has been exercised in
@@ -8,14 +10,13 @@ Use this checklist for user-facing documentation changes.
       labeled as unavailable rather than presented as installable.
 - [ ] Hosted links use only the approved sign-in, individual-plan, and team-plan
       URLs.
-- [ ] Hosted is described as a managed subscription service, not token resale.
+- [ ] Hosted is described positively as a managed subscription service.
 - [ ] Plan copy says the selected term is paid once and does not renew
       automatically.
 - [ ] Self-host documentation is neutral and does not insert repeated sales copy
       into operational steps.
-- [ ] Current licensing is `AGPL-3.0-only`; future source-available planning is
-      labeled non-operative, prospective, counsel-reviewed, and rights-dependent.
-- [ ] No text implies that already granted AGPL rights can be revoked.
+- [ ] Current licensing is `LicenseRef-DSH-Cloud-Community-1.0`; restricted uses
+      and the commercial-contact path match `LICENSE` and `LICENSING.md`.
 - [ ] No production identifier, private address, customer/user detail, credential,
       capacity/cost record, backup/cutover instruction, or incident diary appears.
 - [ ] Relative links, anchors, image descriptions, headings, spelling, and both

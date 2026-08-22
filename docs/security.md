@@ -1,5 +1,7 @@
 # Self-host security guide
 
+English | [简体中文](security.zh-CN.md)
+
 This guide complements the vulnerability-reporting policy in
 [SECURITY.md](../SECURITY.md). It is a deployment checklist, not a certification
 or guarantee. Self-hosted operators own their threat model, infrastructure,

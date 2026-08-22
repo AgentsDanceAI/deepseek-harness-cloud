@@ -1,15 +1,16 @@
 # Install DSH Cloud Community Edition
 
+English | [简体中文](install.zh-CN.md)
+
 Release `0.2.0` has two equivalent, version-locked installers. Both default to
 local trial mode, bind Caddy to `127.0.0.1:8787`, generate a random 256-bit auth
 secret in a mode-`0600` file, and invoke Docker without a shell.
 
-> Registry notice: `@agentsdanceai/dsh-cloud@0.2.0` and `dsh-cloud==0.2.0` are
-> **not published yet**. The commands below become registry-installable only
-> after the protected `v0.2.0` release publishes both artifacts. Use the source
-> commands in the next section until then.
+Release `0.2.0` uses the exact registry coordinates
+`@agentsdanceai/dsh-cloud@0.2.0` and `dsh-cloud==0.2.0`. Keep the explicit version
+in scripts and automation.
 
-## One-command trial after publication
+## One-command trial
 
 With npm/npx:
 

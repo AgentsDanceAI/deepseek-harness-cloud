@@ -14,5 +14,12 @@
     "url": "git+https://github.com/AgentsDanceAI/deepseek-harness-cloud.git",
     "directory": "packages/cli-npm"
   },
-  "license": "AGPL-3.0-only"
+  "homepage": "https://github.com/AgentsDanceAI/deepseek-harness-cloud#readme",
+  "bugs": "https://github.com/AgentsDanceAI/deepseek-harness-cloud/issues",
+  "author": "AgentsDance AI",
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "license": "SEE LICENSE IN LICENSE"
 }

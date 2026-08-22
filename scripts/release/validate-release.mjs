@@ -6,7 +6,8 @@ const SEMVER = /^\d+\.\d+\.\d+$/
 const RUNTIME = /^\d+\.\d+\.\d+-rc\.\d+$/
 const DIGEST_REF = /^[^@\s]+@sha256:[0-9a-f]{64}$/
 const BASE_NAMES = ['python', 'uv', 'node', 'caddy', 'postgres', 'socketProxy']
-const RELEASE_FIELDS = ['$schema', 'version', 'stackSchema', 'databaseSchema', 'minCliVersion', 'minUpgradeFrom', 'legacyCompatibility', 'harnessRuntime', 'desktopRuntime', 'productImages', 'baseImages']
+const LICENSE = 'LicenseRef-DSH-Cloud-Community-1.0'
+const RELEASE_FIELDS = ['$schema', 'version', 'license', 'stackSchema', 'databaseSchema', 'minCliVersion', 'minUpgradeFrom', 'legacyCompatibility', 'harnessRuntime', 'desktopRuntime', 'productImages', 'baseImages']
 
 function rejectUnexpected(errors, value, allowed, prefix) {
   for (const name of Object.keys(value ?? {})) {
@@ -20,6 +21,7 @@ export function validateRelease(value) {
   for (const name of ['version', 'minCliVersion', 'minUpgradeFrom']) {
     if (!SEMVER.test(value?.[name] ?? '')) errors.push(`${name} must be stable SemVer`)
   }
+  if (value?.license !== LICENSE) errors.push(`license must be ${LICENSE}`)
   if (!RUNTIME.test(value?.harnessRuntime ?? '')) errors.push('harnessRuntime must be x.y.z-rc.N')
   if (!RUNTIME.test(value?.desktopRuntime ?? '')) errors.push('desktopRuntime must be x.y.z-rc.N')
   for (const name of ['stackSchema', 'databaseSchema']) {
@@ -49,6 +51,7 @@ export function manifestFromRelease(value) {
   return {
     schemaVersion: 1,
     version: value.version,
+    license: value.license,
     stackSchema: value.stackSchema,
     databaseSchema: value.databaseSchema,
     minCliVersion: value.minCliVersion,

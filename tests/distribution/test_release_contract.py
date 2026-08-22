@@ -11,6 +11,7 @@ DIGEST = re.compile(r"^[^@\s]+@sha256:[0-9a-f]{64}$")
 def test_release_source_is_complete_and_locked():
     release = json.loads((ROOT / "release/release.json").read_text(encoding="utf-8"))
     assert release["version"] == "0.2.0"
+    assert release["license"] == "LicenseRef-DSH-Cloud-Community-1.0"
     assert release["harnessRuntime"] == "0.1.0-rc.8"
     assert release["desktopRuntime"] == "0.1.0-rc.6"
     assert release["minCliVersion"] == "0.2.0"
@@ -24,6 +25,12 @@ def test_release_source_is_complete_and_locked():
         "workspace": "ghcr.io/agentsdanceai/dsh-cloud-workspace:0.2.0",
     }
 
+    package_schema = json.loads(
+        (ROOT / "release/release-manifest.schema.json").read_text(encoding="utf-8")
+    )
+    assert "license" in package_schema["required"]
+    assert package_schema["properties"]["license"]["const"] == release["license"]
+
 
 def test_release_validator_rejects_mutable_references():
     result = subprocess.run(
@@ -34,6 +41,44 @@ def test_release_validator_rejects_mutable_references():
     )
     assert result.returncode == 0, result.stderr
     assert "rejected mutable image reference" in result.stdout
+
+
+def test_release_workflow_is_tag_locked_pinned_and_provenanced():
+    workflow = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+    assert 'tags: ["v*"]' in workflow
+    assert "environment: release" in workflow
+    assert "npm publish" in workflow and "--provenance" in workflow
+    assert "uv publish --trusted-publishing always" in workflow
+    assert "provenance: mode=max" in workflow
+    assert "sbom: true" in workflow
+    assert "gh release create" in workflow
+    uses = re.findall(r"uses:\s*([^\s]+)", workflow)
+    assert uses
+    assert all(re.fullmatch(r"[^@]+@[0-9a-f]{40}", value) for value in uses), uses
+
+
+def test_release_sbom_is_valid_spdx_and_uses_the_active_license(tmp_path: Path):
+    stage = tmp_path / "stage"
+    subprocess.run(
+        ["node", "scripts/release/build-packages.mjs", str(stage)],
+        cwd=ROOT,
+        check=True,
+    )
+    output = tmp_path / "dsh-cloud-0.2.0.spdx.json"
+    subprocess.run(
+        ["node", "scripts/release/generate-sbom.mjs", str(stage), str(output)],
+        cwd=ROOT,
+        check=True,
+    )
+    sbom = json.loads(output.read_text(encoding="utf-8"))
+    assert sbom["spdxVersion"] == "SPDX-2.3"
+    assert sbom["documentNamespace"].endswith("/0.2.0")
+    packages = {package["name"]: package for package in sbom["packages"]}
+    assert set(packages) == {"@agentsdanceai/dsh-cloud", "dsh-cloud"}
+    assert all(
+        package["licenseDeclared"] == "LicenseRef-DSH-Cloud-Community-1.0"
+        for package in packages.values()
+    )
 
 
 def test_dockerfile_is_locked_non_root_and_carries_release_source():

@@ -1,17 +1,10 @@
-schema_version = 1
-active_license = "AGPL-3.0-only"
+schema_version = 2
+active_license = "LicenseRef-DSH-Cloud-Community-1.0"
+license_name = "DSH Cloud Community License 1.0"
 license_file = "LICENSE"
-license_sha256 = "0d96a4ff68ad6d4b6f1f30f713b18d5184912ba8dd389f86aa7710db079abcb0"
-already_distributed_rights_revocable = false
-future_requirements_are_license_text = false
-transition_status = "blocked-pending-counsel-and-rights-audit"
+license_sha256 = "afae9d1a96c2a92aa246e0fe45fde3728f5cc34fee211391d45da95ebada7304"
+effective_release = "0.2.0"
+commercial_contact = "support@agentsdance.ai"
+third_party_components_keep_their_licenses = true
 community_baseline_commit = "945439f346a291722f8f0883e3c3c789d3c0463c"
 community_baseline_manifest = "legal/licensing/COMMUNITY_BASELINE.manifest"
-
-[transition_gates]
-qualified_counsel_approval = false
-copyright_inventory_complete = false
-third_party_notices_verified = false
-contribution_terms_approved = false
-community_boundary_verified = false
-external_release_authorization = false
