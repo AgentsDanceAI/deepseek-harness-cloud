@@ -34,6 +34,17 @@ def test_hosted_production_mounts_its_legal_documents_explicitly():
     assert "../../legal:/srv/operator-legal:ro" not in selfhost
 
 
+def test_hosted_safe_deploy_stamps_the_server_image_with_the_clean_git_head():
+    compose = (ROOT / "deploy/prod/compose.yml").read_text(encoding="utf-8")
+    script = (ROOT / "scripts/safe_deploy.sh").read_text(encoding="utf-8")
+
+    assert "REVISION: ${REVISION:-unknown}" in compose
+    dirty_gate = script.index('if [ -n "$dirty" ]')
+    resolve_head = script.index('revision="$(git rev-parse --verify HEAD^{commit})"')
+    deploy = script.index('REVISION="$revision" docker compose')
+    assert dirty_gate < resolve_head < deploy
+
+
 def test_selfhost_compose_defaults_are_safe_and_image_first():
     compose = (ROOT / "deploy/selfhost/docker-compose.yml").read_text(encoding="utf-8")
     assert "image: ${DHC_SERVER_IMAGE" in compose

@@ -51,6 +51,8 @@ services:
     build:
       context: ../..
       dockerfile: server/Dockerfile
+      args:
+        REVISION: ${REVISION:-unknown}
     image: dhc-server:latest
     container_name: dhc-server
     restart: unless-stopped

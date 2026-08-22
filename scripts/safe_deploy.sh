@@ -37,6 +37,7 @@ if [ -n "$dirty" ] && [ "${ALLOW_DIRTY:-0}" != "1" ]; then
   echo "   确知要带上可 ALLOW_DIRTY=1 覆盖。" >&2
   exit 1
 fi
+revision="$(git rev-parse --verify HEAD^{commit})"
 
 # --- 闸门 2: 部署前基线 ------------------------------------------------------
 # 记录部署前健康状态，避免将既有故障误判为发布回归。
@@ -52,7 +53,7 @@ echo "==> 部署前基线: $before"
 
 # --- 部署 --------------------------------------------------------------------
 echo "==> build + up"
-docker compose -f "$COMPOSE" --env-file "$ENVFILE" up -d --build
+REVISION="$revision" docker compose -f "$COMPOSE" --env-file "$ENVFILE" up -d --build
 
 echo "==> 等待健康"
 for i in $(seq 1 40); do
