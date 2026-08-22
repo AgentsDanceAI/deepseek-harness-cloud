@@ -59,6 +59,15 @@ def test_dockerfile_is_locked_non_root_and_carries_release_source():
     assert "COPY --chown=10001:10001" not in dockerfile
 
 
+def test_all_server_base_image_args_are_global_before_the_first_stage():
+    dockerfile = (ROOT / "server/Dockerfile").read_text(encoding="utf-8")
+    global_args = dockerfile.split("FROM", 1)[0]
+
+    assert "ARG UV_IMAGE=" in global_args
+    assert "ARG PYTHON_IMAGE=" in global_args
+    assert dockerfile.count("ARG PYTHON_IMAGE=") == 1
+
+
 def test_workspace_image_derives_harness_runtime_from_release_build_args():
     dockerfile = (ROOT / "deploy/workspace/Dockerfile").read_text(encoding="utf-8")
     assert "ARG NODE_IMAGE" in dockerfile

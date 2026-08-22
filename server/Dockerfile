@@ -1,8 +1,8 @@
 # syntax=docker/dockerfile:1.7
 ARG UV_IMAGE=ghcr.io/astral-sh/uv:0.8.11@sha256:8101ad825250a114e7bef89eefaa73c31e34e10ffbe5aff01562740bac97553c
+ARG PYTHON_IMAGE=python:3.11-slim-bookworm@sha256:2e32f7d302adc1c37428355c1e646897c0c53f4fd60b6a551245fb90ee129f91
 FROM ${UV_IMAGE} AS uv
 
-ARG PYTHON_IMAGE=python:3.11-slim-bookworm@sha256:2e32f7d302adc1c37428355c1e646897c0c53f4fd60b6a551245fb90ee129f91
 FROM ${PYTHON_IMAGE} AS builder
 COPY --from=uv /uv /uvx /bin/
 WORKDIR /build
@@ -10,7 +10,6 @@ COPY server/pyproject.toml server/uv.lock ./
 RUN UV_PROJECT_ENVIRONMENT=/opt/dsh-cloud/.venv \
     uv sync --frozen --no-dev --no-install-project --extra postgres --extra redis --extra stripe
 
-ARG PYTHON_IMAGE=python:3.11-slim-bookworm@sha256:2e32f7d302adc1c37428355c1e646897c0c53f4fd60b6a551245fb90ee129f91
 FROM ${PYTHON_IMAGE} AS runtime
 ARG VERSION=0.2.0
 ARG REVISION=unknown
