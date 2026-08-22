@@ -48,6 +48,7 @@ def test_release_workflow_is_tag_locked_pinned_and_provenanced():
     assert 'tags: ["v*"]' in workflow
     assert "environment: release" in workflow
     assert "npm publish" in workflow and "--provenance" in workflow
+    assert "NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}" in workflow
     assert "uv publish --trusted-publishing always" in workflow
     assert "provenance: mode=max" in workflow
     assert "sbom: true" in workflow

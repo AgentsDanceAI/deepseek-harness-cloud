@@ -182,7 +182,11 @@ jobs:
           subject-name: ${{ needs.build.outputs.workspace_image }}
           subject-digest: ${{ steps.workspace.outputs.digest }}
           push-to-registry: true
-      - name: Publish npm package with trusted publishing
+      - name: Publish npm package
+        env:
+          # Bootstrap only: npm cannot attach a trusted publisher until the
+          # scoped package exists. Remove this environment secret after 0.2.0.
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         shell: bash
         run: |
           set -euo pipefail
