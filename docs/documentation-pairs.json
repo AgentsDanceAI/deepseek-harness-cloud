@@ -1,30 +1,109 @@
 {
   "schemaVersion": 1,
   "pairs": [
-    ["README.md", "README.zh-CN.md"],
-    ["CHANGELOG.md", "CHANGELOG.zh-CN.md"],
-    ["CODE_OF_CONDUCT.md", "CODE_OF_CONDUCT.zh-CN.md"],
-    ["CONTRIBUTING.md", "CONTRIBUTING.zh-CN.md"],
-    ["SECURITY.md", "SECURITY.zh-CN.md"],
-    ["SUPPORT.md", "SUPPORT.zh-CN.md"],
-    ["TRADEMARKS.md", "TRADEMARKS.zh-CN.md"],
-    ["LICENSING.md", "LICENSING.zh-CN.md"],
-    ["docs/README.md", "docs/README.zh-CN.md"],
-    ["docs/architecture.md", "docs/architecture.zh-CN.md"],
-    ["docs/compatibility.md", "docs/compatibility.zh-CN.md"],
-    ["docs/deploy.md", "docs/deploy.zh-CN.md"],
-    ["docs/editions.md", "docs/editions.zh-CN.md"],
-    ["docs/install.md", "docs/install.zh-CN.md"],
-    ["docs/security.md", "docs/security.zh-CN.md"],
-    ["docs/workspace-scaling.md", "docs/workspace-scaling.zh-CN.md"],
-    ["docs/maintainers/README.md", "docs/maintainers/README.zh-CN.md"],
-    ["docs/maintainers/documentation-review.md", "docs/maintainers/documentation-review.zh-CN.md"],
-    ["docs/maintainers/release-checklist.md", "docs/maintainers/release-checklist.zh-CN.md"],
-    ["deploy/selfhost/README.md", "deploy/selfhost/README.zh-CN.md"],
-    ["packages/cli-npm/README.md", "packages/cli-npm/README.zh-CN.md"],
-    ["packages/cli-python/README.md", "packages/cli-python/README.zh-CN.md"],
-    ["mobile/README.md", "mobile/README.zh-CN.md"],
-    ["miniprogram/README.md", "miniprogram/README.zh-CN.md"],
-    ["legal/licensing/README.md", "legal/licensing/README.zh-CN.md"]
+    [
+      "README.md",
+      "README.zh-CN.md"
+    ],
+    [
+      "CHANGELOG.md",
+      "CHANGELOG.zh-CN.md"
+    ],
+    [
+      "CODE_OF_CONDUCT.md",
+      "CODE_OF_CONDUCT.zh-CN.md"
+    ],
+    [
+      "CONTRIBUTING.md",
+      "CONTRIBUTING.zh-CN.md"
+    ],
+    [
+      "SECURITY.md",
+      "SECURITY.zh-CN.md"
+    ],
+    [
+      "SUPPORT.md",
+      "SUPPORT.zh-CN.md"
+    ],
+    [
+      "TRADEMARKS.md",
+      "TRADEMARKS.zh-CN.md"
+    ],
+    [
+      "LICENSING.md",
+      "LICENSING.zh-CN.md"
+    ],
+    [
+      "docs/README.md",
+      "docs/README.zh-CN.md"
+    ],
+    [
+      "docs/architecture.md",
+      "docs/architecture.zh-CN.md"
+    ],
+    [
+      "docs/compatibility.md",
+      "docs/compatibility.zh-CN.md"
+    ],
+    [
+      "docs/deploy.md",
+      "docs/deploy.zh-CN.md"
+    ],
+    [
+      "docs/editions.md",
+      "docs/editions.zh-CN.md"
+    ],
+    [
+      "docs/install.md",
+      "docs/install.zh-CN.md"
+    ],
+    [
+      "docs/security.md",
+      "docs/security.zh-CN.md"
+    ],
+    [
+      "docs/workspace-scaling.md",
+      "docs/workspace-scaling.zh-CN.md"
+    ],
+    [
+      "docs/maintainers/README.md",
+      "docs/maintainers/README.zh-CN.md"
+    ],
+    [
+      "docs/maintainers/documentation-review.md",
+      "docs/maintainers/documentation-review.zh-CN.md"
+    ],
+    [
+      "docs/maintainers/release-checklist.md",
+      "docs/maintainers/release-checklist.zh-CN.md"
+    ],
+    [
+      "deploy/selfhost/README.md",
+      "deploy/selfhost/README.zh-CN.md"
+    ],
+    [
+      "packages/cli-npm/README.md",
+      "packages/cli-npm/README.zh-CN.md"
+    ],
+    [
+      "packages/cli-python/README.md",
+      "packages/cli-python/README.zh-CN.md"
+    ],
+    [
+      "mobile/README.md",
+      "mobile/README.zh-CN.md"
+    ],
+    [
+      "miniprogram/README.md",
+      "miniprogram/README.zh-CN.md"
+    ],
+    [
+      "legal/licensing/README.md",
+      "legal/licensing/README.zh-CN.md"
+    ],
+    [
+      "packages/dsh-plugin-cloud/README.md",
+      "packages/dsh-plugin-cloud/README.zh-CN.md"
+    ]
   ]
 }

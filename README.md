@@ -267,6 +267,7 @@ tests, security routing, and edition-boundary review.
 | Path | Purpose |
 |---|---|
 | `server/` | FastAPI application, gateway, data layer, templates, configuration, tests |
+| `packages/dsh-plugin-cloud/` | Plugin that connects **stock** DeepSeek Harness installs to the cloud gateway |
 | `deploy/selfhost/` | Canonical public Compose stack, Caddy config, and environment template |
 | `packages/` | Version-matched npm and Python lifecycle CLIs |
 | `release/` | Canonical release identity and schemas |

@@ -34,6 +34,11 @@ jobs:
           uv run ruff check app tests scripts
           uv run pytest -q
           node --test tests/js/*.test.mjs
+      - name: dsh-plugin-cloud tests
+        working-directory: packages/dsh-plugin-cloud
+        run: |
+          npm ci --no-audit --no-fund
+          npm test
 
   desktop:
     runs-on: ubuntu-latest
