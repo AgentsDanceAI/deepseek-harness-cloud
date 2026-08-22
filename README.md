@@ -91,6 +91,36 @@ Self-hosters remain responsible for infrastructure, provider agreements, model
 costs, TLS, identity/email delivery, payment configuration, data protection,
 backups, monitoring, and applicable law.
 
+## 20 models, one gateway
+
+<!-- model-catalog:start -->
+| Provider | Models |
+| --- | --- |
+| DeepSeek | `DeepSeek-V4-Flash` · `DeepSeek-V4-Pro` |
+| Google | `Gemini-3.6-Flash` |
+| Xiaomi | `MiMo-V2-Omni` |
+| MiniMax | `MiniMax-M2.7` · `MiniMax-M3` |
+| Alibaba | `Qwen3-Omni-30B-A3B` · `Qwen3-VL-32B` · `Qwen3.8-Max` |
+| Moonshot | `Kimi-K2.7-Code` · `Kimi-K3` |
+| Zhipu | `GLM-5.2` |
+| ByteDance | `Doubao-Seed-2.0-Pro` |
+| OpenAI | `GPT-5.6-Luna` · `GPT-5.6-Terra` · `GPT-5.6-Sol` |
+| xAI | `Grok-4.5` |
+| Anthropic | `Claude-Sonnet-5` · `Claude-Opus-5` · `Claude-Fable-5` |
+<!-- model-catalog:end -->
+
+**New accounts start with 500 free credits — every model above works out of the
+box.** No card, no API keys, no per-provider signups. Try them on
+[DSH Cloud Hosted](https://dshcloud.online), or pipe them into a stock
+DeepSeek Harness install with one command:
+
+```bash
+npx --yes dsh-plugin-cloud setup
+```
+
+The gateway serves the live catalog, so this table is contract-tested against
+[`server/config/models.json`](server/config/models.json).
+
 ## Quick start
 
 All commands below pin release `0.2.0`; pin exact versions in automation.

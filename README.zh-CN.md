@@ -80,6 +80,35 @@ npm/npx、uv/uvx 遵循同一套版本化安装契约。
 自部署方负责基础设施、模型成本、提供方协议、TLS、身份与邮件、支付配置、
 数据保护、备份、监控及当地法律义务。
 
+## 20 个模型，一个入口
+
+<!-- model-catalog:start -->
+| Provider | Models |
+| --- | --- |
+| DeepSeek | `DeepSeek-V4-Flash` · `DeepSeek-V4-Pro` |
+| Google | `Gemini-3.6-Flash` |
+| Xiaomi | `MiMo-V2-Omni` |
+| MiniMax | `MiniMax-M2.7` · `MiniMax-M3` |
+| Alibaba | `Qwen3-Omni-30B-A3B` · `Qwen3-VL-32B` · `Qwen3.8-Max` |
+| Moonshot | `Kimi-K2.7-Code` · `Kimi-K3` |
+| Zhipu | `GLM-5.2` |
+| ByteDance | `Doubao-Seed-2.0-Pro` |
+| OpenAI | `GPT-5.6-Luna` · `GPT-5.6-Terra` · `GPT-5.6-Sol` |
+| xAI | `Grok-4.5` |
+| Anthropic | `Claude-Sonnet-5` · `Claude-Opus-5` · `Claude-Fable-5` |
+<!-- model-catalog:end -->
+
+**注册即送 500 积分——上面每一个模型开箱直接可用。** 不绑卡、不要任何
+API Key、不用挨家注册。到 [DSH Cloud 托管版](https://dshcloud.online)直接试，
+或者一条命令把它们接进你已有的原版 DeepSeek Harness：
+
+```bash
+npx --yes dsh-plugin-cloud setup
+```
+
+网关下发的是实时目录，本表与
+[`server/config/models.json`](server/config/models.json) 由合同测试互钉。
+
 ## 快速开始
 
 以下命令均固定使用 `0.2.0`；自动化环境也应固定精确版本。
