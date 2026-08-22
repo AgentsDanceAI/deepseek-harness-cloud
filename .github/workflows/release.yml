@@ -80,7 +80,7 @@ jobs:
             "dist/release/dsh-cloud-${{ steps.release.outputs.version }}.spdx.json"
           (
             cd dist/release
-            find . -maxdepth 1 -type f ! -name SHA256SUMS -print0 \
+            find . -maxdepth 1 -type f ! -name SHA256SUMS ! -name '.*' -print0 \
               | sort -z | xargs -0 sha256sum > SHA256SUMS
           )
       - name: Smoke test exact CLI artifacts
@@ -183,10 +183,8 @@ jobs:
           subject-digest: ${{ steps.workspace.outputs.digest }}
           push-to-registry: true
       - name: Publish npm package
-        env:
-          # Bootstrap only: npm cannot attach a trusted publisher until the
-          # scoped package exists. Remove this environment secret after 0.2.0.
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        # 认证走 OIDC trusted publishing (npm >= 11.5.1 自动使用, 需 id-token: write
+        # 且包已绑 trusted publisher —— 0.2.0 起已配好, 不再有任何 token)。
         shell: bash
         run: |
           set -euo pipefail
@@ -200,7 +198,9 @@ jobs:
         run: |
           set -euo pipefail
           docker logout ghcr.io
-          for attempt in $(seq 1 18); do
+          # npm 新包首次进公开索引实测要 ~15 分钟 (0.2.0 发布时 publish 成功后
+          # 第 14 分钟才可匿名 GET), 3 分钟的窗口把一次成功的发布误判成失败。
+          for attempt in $(seq 1 90); do
             if docker buildx imagetools inspect \
                  "${{ needs.build.outputs.server_image }}:${{ needs.build.outputs.version }}" >/dev/null \
                && docker buildx imagetools inspect \
