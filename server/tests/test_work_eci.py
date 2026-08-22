@@ -4,6 +4,7 @@
 NAS 没挂上容器照样起得来只是用户的东西会随回收消失, 镜像缓存不匹配只是慢 50 秒。
 每一条都不会在日志里喊, 所以只能靠测试。
 """
+
 import os
 import sys
 
@@ -17,11 +18,12 @@ from app.workbackend import EciBackend, WorkInfo, cname  # noqa: E402
 
 class FakeEci:
     """记下每次调用, 并按脚本回放响应。"""
+
     def __init__(self, groups=None):
-        self.calls = []            # [(action, params)]
+        self.calls = []  # [(action, params)]
         self.groups = groups or []
         self.deleted = []
-        self.total_count = None    # 覆盖它即可模拟"服务端说还有更多"
+        self.total_count = None  # 覆盖它即可模拟"服务端说还有更多"
         self.next_token = None
 
     async def call(self, action, params=None):
@@ -33,8 +35,10 @@ class FakeEci:
                 gs = [g for g in gs if g["ContainerGroupName"] == p["ContainerGroupName"]]
             if p.get("Status"):
                 gs = [g for g in gs if g.get("Status") == p["Status"]]
-            out = {"ContainerGroups": gs, "TotalCount": self.total_count
-                   if self.total_count is not None else len(gs)}
+            out = {
+                "ContainerGroups": gs,
+                "TotalCount": self.total_count if self.total_count is not None else len(gs),
+            }
             if self.next_token:
                 out["NextToken"] = self.next_token
                 self.next_token = None
@@ -49,16 +53,14 @@ class FakeEci:
         return [p for a, p in self.calls if a == action]
 
 
-def _group(uid="u_abc", status="Running", ip="172.29.0.5", fp="deadbeef",
-           image="ghcr.io/x/dsh:rc8"):
+def _group(uid="u_abc", status="Running", ip="172.29.0.5", fp="deadbeef", image="ghcr.io/x/dsh:rc8"):
     return {
         "ContainerGroupId": "eci-1",
         "ContainerGroupName": cname(uid),
         "Status": status,
         "IntranetIp": ip,
         "Containers": [{"Image": image}],
-        "Tags": [{"Key": "dshwork-user", "Value": uid},
-                 {"Key": "dshwork-bootcfg", "Value": fp}],
+        "Tags": [{"Key": "dshwork-user", "Value": uid}, {"Key": "dshwork-bootcfg", "Value": fp}],
     }
 
 
@@ -79,6 +81,7 @@ def eci(monkeypatch):
 
 # --- 签名: 已对着真实 API 验过, 这里钉住容易被"整理"掉的编码规则 -------------
 
+
 def test_signature_encoding_follows_the_rules_aliyun_actually_uses():
     """RFC3986 之外阿里云还要求 + -> %20、* -> %2A、~ 保留原样。用标准
     quote() 会得到 + 和 *, 签名就对不上, 而报错是 SignatureDoesNotMatch ——
@@ -96,14 +99,15 @@ def test_signature_is_stable_for_the_same_input():
 
 # --- 状态映射 ---------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_running_instance_reports_its_vpc_ip_as_the_host(eci):
     b, fake = eci
     fake.groups = [_group(ip="172.29.181.220")]
     info = await b.inspect("u_abc")
-    assert info == WorkInfo(running=True, boot_fp="deadbeef",
-                            image_id="ghcr.io/x/dsh:rc8",
-                            host="172.29.181.220", state="Running")
+    assert info == WorkInfo(
+        running=True, boot_fp="deadbeef", image_id="ghcr.io/x/dsh:rc8", host="172.29.181.220", state="Running"
+    )
 
 
 @pytest.mark.asyncio
@@ -128,6 +132,7 @@ async def test_terminal_instance_is_cleaned_up_and_reported_gone(eci):
 
 # --- 回收语义: 这条错了会永远漏计费 -----------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_release_deletes_because_eci_cannot_stop(eci):
     """ECI 没有"停止但保留"。若谁把 release 改成一个 stop 类调用, 实例会一直
@@ -136,8 +141,7 @@ async def test_release_deletes_because_eci_cannot_stop(eci):
     fake.groups = [_group()]
     await b.release("u_abc")
     assert fake.deleted == ["eci-1"]
-    assert [a for a, _ in fake.calls if a not in
-            ("DescribeContainerGroups", "DeleteContainerGroup")] == []
+    assert [a for a, _ in fake.calls if a not in ("DescribeContainerGroups", "DeleteContainerGroup")] == []
 
 
 @pytest.mark.asyncio
@@ -148,6 +152,7 @@ async def test_destroying_something_absent_is_not_an_error(eci):
 
 
 # --- 创建参数 ---------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_create_asks_for_the_image_cache(eci):
@@ -175,10 +180,14 @@ async def test_boot_script_and_env_reach_the_container(eci):
     b, fake = eci
     await b.create("u_abc", boot="exec dsh web", env={"A": "1", "B": "2"}, boot_fp="fp")
     p = fake.params_of("CreateContainerGroup")[0]
-    assert [p["Container.1.Command.1"], p["Container.1.Arg.1"], p["Container.1.Arg.2"]] \
-        == ["sh", "-c", "exec dsh web"]
-    got = {p[f"Container.1.EnvironmentVar.{i}.Key"]: p[f"Container.1.EnvironmentVar.{i}.Value"]
-           for i in (1, 2)}
+    assert [p["Container.1.Command.1"], p["Container.1.Arg.1"], p["Container.1.Arg.2"]] == [
+        "sh",
+        "-c",
+        "exec dsh web",
+    ]
+    got = {
+        p[f"Container.1.EnvironmentVar.{i}.Key"]: p[f"Container.1.EnvironmentVar.{i}.Value"] for i in (1, 2)
+    }
     assert got == {"A": "1", "B": "2"}
 
 
@@ -205,9 +214,10 @@ async def test_nas_mounts_home_and_workspace_under_per_user_subpaths(eci, monkey
     assert p["Volume.1.Type"] == "NFSVolume"
     assert p["Volume.1.NFSVolume.Server"] == "nas.example.com"
     assert p["Volume.1.NFSVolume.Path"] == "/dshwork"
-    hexid = cname("u_abc")[len("dshwork-"):]
-    mounts = {p[f"Container.1.VolumeMount.{i}.MountPath"]:
-              p[f"Container.1.VolumeMount.{i}.SubPath"] for i in (1, 2)}
+    hexid = cname("u_abc")[len("dshwork-") :]
+    mounts = {
+        p[f"Container.1.VolumeMount.{i}.MountPath"]: p[f"Container.1.VolumeMount.{i}.SubPath"] for i in (1, 2)
+    }
     assert mounts == {"/root": f"{hexid}/home", "/workspace": f"{hexid}/workspace"}
 
 
@@ -217,12 +227,12 @@ async def test_two_users_never_share_a_subpath(eci, monkeypatch):
     monkeypatch.setattr(config, "WORK_NAS_SERVER", "nas.example.com")
     await b.create("u_aaa", boot="x", env={}, boot_fp="fp")
     await b.create("u_bbb", boot="x", env={}, boot_fp="fp")
-    subs = [p["Container.1.VolumeMount.1.SubPath"]
-            for p in fake.params_of("CreateContainerGroup")]
+    subs = [p["Container.1.VolumeMount.1.SubPath"] for p in fake.params_of("CreateContainerGroup")]
     assert subs[0] != subs[1]
 
 
 # --- 计量口径 ---------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_running_users_comes_from_tags_not_names(eci):
@@ -231,8 +241,7 @@ async def test_running_users_comes_from_tags_not_names(eci):
     assert sorted(await b.running_users()) == ["u_aaa", "u_bbb"]
     p = fake.params_of("DescribeContainerGroups")[0]
     assert p["Status"] == "Running"
-    # 实测: 单独传 Limit 会被 ECI 要求 ContainerGroupId, 整个列举因此失败 ——
-    # 而失败的列举意味着没人被计量、没人被回收。
+    # 此 API 将 Limit 与 ContainerGroupId 绑定；全量列举不能单独传 Limit。
     assert "Limit" not in p
 
 
@@ -251,7 +260,7 @@ async def test_a_truncated_listing_is_shouted_about(eci, caplog):
     所以宁可吵。"""
     b, fake = eci
     fake.groups = [_group(uid="u_aaa")]
-    fake.total_count = 7           # 服务端说有 7 个, 却只给了 1 个且没有续页
+    fake.total_count = 7  # 服务端说有 7 个, 却只给了 1 个且没有续页
     with caplog.at_level("ERROR"):
         await b.running_users()
     assert "1/7" in caplog.text
@@ -266,10 +275,11 @@ async def test_eci_is_not_resumable():
 
 # --- 用户看到的等待时间, 必须跟后端一致 --------------------------------------
 
+
 def test_boot_wait_hint_follows_the_backend(monkeypatch):
-    """docker 是 stop/start, 几秒回来; ECI 每次都是全新实例, 实测约 25s。
-    照着 docker 的数字承诺"5–20 秒", 到了 ECI 上就是每次都食言。"""
+    """等待提示按后端启动方式区分：重启容器比新建远程实例更快。"""
     from app import workspace
+
     monkeypatch.setattr(workspace, "_backend", workbackend.DockerBackend())
     assert workspace._boot_wait_hint() == "5–20 秒"
     monkeypatch.setattr(workspace, "_backend", EciBackend())
@@ -278,25 +288,28 @@ def test_boot_wait_hint_follows_the_backend(monkeypatch):
 
 # --- 挂载失败: 唯一的症状是"一直在启动" --------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_a_stuck_mount_is_reported_once(eci, caplog):
-    """挂载失败不会让实例退出 —— 它一直 Pending, 而 Pending 和"正在启动"
-    在上层看来一模一样: 用户永远看着转圈, 日志里一个字都没有。实测踩过
-    (WORK_NAS_PATH 指了 NAS 上不存在的目录)。"""
+    """挂载失败会让实例停在 Pending，必须记录一次明确诊断。"""
     b, fake = eci
     g = _group(status="Pending", ip="")
-    g["Events"] = [{"Type": "Warning",
-                    "Message": 'MountVolume.SetUp failed for volume "dshwork-nas" : file does not exist'}]
+    g["Events"] = [
+        {
+            "Type": "Warning",
+            "Message": 'MountVolume.SetUp failed for volume "dshwork-nas" : file does not exist',
+        }
+    ]
     fake.groups = [g]
     with caplog.at_level("ERROR"):
         info = await b.inspect("u_abc")
-    assert info is not None and info.running is False   # 仍然报"在起", 别把它当不存在
+    assert info is not None and info.running is False  # 仍然报"在起", 别把它当不存在
     assert "WORK_NAS_PATH" in caplog.text
 
     caplog.clear()
     with caplog.at_level("ERROR"):
         await b.inspect("u_abc")
-    assert caplog.text == ""            # 冷路径每 30 秒来一次, 不能每次都刷
+    assert caplog.text == ""  # 冷路径每 30 秒来一次, 不能每次都刷
 
 
 @pytest.mark.asyncio
@@ -310,6 +323,7 @@ async def test_a_healthy_pending_says_nothing(eci, caplog):
 
 # --- 「個人成品」的离线视图: 走岔了不会报错, 只会永远空白 --------------------
 
+
 def test_offline_dir_layout_matches_what_gets_mounted(eci, monkeypatch, tmp_path):
     """离线视图的路径和创建实例时的 SubPath 是同一个位置的两种写法。
     走岔了不报错, 只是那个页面永远列不出东西 —— 而在 ECI 上容器闲置即销毁,
@@ -317,7 +331,7 @@ def test_offline_dir_layout_matches_what_gets_mounted(eci, monkeypatch, tmp_path
     b, fake = eci
     monkeypatch.setattr(config, "WORK_NAS_LOCAL_MOUNT", str(tmp_path))
     monkeypatch.setattr(config, "WORK_NAS_SERVER", "nas.example.com")
-    hexid = cname("u_abc")[len("dshwork-"):]
+    hexid = cname("u_abc")[len("dshwork-") :]
     (tmp_path / hexid / "workspace").mkdir(parents=True)
 
     got = b.offline_workspace_dir("u_abc")
@@ -325,10 +339,12 @@ def test_offline_dir_layout_matches_what_gets_mounted(eci, monkeypatch, tmp_path
 
     # 与 create() 真正下发的 SubPath 对齐
     import asyncio
+
     asyncio.get_event_loop_policy().new_event_loop().run_until_complete(
-        b.create("u_abc", boot="x", env={}, boot_fp="fp"))
+        b.create("u_abc", boot="x", env={}, boot_fp="fp")
+    )
     p = fake.params_of("CreateContainerGroup")[0]
-    sub = p["Container.1.VolumeMount.2.SubPath"]          # /workspace 那条
+    sub = p["Container.1.VolumeMount.2.SubPath"]  # /workspace 那条
     assert p["Container.1.VolumeMount.2.MountPath"] == "/workspace"
     assert str(got).endswith(sub), f"离线路径 {got} 与挂载 SubPath {sub} 对不上"
 

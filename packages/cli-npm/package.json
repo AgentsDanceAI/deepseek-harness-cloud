@@ -1,0 +1,18 @@
+{
+  "name": "@agentsdanceai/dsh-cloud",
+  "version": "0.0.0-development",
+  "private": true,
+  "description": "Safe self-host installer and lifecycle CLI for DSH Cloud Community Edition",
+  "type": "module",
+  "bin": {"dsh-cloud": "bin/dsh-cloud.mjs"},
+  "engines": {"node": ">=22.14.0"},
+  "dependencies": {},
+  "files": ["bin", "src", "templates", "release-manifest.json", "README.md", "LICENSE"],
+  "scripts": {"test": "node --test test/*.test.mjs"},
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AgentsDanceAI/deepseek-harness-cloud.git",
+    "directory": "packages/cli-npm"
+  },
+  "license": "AGPL-3.0-only"
+}

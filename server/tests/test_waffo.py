@@ -7,6 +7,7 @@ where app.config may already be imported with the CNY price table by another
 test module — an autouse fixture re-pins config attributes and resets the plans
 price cache per test, and reverts cleanly afterwards.
 """
+
 from __future__ import annotations
 
 import base64
@@ -18,16 +19,21 @@ import tempfile
 import time
 from pathlib import Path
 
+from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
 
 
 def _keypair():
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-    priv = key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
-                             serialization.NoEncryption()).decode()
-    pub = key.public_key().public_bytes(serialization.Encoding.PEM,
-                                        serialization.PublicFormat.SubjectPublicKeyInfo).decode()
+    priv = key.private_bytes(
+        serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()
+    ).decode()
+    pub = (
+        key.public_key()
+        .public_bytes(serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo)
+        .decode()
+    )
     return key, priv, pub
 
 
@@ -52,10 +58,10 @@ for _k in list(os.environ):
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import pytest
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from app import plans, config, credits, db, plans, security
+from app import config, credits, db, plans, security
 from app.payments import base, waffo_provider
 from app.payments.api import router as pay_router
 
@@ -89,8 +95,9 @@ def make_user() -> tuple[str, dict]:
     _seq += 1
     uid = security.new_id("u_")
     with db.tx() as conn:
-        conn.execute("INSERT INTO users (id, email, created) VALUES (?,?,?)",
-                     (uid, f"w{_seq}@test.local", time.time()))
+        conn.execute(
+            "INSERT INTO users (id, email, created) VALUES (?,?,?)", (uid, f"w{_seq}@test.local", time.time())
+        )
     token = security.sign_token(uid, epoch=0)
     return uid, {"Authorization": f"Bearer {token}"}
 
@@ -105,6 +112,7 @@ def waffo_sig(payload: bytes, t_ms: int | None = None) -> str:
 
 # --- request signing ---------------------------------------------------------
 
+
 def test_sign_request_canonical_and_signature():
     path = "/v1/actions/checkout/create-session"
     body = json.dumps({"a": 1}).encode()
@@ -116,15 +124,18 @@ def test_sign_request_canonical_and_signature():
     # canonical = METHOD\nPATH\nTS\nSHA256_BASE64(BODY), signed PKCS1v15 SHA256
     digest = base64.b64encode(hashlib.sha256(body).digest()).decode()
     canonical = f"POST\n{path}\n{ts}\n{digest}".encode()
-    _API_KEY.public_key().verify(base64.b64decode(headers["X-Signature"]), canonical,
-                                 padding.PKCS1v15(), hashes.SHA256())
+    _API_KEY.public_key().verify(
+        base64.b64decode(headers["X-Signature"]), canonical, padding.PKCS1v15(), hashes.SHA256()
+    )
     # a tampered canonical must NOT verify
-    with pytest.raises(Exception):
-        _API_KEY.public_key().verify(base64.b64decode(headers["X-Signature"]),
-                                     canonical + b"x", padding.PKCS1v15(), hashes.SHA256())
+    with pytest.raises(InvalidSignature):
+        _API_KEY.public_key().verify(
+            base64.b64decode(headers["X-Signature"]), canonical + b"x", padding.PKCS1v15(), hashes.SHA256()
+        )
 
 
 # --- webhook signature verification -----------------------------------------
+
 
 def test_verify_webhook_signature_roundtrip_tamper_stale():
     payload = json.dumps({"eventType": "order.completed"}).encode()
@@ -142,6 +153,7 @@ def test_verify_webhook_signature_roundtrip_tamper_stale():
 
 # --- event classification ----------------------------------------------------
 
+
 def test_classify_event_table():
     assert waffo_provider.classify_event("order.completed") == "paid"
     assert waffo_provider.classify_event("refund.succeeded") == "reversal"
@@ -158,6 +170,7 @@ def test_classify_event_table():
 
 # --- checkout ----------------------------------------------------------------
 
+
 def test_checkout_creates_pending_order_usd(monkeypatch):
     monkeypatch.setattr(config, "WAFFO_PRODUCT_ID", "PROD_test")  # skip store/product resolution
     uid, headers = make_user()
@@ -168,8 +181,9 @@ def test_checkout_creates_pending_order_usd(monkeypatch):
         return 200, {"data": {"checkoutUrl": "https://pay.waffo.ai/c/SESS_1", "sessionId": "SESS_1"}}
 
     monkeypatch.setattr(waffo_provider, "_waffo_request", fake_request)
-    r = client.post("/api/pay/checkout", json={"item": "plan:plus:monthly", "provider": "waffo"},
-                    headers=headers)
+    r = client.post(
+        "/api/pay/checkout", json={"item": "plan:plus:monthly", "provider": "waffo"}, headers=headers
+    )
     body = r.json()
     assert r.status_code == 200
     assert body["provider"] == "waffo"
@@ -195,7 +209,7 @@ def test_checkout_creates_pending_order_usd(monkeypatch):
     # locked in exactly the shape the live API rejects with a fieldless
     # {"message":"Invalid input","layer":"order"} — every real checkout
     # failed against production while the suite stayed green.
-    expected = f'{plans.pricing()["tiers"]["plus"]["monthly_intro_cents"] / 100:.2f}'
+    expected = f"{plans.pricing()['tiers']['plus']['monthly_intro_cents'] / 100:.2f}"
     assert p["priceSnapshot"]["amount"] == expected
     assert isinstance(p["priceSnapshot"]["amount"], str)
     assert p["orderMerchantExternalId"] == oid
@@ -205,40 +219,45 @@ def test_checkout_creates_pending_order_usd(monkeypatch):
 
 # --- webhook: paid, idempotence, refund, unsigned reversal -------------------
 
+
 def test_webhook_paid_idempotent_then_refund(monkeypatch):
     uid, _ = make_user()
     order = base.create_order(uid, "waffo", "plan:plus:monthly")
     oid = order["order_id"]
     assert base.get_order(oid)["status"] == "pending"
 
-    event = {"eventType": "order.completed",
-             "data": {"orderMerchantExternalId": oid, "sessionId": "SESS_9"}}
+    event = {"eventType": "order.completed", "data": {"orderMerchantExternalId": oid, "sessionId": "SESS_9"}}
     payload = json.dumps(event).encode()
-    r = client.post("/api/pay/webhook/waffo", content=payload,
-                    headers={"X-Waffo-Signature": waffo_sig(payload)})
+    r = client.post(
+        "/api/pay/webhook/waffo", content=payload, headers={"X-Waffo-Signature": waffo_sig(payload)}
+    )
     assert r.status_code == 200 and r.json() == {"received": True}
 
     settled = base.get_order(oid)
     assert settled["status"] == "paid" and settled["provider_ref"] == "SESS_9"
-    assert credits.balance(uid) == plans.pricing()["tiers"]["plus"]["monthly_credits"]  # plus monthly_credits (USD table)
+    assert (
+        credits.balance(uid) == plans.pricing()["tiers"]["plus"]["monthly_credits"]
+    )  # plus monthly_credits (USD table)
     sub = db.query_one("SELECT * FROM subscriptions WHERE user_id=?", (uid,))
     assert sub["tier"] == "plus" and float(sub["expires"]) > time.time()
     expires_before = float(sub["expires"])
 
     # duplicate webhook: no double fulfilment
-    r = client.post("/api/pay/webhook/waffo", content=payload,
-                    headers={"X-Waffo-Signature": waffo_sig(payload)})
+    r = client.post(
+        "/api/pay/webhook/waffo", content=payload, headers={"X-Waffo-Signature": waffo_sig(payload)}
+    )
     assert r.status_code == 200
     assert credits.balance(uid) == plans.pricing()["tiers"]["plus"]["monthly_credits"]
     sub = db.query_one("SELECT * FROM subscriptions WHERE user_id=?", (uid,))
     assert float(sub["expires"]) == expires_before
 
     # refund with a valid signature: paid -> refunded
-    refund = {"eventType": "refund.succeeded",
-              "data": {"orderMerchantExternalId": oid, "sessionId": "SESS_9"}}
+    refund = {
+        "eventType": "refund.succeeded",
+        "data": {"orderMerchantExternalId": oid, "sessionId": "SESS_9"},
+    }
     rp = json.dumps(refund).encode()
-    r = client.post("/api/pay/webhook/waffo", content=rp,
-                    headers={"X-Waffo-Signature": waffo_sig(rp)})
+    r = client.post("/api/pay/webhook/waffo", content=rp, headers={"X-Waffo-Signature": waffo_sig(rp)})
     assert r.status_code == 200
     assert base.get_order(oid)["status"] == "refunded"
 
@@ -257,9 +276,14 @@ def test_unsigned_webhook_rejected_no_state_change(monkeypatch):
     # a bad signature on a paid event is likewise rejected, nothing fulfilled
     paid = {"eventType": "order.completed", "data": {"orderMerchantExternalId": oid}}
     pp = json.dumps(paid).encode()
-    r = client.post("/api/pay/webhook/waffo", content=pp,
-                    headers={"X-Waffo-Signature": f"t={int(time.time() * 1000)},v1=" +
-                             base64.b64encode(b"not-a-signature").decode()})
+    r = client.post(
+        "/api/pay/webhook/waffo",
+        content=pp,
+        headers={
+            "X-Waffo-Signature": f"t={int(time.time() * 1000)},v1="
+            + base64.b64encode(b"not-a-signature").decode()
+        },
+    )
     assert r.status_code == 400
     assert base.get_order(oid)["status"] == "pending"
     assert credits.balance(uid) == 0
@@ -275,4 +299,13 @@ def test_process_webhook_unknown_order_is_ignored():
 def test_configured_and_active_provider():
     assert waffo_provider.configured() is True
     from app.payments import api
+
     assert "waffo" in api.active_providers()
+
+
+def test_missing_webhook_key_disables_provider(monkeypatch):
+    monkeypatch.setattr(config, "WAFFO_WEBHOOK_PUBLIC_KEY", "")
+    assert waffo_provider.configured() is False
+    from app.payments import api
+
+    assert "waffo" not in api.active_providers()

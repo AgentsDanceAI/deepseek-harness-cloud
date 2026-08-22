@@ -8,9 +8,10 @@ Security model:
     sign/sign_type and empty values, sort keys), require app_id to match, then
     confirm via alipay.trade.query before the caller fulfils. The query goes
     over TLS straight to the official gateway; its response signature is not
-    re-verified (transport trust, proven in a sibling production system).
+    re-verified, so this path relies on transport authentication.
 Keys may be full PEM or the bare base64 body the Alipay console hands out.
 """
+
 from __future__ import annotations
 
 import base64
@@ -33,7 +34,7 @@ def _pem(body: str, kind: str) -> bytes:
     if "BEGIN" in body:
         return body.replace("\\n", "\n").encode()
     b64 = "".join(body.split())
-    lines = "\n".join(b64[i:i + 64] for i in range(0, len(b64), 64))
+    lines = "\n".join(b64[i : i + 64] for i in range(0, len(b64), 64))
     return f"-----BEGIN {kind}-----\n{lines}\n-----END {kind}-----\n".encode()
 
 
@@ -58,15 +59,26 @@ def _sign(params: dict) -> str:
 
 
 def _base_params(method: str) -> dict:
-    return {"app_id": config.ALIPAY_APP_ID, "method": method, "format": "JSON", "charset": "utf-8",
-            "sign_type": "RSA2", "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"), "version": "1.0"}
+    return {
+        "app_id": config.ALIPAY_APP_ID,
+        "method": method,
+        "format": "JSON",
+        "charset": "utf-8",
+        "sign_type": "RSA2",
+        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "version": "1.0",
+    }
 
 
 def create_page_pay(order: dict) -> str:
     """Returns the signed gateway redirect URL for 电脑网站支付."""
     oid = order["order_id"]
-    biz = {"out_trade_no": oid, "product_code": "FAST_INSTANT_TRADE_PAY",
-           "total_amount": f"{order['amount_cents'] / 100:.2f}", "subject": order["description"]}
+    biz = {
+        "out_trade_no": oid,
+        "product_code": "FAST_INSTANT_TRADE_PAY",
+        "total_amount": f"{order['amount_cents'] / 100:.2f}",
+        "subject": order["description"],
+    }
     params = _base_params("alipay.trade.page.pay")
     params["notify_url"] = f"{config.PUBLIC_BASE}/api/pay/webhook/alipay"
     params["return_url"] = f"{config.PUBLIC_BASE}/console?pay=success&order={oid}"
@@ -80,8 +92,9 @@ def verify_notify(form: dict) -> bool:
     try:
         pub = serialization.load_pem_public_key(_pem(config.ALIPAY_PUBLIC_KEY, "PUBLIC KEY"))
         content = _sign_content(form, exclude=("sign", "sign_type"))
-        pub.verify(base64.b64decode(form.get("sign", "")), content.encode(),
-                   padding.PKCS1v15(), hashes.SHA256())
+        pub.verify(
+            base64.b64decode(form.get("sign", "")), content.encode(), padding.PKCS1v15(), hashes.SHA256()
+        )
         return True
     except Exception:
         return False

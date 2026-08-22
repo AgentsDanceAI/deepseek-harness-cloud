@@ -16,9 +16,8 @@ android {
             ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
-    // 正式签名 (2026-08-18): keystore 与 AgentsDance 共用同一把
-    // (/root/.agentsdance-signing/android-release.keystore, 别名 agentsdance)。
-    // 走环境变量而非硬编码路径, 免得密钥路径进 git; CI 与本机同一套入口。
+    // Release signing is configured exclusively through environment variables;
+    // credential paths and secrets must not be committed.
     // 未提供 ANDROID_KEYSTORE 时 release 构建回落无签名 —— 让缺凭据的场景
     // 明确失败在 zipalign/install 阶段, 而不是悄悄出一个 debug 签名的包。
     signingConfigs {

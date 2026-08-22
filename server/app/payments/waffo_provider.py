@@ -1,9 +1,7 @@
 """Waffo (waffo.ai) — overseas merchant-of-record collection channel.
 
-Ported from a sibling production system's payment module onto this repo's
-order kernel (payments/base.py). Waffo mechanics kept verbatim; storage,
-fulfilment and idempotence are delegated to base.py — Waffo has NO table of its
-own, it rides the shared `orders` table like every other provider here.
+Storage, fulfilment, and idempotence are delegated to the shared order kernel
+(`payments/base.py`); Waffo does not maintain a provider-specific order table.
 
 API auth (docs.waffo.ai): RSA-SHA256 request signing —
   canonical = METHOD + "\n" + PATH + "\n" + TIMESTAMP + "\n" + SHA256_BASE64(BODY)
@@ -22,6 +20,7 @@ Security baseline (same as stripe/alipay/wechat here):
   - idempotence lives in base.mark_paid/mark_refunded (first transition only);
   - private keys stay in env/config, never in the DB, code, or the frontend.
 """
+
 from __future__ import annotations
 
 import base64
@@ -29,7 +28,6 @@ import hashlib
 import json
 import logging
 import time
-from typing import Optional
 
 import httpx
 from fastapi import HTTPException
@@ -41,6 +39,7 @@ logger = logging.getLogger("dhc.waffo")
 
 
 # ── PEM handling ───────────────────────────────────────────────────────────
+
 
 def _pem(raw: str, kind: str = "PRIVATE KEY") -> str:
     """Normalise a PEM env value. Tolerates three paste shapes the Waffo
@@ -56,12 +55,12 @@ def _pem(raw: str, kind: str = "PRIVATE KEY") -> str:
     if "-----BEGIN" in v:
         return v
     body = "".join(v.split())
-    lines = "\n".join(body[i:i + 64] for i in range(0, len(body), 64))
+    lines = "\n".join(body[i : i + 64] for i in range(0, len(body), 64))
     return f"-----BEGIN {kind}-----\n{lines}\n-----END {kind}-----\n"
 
 
 def configured() -> bool:
-    return bool(config.WAFFO_MERCHANT_ID and config.WAFFO_PRIVATE_KEY)
+    return bool(config.WAFFO_MERCHANT_ID and config.WAFFO_PRIVATE_KEY and config.WAFFO_WEBHOOK_PUBLIC_KEY)
 
 
 def _api_base() -> str:
@@ -70,13 +69,19 @@ def _api_base() -> str:
 
 # ── RSA-SHA256 request signing ─────────────────────────────────────────────
 
-def sign_request(method: str, path: str, body: bytes,
-                 timestamp: Optional[int] = None,
-                 private_key_pem: Optional[str] = None) -> dict:
+
+def sign_request(
+    method: str,
+    path: str,
+    body: bytes,
+    timestamp: int | None = None,
+    private_key_pem: str | None = None,
+) -> dict:
     """Build the API-key auth headers.
     canonical = METHOD\\nPATH\\nTS\\nSHA256_BASE64(BODY), signed RSA PKCS1v15 SHA256."""
     from cryptography.hazmat.primitives import hashes, serialization
     from cryptography.hazmat.primitives.asymmetric import padding
+
     ts = int(timestamp if timestamp is not None else time.time())
     body_digest = base64.b64encode(hashlib.sha256(body or b"").digest()).decode()
     canonical = f"{method.upper()}\n{path}\n{ts}\n{body_digest}".encode()
@@ -104,8 +109,10 @@ async def _waffo_request(path: str, payload: dict) -> tuple[int, dict]:
 
 # ── webhook signature verification ─────────────────────────────────────────
 
-def verify_webhook_signature(payload: bytes, sig_header: str, public_key_pem: str,
-                             tolerance: int = 300, now: Optional[float] = None) -> bool:
+
+def verify_webhook_signature(
+    payload: bytes, sig_header: str, public_key_pem: str, tolerance: int = 300, now: float | None = None
+) -> bool:
     """Verify RSA-SHA256 over f"{t}.{body}"; t is milliseconds; 5-minute tolerance
     guards replay. Header shape: "t=<ms>,v1=<base64>"."""
     t, v1 = "", ""
@@ -125,9 +132,9 @@ def verify_webhook_signature(payload: bytes, sig_header: str, public_key_pem: st
     try:
         from cryptography.hazmat.primitives import hashes, serialization
         from cryptography.hazmat.primitives.asymmetric import padding
+
         pub = serialization.load_pem_public_key(public_key_pem.encode())
-        pub.verify(base64.b64decode(v1), f"{t}.".encode() + payload,
-                   padding.PKCS1v15(), hashes.SHA256())
+        pub.verify(base64.b64decode(v1), f"{t}.".encode() + payload, padding.PKCS1v15(), hashes.SHA256())
         return True
     except Exception:
         return False
@@ -156,6 +163,7 @@ def classify_event(etype: str) -> str:
 
 # ── kv-backed product/store cache (shared kv table, portable upsert) ────────
 
+
 def _kv_get(k: str) -> str:
     row = db.query_one("SELECT v FROM kv WHERE k=?", (k,))
     return row["v"] if row else ""
@@ -170,6 +178,7 @@ def _kv_set(k: str, v: str) -> None:
 
 # ── store / product resolution (checkout needs a productId) ─────────────────
 
+
 async def ensure_store_id() -> str:
     """create-product needs a storeId (STO_…). Prefer the env override; else
     query the merchant's stores over GraphQL and cache — single store is taken
@@ -177,16 +186,19 @@ async def ensure_store_id() -> str:
     sid = config.WAFFO_STORE_ID or _kv_get("waffo_store_id")
     if sid:
         return sid
-    status, data = await _waffo_request(
-        "/v1/graphql", {"query": "query { stores { id name slug } }"})
+    status, data = await _waffo_request("/v1/graphql", {"query": "query { stores { id name slug } }"})
     stores = ((data.get("data") or {}).get("stores") or []) if isinstance(data, dict) else []
     if status >= 300 or not stores:
         logger.error("[waffo] store query failed status=%s resp=%s", status, data)
         raise HTTPException(502, "waffo_store_unresolved")
     sid = str(stores[0].get("id") or "").strip()
     if len(stores) > 1:
-        logger.warning("[waffo] merchant has %d stores, using first %s (%s); set "
-                       "WAFFO_STORE_ID to choose", len(stores), sid, stores[0].get("name"))
+        logger.warning(
+            "[waffo] merchant has %d stores, using first %s (%s); set WAFFO_STORE_ID to choose",
+            len(stores),
+            sid,
+            stores[0].get("name"),
+        )
     _kv_set("waffo_store_id", sid)
     logger.info("[waffo] resolved store %s (%s)", sid, stores[0].get("name"))
     return sid
@@ -199,7 +211,7 @@ NAME_MAX = 64
 
 
 def fit_name(name: str) -> str:
-    return name if len(name) <= NAME_MAX else name[:NAME_MAX - 1].rstrip() + "…"
+    return name if len(name) <= NAME_MAX else name[: NAME_MAX - 1].rstrip() + "…"
 
 
 def catalog_prices(item: str) -> dict:
@@ -216,11 +228,12 @@ def catalog_prices(item: str) -> dict:
     it was traced.
     """
     from .. import currency as _cur
+
     prices = {}
     for cur in _cur.SUPPORTED:
         try:
             cents = base.resolve_item(item, cur)["amount_cents"]
-        except Exception:      # an item priced in some tables but not others
+        except Exception:  # an item priced in some tables but not others
             continue
         prices[cur] = {"amount": f"{cents / 100:.2f}", "taxIncluded": True, "taxCategory": "saas"}
     return prices
@@ -247,9 +260,13 @@ async def ensure_product_id(item: str) -> str:
     # became "create another one". Deactivated products are skipped — matching
     # one would hand checkout a product Waffo will not sell.
     try:
-        _st, d = await _waffo_request("/v1/graphql", {
-            "query": "query($s:String!){ onetimeProducts(storeId:$s, limit:200){ id name status } }",
-            "variables": {"s": store_id}})
+        _st, d = await _waffo_request(
+            "/v1/graphql",
+            {
+                "query": "query($s:String!){ onetimeProducts(storeId:$s, limit:200){ id name status } }",
+                "variables": {"s": store_id},
+            },
+        )
         for p in ((d.get("data") or {}).get("onetimeProducts") or []) if isinstance(d, dict) else []:
             if p.get("status") != "active":
                 continue
@@ -263,19 +280,22 @@ async def ensure_product_id(item: str) -> str:
         raise
     except Exception:
         logger.exception("[waffo] existing-product lookup failed, creating a new one")
-    status, data = await _waffo_request("/v1/actions/onetime-product/create-product", {
-        "storeId": store_id,
-        "name": fit_name(name),
-        "description": name,
-        # prices is keyed by ISO-4217 currency (not an array); each sellable
-        # currency needs a key or its create-session is rejected. The site
-        # quotes six, so all six go in — a product carrying only USD makes
-        # checkout fail for exactly the visitors who were shown a local price.
-        "prices": catalog_prices(item),
-    })
+    status, data = await _waffo_request(
+        "/v1/actions/onetime-product/create-product",
+        {
+            "storeId": store_id,
+            "name": fit_name(name),
+            "description": name,
+            # prices is keyed by ISO-4217 currency (not an array); each sellable
+            # currency needs a key or its create-session is rejected. The site
+            # quotes six, so all six go in — a product carrying only USD makes
+            # checkout fail for exactly the visitors who were shown a local price.
+            "prices": catalog_prices(item),
+        },
+    )
     body = data.get("data") if isinstance(data, dict) and isinstance(data.get("data"), dict) else data
     prod = (body or {}).get("product") if isinstance((body or {}).get("product"), dict) else (body or {})
-    pid = str((prod.get("id") or prod.get("productId") or "")).strip()
+    pid = str(prod.get("id") or prod.get("productId") or "").strip()
     if status >= 300 or not pid:
         logger.error("[waffo] create-product failed item=%s status=%s resp=%s", item, status, data)
         raise HTTPException(502, "waffo_product_failed")
@@ -344,6 +364,7 @@ def payment_methods_for(currency: str, amount: float) -> list[str]:
 
 # ── checkout ────────────────────────────────────────────────────────────────
 
+
 def _item_of(order: dict) -> str:
     """Reconstruct the item id from a base.create_order() output row.
 
@@ -396,6 +417,7 @@ async def create_checkout(order: dict) -> str:
 
 # ── webhook processing (drives api._settle) ─────────────────────────────────
 
+
 def process_webhook(raw: bytes, sig_header: str) -> dict | None:
     """Verify + classify + match a local order. Returns a dict for _settle
     ({"event": "paid"|"refund", "order_id", "provider_ref"}) or None to ignore.
@@ -409,7 +431,7 @@ def process_webhook(raw: bytes, sig_header: str) -> dict | None:
     try:
         event = json.loads(raw)
     except (ValueError, TypeError):
-        raise HTTPException(400, "invalid_json")
+        raise HTTPException(400, "invalid_json") from None
     kind = classify_event(str(event.get("eventType") or ""))
     if kind == "ignore":
         return None
@@ -428,15 +450,7 @@ def process_webhook(raw: bytes, sig_header: str) -> dict | None:
             raise HTTPException(400, "signature_required")
         return {"event": "refund", "order_id": order_id, "provider_ref": session_id}
     # kind == "paid"
-    if not verified:
-        # No-pubkey degraded path: only outside prod AND when the amount matches
-        # a local pending order. prod without a webhook pubkey never settles.
-        expected = round(order["amount_cents"] / 100, 2)
-        got = str(data.get("total") or data.get("amount") or "")
-        amount_ok = got in (str(expected), str(order["amount_cents"]))
-        if not (config.WAFFO_ENV != "prod" and amount_ok and order.get("status") == "pending"):
-            logger.error("[waffo] unverified webhook rejected order=%s (set "
-                         "WAFFO_WEBHOOK_PUBLIC_KEY to settle in prod)", order_id)
-            raise HTTPException(400, "signature_required")
-        logger.warning("[waffo] non-prod settle without signature order=%s", order_id)
+    if not pub or not verified:
+        logger.error("[waffo] webhook signature required order=%s", order_id)
+        raise HTTPException(400, "signature_required")
     return {"event": "paid", "order_id": order_id, "provider_ref": session_id}

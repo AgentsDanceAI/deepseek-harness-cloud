@@ -78,6 +78,13 @@
         if (!r.ok) throw new Error(d.detail || {{ t("team.err_request_failed") | tojson }}); return d; }); });
   }
   function err(msg) { var e = $('#team-error'); if (e) { e.textContent = msg; e.hidden = false; } }
+  function addCell(row, text, className) {
+    var cell = document.createElement('td');
+    if (className) cell.className = className;
+    cell.textContent = text;
+    row.appendChild(cell);
+    return cell;
+  }
 
   function render(s) {
     if (!s.in_org) { $('#team-none').hidden = false; $('#team-view').hidden = true; return; }
@@ -93,17 +100,18 @@
 
     $('#owner-tools').hidden = false;
     var tb = $('#t-members tbody');
-    tb.innerHTML = '';
+    tb.textContent = '';
     (s.usage || []).forEach(function (u) {
       var tr = document.createElement('tr');
       var hrs = Math.floor((u.minutes || 0) / 60), mm = (u.minutes || 0) % 60;
-      tr.innerHTML =
-        '<td>' + u.email + '</td>' +
-        '<td>' + (u.role === 'owner' ? {{ t("team.role_owner") | tojson }} : {{ t("team.role_member") | tojson }}) + '</td>' +
-        '<td class="num">' + (u.credits || 0).toLocaleString() + '</td>' +
-        '<td class="num">' + (hrs ? hrs + 'h ' : '') + mm + 'm</td>' +
-        '<td></td><td></td><td></td>';
-      var cells = tr.querySelectorAll('td');
+      var emailCell = addCell(tr, '');
+      emailCell.textContent = u.email;
+      var roleCell = addCell(tr, u.role === 'owner'
+        ? {{ t("team.role_owner") | tojson }} : {{ t("team.role_member") | tojson }});
+      var creditCell = addCell(tr, (u.credits || 0).toLocaleString(), 'num');
+      var minuteCell = addCell(tr, (hrs ? hrs + 'h ' : '') + mm + 'm', 'num');
+      var cells = [emailCell, roleCell, creditCell, minuteCell,
+                   addCell(tr, ''), addCell(tr, ''), addCell(tr, '')];
 
       // caps are editable inline: an admin sizing next month should not have to
       // leave the page they are reading the numbers on

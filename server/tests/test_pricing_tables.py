@@ -6,13 +6,14 @@ already shipped — a yearly price set to ten months while the badge claimed 20%
 off, and a per-month figure rounded independently of the yearly total it was
 supposed to be a twelfth of. Both are pinned here.
 """
+
 from __future__ import annotations
 
 import json
 import math
-from fractions import Fraction
 import subprocess
 import sys
+from fractions import Fraction
 from pathlib import Path
 
 import pytest
@@ -64,19 +65,19 @@ def test_discounts_derive_from_the_dollar_card_not_the_nominal_percent(path):
     """
     usd = table(CONFIG / "pricing.usd.json")["tiers"]
     t = table(path)
-    step = 100 if t["currency"] == "JPY" else 1          # 与 gen_pricing.STEP 同源
+    step = 100 if t["currency"] == "JPY" else 1  # 与 gen_pricing.STEP 同源
     for tier in PAID:
         u, loc = usd[tier], t["tiers"][tier]
         monthly = loc["monthly_cents"] // 100
         for field in ("monthly_intro_cents", "yearly_per_month_cents"):
             # 有理数, 不是浮点: €45 的 7 折真值是 31.5 应进到 32, 而 45*0.7 在
-            # IEEE754 里是 31.499999999999996, 用浮点重算这条断言会把 31 当成对的
-            # (2026-08-19 实际踩到: 生成器修好了, 测试反而红了)。
+            # IEEE754 里是 31.499999999999996；用浮点重算会把 31 错当成正确结果。
             ratio = Fraction(u[field], u["monthly_cents"])
             want = math.floor(Fraction(monthly) * ratio / step + Fraction(1, 2)) * step
             assert loc[field] // 100 == want, (
                 f"{t['currency']} {tier} {field}: 表里是 {loc[field] // 100}, "
-                f"按美元卡比例 {ratio:.4f} 应为 {want} —— 折扣比例是不是又按名义值各算各的了?")
+                f"按美元卡比例 {ratio:.4f} 应为 {want} —— 折扣比例是不是又按名义值各算各的了?"
+            )
 
 
 @pytest.mark.parametrize("path", TABLES, ids=lambda p: p.stem)
@@ -110,8 +111,7 @@ def test_a_pack_never_beats_the_plan_it_costs_the_same_as(path):
 
 
 def _rates(t: dict) -> dict[str, float]:
-    out = {tier: t["tiers"][tier]["monthly_credits"] / t["tiers"][tier]["monthly_cents"]
-           for tier in PAID}
+    out = {tier: t["tiers"][tier]["monthly_credits"] / t["tiers"][tier]["monthly_cents"] for tier in PAID}
     out.update({pid: p["credits"] / p["cents"] for pid, p in t["packs"].items()})
     return out
 
@@ -122,7 +122,7 @@ def test_usd_buys_credits_at_exactly_one_rate():
     better rate is a discount nobody decided on — it moves the gross margin without
     moving a price."""
     rates = _rates(table(CONFIG / "pricing.usd.json"))
-    assert set(round(r, 9) for r in rates.values()) == {1.0}, rates   # 100 积分 / 100 分
+    assert set(round(r, 9) for r in rates.values()) == {1.0}, rates  # 100 积分 / 100 分
 
 
 @pytest.mark.parametrize("path", TABLES, ids=lambda p: p.stem)

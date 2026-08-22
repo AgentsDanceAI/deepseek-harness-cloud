@@ -1,0 +1,90 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main, "codex/**"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  server:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: astral-sh/setup-uv@d0d8abe699bfb85fec6de9f7adb5ae17292296ff # v6
+        with:
+          version: "0.8.13"
+          enable-cache: true
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+      - name: Install locked dependencies
+        working-directory: server
+        run: uv sync --all-extras --locked
+      - name: Lint and test
+        working-directory: server
+        run: |
+          uv run ruff format --check app tests scripts
+          uv run ruff check app tests scripts
+          uv run pytest -q
+          node --test tests/js/*.test.mjs
+
+  desktop:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+      - name: Verify release contract
+        run: node desktop/scripts/verify-version.mjs
+      - name: Assemble overlay
+        run: node desktop/scripts/assemble.mjs
+      - name: Install and test
+        working-directory: desktop/build/upstream
+        run: |
+          corepack enable
+          corepack yarn install
+          node ../../scripts/verify-contract.mjs .
+          corepack yarn typecheck
+          corepack yarn test --run
+
+  mobile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Install and validate
+        working-directory: mobile
+        run: |
+          npm ci
+          npm run check
+          npx cap sync android
+      - name: Test Android shell
+        working-directory: mobile/android
+        run: ./gradlew test assembleDebug --no-daemon
+
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: astral-sh/setup-uv@d0d8abe699bfb85fec6de9f7adb5ae17292296ff # v6
+        with:
+          version: "0.8.13"
+          enable-cache: true
+      - name: Validate deployment contracts
+        run: |
+          docker compose -f deploy/selfhost/docker-compose.yml config --quiet
+          uv run --project server --extra dev pytest tests/deploy tests/distribution tests/repository -q

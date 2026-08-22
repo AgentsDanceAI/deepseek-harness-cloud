@@ -1,6 +1,6 @@
 """Cloud workspaces ("dshwork"): a per-user dsh container, usable from a phone.
 
-Architecture (all pieces already proven in production separately):
+Architecture:
   browser -> Caddy site work.<domain>
              forward_auth -> GET /api/work/route here (session cookie), which
                ensures the user's container is running and answers 200 with
@@ -13,36 +13,36 @@ Architecture (all pieces already proven in production separately):
              model+search traffic is metered exactly like the desktop app.
 
 Where that container runs is WORK_BACKEND (see workbackend.py):
-  docker  本机引擎, 隔离网络 + 命名卷。可 stop/start, 恢复几秒。自部署只有这条。
-  eci     阿里云弹性容器实例, 按秒计费。**没有"停止但保留"** —— 闲置回收就是
+  docker  本机引擎, 隔离网络 + 命名卷。可 stop/start；自部署使用此后端。
+  eci     阿里云弹性容器实例。**没有"停止但保留"** —— 闲置回收就是
           删除, 所以 /root 与 /workspace 必须落在 NAS 上, 而"恢复"是一次完整
-          冷启动 (实测到用户可用约 25s: 18s 起实例 + 7s dsh 绑端口)。
+          冷启动。
 
 Security model:
   - dsh executes arbitrary code -> one container per user, memory/cpu/pids
     limits, isolated network, named volumes, no host mounts.
   - The engine API is reached ONLY through a scoped socket proxy (containers/
     networks endpoints); the app container never sees the raw docker socket.
-  - Billing: WORK_CREDITS_PER_MIN per running minute; idle containers are
-    stopped after WORK_IDLE_STOP_MIN minutes without traffic (volumes persist,
-    next visit restarts within seconds).
+  - Running time is metered separately from model credits; idle containers are
+    reclaimed after the configured inactivity window while persistent data is retained.
 """
+
 from __future__ import annotations
 
 import asyncio
 import hashlib
 import logging
-import pathlib
 import re
 import time
 from urllib.parse import quote, unquote
 
 import httpx
 from fastapi import APIRouter, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 
 from . import config, credits, db, model_catalog, security, work_access, workbackend
 from .accounts import resolve_user, try_resolve_user
+from .http_limits import read_limited_body
 
 log = logging.getLogger("dhc.work")
 router = APIRouter(tags=["workspace"])
@@ -111,23 +111,25 @@ def _mint_workspace_token(user: dict) -> str:
     """
     device_id = security.new_id("dev_")
     epoch = int(user["session_epoch"])
-    token = security.sign_token(user["id"], device_id=device_id, epoch=epoch,
-                                ttl=config.DEVICE_TOKEN_TTL)
+    token = security.sign_token(user["id"], device_id=device_id, epoch=epoch, ttl=config.DEVICE_TOKEN_TTL)
     now = time.time()
     with db.tx() as conn:
         # the superseded credential must stop working the moment a new one exists
-        conn.execute("UPDATE devices SET revoked=1 WHERE user_id=? AND platform='cloud' AND revoked=0",
-                     (user["id"],))
+        conn.execute(
+            "UPDATE devices SET revoked=1 WHERE user_id=? AND platform='cloud' AND revoked=0", (user["id"],)
+        )
         # keep the last few for the audit trail; drop the rest
         stale = conn.execute(
-            "SELECT id FROM devices WHERE user_id=? AND platform='cloud' AND revoked=1 "
-            "ORDER BY created DESC", (user["id"],)).fetchall()
+            "SELECT id FROM devices WHERE user_id=? AND platform='cloud' AND revoked=1 ORDER BY created DESC",
+            (user["id"],),
+        ).fetchall()
         for row in stale[2:]:
             conn.execute("DELETE FROM devices WHERE id=?", (row["id"],))
         conn.execute(
             "INSERT INTO devices (id, user_id, name, platform, token_hash, epoch, last_seen, created) "
             "VALUES (?,?,?,?,?,?,?,?)",
-            (device_id, user["id"], "云工作台", "cloud", security.token_hash(token), epoch, now, now))
+            (device_id, user["id"], "云工作台", "cloud", security.token_hash(token), epoch, now, now),
+        )
     return token
 
 
@@ -142,8 +144,8 @@ def agent_last_active(user_id: str) -> float:
     Returns 0.0 when the user has never had a workspace device.
     """
     row = db.query_one(
-        "SELECT MAX(last_seen) AS ts FROM devices WHERE user_id=? AND platform='cloud'",
-        (user_id,))
+        "SELECT MAX(last_seen) AS ts FROM devices WHERE user_id=? AND platform='cloud'", (user_id,)
+    )
     return float((row["ts"] if row is not None else None) or 0.0)
 
 
@@ -178,21 +180,19 @@ def _boot_script() -> str:
     # combination proven to work is pi-ai + openai-completions against this
     # upstream). web_search stays on the deepseek search row via env.
     # The model list is the catalog, not a hand-kept copy of it: the picker in
-    # the workspace and the price table on /pricing are then the same 20 rows by
+    # the workspace and the price table on /pricing are then the same rows by
     # construction, so a model can never be sellable but unpickable (or worse,
     # pickable but unpriced — which bills at the most expensive entry).
     model_rows = "".join(
-        f"        - id: {m['id']}\n"
-        f"          name: {m.get('display_name', m['id'])}\n"
+        f"        - id: {m['id']}\n          name: {m.get('display_name', m['id'])}\n"
         for m in model_catalog.catalog().values()
     )
     settings_yaml = (
         # dsh registers its own DeepSeek provider, which showed up in the model
         # picker as a second "DeepSeek" group offering V4-Flash/V4-Pro. Those
-        # entries were broken twice over: the adapter mis-parses our upstream's
-        # tool-call deltas (see above), and with no DEEPSEEK_BASE_URL set they
-        # resolved to the PUBLIC api.deepseek.com — sending the user's device
-        # token to a third party. An explicit empty catalog removes them from
+        # entries are incompatible with the gateway's tool-call deltas (see
+        # above), and their default endpoint is outside this service. An explicit
+        # empty catalog removes them from
         # the picker; baseURL keeps anything that still resolves on-platform.
         "llm-deepseek:\n"
         f"  baseURL: {gateway}/llm/v1\n"
@@ -204,9 +204,7 @@ def _boot_script() -> str:
         "      apiKeyEnv: DSH_CLOUD_TOKEN\n"
         "      api: openai-completions\n"
         f"      baseURL: {gateway}/llm/v1\n"
-        "      models:\n"
-        + model_rows
-        + "agent-default-model:\n"
+        "      models:\n" + model_rows + "agent-default-model:\n"
         "  provider: dshcloud\n"
         f"  model: {model_catalog.default_model()}\n"
     )
@@ -244,13 +242,12 @@ def _boot_script() -> str:
         "'"
     )
     boot = (
-        "mkdir -p /root/.dsh && cat > /root/.dsh/settings.yaml <<'DHCEOF'\n"
-        + settings_yaml +
-        "DHCEOF\n"
+        "mkdir -p /root/.dsh && cat > /root/.dsh/settings.yaml <<'DHCEOF'\n" + settings_yaml + "DHCEOF\n"
         "cat > /root/.dsh/.dshcloud-agents.md <<'DHCMDEOF'\n"
-        + agents_md +
-        "DHCMDEOF\n"
-        + merge_agents_md + "\n"
+        + agents_md
+        + "DHCMDEOF\n"
+        + merge_agents_md
+        + "\n"
         # A always-on static server over /workspace. Without it, seeing a file
         # the agent just wrote meant asking the agent to start a server — and
         # that server dies with the container, so the link rots. This one is
@@ -273,32 +270,15 @@ async def _create(user: dict) -> None:
         "DEEPSEEK_BASE_URL": f"{gateway}/llm/v1",
         "DEEPSEEK_SEARCH_BASE_URL": f"{gateway}/llm/anthropic/v1",
         "DSH_TELEMETRY_DISABLED": "1",
-        # The per-user container IS the sandbox boundary (memory/cpu/pids
-        # limits, isolated network, no docker.sock, non-privileged, ephemeral).
-        # dsh's own bash sandbox needs bubblewrap or a Landlock kernel (5.13+).
-        # On 158 (al8, 5.10) it had neither, so under the default
-        # "workspace-write" mode EVERY bash call died with "no sandbox backend
-        # is usable on this host" and the agent then stalled on an approval
-        # prompt no cloud UI can answer. dsh's web profile keys both the
-        # sandbox-policy mode AND the approval policy off this one env var
-        # (dump-config: mode = DSH_PERMISSION_MODE ?? 'workspace-write';
-        # approval = mode==='danger-full-access' ? 'never' : 'ask'), so
-        # danger-full-access makes tools run unconfined and prompt-free —
-        # correct when the container is the sandbox. DSH_ is bootstrap-only
-        # (a workspace .env cannot forge it); only we set it, here.
-        #
-        # STALE PREMISE, half of it: 144 runs 6.8 and Landlock IS reachable
-        # from inside this very container (probed 2026-08-20: ABI v4). The
-        # kernel objection died with the move off 158. What still forces
-        # danger-full-access is the *other* half — the two policies share one
-        # env var, so any tighter mode also flips approval back to 'ask' and
-        # re-creates the unanswerable prompt. Worth revisiting if dsh ever lets
-        # sandbox mode and approval policy be set apart; the image still ships
-        # no bubblewrap either way.
+        # The per-user container is the sandbox boundary: resource limits,
+        # isolated networking, no docker socket, and no privileged mode. dsh
+        # currently couples its sandbox policy and interactive approval policy
+        # to this environment variable. The web client cannot answer approval
+        # prompts, so tools run without a second in-container sandbox. Revisit
+        # this setting when those policies can be configured independently.
         "DSH_PERMISSION_MODE": "danger-full-access",
     }
-    await backend().create(user["id"], boot=boot, env=env,
-                           boot_fp=_boot_fingerprint(boot))
+    await backend().create(user["id"], boot=boot, env=env, boot_fp=_boot_fingerprint(boot))
 
 
 async def _start(user_id: str) -> None:
@@ -307,7 +287,7 @@ async def _start(user_id: str) -> None:
 
 
 async def _stop(user_id: str) -> None:
-    """闲置回收。docker 上是 stop (卷还在, 恢复几秒); ECI 上是删除 —— 那边没有
+    """闲置回收。docker 上是 stop (卷保留); ECI 上是删除 —— 那边没有
     "停止但保留"这个状态, 用户的东西靠 NAS 活下来。"""
     await backend().release(user_id)
     _host.pop(user_id, None)
@@ -317,8 +297,7 @@ async def _ready(user_id: str) -> bool:
     """dsh answers on :3081 once booted; the fence trusts a loopback Host."""
     try:
         async with httpx.AsyncClient(timeout=3.0) as client:
-            r = await client.get(f"http://{_upstream(user_id)}/",
-                                 headers={"host": "127.0.0.1:3080"})
+            r = await client.get(f"http://{_upstream(user_id)}/", headers={"host": "127.0.0.1:3080"})
             return r.status_code == 200
     except httpx.HTTPError:
         return False
@@ -327,8 +306,8 @@ async def _ready(user_id: str) -> bool:
 def _boot_is_stale(info: workbackend.WorkInfo) -> bool:
     """True when the workspace was built from a different boot configuration.
 
-    One with no stamp at all predates the mechanism, so it is stale by
-    definition — that is exactly the population stuck on the old 2-model list.
+    A workspace without a stamp predates the mechanism and is stale by
+    definition.
     """
     return info.boot_fp != _boot_fingerprint(_boot_script())
 
@@ -337,10 +316,8 @@ async def _image_is_stale(info: workbackend.WorkInfo) -> bool:
     """True when the workspace runs an image other than what it would be born
     from now.
 
-    The boot fingerprint does NOT move when only the image does, so without
-    this a runtime bump (rc6 -> rc8) reaches brand-new users only: anyone who
-    already had a workspace gets it started again on the old image, with
-    nothing in the logs to say so.
+    The boot fingerprint does not change when only the image changes, so the
+    image identity must be checked independently for existing workspaces.
 
     What "the image" means differs per backend — docker resolves the tag to an
     image ID (so a same-tag rebuild counts), ECI can only compare the registry
@@ -362,9 +339,7 @@ async def ensure_workspace(user: dict) -> str:
         # into the old Cmd, and the runtime into the old image. Storage is
         # named volumes (docker) or NAS (ECI), so files and history persist
         # across the recreate.
-        stale = ("boot config" if _boot_is_stale(info)
-                 else "image" if await _image_is_stale(info)
-                 else None)
+        stale = "boot config" if _boot_is_stale(info) else "image" if await _image_is_stale(info) else None
         if stale is not None:
             log.info("workspace %s has stale %s; recreating", uid, stale)
             await backend().destroy(uid)
@@ -432,9 +407,20 @@ def is_agent_content(path: str) -> bool:
 def on_preview_host(request: Request) -> bool:
     dom = (config.PREVIEW_DOMAIN or "").strip()
     return bool(dom) and request.headers.get("host", "").split(":")[0] == dom
-_HOP_HEADERS = {"connection", "keep-alive", "transfer-encoding", "upgrade",
-                "proxy-authenticate", "proxy-authorization", "te", "trailer",
-                "content-encoding", "content-length"}
+
+
+_HOP_HEADERS = {
+    "connection",
+    "keep-alive",
+    "transfer-encoding",
+    "upgrade",
+    "proxy-authenticate",
+    "proxy-authorization",
+    "te",
+    "trailer",
+    "content-encoding",
+    "content-length",
+}
 
 
 async def _port_open(user_id: str, port: int, timeout: float = 0.6) -> bool:
@@ -462,10 +448,8 @@ def _ws_volume_dir(user_id: str):
     """Read-only path to this user's /workspace as seen from the app machine.
 
     Where that is depends on the backend (docker volume vs NAS), so the backend
-    owns it. What does not depend on the backend: the workspace is absent most
-    of the time — stopped after 15 idle minutes, or on ECI deleted outright —
-    and this is what keeps 個人成品 a record of what the agent made instead of a
-    page that is blank whenever nobody is working.
+    owns it. Reading persistent storage keeps the artifacts view available even
+    while the compute instance is stopped or deleted.
     """
     return backend().offline_workspace_dir(user_id)
 
@@ -506,8 +490,8 @@ async def _workspace_files(user_id: str, limit: int = 60) -> list[str]:
     names = []
     for raw in _HREF_RE.findall(r.text):
         name = raw.strip()
-        # 与离线那条路用同一份过滤: 同一个工作台不该因为容器碰巧在不在跑就列出
-        # 不同的东西。ECI 上容器闲置即销毁, 这个来回比以前频繁得多。
+        # Apply the same filtering as the offline path so results do not depend
+        # on whether the workspace is currently running.
         # 名字从目录索引来时是百分号编码的, 先解回来再比对, 否则过滤形同虚设。
         try:
             plain = unquote(name).rstrip("/")
@@ -527,7 +511,7 @@ async def _workspace_files(user_id: str, limit: int = 60) -> list[str]:
 async def _open_ports(user_id: str) -> list[int]:
     probes = [p for p in PREVIEW_PROBE_PORTS if p not in _PREVIEW_BLOCKED_PORTS]
     results = await asyncio.gather(*(_port_open(user_id, p) for p in probes))
-    return [p for p, ok in zip(probes, results) if ok]
+    return [p for p, ok in zip(probes, results, strict=True) if ok]
 
 
 def _inject_base(body: bytes, prefix: str) -> bytes:
@@ -543,51 +527,106 @@ def _inject_base(body: bytes, prefix: str) -> bytes:
     return tag + body
 
 
+async def _close_preview_upstream(upstream, client) -> None:  # noqa: ANN001
+    try:
+        await upstream.aclose()
+    finally:
+        await client.aclose()
+
+
+class _PreviewHTMLTooLarge(Exception):
+    pass
+
+
+async def _read_preview_html(upstream, max_bytes: int) -> bytes:  # noqa: ANN001
+    limit = max(0, int(max_bytes))
+    declared = upstream.headers.get("content-length", "")
+    if declared.isdigit() and int(declared) > limit:
+        raise _PreviewHTMLTooLarge
+    chunks: list[bytes] = []
+    seen = 0
+    async for chunk in upstream.aiter_raw():
+        seen += len(chunk)
+        if seen > limit:
+            raise _PreviewHTMLTooLarge
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
 # How a workspace file is presented: a glyph, a tile colour, and a human type
 # name. Keyed by extension because that is all the container's directory index
 # gives us — no stat, no mime (the docker socket proxy denies exec, and that
 # restriction is worth more than richer metadata).
-_ICON_PAGE = ('<svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" '
-              'stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
-              '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M7 6.5h.01"/></svg>')
-_ICON_DOC = ('<svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" '
-             'stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
-             '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/>'
-             '<path d="M14 3v5h5M9 13h6M9 17h4"/></svg>')
-_ICON_IMG = ('<svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" '
-             'stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
-             '<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="1.6"/>'
-             '<path d="m4 18 5-4 4 3 3-2 4 3"/></svg>')
-_ICON_DECK = ('<svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" '
-              'stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
-              '<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M12 16v4M8 20h8"/></svg>')
-_ICON_CODE = ('<svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" '
-              'stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
-              '<path d="m8 8-4 4 4 4M16 8l4 4-4 4"/></svg>')
-_ICON_DIR = ('<svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" '
-             'stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
-             '<path d="M4 19V7.5A1.5 1.5 0 0 1 5.5 6h3.8l2 2.5h7.2A1.5 1.5 0 0 1 20 10v9z"/></svg>')
+_ICON_PAGE = (
+    '<svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" '
+    'stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+    '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M7 6.5h.01"/></svg>'
+)
+_ICON_DOC = (
+    '<svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" '
+    'stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+    '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/>'
+    '<path d="M14 3v5h5M9 13h6M9 17h4"/></svg>'
+)
+_ICON_IMG = (
+    '<svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" '
+    'stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+    '<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="1.6"/>'
+    '<path d="m4 18 5-4 4 3 3-2 4 3"/></svg>'
+)
+_ICON_DECK = (
+    '<svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" '
+    'stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+    '<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M12 16v4M8 20h8"/></svg>'
+)
+_ICON_CODE = (
+    '<svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" '
+    'stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+    '<path d="m8 8-4 4 4 4M16 8l4 4-4 4"/></svg>'
+)
+_ICON_DIR = (
+    '<svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" '
+    'stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+    '<path d="M4 19V7.5A1.5 1.5 0 0 1 5.5 6h3.8l2 2.5h7.2A1.5 1.5 0 0 1 20 10v9z"/></svg>'
+)
 
 _KINDS = {
-    ".html": ("page", _ICON_PAGE, "网页"), ".htm": ("page", _ICON_PAGE, "网页"),
-    ".pdf": ("doc", _ICON_DOC, "PDF"), ".md": ("doc", _ICON_DOC, "Markdown"),
-    ".txt": ("doc", _ICON_DOC, "文本"), ".csv": ("doc", _ICON_DOC, "表格"),
-    ".docx": ("doc", _ICON_DOC, "Word"), ".xlsx": ("doc", _ICON_DOC, "Excel"),
-    ".pptx": ("deck", _ICON_DECK, "演示文稿"), ".ppt": ("deck", _ICON_DECK, "演示文稿"),
-    ".png": ("img", _ICON_IMG, "图片"), ".jpg": ("img", _ICON_IMG, "图片"),
-    ".jpeg": ("img", _ICON_IMG, "图片"), ".gif": ("img", _ICON_IMG, "图片"),
-    ".svg": ("img", _ICON_IMG, "矢量图"), ".webp": ("img", _ICON_IMG, "图片"),
-    ".js": ("code", _ICON_CODE, "脚本"), ".mjs": ("code", _ICON_CODE, "脚本"),
-    ".ts": ("code", _ICON_CODE, "脚本"), ".py": ("code", _ICON_CODE, "脚本"),
-    ".json": ("code", _ICON_CODE, "JSON"), ".css": ("code", _ICON_CODE, "样式"),
+    ".html": ("page", _ICON_PAGE, "网页"),
+    ".htm": ("page", _ICON_PAGE, "网页"),
+    ".pdf": ("doc", _ICON_DOC, "PDF"),
+    ".md": ("doc", _ICON_DOC, "Markdown"),
+    ".txt": ("doc", _ICON_DOC, "文本"),
+    ".csv": ("doc", _ICON_DOC, "表格"),
+    ".docx": ("doc", _ICON_DOC, "Word"),
+    ".xlsx": ("doc", _ICON_DOC, "Excel"),
+    ".pptx": ("deck", _ICON_DECK, "演示文稿"),
+    ".ppt": ("deck", _ICON_DECK, "演示文稿"),
+    ".png": ("img", _ICON_IMG, "图片"),
+    ".jpg": ("img", _ICON_IMG, "图片"),
+    ".jpeg": ("img", _ICON_IMG, "图片"),
+    ".gif": ("img", _ICON_IMG, "图片"),
+    ".svg": ("img", _ICON_IMG, "矢量图"),
+    ".webp": ("img", _ICON_IMG, "图片"),
+    ".js": ("code", _ICON_CODE, "脚本"),
+    ".mjs": ("code", _ICON_CODE, "脚本"),
+    ".ts": ("code", _ICON_CODE, "脚本"),
+    ".py": ("code", _ICON_CODE, "脚本"),
+    ".json": ("code", _ICON_CODE, "JSON"),
+    ".css": ("code", _ICON_CODE, "样式"),
 }
 
 
 def _describe(name: str, href: str) -> dict:
     """Presentation facts for one workspace entry."""
     if name.endswith("/"):
-        return {"name": name, "href": href, "label": name.rstrip("/"), "kind": "dir",
-                "glyph": _ICON_DIR, "type_label": "文件夹"}
+        return {
+            "name": name,
+            "href": href,
+            "label": name.rstrip("/"),
+            "kind": "dir",
+            "glyph": _ICON_DIR,
+            "type_label": "文件夹",
+        }
     ext = ("." + name.rsplit(".", 1)[1].lower()) if "." in name else ""
     kind, glyph, type_label = _KINDS.get(ext, ("file", _ICON_CODE, ext.lstrip(".").upper() or "文件"))
     # Names arrive percent-encoded from the directory index; a card reading
@@ -597,8 +636,14 @@ def _describe(name: str, href: str) -> dict:
         label = unquote(name)
     except Exception:  # noqa: BLE001 - a malformed name must not blank the page
         label = name
-    return {"name": name, "href": href, "label": label, "kind": kind,
-            "glyph": glyph, "type_label": type_label}
+    return {
+        "name": name,
+        "href": href,
+        "label": label,
+        "kind": kind,
+        "glyph": glyph,
+        "type_label": type_label,
+    }
 
 
 @router.get("/preview/file/{name:path}")
@@ -639,15 +684,18 @@ async def preview_offline_file(request: Request, name: str):
         index = target / "index.html"
         if index.is_file():
             from fastapi.responses import FileResponse
+
             return FileResponse(index, headers=sandbox)
         rows = "".join(
             f'<li><a href="{quote(e.name, safe="")}{"/" if e.is_dir() else ""}">{e.name}</a></li>'
             for e in sorted(target.iterdir(), key=lambda x: (not x.is_dir(), x.name.lower()))
-            if not e.name.startswith("."))
+            if not e.name.startswith(".")
+        )
         return HTMLResponse(f"<meta charset=utf-8><ul>{rows}</ul>", headers=sandbox)
     if not target.is_file():
         return JSONResponse(status_code=404, content={"detail": "not_found"})
     from fastapi.responses import FileResponse
+
     return FileResponse(target, headers=sandbox)
 
 
@@ -669,36 +717,47 @@ async def preview_index(request: Request):
 
     files, ports = [], []
     if running:
-        files = [_describe(f, preview_origin(f"/preview/{PREVIEW_STATIC_PORT}/{f}"))
-                 for f in await _workspace_files(user["id"])]
+        files = [
+            _describe(f, preview_origin(f"/preview/{PREVIEW_STATIC_PORT}/{f}"))
+            for f in await _workspace_files(user["id"])
+        ]
         ports = [p for p in await _open_ports(user["id"]) if p != PREVIEW_STATIC_PORT]
         if not files:
-            # 容器在跑却一个文件都读不到, 而存储里明明有 —— 那不是"用户还没
-            # 产出东西", 是我们够不着容器的静态服务。ECI 上最常见的原因是安全
-            # 组只放行了 3081, 于是 8088 的包被直接丢弃 (表现为超时, 不是拒绝)。
-            # 空白页看起来像"你还没做过什么", 是最难查的那种错。退回存储侧的
-            # 列表, 并且喊一声。
+            # The runtime may be healthy while its static-preview endpoint is
+            # temporarily unreachable. Preserve access to persisted artifacts.
             offline = _workspace_files_offline(user["id"])
             if offline:
-                log.warning("[work] %s 工作台在跑, 但 :%d 读不到文件而存储里有 %d 个 —— "
-                            "检查安全组是否只放行了 3081", user["id"],
-                            PREVIEW_STATIC_PORT, len(offline))
-                files = [_describe(f, preview_origin("/preview/file/" + quote(f, safe="/")))
-                         for f in offline]
+                log.warning(
+                    "[work] workspace %s preview endpoint :%d unavailable; using %d persisted files",
+                    user["id"],
+                    PREVIEW_STATIC_PORT,
+                    len(offline),
+                )
+                files = [_describe(f, preview_origin("/preview/file/" + quote(f, safe="/"))) for f in offline]
     else:
         # Asleep is the normal state, not an error state: the files are still
         # on the volume, so list them from there and open them from there too.
-        files = [_describe(f, preview_origin("/preview/file/" + quote(f, safe="/")))
-                 for f in _workspace_files_offline(user["id"])]
+        files = [
+            _describe(f, preview_origin("/preview/file/" + quote(f, safe="/")))
+            for f in _workspace_files_offline(user["id"])
+        ]
 
     from .webpages import _render
-    return _render(request, "works.html", "works",
-                   running=running, files=files, ports=ports,
-                   static_port=PREVIEW_STATIC_PORT)
+
+    return _render(
+        request,
+        "works.html",
+        "works",
+        running=running,
+        files=files,
+        ports=ports,
+        static_port=PREVIEW_STATIC_PORT,
+    )
 
 
-@router.api_route("/preview/{port}/{path:path}",
-                  methods=["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"])
+@router.api_route(
+    "/preview/{port}/{path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]
+)
 async def preview_proxy(request: Request, port: int, path: str):
     user = try_resolve_user(request)
     site = config.PUBLIC_BASE.rstrip("/")
@@ -711,57 +770,104 @@ async def preview_proxy(request: Request, port: int, path: str):
         return RedirectResponse(f"{site}/work", status_code=302)
 
     url = f"http://{_upstream_host(user['id'])}:{port}/{path}"
-    fwd = {k: v for k, v in request.headers.items()
-           if k.lower() not in _HOP_HEADERS and k.lower() not in ("host", "cookie")}
+    fwd = {
+        k: v
+        for k, v in request.headers.items()
+        if k.lower() not in _HOP_HEADERS and k.lower() not in ("host", "cookie")
+    }
+    content = None
+    if request.method not in {"GET", "HEAD", "OPTIONS"}:
+        content = await read_limited_body(
+            request,
+            max_bytes=config.PREVIEW_BODY_MAX_BYTES,
+            timeout_s=config.REQUEST_BODY_TIMEOUT_S,
+        )
+    client = httpx.AsyncClient(timeout=30.0, follow_redirects=False)
     try:
-        async with httpx.AsyncClient(timeout=30.0, follow_redirects=False) as http:
-            upstream = await http.request(
-                request.method, url, params=dict(request.query_params),
-                headers=fwd, content=await request.body())
+        upstream_request = client.build_request(
+            request.method,
+            url,
+            params=dict(request.query_params),
+            headers=fwd,
+            content=content,
+        )
+        upstream = await client.send(upstream_request, stream=True)
     except httpx.HTTPError:
-        return HTMLResponse(status_code=502, content=(
-            f"<!doctype html><meta charset=utf-8><p>端口 {port} 没有响应。"
-            "确认服务已启动且监听 <code>0.0.0.0</code>（不是 127.0.0.1）。</p>"
-            '<p><a href="/preview">← 查看正在监听的端口</a></p>'))
+        await client.aclose()
+        return HTMLResponse(
+            status_code=502,
+            content=(
+                f"<!doctype html><meta charset=utf-8><p>端口 {port} 没有响应。"
+                "确认服务已启动且监听 <code>0.0.0.0</code>（不是 127.0.0.1）。</p>"
+                '<p><a href="/preview">← 查看正在监听的端口</a></p>'
+            ),
+        )
 
-    body = upstream.content
-    headers = {k: v for k, v in upstream.headers.items() if k.lower() not in _HOP_HEADERS}
-    ctype = upstream.headers.get("content-type", "")
-    if ctype.startswith("text/html"):
-        body = _inject_base(body, f"/preview/{port}/")
+    payload_headers = {"content-encoding", "content-length"}
+    headers = {
+        k: v
+        for k, v in upstream.headers.items()
+        if k.lower() not in _HOP_HEADERS or k.lower() in payload_headers
+    }
+    ctype = upstream.headers.get("content-type", "").lower()
     # Relocate upstream redirects into the preview namespace so a trailing-slash
     # redirect (the common case) doesn't bounce the user out to the site root.
     location = upstream.headers.get("location")
     if location and location.startswith("/"):
         headers["location"] = f"/preview/{port}{location}"
-    # 上游是**智能体自己起的服务**, 它的响应头由智能体决定 —— 原样转发等于让被
-    # 预览的东西自己决定防护。两样必须由我们说了算:
-    #
-    # 1) 沙箱。没有它, 页面就以 dshcloud.online 这个源运行, 同源 fetch 会自动
-    #    带上 dhc_session (httponly 挡的是读, 不是发), 而 API 认证的兜底正是读
-    #    它, 且除 OAuth 外没有 CSRF 防护。于是一个被提示注入的智能体写出的页面,
-    #    在用户点开预览的那一刻就能以他的身份调 /api/auth/password —— 而无密码
-    #    账号那条旧密码校验是跳过的。sandbox 不带 allow-same-origin, 文档落到
-    #    不透明源, 这条路就断了。
-    # 2) 上游的 set-cookie。智能体的服务没有资格在我们的域上种 cookie。
-    #
-    # 按大小写不敏感剔除后再写入: httpx 通常给小写键, 但这道防线不该押在
-    # "上游和客户端库都规规矩矩"上。
-    _agent_controlled = {"content-security-policy", "content-security-policy-report-only",
-                         "set-cookie"}
+    # Preview services are user-controlled. They cannot set cookies or override
+    # the control plane's CSP. Without an isolated preview origin, sandbox the
+    # document into an opaque origin so authenticated APIs remain cross-origin.
+    _agent_controlled = {"content-security-policy", "content-security-policy-report-only", "set-cookie"}
     headers = {k: v for k, v in headers.items() if k.lower() not in _agent_controlled}
-    # 沙箱只在**没有**独立预览域时才用: 它把文档打进不透明源, 代价是 dev server
-    # 的 localStorage 与 HMR 都废掉。有了独立域 + Origin 白名单, 跨源写入这条路
-    # 已经断了, 就不必再付这个代价。
+    # An isolated origin preserves dev-server storage and HMR without sharing
+    # the control plane's origin.
     if not config.PREVIEW_DOMAIN:
         headers["content-security-policy"] = "sandbox allow-scripts allow-popups allow-forms"
-    resp = Response(content=body, status_code=upstream.status_code, headers=headers)
+    if request.method == "HEAD":
+        await _close_preview_upstream(upstream, client)
+        resp = Response(content=b"", status_code=upstream.status_code, headers=headers)
+    elif ctype.startswith("text/html") and not upstream.headers.get("content-encoding"):
+        try:
+            body = await _read_preview_html(upstream, config.PREVIEW_HTML_MAX_BYTES)
+        except _PreviewHTMLTooLarge:
+            return JSONResponse(
+                status_code=502,
+                content={
+                    "detail": "preview_html_too_large",
+                    "max_bytes": config.PREVIEW_HTML_MAX_BYTES,
+                },
+            )
+        except httpx.HTTPError:
+            return HTMLResponse(status_code=502, content="preview_upstream_read_failed")
+        finally:
+            await _close_preview_upstream(upstream, client)
+        body = _inject_base(body, f"/preview/{port}/")
+        headers = {k: v for k, v in headers.items() if k.lower() not in payload_headers}
+        resp = Response(content=body, status_code=upstream.status_code, headers=headers)
+    else:
+        if ctype.startswith("text/html"):
+            headers["x-dsh-preview-rewrite"] = "skipped-content-encoding"
+
+        async def relay():
+            try:
+                async for chunk in upstream.aiter_raw():
+                    yield chunk
+            finally:
+                await _close_preview_upstream(upstream, client)
+
+        resp = StreamingResponse(relay(), status_code=upstream.status_code, headers=headers)
     # Assets requested with an absolute path ("/style.css") land outside this
     # prefix; the cookie lets the fallback handler route them back here.
-    resp.set_cookie(_PREVIEW_PORT_COOKIE, str(port), max_age=86400,
-                    httponly=True, samesite="lax",
-                    secure=config.PUBLIC_BASE.startswith("https"),
-                    domain=config.COOKIE_DOMAIN or None)
+    resp.set_cookie(
+        _PREVIEW_PORT_COOKIE,
+        str(port),
+        max_age=86400,
+        httponly=True,
+        samesite="lax",
+        secure=config.PUBLIC_BASE.startswith("https"),
+        domain=config.COOKIE_DOMAIN or None,
+    )
     return resp
 
 
@@ -787,6 +893,7 @@ async def preview_fallback(request: Request):
 
 # --- routing (Caddy forward_auth hits this on EVERY request incl. WS) --------
 
+
 @router.get("/api/work/route")
 async def work_route(request: Request):
     if not config.WORK_ENABLED:
@@ -807,9 +914,8 @@ async def work_route(request: Request):
         _last_seen[user["id"]] = now
         return Response(status_code=200, headers={"X-Work-Upstream": _upstream(user["id"])})
 
-    # Cold check: the month's machine hours are spent -> the plans, not a
-    # silent credit drain. (This used to send them to /work/upgrade, which was
-    # deleted with the workspace pass — every out-of-hours visitor got a 404.)
+    # When the machine-time allowance is exhausted, route to plans rather than
+    # consuming model credits.
     if work_access.blocked_reason(user["id"]):
         return RedirectResponse(f"{site}/pricing?reason=work#plans", status_code=302)
 
@@ -847,8 +953,8 @@ _PWA_INJECT_TMPL = """
 def _pwa_inject() -> str:
     """The injected head block, stamped with the current asset version."""
     from .webpages import ASSET_V
-    return _PWA_INJECT_TMPL.replace("{asset_v}", ASSET_V)
 
+    return _PWA_INJECT_TMPL.replace("{asset_v}", ASSET_V)
 
 
 @router.get("/api/work/shell")
@@ -876,8 +982,9 @@ async def work_shell(request: Request):
     _last_seen[user["id"]] = time.time()
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
-            upstream = await client.get(f"http://{_upstream(user['id'])}/",
-                                        headers={"host": "127.0.0.1:3080"})
+            upstream = await client.get(
+                f"http://{_upstream(user['id'])}/", headers={"host": "127.0.0.1:3080"}
+            )
     except httpx.HTTPError:
         return RedirectResponse(f"{site}/work/starting", status_code=302)
     html = upstream.text
@@ -891,6 +998,7 @@ _PWA_DIR = None
 
 def _pwa_path(name: str):
     from pathlib import Path
+
     global _PWA_DIR
     if _PWA_DIR is None:
         _PWA_DIR = Path(__file__).resolve().parent / "static" / "pwa"
@@ -900,32 +1008,35 @@ def _pwa_path(name: str):
 @router.get("/manifest.webmanifest")
 async def pwa_manifest():
     from fastapi.responses import FileResponse
-    return FileResponse(_pwa_path("manifest.webmanifest"),
-                        media_type="application/manifest+json")
+
+    return FileResponse(_pwa_path("manifest.webmanifest"), media_type="application/manifest+json")
 
 
 @router.get("/sw.js")
 async def pwa_sw():
     from fastapi.responses import FileResponse
-    return FileResponse(_pwa_path("sw.js"), media_type="text/javascript",
-                        headers={"cache-control": "no-cache"})
+
+    return FileResponse(
+        _pwa_path("sw.js"), media_type="text/javascript", headers={"cache-control": "no-cache"}
+    )
 
 
 @router.get("/pwa/{name}")
 async def pwa_asset(name: str):
     from fastapi.responses import FileResponse
+
     safe = re.sub(r"[^a-zA-Z0-9._-]", "", name)
     path = _pwa_path(safe)
     if not path.is_file():
         return JSONResponse(status_code=404, content={"detail": "not_found"})
-    media = ("text/css" if safe.endswith(".css")
-             else "text/javascript" if safe.endswith(".js")
-             else "image/png")
-    return FileResponse(path, media_type=media,
-                        headers={"cache-control": "public, max-age=86400"})
+    media = (
+        "text/css" if safe.endswith(".css") else "text/javascript" if safe.endswith(".js") else "image/png"
+    )
+    return FileResponse(path, media_type=media, headers={"cache-control": "public, max-age=86400"})
 
 
 # --- user-facing endpoints ---------------------------------------------------
+
 
 @router.get("/api/work/status")
 async def work_status(request: Request):
@@ -937,24 +1048,30 @@ async def work_status(request: Request):
     info = await _inspect(user["id"])
     state = (info.state or "unknown") if info else "none"
     ready = bool(info) and info.running and await _ready(user["id"])
-    # 启动页画的是**真实阶段**, 不是按秒数假装的进度。后端本来就知道自己走到哪
-    # 一步 (ECI 会报 Scheduling/Pending/Running), 之前被压成一个字符串扔掉了。
+    # The startup page uses backend state rather than a time-based approximation.
     # 用一套与后端无关的词暴露出来, 免得页面去解析 docker/ECI 各自的状态名。
-    phase = ("ready" if ready
-             else "warming" if info and info.running   # 实例起来了, dsh 还在绑端口
-             else "booting" if info                     # 实例在调度/启动
-             else "queued")                             # 还没有实例
-    out = {"enabled": True,
-           "phase": phase,
-           "state": "running" if ready else ("starting" if info and info.running else state),
-           "url": _work_url("/"),
-           "credits_per_min": config.WORK_CREDITS_PER_MIN,
-           "idle_stop_min": config.WORK_IDLE_STOP_MIN,
-           "balance": credits.balance(user["id"]),
-           # The workspace runs on its own subdomain and renders dsh's UI, so it
-           # has no server-side template to branch on — the admin entry in the
-           # floating menu is gated on this flag instead.
-           "is_admin": bool(user.get("is_admin"))}
+    phase = (
+        "ready"
+        if ready
+        else "warming"
+        if info and info.running  # 实例起来了, dsh 还在绑端口
+        else "booting"
+        if info  # 实例在调度/启动
+        else "queued"
+    )  # 还没有实例
+    out = {
+        "enabled": True,
+        "phase": phase,
+        "state": "running" if ready else ("starting" if info and info.running else state),
+        "url": _work_url("/"),
+        "credits_per_min": config.WORK_CREDITS_PER_MIN,
+        "idle_stop_min": config.WORK_IDLE_STOP_MIN,
+        "balance": credits.balance(user["id"]),
+        # The workspace runs on its own subdomain and renders dsh's UI, so it
+        # has no server-side template to branch on — the admin entry in the
+        # floating menu is gated on this flag instead.
+        "is_admin": bool(user.get("is_admin")),
+    }
     out.update(work_access.state(user["id"]))
     return out
 
@@ -996,8 +1113,8 @@ async def work_entry(request: Request):
     return RedirectResponse(f"{site}/work/starting{suffix}", status_code=302)
 
 
-# 启动页的样式/脚本单独放, 不塞进那段 f-string —— 里面全是 CSS 与 JS 的大括号,
-# 逐个转义会把它变成没人愿意改的东西。
+# Keep the launch-page assets outside the HTML f-string so CSS/JS braces remain
+# readable and do not require manual escaping.
 _BOOT_CSS = """
 .boot{max-width:430px;margin:0 auto;text-align:center}
 .boot .track{position:relative;height:8px;margin:30px 0 12px;border-radius:999px;
@@ -1009,9 +1126,8 @@ _BOOT_CSS = """
   transition:left .5s cubic-bezier(.22,.61,.36,1)}
 .boot .whale{position:absolute;left:-19px;top:-14px;width:38px;height:26px;
   color:var(--brand);animation:bob 2.6s ease-in-out infinite}
-/* 支点要落在尾鳍与身体的连接处。transform-origin 的百分比默认按 viewBox 解析
-   (transform-box 默认 view-box), 不是按元素自身 —— 之前那个 78% 是撞上的,
-   换个 viewBox 就会歪到别处。用 fill-box 显式按元素自身的包围盒算。 */
+/* Anchor the tail animation to its own bounding box. `fill-box` prevents viewBox
+   changes from moving the transform origin. */
 .boot .whale .fluke{transform-box:fill-box;transform-origin:0% 50%;
   animation:flick 1.15s ease-in-out infinite}
 @keyframes bob{0%,100%{transform:translateY(0) rotate(-2deg)}
@@ -1080,9 +1196,8 @@ setInterval(paint,120);paint();
 def _boot_wait_hint() -> str:
     """等多久, 按后端说实话。
 
-    docker 是 stop/start, 卷和镜像都在本机, 几秒就回来。ECI 每次都是全新实例:
-    实测约 25 秒 (18s 起实例 + 7s dsh 绑端口), 而镜像缓存没命中时会退回 50 秒。
-    照着 docker 的数字写"5–20 秒", 到了 ECI 上就是每次都超时的承诺。
+    docker 使用 stop/start，卷和镜像保留在本机；ECI 每次创建新实例，通常需要
+    更长的等待时间。用户界面的提示应按后端区分。
     """
     return "20–40 秒" if not backend().resumable else "5–20 秒"
 
@@ -1091,8 +1206,7 @@ def _boot_wait_hint() -> str:
 async def work_starting(request: Request, state: str = ""):
     """启动等待页。
 
-    ECI 上"恢复"是一次完整冷启动 (到用户能用约 25s), 一个只会转圈的图标在这个
-    时长上会让人以为卡住了。所以画真实进度: 后端已经知道自己走到哪一步
+    ECI 上“恢复”是一次完整冷启动，因此等待页显示后端报告的真实阶段：
     (/api/work/status 的 phase), 页面按阶段推进, 阶段内渐近而不撞满格。
     """
     if state == "busy":
@@ -1100,8 +1214,11 @@ async def work_starting(request: Request, state: str = ""):
     elif state == "error":
         title, body, poll = "启动失败", "云工作台启动失败，请稍后重试；问题持续请联系支持。", False
     else:
-        title, body, poll = ("云工作台启动中…",
-                             f"正在为你准备云端工作区，通常需要 {_boot_wait_hint()}。", True)
+        title, body, poll = (
+            "云工作台启动中…",
+            f"正在为你准备云端工作区，通常需要 {_boot_wait_hint()}。",
+            True,
+        )
 
     if poll:
         progress = (
@@ -1109,7 +1226,7 @@ async def work_starting(request: Request, state: str = ""):
             'aria-valuemax="100" aria-valuenow="0" aria-label="启动进度">'
             '<div class="fill" id="fill"></div>'
             f'<div class="swimmer" id="swim">{_BOOT_WHALE}</div>'
-            '</div>'
+            "</div>"
             '<p class="phase" id="phase">正在排队</p>'
             '<p class="slow" id="slow" hidden>比平时久一些，仍在继续。</p>'
         )
@@ -1132,22 +1249,22 @@ async def work_starting(request: Request, state: str = ""):
 
 # --- billing + idle reaper (one asyncio task, started from main.py) ----------
 
+
 async def reaper_tick(now: float) -> None:
     """One meter/reaper pass over every running workspace."""
     for uid in await _running_workspaces():
         # 按**容器存在的时间**计量, 不是按智能体干活的时间。
         #
-        # 原先只计"智能体 60 秒内调过网关"的分钟, 理由是"读回复和走开不该扣时长"。
-        # 那在工作台跑在自己机器上时是对的 —— 多存在一分钟的边际成本≈0。切到 ECI
-        # 之后同一个决定变成了直接补贴: 云厂商按秒收, 我们按"干活"收, 中间那段
-        # 由我们垫。而且窗口会被重置 —— 每 29 分钟发一条消息就能让容器长生不老,
-        # 计量却只有每条消息一分钟。
+        # Meter the full lifetime of a running container rather than only the
+        # minutes in which the agent calls the gateway. This matches the resource
+        # actually reserved and prevents sparse activity from bypassing metering.
         #
         # 机时依然只扣 MINUTES, 永不扣积分: 套餐里机时是单独的额度 (GitHub
         # Actions 那种口径), 积分留给 token。这里仍写一行 usage_log (work_access
         # 数的就是它), 但 credits=0, 所以一分钟机时绝不会动到 token 余额。
-        credits.spend(uid, 0, kind=work_access.MINUTE_KIND,
-                      model="dshwork", request_id=f"ws-{int(now // 60)}")
+        credits.spend(
+            uid, 0, kind=work_access.MINUTE_KIND, model="dshwork", request_id=f"ws-{int(now // 60)}"
+        )
         work_access.consume_minute(uid)
         last = _last_seen.setdefault(uid, now)  # re-seed after restart
         # Two stop rules, because idle minutes are now free and RAM is not:
@@ -1160,12 +1277,10 @@ async def reaper_tick(now: float) -> None:
         # backstop must not be reaped before the user can type into it.
         started = _started_at.setdefault(uid, now)  # re-seed after restart
         gone = now - last > config.WORK_IDLE_STOP_MIN * 60
-        agent_gone = (now - max(agent_last_active(uid), started)
-                      > config.WORK_AGENT_IDLE_STOP_MIN * 60)
+        agent_gone = now - max(agent_last_active(uid), started) > config.WORK_AGENT_IDLE_STOP_MIN * 60
         broke = credits.balance(uid) <= -config.OVERDRAFT_LIMIT_CREDITS
         if gone or agent_gone or broke:
-            reason = ("user idle" if gone else
-                      "agent idle" if agent_gone else "credits exhausted")
+            reason = "user idle" if gone else "agent idle" if agent_gone else "credits exhausted"
             log.info("stopping workspace %s (%s)", uid, reason)
             await _stop(uid)
             _last_seen.pop(uid, None)
@@ -1173,10 +1288,13 @@ async def reaper_tick(now: float) -> None:
 
 
 async def billing_reaper_loop() -> None:
-    log.info("workspace billing/reaper loop started (%s credits per ACTIVE min, "
-             "idle-stop %s min, agent-idle-stop %s min)",
-             config.WORK_CREDITS_PER_MIN, config.WORK_IDLE_STOP_MIN,
-             config.WORK_AGENT_IDLE_STOP_MIN)
+    log.info(
+        "workspace billing/reaper loop started (%s credits per ACTIVE min, "
+        "idle-stop %s min, agent-idle-stop %s min)",
+        config.WORK_CREDITS_PER_MIN,
+        config.WORK_IDLE_STOP_MIN,
+        config.WORK_AGENT_IDLE_STOP_MIN,
+    )
     while True:
         try:
             await asyncio.sleep(60)

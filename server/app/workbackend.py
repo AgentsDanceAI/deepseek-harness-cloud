@@ -3,15 +3,16 @@
 Two backends, same contract:
 
   docker  本机 (或自部署) 的 docker 引擎, 经受限 socket 代理。容器可以 stop 后
-          再 start, 命名卷留在原地, 恢复只要几秒。
+          再 start, 命名卷保留状态。
   eci     阿里云弹性容器实例。**没有"停止但保留"这个状态** —— 只能创建和删除,
-          于是"闲置回收"等于销毁, 而恢复是一次完整冷启动 (实测中位数 19s)。
+          于是"闲置回收"等于销毁, 而恢复是一次完整冷启动。
           正因如此, ECI 后端下 /root 与 /workspace 必须落在 NAS 上: 容器一删,
           容器内的任何东西都不再存在。
 
 抽象出这层不是为了好看, 是因为 deploy/selfhost/ 那条路只有 docker: 把 docker
 换掉等于把自部署删掉。两边都实现同一个 Backend, 由 WORK_BACKEND 选。
 """
+
 from __future__ import annotations
 
 import abc
@@ -42,11 +43,12 @@ def cname(user_id: str) -> str:
 @dataclass(frozen=True)
 class WorkInfo:
     """What the app needs to know about one workspace, backend-independent."""
+
     running: bool
-    boot_fp: str      # boot-script digest stamped at create time
-    image_id: str     # whatever identifies the image THIS instance was born from
-    host: str         # hostname or IP that answers on :3081
-    state: str = ""   # backend's own word for it, for /api/work/status only
+    boot_fp: str  # boot-script digest stamped at create time
+    image_id: str  # whatever identifies the image THIS instance was born from
+    host: str  # hostname or IP that answers on :3081
+    state: str = ""  # backend's own word for it, for /api/work/status only
 
 
 class Backend(abc.ABC):
@@ -65,8 +67,7 @@ class Backend(abc.ABC):
         is far worse than running one build behind."""
 
     @abc.abstractmethod
-    async def create(self, user_id: str, *, boot: str, env: dict[str, str],
-                     boot_fp: str) -> None: ...
+    async def create(self, user_id: str, *, boot: str, env: dict[str, str], boot_fp: str) -> None: ...
 
     @abc.abstractmethod
     async def start(self, user_id: str) -> None: ...
@@ -88,9 +89,8 @@ class Backend(abc.ABC):
     def offline_workspace_dir(self, user_id: str) -> pathlib.Path | None:
         """应用机上能只读看到这个用户 /workspace 的路径, 没有则 None。
 
-        「個人成品」靠它: 用户不在时工作台是停着的 (docker) 或已经被删掉的
-        (ECI), 而那个页面正是他唯一能看见自己文件的地方 —— 尤其在 ECI 上,
-        容器根本不存在, 除了这条路没有别的办法列出他的东西。
+        工作区停止或删除后，文件列表仍需要从持久卷读取；ECI 实例不存在时
+        尤其不能依赖容器文件系统。
         """
         return None
 
@@ -99,9 +99,8 @@ class Backend(abc.ABC):
 
 LABEL = "dshwork.user"
 # The boot script is baked into the container's Cmd at CREATE time, so an
-# existing container keeps rewriting the settings.yaml it was born with — the
-# catalog grew from 2 models to 20 and every already-provisioned workspace
-# stayed on the old two. Stamping the script's digest lets ensure_workspace spot
+# existing container keeps rewriting the settings.yaml it was born with.
+# Stamping the script's digest lets ensure_workspace spot
 # a stale container and rebuild it; /root and /workspace survive, so nothing the
 # user made is lost.
 CFG_LABEL = "dshwork.bootcfg"
@@ -110,10 +109,9 @@ CFG_LABEL = "dshwork.bootcfg"
 def host_free_mb() -> int | None:
     """宿主可用内存 (MB)。读不到返回 None。
 
-    容器里读 /proc/meminfo 拿到的就是**宿主**的数 (它不做 namespace 隔离, 实测
-    MemTotal 与宿主逐字节相同), 所以不需要把 /proc 挂进来或多开一个探针。
+    容器里的 /proc/meminfo 反映宿主内存，因此无需额外挂载或探针。
     用 MemAvailable 而不是 MemFree: 后者把可回收的 page cache 算成"已用",
-    在一台跑了半个月的机器上会永远显示没内存, 于是这道闸门变成永远关闭。"""
+    可能导致容量检查长期误判为内存不足。"""
     try:
         with open("/proc/meminfo", encoding="ascii") as f:
             for line in f:
@@ -127,8 +125,9 @@ def host_free_mb() -> int | None:
 class DockerBackend(Backend):
     resumable = True
 
-    async def _api(self, method: str, path: str, *, json_body: dict | None = None,
-                   params: dict | None = None) -> httpx.Response:
+    async def _api(
+        self, method: str, path: str, *, json_body: dict | None = None, params: dict | None = None
+    ) -> httpx.Response:
         async with httpx.AsyncClient(base_url=config.DOCKER_PROXY_URL, timeout=30.0) as client:
             return await client.request(method, path, json=json_body, params=params)
 
@@ -137,7 +136,7 @@ class DockerBackend(Backend):
         if r.status_code != 200:
             return None
         d = r.json()
-        labels = ((d.get("Config") or {}).get("Labels") or {})
+        labels = (d.get("Config") or {}).get("Labels") or {}
         return WorkInfo(
             running=(d.get("State") or {}).get("Status", "") == "running",
             # no stamp at all predates the mechanism -> stale by definition
@@ -149,19 +148,17 @@ class DockerBackend(Backend):
 
     async def current_image_id(self) -> str:
         """Resolved image *ID*, not the tag string: the usual upgrade here is
-        `docker build -t dsh-local:rc8` — sometimes the same tag rebuilt — and a
+        `docker build -t image:tag` — sometimes the same tag rebuilt — and a
         tag comparison would call that unchanged, leaving every existing
         workspace on the old runtime forever."""
         r = await self._api("GET", f"/images/{config.WORK_IMAGE}/json")
         if r.status_code != 200:
-            log.warning("[work] 解析不了镜像 %s (%s), 跳过镜像陈旧判定",
-                        config.WORK_IMAGE, r.status_code)
+            log.warning("[work] 解析不了镜像 %s (%s), 跳过镜像陈旧判定", config.WORK_IMAGE, r.status_code)
             return ""
         return (r.json() or {}).get("Id", "")
 
-    async def create(self, user_id: str, *, boot: str, env: dict[str, str],
-                     boot_fp: str) -> None:
-        hexid = cname(user_id)[len("dshwork-"):]
+    async def create(self, user_id: str, *, boot: str, env: dict[str, str], boot_fp: str) -> None:
+        hexid = cname(user_id)[len("dshwork-") :]
         body = {
             "Image": config.WORK_IMAGE,
             "Cmd": ["sh", "-c", boot],
@@ -172,9 +169,8 @@ class DockerBackend(Backend):
                 "Memory": config.WORK_MEM_LIMIT_MB * 1024 * 1024,
                 "NanoCpus": int(config.WORK_CPUS * 1e9),
                 "PidsLimit": 512,
-                # 内存到悬崖时让 OOM killer 先挑工作台: 它可随时重启、卷还在, 而
-                # 默认规则是按占用挑, 会先杀同机最大的进程 (postgres /
-                # elasticsearch) —— 那是别人的数据库, 而且不是它闯的祸。
+                # Prefer reclaiming a restartable workspace over unrelated host
+                # services when the kernel must select an OOM victim.
                 "OomScoreAdj": config.WORK_OOM_SCORE_ADJ,
                 "NetworkMode": config.WORK_NETWORK,
                 "RestartPolicy": {"Name": "no"},
@@ -184,8 +180,7 @@ class DockerBackend(Backend):
                 ],
             },
         }
-        r = await self._api("POST", "/containers/create", json_body=body,
-                            params={"name": cname(user_id)})
+        r = await self._api("POST", "/containers/create", json_body=body, params={"name": cname(user_id)})
         if r.status_code not in (201, 409):  # 409 = already exists (race)
             raise RuntimeError(f"container create failed: {r.status_code} {r.text[:200]}")
 
@@ -202,18 +197,15 @@ class DockerBackend(Backend):
         await self._api("DELETE", f"/containers/{cname(user_id)}")
 
     async def running_users(self) -> list[str]:
-        r = await self._api("GET", "/containers/json",
-                            params={"filters": '{"label":["%s"]}' % LABEL})
+        r = await self._api("GET", "/containers/json", params={"filters": f'{{"label":["{LABEL}"]}}'})
         if r.status_code != 200:
             return []
-        return [uid for c in r.json()
-                if (uid := (c.get("Labels") or {}).get(LABEL, ""))]
+        return [uid for c in r.json() if (uid := (c.get("Labels") or {}).get(LABEL, ""))]
 
     def capacity_reason(self) -> str:
         """起新工作台前的容量判定, 返回空串表示可以起。
 
-        静态并发上限之外还要看**宿主内存余量** —— 静态上限不知道同机还跑着
-        另一套自有生产系统全栈, 8 × 512M 的额度在对方峰值时就是压垮线。
+        静态并发上限之外还要检查宿主内存余量，避免工作区影响同机服务。
 
         内存读不到时**放行**: 与本模块其余闸门同一姿态 (检查自身故障不该拦人),
         而且一个读不到 /proc 的进程更可能是环境异常而不是真的没内存。"""
@@ -222,8 +214,13 @@ class DockerBackend(Backend):
             return ""
         need = config.WORK_MEM_LIMIT_MB + config.WORK_MIN_FREE_MB
         if free < need:
-            log.warning("[work] 宿主可用内存 %dMB < 需要 %dMB (容器 %d + 保留 %d), 拒起新工作台",
-                        free, need, config.WORK_MEM_LIMIT_MB, config.WORK_MIN_FREE_MB)
+            log.warning(
+                "[work] 宿主可用内存 %dMB < 需要 %dMB (容器 %d + 保留 %d), 拒起新工作台",
+                free,
+                need,
+                config.WORK_MEM_LIMIT_MB,
+                config.WORK_MIN_FREE_MB,
+            )
             return f"memory:{free}<{need}"
         return ""
 
@@ -231,7 +228,7 @@ class DockerBackend(Backend):
         root = (config.WORK_VOLUME_ROOT or "").strip()
         if not root:
             return None
-        hexid = cname(user_id)[len("dshwork-"):]
+        hexid = cname(user_id)[len("dshwork-") :]
         d = pathlib.Path(root) / f"dshwork-ws-{hexid}" / "_data"
         return d if d.is_dir() else None
 
@@ -257,9 +254,7 @@ def _pe(s) -> str:
 def _sign(params: dict, secret: str, method: str = "POST") -> str:
     canon = "&".join(f"{_pe(k)}={_pe(v)}" for k, v in sorted(params.items()))
     sts = f"{method}&{_pe('/')}&{_pe(canon)}"
-    return base64.b64encode(
-        hmac.new((secret + "&").encode(), sts.encode(), hashlib.sha1).digest()
-    ).decode()
+    return base64.b64encode(hmac.new((secret + "&").encode(), sts.encode(), hashlib.sha1).digest()).decode()
 
 
 class EciError(RuntimeError):
@@ -273,6 +268,7 @@ class EciBackend(Backend):
     全部文件和会话。WORK_NAS_SERVER 为空时仍可运行 (用于冒烟验证), 但每次创建
     都会告警: 那种形态下工作台是一次性的。
     """
+
     resumable = False
 
     def __init__(self) -> None:
@@ -302,12 +298,13 @@ class EciBackend(Backend):
         try:
             body = r.json()
         except ValueError:
-            raise EciError(f"{action}: HTTP {r.status_code}, 响应不是 JSON: {r.text[:200]}")
+            raise EciError(f"{action}: HTTP {r.status_code}, 响应不是 JSON: {r.text[:200]}") from None
         # 阿里云把错误也放在 200 之外的码里, 但 Code 字段才是权威的 —— 只看
         # status_code 会把 "参数错误" 读成成功。
         if r.status_code != 200 or body.get("Code"):
-            raise EciError(f"{action}: {body.get('Code') or r.status_code} "
-                           f"{body.get('Message', r.text[:200])}")
+            raise EciError(
+                f"{action}: {body.get('Code') or r.status_code} {body.get('Message', r.text[:200])}"
+            )
         return body
 
     # -- helpers ------------------------------------------------------------
@@ -316,14 +313,15 @@ class EciBackend(Backend):
         server = (config.WORK_NAS_SERVER or "").strip()
         if not server:
             if not self._warned_no_nas:
-                log.warning("[work] ECI 后端未配置 WORK_NAS_SERVER: 工作台是一次性的, "
-                            "闲置回收会抹掉用户的文件与会话")
+                log.warning(
+                    "[work] ECI 后端未配置 WORK_NAS_SERVER: 工作台是一次性的, 闲置回收会抹掉用户的文件与会话"
+                )
                 self._warned_no_nas = True
             return {}
-        hexid = cname(user_id)[len("dshwork-"):]
+        hexid = cname(user_id)[len("dshwork-") :]
         # 这个目录**必须已经存在于 NAS 上** —— ECI 不会替你建, 挂载会以
         # "file does not exist" 失败, 而实例只是一直 Pending, 不报错。
-        # (SubPath 的嵌套目录倒是会自动创建, 实测过。)
+        # SubPath 嵌套目录由挂载方按需创建。
         root = (config.WORK_NAS_PATH or "/").rstrip("/") or "/"
         p = {
             "Volume.1.Name": "dshwork-nas",
@@ -334,9 +332,10 @@ class EciBackend(Backend):
         }
         # SubPath 而不是给每个用户一个 Volume: NFS 的子目录要先存在才挂得上,
         # 而 SubPath 沿用 k8s 语义, 由挂载方按需创建。一个卷 + 两个子路径,
-        # 也省掉"用户数 = 卷数"这条会撞上 ECI 卷数量上限的路。
-        for i, (sub, path) in enumerate(((f"{hexid}/home", "/root"),
-                                         (f"{hexid}/workspace", "/workspace")), start=1):
+        # 一个共享卷配合用户子路径，也避免触发每实例卷数量限制。
+        for i, (sub, path) in enumerate(
+            ((f"{hexid}/home", "/root"), (f"{hexid}/workspace", "/workspace")), start=1
+        ):
             p[f"Container.1.VolumeMount.{i}.Name"] = "dshwork-nas"
             p[f"Container.1.VolumeMount.{i}.MountPath"] = path
             p[f"Container.1.VolumeMount.{i}.SubPath"] = sub
@@ -347,10 +346,9 @@ class EciBackend(Backend):
         return {t.get("Key", ""): t.get("Value", "") for t in (group.get("Tags") or [])}
 
     async def _find(self, user_id: str) -> dict | None:
-        # 不传 Limit: 实测单独传它会被要求 ContainerGroupId
-        # ("MissingParameter ... ContainerGroupId")。按名字查本来也至多一条。
-        body = await self._call("DescribeContainerGroups",
-                                {"ContainerGroupName": cname(user_id)})
+        # Omit Limit because this API combination requires ContainerGroupId when
+        # it is present. A name lookup yields at most one active group here.
+        body = await self._call("DescribeContainerGroups", {"ContainerGroupName": cname(user_id)})
         for g in body.get("ContainerGroups", []):
             if g.get("ContainerGroupName") == cname(user_id):
                 return g
@@ -384,10 +382,8 @@ class EciBackend(Backend):
     def _report_stuck_mount(self, user_id: str, group: dict) -> None:
         """挂载失败不会让实例退出, 它会一直 Pending。
 
-        对上层来说这和"正在启动"长得一模一样, 于是 ensure_workspace 永远返回
-        starting, 用户永远看着转圈, 日志里一个字都没有。实测踩过一次:
-        WORK_NAS_PATH 指了个 NAS 上不存在的目录 ("file does not exist") ——
-        注意 SubPath 的嵌套目录 ECI 会自动建, 但基础 Path 必须先存在。
+        对上层来说这和“正在启动”相同，因此必须从事件中报告挂载告警。
+        SubPath 的嵌套目录可以自动创建，但 WORK_NAS_PATH 的基础路径必须存在。
         """
         if user_id in self._mount_reported:
             return
@@ -395,22 +391,26 @@ class EciBackend(Backend):
             msg = e.get("Message", "")
             if e.get("Type") == "Warning" and "MountVolume" in msg:
                 self._mount_reported.add(user_id)
-                log.error("[work] %s 卡在 %s: 挂载失败 —— %s。"
-                          "检查 WORK_NAS_PATH=%r 在 NAS 上是否存在, "
-                          "以及挂载点权限组是否放行本交换机网段",
-                          user_id, group.get("Status"), msg[:200], config.WORK_NAS_PATH)
+                log.error(
+                    "[work] %s 卡在 %s: 挂载失败 —— %s。"
+                    "检查 WORK_NAS_PATH=%r 在 NAS 上是否存在, "
+                    "以及挂载点权限组是否放行本交换机网段",
+                    user_id,
+                    group.get("Status"),
+                    msg[:200],
+                    config.WORK_NAS_PATH,
+                )
                 return
 
     async def current_image_id(self) -> str:
         """ECI 上镜像身份就是仓库引用本身。
 
-        不像本机 docker 能拿到解析后的镜像 ID —— 同名重推 (`:rc8` 内容变了但
+        不像本机 docker 能拿到解析后的镜像 ID —— 同名重推（tag 不变但
         tag 没变) 这里察觉不到。可接受: 工作台镜像走版本号 tag, 而重建镜像缓存
         本来就是发版流程的一步。"""
         return config.WORK_IMAGE_REF or config.WORK_IMAGE
 
-    async def create(self, user_id: str, *, boot: str, env: dict[str, str],
-                     boot_fp: str) -> None:
+    async def create(self, user_id: str, *, boot: str, env: dict[str, str], boot_fp: str) -> None:
         p = {
             "ContainerGroupName": cname(user_id),
             "ZoneId": config.ECI_ZONE_ID or None,
@@ -420,8 +420,8 @@ class EciBackend(Backend):
             "Memory": round(config.WORK_MEM_LIMIT_MB / 1024, 2),
             "ComputeCategory.1": config.ECI_COMPUTE_CATEGORY or None,
             "RestartPolicy": "Never",
-            # 命中镜像缓存是 50s -> 19s 的全部差别。缓存要在发版时按新镜像重建,
-            # 否则这里静默退回全量拉取, 只是慢, 不会报错 —— 也就不会有人发现。
+            # Rebuild the cache for each immutable image release. A cache miss
+            # falls back to a full image pull and must be monitored separately.
             "AutoMatchImageCache": "true",
             "AutoCreateEip": "true",
             "EipBandwidth": config.ECI_EIP_BANDWIDTH,
@@ -454,8 +454,7 @@ class EciBackend(Backend):
         g = await self._find(user_id)
         if g is None:
             return
-        await self._call("DeleteContainerGroup",
-                         {"ContainerGroupId": g["ContainerGroupId"]})
+        await self._call("DeleteContainerGroup", {"ContainerGroupId": g["ContainerGroupId"]})
 
     def offline_workspace_dir(self, user_id: str) -> pathlib.Path | None:
         """NAS 上该用户的 workspace 子目录, 前提是应用机把同一个 NAS 挂了起来。
@@ -466,7 +465,7 @@ class EciBackend(Backend):
         root = (config.WORK_NAS_LOCAL_MOUNT or "").strip()
         if not root:
             return None
-        hexid = cname(user_id)[len("dshwork-"):]
+        hexid = cname(user_id)[len("dshwork-") :]
         d = pathlib.Path(root) / hexid / "workspace"
         return d if d.is_dir() else None
 
@@ -498,8 +497,11 @@ class EciBackend(Backend):
             if not token:
                 break
         if isinstance(total, int) and seen < total:
-            log.error("[work] ECI 只回了 %d/%d 个运行中实例且没有续页令牌 —— "
-                      "这批工作台不会被计量也不会被回收", seen, total)
+            log.error(
+                "[work] ECI 只回了 %d/%d 个运行中实例且没有续页令牌 —— 这批工作台不会被计量也不会被回收",
+                seen,
+                total,
+            )
         return users
 
 

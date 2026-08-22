@@ -1,0 +1,66 @@
+name: Feature request
+description: Propose a focused product, API, documentation, or operator improvement
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Describe the user problem before the implementation. Review docs/editions.md so the proposal does not reclassify an existing Community capability.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: Who encounters the problem, in what workflow, and why existing behavior is insufficient?
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Desired outcome
+      description: Describe observable success without requiring a particular implementation.
+    validations:
+      required: true
+  - type: dropdown
+    id: edition
+    attributes:
+      label: Edition boundary
+      description: Use docs/editions.md. Hosted operations are environment-specific operations, not a retroactive product license.
+      options:
+        - Community Edition
+        - Hosted operations
+        - Net-new Enterprise extension
+        - Cross-edition / unsure
+    validations:
+      required: true
+  - type: textarea
+    id: boundary
+    attributes:
+      label: Boundary reasoning
+      description: Identify related Community baseline behavior and explain why it remains complete and usable.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Include configuration, documentation, extension-interface, and no-change alternatives.
+    validations:
+      required: true
+  - type: textarea
+    id: compatibility
+    attributes:
+      label: Compatibility and risk
+      description: Note API, schema, configuration, migration, privacy, security, deployment, and rollback effects.
+  - type: checkboxes
+    id: confirmations
+    attributes:
+      label: Confirmations
+      options:
+        - label: I searched existing issues and proposals.
+          required: true
+        - label: I have not included secrets, personal data, customer data, or private operations detail.
+          required: true
+        - label: This proposal does not describe planned source-available terms as currently effective.
+          required: true

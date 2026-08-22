@@ -1,20 +1,19 @@
-"""API key: 签发一次可见、只存哈希、可吊销、能驱动网关。
+"""API key 合约：明文仅签发时可见、服务端只存哈希、支持吊销和网关认证。"""
 
-背景 (2026-08-18): 网关一直是 OpenAI 兼容的, 官网也这么宣传, 但用户拿不到可用
-凭据 —— 只能去桌面端 cloud-auth.json 里抠设备令牌。这批用例钉住新入口的行为。
-"""
 import os
 import tempfile
 
 _TMP = tempfile.mkdtemp(prefix="dhc-apikeys-")
 # 环境必须在 import app 之前钉好 —— config 在 import 期读 env (与其他测试同约定)
-os.environ.update({
-    "DHC_DEV": "1",
-    "AUTH_SECRET": "test-secret",
-    "DHC_DATA_DIR": _TMP,
-    "DB_PATH": os.path.join(_TMP, "test.db"),
-    "FREE_SIGNUP_CREDITS": "500",
-})
+os.environ.update(
+    {
+        "DHC_DEV": "1",
+        "AUTH_SECRET": "test-secret",
+        "DHC_DATA_DIR": _TMP,
+        "DB_PATH": os.path.join(_TMP, "test.db"),
+        "FREE_SIGNUP_CREDITS": "500",
+    }
+)
 
 from fastapi.testclient import TestClient  # noqa: E402
 
@@ -54,7 +53,7 @@ def test_key_authenticates_both_header_styles():
     c = _client("ak2@test.local")
     key = c.post("/api/auth/api-keys", json={}).json()["key"]
 
-    fresh = TestClient(app)   # 无 cookie, 只能靠 key
+    fresh = TestClient(app)  # 无 cookie, 只能靠 key
     assert fresh.get("/api/auth/me", headers={"authorization": f"Bearer {key}"}).status_code == 200
     assert fresh.get("/api/auth/me", headers={"x-api-key": key}).status_code == 200
 
@@ -74,8 +73,10 @@ def test_revoked_key_stops_working():
 
 def test_key_cannot_revoke_another_users_key():
     victim = _client("ak-victim@test.local")
-    vkey_id = (victim.post("/api/auth/api-keys", json={}),
-               victim.get("/api/auth/api-keys").json()["keys"][0]["id"])[1]
+    vkey_id = (
+        victim.post("/api/auth/api-keys", json={}),
+        victim.get("/api/auth/api-keys").json()["keys"][0]["id"],
+    )[1]
     attacker = _client("ak-attacker@test.local")
     attacker.post("/api/auth/api-keys/revoke", json={"id": vkey_id})
     # 受害者的 key 仍在 —— revoke 的 WHERE 带 user_id

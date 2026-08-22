@@ -1,0 +1,16 @@
+[build-system]
+requires = []
+build-backend = "build_backend"
+backend-path = ["."]
+
+[project]
+name = "dsh-cloud"
+version = "0.0.0.dev0"
+description = "Safe self-host installer and lifecycle CLI for DSH Cloud Community Edition"
+requires-python = ">=3.11"
+dependencies = []
+license = {text = "AGPL-3.0-only"}
+readme = "README.md"
+
+[project.scripts]
+dsh-cloud = "dsh_cloud_cli.__main__:main"

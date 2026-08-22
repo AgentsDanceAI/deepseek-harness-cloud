@@ -1,0 +1,36 @@
+services:
+  dhc-server:
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DB_BACKEND: postgres
+      POSTGRES_DSN: ${POSTGRES_DSN:-postgresql://dhc:${POSTGRES_PASSWORD:-dsh-cloud-local}@postgres:5432/dhc}
+
+  postgres:
+    image: ${POSTGRES_IMAGE:-postgres:18-alpine@sha256:d3e1620b530c944afa6e887d22eb899824da68e19c52024bf98f5220c88a65b2}
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: dhc
+      POSTGRES_USER: dhc
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-dsh-cloud-local}
+    volumes:
+      # postgres:18 stores versioned data below /var/lib/postgresql/18/docker.
+      # Mount the parent or Docker creates an anonymous volume for the real DB.
+      - dhc-pgdata:/var/lib/postgresql
+    networks: [dhc-net]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dhc -d dhc"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    security_opt: ["no-new-privileges:true"]
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  dhc-pgdata:
+    name: ${COMPOSE_PROJECT_NAME:-dsh-selfhost}_dhc-pgdata

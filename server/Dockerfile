@@ -1,32 +1,51 @@
-FROM python:3.11-slim
+# syntax=docker/dockerfile:1.7
+ARG UV_IMAGE=ghcr.io/astral-sh/uv:0.8.11@sha256:8101ad825250a114e7bef89eefaa73c31e34e10ffbe5aff01562740bac97553c
+FROM ${UV_IMAGE} AS uv
+
+ARG PYTHON_IMAGE=python:3.11-slim-bookworm@sha256:2e32f7d302adc1c37428355c1e646897c0c53f4fd60b6a551245fb90ee129f91
+FROM ${PYTHON_IMAGE} AS builder
+COPY --from=uv /uv /uvx /bin/
+WORKDIR /build
+COPY server/pyproject.toml server/uv.lock ./
+RUN UV_PROJECT_ENVIRONMENT=/opt/dsh-cloud/.venv \
+    uv sync --frozen --no-dev --no-install-project --extra postgres --extra redis --extra stripe
+
+ARG PYTHON_IMAGE=python:3.11-slim-bookworm@sha256:2e32f7d302adc1c37428355c1e646897c0c53f4fd60b6a551245fb90ee129f91
+FROM ${PYTHON_IMAGE} AS runtime
+ARG VERSION=0.2.0
+ARG REVISION=unknown
+ARG CREATED=unknown
+LABEL org.opencontainers.image.source="https://github.com/AgentsDanceAI/deepseek-harness-cloud" \
+      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.revision="${REVISION}" \
+      org.opencontainers.image.created="${CREATED}" \
+      org.opencontainers.image.licenses="AGPL-3.0-only"
+
+ENV PATH=/opt/dsh-cloud/.venv/bin:$PATH \
+    PYTHONPATH=/srv/dhc \
+    DHC_DATA_DIR=/app/data \
+    DHC_RELEASE_FILE=/usr/share/dsh-cloud/release.json \
+    RELEASE_VERSION=${VERSION} \
+    RELEASE_REVISION=${REVISION}
+
+RUN groupadd --gid 10001 dsh-cloud \
+ && useradd --uid 10001 --gid 10001 --home /nonexistent --shell /usr/sbin/nologin dsh-cloud \
+ && install -d -o 10001 -g 10001 /app/data \
+ && install -d -o 0 -g 0 -m 0755 /srv/dhc /srv/legal /opt/dsh-cloud /usr/share/dsh-cloud
+
+COPY --from=builder --chown=0:0 /opt/dsh-cloud/.venv /opt/dsh-cloud/.venv
+COPY --chown=0:0 server/app /srv/dhc/app
+COPY --chown=0:0 server/config /srv/dhc/config
+COPY --chown=0:0 server/scripts /srv/dhc/scripts
+COPY --chown=0:0 release/release.json /usr/share/dsh-cloud/release.json
+COPY --chown=0:0 server/legal/ /srv/legal/
+COPY --chown=0:0 release/docker_entrypoint.py /usr/local/bin/dsh-cloud-entrypoint
 
 WORKDIR /srv/dhc
-
-# Install only the dependencies (declared in pyproject), then run from the copied
-# source tree via PYTHONPATH. We deliberately do NOT `pip install .` the package:
-# templates/, static/, and config/ are resolved through __file__-relative paths at
-# runtime, and a site-packages install would drop those non-.py data files.
-COPY server/pyproject.toml ./
-RUN pip install --no-cache-dir \
-        "fastapi>=0.115" "uvicorn[standard]>=0.30" "httpx>=0.27" "jinja2>=3.1" \
-        "python-multipart>=0.0.9" "itsdangerous>=2.2" "cryptography>=42" \
-        "psycopg[binary,pool]>=3.2"
-
-COPY server/app ./app
-COPY server/config ./config
-# Maintenance scripts run with `docker exec` against the live deployment
-# (waffo_sync_catalog.py talks to the payment provider with the running
-# container's credentials), so they have to be in the image, not just the repo.
-COPY server/scripts ./scripts
-# The legal documents live at the repo root and are read at request time by
-# webpages._legal_dir(). Without this they are absent from the image and every
-# /legal/* page renders empty — which is exactly what a payment processor's
-# review would see. The build context is the repo root so they can be copied.
-COPY legal /srv/legal
-
-ENV PYTHONPATH=/srv/dhc
-ENV DHC_DATA_DIR=/app/data
 VOLUME /app/data
-
 EXPOSE 8100
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD ["/usr/local/bin/python3", "-I", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8100/readyz', timeout=3)"]
+STOPSIGNAL SIGTERM
+ENTRYPOINT ["/usr/local/bin/python3", "-I", "/usr/local/bin/dsh-cloud-entrypoint"]
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8100"]

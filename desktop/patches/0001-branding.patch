@@ -61,6 +61,21 @@ index 48cd4da..1c9ed61 100644
    if (app.isPackaged && process.cwd() === '/') process.chdir(app.getPath('home'))
  
    const failLoudProcess: FailLoudProcess = {
+diff --git a/dsh-plugin-desktop/tests/plugin.spec.ts b/dsh-plugin-desktop/tests/plugin.spec.ts
+index 97a07a7..75284f3 100644
+--- a/dsh-plugin-desktop/tests/plugin.spec.ts
++++ b/dsh-plugin-desktop/tests/plugin.spec.ts
+@@ -147,8 +147,8 @@ describe('desktop Host plugin', () => {
+     expect(harness.shell()).toEqual(expect.objectContaining({
+       mode: 'compatibility',
+       url: 'http://127.0.0.1:43120/?dsh-desktop-mode=compatibility&dsh-desktop-platform=darwin',
+-      productName: 'DSH Desktop',
+-      windowTitle: 'DeepSeek Harness Desktop',
++      productName: 'DSH Cloud Desktop',
++      windowTitle: 'DSH Cloud Desktop',
+       iconPath: expect.stringMatching(/\/build\/app-icon-mac\.png$/u),
+       trayIcons: {
+         templatePath: expect.stringMatching(/\/build\/tray-iconTemplate\.png$/u),
 diff --git a/dsh-plugin-desktop/tests/package.spec.ts b/dsh-plugin-desktop/tests/package.spec.ts
 index 404e5e2..f20487f 100644
 --- a/dsh-plugin-desktop/tests/package.spec.ts

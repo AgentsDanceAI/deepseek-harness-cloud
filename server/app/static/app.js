@@ -75,9 +75,15 @@
   function hideError(el) { if (el) el.hidden = true; }
 
   function safeNext(fallback) {
-    var n = new URLSearchParams(location.search).get("next") || fallback || "/console";
-    if (n.charAt(0) !== "/" || n.charAt(1) === "/") n = fallback || "/console";
-    return n;
+    var fallbackPath = fallback || "/console";
+    var raw = new URLSearchParams(location.search).get("next") || fallbackPath;
+    var decoded;
+    try { decoded = decodeURIComponent(raw); } catch (_) { return fallbackPath; }
+    if (decoded.charAt(0) !== "/" || decoded.slice(0, 2) === "//" ||
+        decoded.indexOf("\\") !== -1 || /[\u0000-\u001f]/.test(decoded)) {
+      return fallbackPath;
+    }
+    return raw;
   }
 
   function fmtTs(ts) {
@@ -110,6 +116,28 @@
       return T("js.msg.34") + (n > 0 ? n.toLocaleString() : parts[1]);
     }
     return item || "—";
+  }
+
+  function renderModelRows(holder, models, includeCredits) {
+    holder.textContent = "";
+    models.forEach(function (m) {
+      var row = document.createElement("div");
+      row.className = "model-row";
+      var name = document.createElement("b");
+      name.title = m.id;
+      name.textContent = m.name;
+      var details = document.createElement("span");
+      var multiplier = m.multiplier != null ? m.multiplier + "x" : "—";
+      if (includeCredits) {
+        var credits = m.credits_per_m != null ? m.credits_per_m.toLocaleString() : "—";
+        details.textContent = multiplier + " · " + credits + T("js.msg.01");
+      } else {
+        details.textContent = multiplier;
+      }
+      row.appendChild(name);
+      row.appendChild(details);
+      holder.appendChild(row);
+    });
   }
 
   var PROVIDER_ZH = { alipay: T("js.msg.26"), wechat: T("js.msg.23"), stripe: T("js.msg.47") };
@@ -234,11 +262,9 @@
     var holders = $$("[data-model-rows]");
     if (holders.length) {
       fetch("/api/models").then(function (r) { return r.json(); }).then(function (d) {
-        var html = (d.models || []).map(function (m) {
-          return '<div class="model-row"><b title="' + m.id + '">' + m.name +
-                 "</b><span>" + (m.multiplier != null ? m.multiplier + "x" : "—") + "</span></div>";
-        }).join("");
-        holders.forEach(function (h) { if (!h.innerHTML) h.innerHTML = html; });
+        holders.forEach(function (h) {
+          if (!h.textContent.trim()) renderModelRows(h, d.models || [], false);
+        });
       }).catch(function () {});
     }
     var dl = $("#stat-downloads"), lg = $("#stat-logins");
@@ -341,15 +367,13 @@
       show("act-done");
     }
 
-    // 授权在浏览器里完成, 焦点留在浏览器。桌面端**不能**自己抢回前台 ——
-    // macOS 不允许后台应用靠 app.focus() 跨应用抢焦点 (2026-08-19 实测:
-    // 代码确实在包里跑了, 现象照旧), 顶多让 Dock 图标跳一下。唯一可靠的
-    // 通路是自定义 scheme: 由用户所在的前台浏览器发起跳转, 系统才放行。
-    // 自动跳一次 + 常驻按钮兜底 (自动跳可能被浏览器拦, 或用户根本没装客户端)。
+    // Browser authorization leaves focus in the browser. A custom URL scheme
+    // lets the operating system foreground the desktop app; keep a manual
+    // button available when the automatic attempt is blocked or not installed.
     function backToApp() {
       var wrap = $("#act-back-wrap");
       if (wrap) wrap.hidden = false;
-      try { location.href = "dshcloud://auth-done"; } catch (e) { /* 没装客户端: 按钮还在 */ }
+      try { location.href = "dshcloud://auth-done"; } catch (e) { /* keep the manual button */ }
     }
 
     function lookup(c) {
@@ -664,13 +688,7 @@
       if (!holders.length) return;
       fetch("/api/models").then(function (r) { return r.json(); }).then(function (d) {
         var models = d.models || [];
-        var html = models.map(function (m) {
-          return '<div class="model-row"><b title="' + m.id + '">' + m.name +
-                 "</b><span>" + (m.multiplier != null ? m.multiplier + "x" : "—") + " · " +
-                 (m.credits_per_m != null ? m.credits_per_m.toLocaleString() : "—") +
-                 T("js.msg.01");
-        }).join("");
-        holders.forEach(function (h) { h.innerHTML = html; });
+        holders.forEach(function (h) { renderModelRows(h, models, true); });
         $$("[id^=model-count-]").forEach(function (el) {
           el.textContent = models.length + T("js.msg.00");
         });

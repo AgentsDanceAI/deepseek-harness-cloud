@@ -11,6 +11,7 @@ Security model (see base.py for the iron rules):
 Each webhook answers in the ack dialect its provider retries on: stripe JSON,
 alipay the literal text "success", wechat {"code": "SUCCESS"}.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -35,10 +36,15 @@ def active_providers() -> list[str]:
         out.append("stripe")
     if config.ALIPAY_APP_ID and config.ALIPAY_APP_PRIVATE_KEY:
         out.append("alipay")
-    if (config.WECHAT_PAY_MCHID and config.WECHAT_PAY_APIV3_KEY and config.WECHAT_PAY_PRIVATE_KEY_PATH
-            and config.WECHAT_PAY_SERIAL_NO and config.WECHAT_PAY_APPID):
+    if (
+        config.WECHAT_PAY_MCHID
+        and config.WECHAT_PAY_APIV3_KEY
+        and config.WECHAT_PAY_PRIVATE_KEY_PATH
+        and config.WECHAT_PAY_SERIAL_NO
+        and config.WECHAT_PAY_APPID
+    ):
         out.append("wechat")
-    if config.WAFFO_MERCHANT_ID and config.WAFFO_PRIVATE_KEY:
+    if waffo_provider.configured():
         out.append("waffo")
     return out
 
@@ -65,8 +71,12 @@ def pay_context(request: Request):
     # loads too, and a 401 there would break it.
     user = try_resolve_user(request)
     intro = base.intro_eligibility(user["id"], p.get("currency")) if user else {}
-    return {"providers": active_providers(), "pricing": p, "currency": p.get("currency", "CNY"),
-            "intro_eligible": intro}
+    return {
+        "providers": active_providers(),
+        "pricing": p,
+        "currency": p.get("currency", "CNY"),
+        "intro_eligible": intro,
+    }
 
 
 @router.post("/checkout")
@@ -85,8 +95,17 @@ def checkout(request: Request, body: dict, user: dict = Depends(resolve_user)):
             conn.execute(
                 "INSERT INTO orders (id, user_id, provider, item, amount_cents, currency, status, created) "
                 "VALUES (?,?,?,?,?,?,?,?)",
-                (order_id, user["id"], "intent", item, info["amount_cents"], info["currency"],
-                 "intent", time.time()))
+                (
+                    order_id,
+                    user["id"],
+                    "intent",
+                    item,
+                    info["amount_cents"],
+                    info["currency"],
+                    "intent",
+                    time.time(),
+                ),
+            )
         return {"order_id": order_id, "provider": None, "intent": True}
     provider = requested if requested in active else active[0]
     if provider == "waffo":
@@ -102,18 +121,30 @@ def checkout(request: Request, body: dict, user: dict = Depends(resolve_user)):
             raise HTTPException(400, "currency_not_payable")
     order = base.create_order(user["id"], provider, item, cur)
     if provider == "stripe":
-        return {"order_id": order["order_id"], "provider": "stripe",
-                "pay_url": stripe_provider.create_checkout(order)}
+        return {
+            "order_id": order["order_id"],
+            "provider": "stripe",
+            "pay_url": stripe_provider.create_checkout(order),
+        }
     if provider == "alipay":
-        return {"order_id": order["order_id"], "provider": "alipay",
-                "pay_url": alipay_provider.create_page_pay(order)}
+        return {
+            "order_id": order["order_id"],
+            "provider": "alipay",
+            "pay_url": alipay_provider.create_page_pay(order),
+        }
     if provider == "waffo":
         # create_checkout is async (httpx); this route is sync (runs in a
         # threadpool worker with no running loop), so drive it with asyncio.run.
-        return {"order_id": order["order_id"], "provider": "waffo",
-                "pay_url": asyncio.run(waffo_provider.create_checkout(order))}
-    return {"order_id": order["order_id"], "provider": "wechat",
-            "code_url": wechatpay_provider.create_native(order)}
+        return {
+            "order_id": order["order_id"],
+            "provider": "waffo",
+            "pay_url": asyncio.run(waffo_provider.create_checkout(order)),
+        }
+    return {
+        "order_id": order["order_id"],
+        "provider": "wechat",
+        "code_url": wechatpay_provider.create_native(order),
+    }
 
 
 PUBLIC_ORDER_COLS = ("id", "provider", "item", "amount_cents", "currency", "status", "created", "paid_at")
@@ -123,8 +154,9 @@ PUBLIC_ORDER_COLS = ("id", "provider", "item", "amount_cents", "currency", "stat
 def list_orders(user: dict = Depends(resolve_user)):
     base.expire_stale_pending(user["id"])
     rows = db.query(
-        f"SELECT {', '.join(PUBLIC_ORDER_COLS)} FROM orders WHERE user_id=? "
-        "ORDER BY created DESC LIMIT 100", (user["id"],))
+        f"SELECT {', '.join(PUBLIC_ORDER_COLS)} FROM orders WHERE user_id=? ORDER BY created DESC LIMIT 100",
+        (user["id"],),
+    )
     return {"orders": [dict(r) for r in rows]}
 
 
@@ -137,6 +169,7 @@ def order_status(order_id: str, user: dict = Depends(resolve_user)):
 
 
 # --- webhooks (no auth; verified inside the provider modules) ----------------
+
 
 def _settle(result: dict | None) -> None:
     """The one place the iron-rule state machine is driven from webhooks."""

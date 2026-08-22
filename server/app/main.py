@@ -1,12 +1,13 @@
 """FastAPI application assembly."""
+
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
-from pathlib import Path
 
 from . import config, db
 
@@ -14,38 +15,49 @@ log = logging.getLogger("dhc")
 
 
 def setup_logging() -> None:
-    """让 dhc.* 的日志真的有个出口。
-
-    此前应用从未配置过 logging。Python 在找不到任何 handler 时会用 lastResort
-    兜底, 但它**只输出 WARNING 及以上**, 而且不带时间、不带 logger 名。于是:
-      · log.info 全部落空 —— "谁的工作台什么时候被回收了"这类问题永远查不到,
-        而在 ECI 上回收就是销毁实例, 那正是要能对账的事;
-      · 侥幸可见的 WARNING/ERROR 也没有时间戳, 出事时对不上时间线。
-
-    只挂在 dhc 这一支上, 不碰 root: uvicorn 有自己的 access/error logger, 动
-    root 会把它们的格式一起改掉。propagate=False 是为了别再落到 lastResort 上
-    重复输出一遍。
-    """
+    """Configure application logs without changing uvicorn's loggers."""
     level = (config.LOG_LEVEL or "INFO").upper()
-    handler = logging.StreamHandler()   # stderr, 与 docker logs 同一个出口
-    handler.setFormatter(logging.Formatter(
-        "%(asctime)s %(levelname)-7s %(name)s: %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S"))
+    handler = logging.StreamHandler()
+    handler.setFormatter(
+        logging.Formatter("%(asctime)s %(levelname)-7s %(name)s: %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
+    )
     root = logging.getLogger("dhc")
-    root.handlers[:] = [handler]        # 反复调用不叠加 handler
+    root.handlers[:] = [handler]
     root.setLevel(getattr(logging, level, logging.INFO))
     root.propagate = False
 
 
-def create_app() -> FastAPI:
-    setup_logging()
+def validate_startup_config() -> None:
     if not config.auth_secret() and not config.DEV_MODE:
         raise RuntimeError("AUTH_SECRET must be set (or DHC_DEV=1 for local development)")
+    # Preserve the historical enablement boundary: a lone stale variable does
+    # not activate Waffo or block unrelated payment providers. Once checkout
+    # credentials are complete, signed webhooks are mandatory.
+    waffo_enabled = bool(config.WAFFO_MERCHANT_ID and config.WAFFO_PRIVATE_KEY)
+    if waffo_enabled and not config.WAFFO_WEBHOOK_PUBLIC_KEY:
+        raise RuntimeError("WAFFO_WEBHOOK_PUBLIC_KEY is required whenever Waffo checkout is enabled")
+
+
+def create_app() -> FastAPI:
+    setup_logging()
+    validate_startup_config()
     if not config.UPSTREAM_API_KEY:
         log.warning("UPSTREAM_API_KEY is not set — the LLM gateway will answer 503")
 
-    app = FastAPI(title="deepseek-harness-cloud", docs_url="/api/docs" if config.DEV_MODE else None,
-                  redoc_url=None, openapi_url="/api/openapi.json" if config.DEV_MODE else None)
+    app = FastAPI(
+        title="deepseek-harness-cloud",
+        docs_url="/api/docs" if config.DEV_MODE else None,
+        redoc_url=None,
+        openapi_url="/api/openapi.json" if config.DEV_MODE else None,
+    )
+
+    from .http_limits import RequestBodyLimit
+
+    app.add_middleware(
+        RequestBodyLimit,
+        default_bytes=config.API_BODY_MAX_BYTES,
+        webhook_bytes=config.WEBHOOK_BODY_MAX_BYTES,
+    )
 
     db.ensure_schema()
 
@@ -55,6 +67,7 @@ def create_app() -> FastAPI:
     # that host, never a wildcard, because these endpoints act with the session.
     if config.WORK_DOMAIN:
         from fastapi.middleware.cors import CORSMiddleware
+
         scheme = "http" if config.PUBLIC_BASE.startswith("http://") else "https"
         app.add_middleware(
             CORSMiddleware,
@@ -64,19 +77,25 @@ def create_app() -> FastAPI:
             allow_headers=["content-type"],
         )
 
+    from .security_headers import SecurityHeaders
+
+    app.add_middleware(SecurityHeaders, https=config.PUBLIC_BASE.startswith("https://"))
+
     from .accounts import router as accounts_router
     from .admin import router as admin_router
     from .desktop_updates import router as updates_router
     from .device_auth import router as device_router
     from .gateway import router as gateway_router
+    from .health import router as health_router
     from .oauth import router as oauth_router
     from .payments.api import router as payments_router
-    from .webpages import router as pages_router
     from .teams import router as teams_router
+    from .webpages import router as pages_router
     from .workspace import preview_fallback as workspace_preview_fallback
     from .workspace import router as workspace_router
 
     app.include_router(accounts_router)
+    app.include_router(health_router)
     app.include_router(oauth_router)
     app.include_router(device_router)
     app.include_router(gateway_router)
@@ -92,19 +111,19 @@ def create_app() -> FastAPI:
         @app.on_event("startup")
         async def _start_workspace_loop() -> None:
             import asyncio
+
             app.state.workspace_loop = asyncio.create_task(billing_reaper_loop())
 
-    # A wrong WORK_VOLUME_ROOT does not fail anything — it just makes 個人成品
-    # show nothing for every user with a stopped workspace. That is exactly the
-    # kind of breakage a machine move introduces (the host's docker root is
-    # /mnt/docker here, /var/lib/docker on a default install), so say it once
-    # at boot rather than let it be discovered by a confused user.
+    # Report a bad offline-volume mount at startup instead of silently rendering
+    # empty files for stopped workspaces.
     if config.WORK_VOLUME_ROOT and not Path(config.WORK_VOLUME_ROOT).is_dir():
-        log.warning("WORK_VOLUME_ROOT=%s is not a directory in this container — "
-                    "个人成品 will be empty whenever a workspace is stopped. "
-                    "Check DOCKER_VOLUME_ROOT in .env against "
-                    "`docker info -f '{{.DockerRootDir}}'`/volumes on the host.",
-                    config.WORK_VOLUME_ROOT)
+        log.warning(
+            "WORK_VOLUME_ROOT=%s is not a directory in this container — "
+            "个人成品 will be empty whenever a workspace is stopped. "
+            "Check DOCKER_VOLUME_ROOT in .env against "
+            "`docker info -f '{{.DockerRootDir}}'`/volumes on the host.",
+            config.WORK_VOLUME_ROOT,
+        )
 
     static_dir = Path(__file__).parent / "static"
     if static_dir.is_dir():
@@ -120,6 +139,7 @@ def create_app() -> FastAPI:
         # (and is the only path a self-hoster has). Bound it so a few large
         # transfers cannot starve the gateway and the workspaces beside it.
         from .release_throttle import ReleaseThrottle
+
         app.add_middleware(ReleaseThrottle)  # raw ASGI: holds the slot until the body ends
     except OSError:
         log.warning("releases dir unavailable at %s", releases_dir)
@@ -137,6 +157,7 @@ def create_app() -> FastAPI:
         PREVIEW_DOMAIN 留空时整段是空操作, 行为与配置前完全一致。
         """
         from . import workspace as _ws
+
         if config.PREVIEW_DOMAIN:
             path = request.url.path
             if _ws.on_preview_host(request):
@@ -147,16 +168,11 @@ def create_app() -> FastAPI:
                 return RedirectResponse(_ws.preview_origin(path) + q, status_code=307)
         return await call_next(request)
 
-    @app.get("/api/health")
-    def health():
-        return {"ok": True, "service": "deepseek-harness-cloud"}
-
     # Registered after every real route, so it only ever sees requests that
     # would otherwise 404: a previewed page asking for an absolute-path asset
     # ("/style.css") from outside its /preview/<port>/ prefix. The preview
     # cookie says which port that page came from.
-    app.add_route("/{path:path}", workspace_preview_fallback,
-                  methods=["GET", "HEAD"])
+    app.add_route("/{path:path}", workspace_preview_fallback, methods=["GET", "HEAD"])
 
     return app
 

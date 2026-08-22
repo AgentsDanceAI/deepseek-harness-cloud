@@ -10,6 +10,7 @@ Both failures this catches have already shipped once:
 * A key present in one catalogue and not the other renders as the raw key id
   ("pricing.plan.subscribe") to whichever language is missing it.
 """
+
 from __future__ import annotations
 
 import json
@@ -20,8 +21,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
 TEMPLATES = sorted((ROOT / "app" / "templates").glob("*.html"))
-CATALOGS = {p.stem: json.loads(p.read_text())
-            for p in (ROOT / "config" / "i18n").glob("*.json")}
+CATALOGS = {p.stem: json.loads(p.read_text()) for p in (ROOT / "config" / "i18n").glob("*.json")}
 APP_JS = (ROOT / "app" / "static" / "app.js").read_text()
 
 # t("key") / _t("key") / T("key") — literal keys only. Keys built by
@@ -54,14 +54,19 @@ def test_placeholders_match_across_languages():
     "valid for  days" — rather than raising."""
     langs = sorted(CATALOGS)
     base_lang, *rest = langs
-    ph = lambda s: set(re.findall(r"\{([a-z_][a-z0-9_]*)\}", s))
+
+    def placeholders(value):
+        return set(re.findall(r"\{([a-z_][a-z0-9_]*)\}", value))
+
     for key, value in CATALOGS[base_lang].items():
         if not isinstance(value, str):
             continue
         for lang in rest:
             other = CATALOGS[lang].get(key)
             if isinstance(other, str):
-                assert ph(value) == ph(other), f"{key}: {base_lang}{sorted(ph(value))} vs {lang}{sorted(ph(other))}"
+                assert placeholders(value) == placeholders(other), (
+                    f"{key}: {base_lang}{sorted(placeholders(value))} vs {lang}{sorted(placeholders(other))}"
+                )
 
 
 def test_in_page_anchors_exist():
@@ -82,6 +87,7 @@ def test_tax_copy_matches_what_we_tell_the_provider():
     gross and told it was net. Whichever way this is decided, both sides move
     together."""
     import inspect
+
     from app.payments import waffo_provider
 
     src = inspect.getsource(waffo_provider)

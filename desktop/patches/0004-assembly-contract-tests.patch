@@ -1,0 +1,72 @@
+diff --git a/dsh-plugin-desktop/tests/electron-runtime.spec.ts b/dsh-plugin-desktop/tests/electron-runtime.spec.ts
+index be0167f..7d02447 100644
+--- a/dsh-plugin-desktop/tests/electron-runtime.spec.ts
++++ b/dsh-plugin-desktop/tests/electron-runtime.spec.ts
+@@ -1,6 +1,11 @@
++import { readFileSync } from 'node:fs'
+ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+ import type { DesktopShellSpec } from '../src/runtime.ts'
+-
++
++const productManifest = JSON.parse(
++  readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
++) as { version: string }
++
+ const terminal = vi.hoisted(() => ({ open: vi.fn() }))
+ const updater = vi.hoisted(() => ({ download: vi.fn() }))
+ const childProcess = vi.hoisted(() => {
+@@ -474,7 +479,7 @@ describe('Electron compatibility runtime', () => {
+         pnpmBinPath: expect.stringMatching(/\/node_modules\/pnpm\/bin\/pnpm\.mjs$/u),
+         electronVersion: '43.4.0',
+         profileName: 'desktop',
+-        productVersion: '2.0.0',
++        productVersion: productManifest.version,
+         profileDir: '/tmp/dsh-home/profiles/desktop',
+         homeDir: '/tmp/dsh-home',
+         stateDir: expect.stringMatching(/^\/tmp\/dsh-desktop-user-data\/cli\/[a-f0-9]{64}$/u),
+@@ -541,7 +546,7 @@ describe('Electron compatibility runtime', () => {
+     expect(runtime.updates).toMatchObject({
+       isPackaged: false,
+       canDownload: false,
+-      currentVersion: '2.0.0',
++      currentVersion: productManifest.version,
+       statePath: '/tmp/dsh-desktop-user-data/updates/state.json',
+     })
+     electron.app.isPackaged = true
+diff --git a/dsh-plugin-desktop/tests/package.spec.ts b/dsh-plugin-desktop/tests/package.spec.ts
+index f20487f..8aa60f7 100644
+--- a/dsh-plugin-desktop/tests/package.spec.ts
++++ b/dsh-plugin-desktop/tests/package.spec.ts
+@@ -25,6 +25,7 @@
+     mac?: { hardenedRuntime?: unknown; icon?: unknown; notarize?: unknown; target?: unknown }
+     win?: { icon?: unknown; target?: unknown }
+     nsis?: Record<string, unknown>
++    protocols?: unknown
+     linux?: { icon?: unknown }
+   }
+   dependencies?: Record<string, unknown>
+@@ -159,12 +160,13 @@ describe('published package surface', () => {
+       'cordis.patch.yml',
+       'lib/**',
+       'package.json',
++      'build/cloud/**',
+     ])
+     expect(manifest.build?.mac?.icon).toBe('build/app-icon-mac.png')
+     expect(manifest.build?.win?.icon).toBe('build/app-icon.png')
+     expect(manifest.build?.win?.target).toEqual([{
+       target: 'nsis',
+-      arch: ['x64'],
++      arch: ['x64', 'arm64'],
+     }])
+     expect(manifest.build?.nsis).toEqual({
+       oneClick: false,
+@@ -176,5 +178,9 @@ describe('published package surface', () => {
+       shortcutName: 'DSH Cloud Desktop',
+       artifactName: 'DSH-Cloud-Desktop-${version}-${arch}-Setup.${ext}',
+     })
++    expect(manifest.build?.protocols).toEqual([{
++      name: 'DSH Cloud',
++      schemes: ['dshcloud'],
++    }])
+     expect(manifest.build?.linux?.icon).toBe('build/app-icon.png')
+   })

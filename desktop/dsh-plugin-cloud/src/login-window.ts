@@ -67,10 +67,8 @@ export async function runLoginWindow(): Promise<LoginResult | undefined> {
       settled = true
       pollGeneration += 1
       if (pollTimer !== undefined) clearTimeout(pollTimer)
-      // 设备授权是在**浏览器**里完成的, 焦点因此留在浏览器。授权成功后登录窗关闭、
-      // 主窗口起来, 但没人把应用拉回前台 —— 用户看到的是"客户端不见了", 得自己去
-      // 应用程序里重新找 (2026-08-18 用户实测反馈)。这里显式抢回前台。
-      // macOS 上 app.focus({steal:true}) 才能跨应用抢焦点; 其他平台忽略该参数。
+      // Device authorization completes in a browser. Bring the desktop app back
+      // to the foreground after success; macOS requires the `steal` option.
       if (value !== undefined) {
         try {
           if (process.platform === 'darwin') app.focus({ steal: true })

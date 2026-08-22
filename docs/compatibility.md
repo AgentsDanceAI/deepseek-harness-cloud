@@ -2,7 +2,7 @@
 
 deepseek-harness（dsh）处于 developer preview，官方明言会有 breaking change；
 deepseek-harness-desktop 也会跟着动。本项目的立场：**不 fork 上游一行代码**，
-全部定制收敛为「3 个小补丁 + 1 个自包含目录」，升级是机械操作。
+全部定制收敛为「4 个小补丁 + 1 个自包含目录」，升级是机械操作。
 
 ## 1. Pin 与产物
 
@@ -13,6 +13,11 @@ deepseek-harness-desktop 也会跟着动。本项目的立场：**不 fork 上�
 | `desktopCommit` | deepseek-harness-desktop 的 git pin（补丁基线） |
 | `harnessCommit` | dsh 源码 pin（仅用于子模块一致性，参考） |
 | `runtimePackageVersion` | `@deepseek-ai/dsh*` npm 包版本族（真正跑的代码） |
+
+服务端工作区与桌面端分别锁版本：`release/release.json.harnessRuntime` 是
+工作区镜像使用的版本，`desktopRuntime` 是 pinned 桌面上游实际支持的版本。
+两者不得假装一致；升级桌面 pin 并通过装配、类型检查和测试后，才同步提升
+`desktopRuntime`。
 
 装配（`desktop/scripts/assemble.mjs`）= clone pin → `git apply` 补丁 → 拷入
 `dsh-plugin-cloud` → 各种守卫检查。产出的是一棵普通的上游工作树，用上游自己
@@ -68,7 +73,7 @@ cd dsh-plugin-desktop && yarn build && yarn package:dir
 | 风险 | 信号 | 预案 |
 |---|---|---|
 | patch 层是"整 row config 替换"，上游给 `llm-deepseek` row 新增默认 config 字段会被我们盖掉 | verify-contract 不报错但行为变化；升级时 diff base bundle 的该 row | 把上游新增字段并入 `cloudProfilePatches()` |
-| `llm-pi-ai` 注入失效而 `llm-deepseek` 仍被我们禁用 | **一个模型都不剩** —— 上游在无可用模型时禁用输入框, 用户连换模型都打不出来 (2026-08-19 死锁同款) | verify-contract 已断言 pi-ai 契约; 运行时另有兜底: 目录拉不到就不禁 deepseek 行 |
+| `llm-pi-ai` 注入失效而 `llm-deepseek` 仍被禁用 | 无可用模型时输入框会被禁用 | verify-contract 断言 pi-ai 契约；运行时在目录不可用时保留 deepseek 行作为兜底 |
 | 上游把 web_search 换协议/换 row | verify-contract 失败 | 网关加对应面（服务端改动，客户端不动） |
 | 上游给 desktop 加自己的账号体系 | 装配后功能重叠 | 用 0003 同款手法禁掉上游 row，保留我们的 |
 | `main.ts` 重构导致 0003 锚点消失 | git apply 冲突 | 重找 boot 前/prepare 后两个语义锚，重生成补丁（逻辑都在 cloud/ 里，补丁只有 8 行） |

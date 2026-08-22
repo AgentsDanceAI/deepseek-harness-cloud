@@ -6,18 +6,21 @@ The rules that decide whose money is spent:
     answerable — that is the whole point of a shared pool;
   * seats bound membership, and the owner cannot be removed.
 """
+
 import os
 import tempfile
 import time
 
 _TMP = tempfile.mkdtemp(prefix="dhc-team-")
-os.environ.update({
-    "DHC_DEV": "1",
-    "AUTH_SECRET": "test-secret",
-    "DHC_DATA_DIR": _TMP,
-    "DB_PATH": os.path.join(_TMP, "test.db"),
-    "UPSTREAM_API_KEY": "sk-upstream-test",
-})
+os.environ.update(
+    {
+        "DHC_DEV": "1",
+        "AUTH_SECRET": "test-secret",
+        "DHC_DATA_DIR": _TMP,
+        "DB_PATH": os.path.join(_TMP, "test.db"),
+        "UPSTREAM_API_KEY": "sk-upstream-test",
+    }
+)
 
 import pytest  # noqa: E402
 from fastapi import HTTPException  # noqa: E402
@@ -35,23 +38,24 @@ def _user(uid):
         c.execute("DELETE FROM credit_grants WHERE user_id=?", (uid,))
         c.execute("DELETE FROM usage_log WHERE user_id=?", (uid,))
         c.execute("DELETE FROM minute_grants WHERE user_id=?", (uid,))
-        c.execute("INSERT INTO users (id,email,session_epoch,created) VALUES (?,?,0,0)",
-                  (uid, uid + "@t.local"))
+        c.execute(
+            "INSERT INTO users (id,email,session_epoch,created) VALUES (?,?,0,0)", (uid, uid + "@t.local")
+        )
     return uid
 
 
 def test_pool_is_spent_before_personal_credits():
     owner = _user("u_t_owner")
     org_id = teams.create_org(owner, "Acme")
-    credits.grant(owner, 100, 3600, kind="grant_signup")   # personal
-    teams.grant_pool(org_id, 500, 3600)                    # shared
+    credits.grant(owner, 100, 3600, kind="grant_signup")  # personal
+    teams.grant_pool(org_id, 500, 3600)  # shared
 
     assert credits.balance(owner) == 600
     assert credits.personal_balance(owner) == 100
 
     credits.spend(owner, 300, kind="llm", model="m")
     assert teams.pool_balance(org_id) == 200
-    assert credits.personal_balance(owner) == 100          # untouched
+    assert credits.personal_balance(owner) == 100  # untouched
 
 
 def test_personal_credits_cover_the_remainder():
@@ -85,7 +89,7 @@ def test_usage_is_attributed_to_the_member_not_the_org():
 def test_seats_bound_membership():
     owner = _user("u_t_owner4")
     outsider = _user("u_t_out4")
-    org_id = teams.create_org(owner, "Acme4")   # seats default to 1, owner fills it
+    org_id = teams.create_org(owner, "Acme4")  # seats default to 1, owner fills it
     code = teams.create_invite(org_id)
     with pytest.raises(HTTPException) as e:
         teams.accept_invite(code, outsider)
@@ -105,7 +109,7 @@ def test_invite_is_single_use_and_expires():
     code = teams.create_invite(org_id)
     teams.accept_invite(code, a)
     with pytest.raises(HTTPException):
-        teams.accept_invite(code, b)          # already used
+        teams.accept_invite(code, b)  # already used
 
     stale = teams.create_invite(org_id)
     with db.tx() as c:
@@ -139,10 +143,10 @@ def test_member_cap_stops_that_member_only():
 
     credits.spend(heavy, 100, kind="llm", model="m")
     assert teams.credit_cap_exceeded(heavy) is True
-    assert teams.credit_cap_exceeded(light) is False      # unaffected
+    assert teams.credit_cap_exceeded(light) is False  # unaffected
     assert plans.check_run_blocked(heavy) == "member_cap_reached"
     assert plans.check_run_blocked(light) is None
-    assert teams.pool_balance(org_id) == 9_900             # pool still has plenty
+    assert teams.pool_balance(org_id) == 9_900  # pool still has plenty
 
 
 def test_member_override_beats_the_org_default():
@@ -156,9 +160,9 @@ def test_member_override_beats_the_org_default():
 
     credits.spend(member, 60, kind="llm", model="m")
     assert teams.credit_cap_exceeded(member) is True
-    teams.set_member_caps(org_id, member, credit_cap=500)   # owner raises it
+    teams.set_member_caps(org_id, member, credit_cap=500)  # owner raises it
     assert teams.credit_cap_exceeded(member) is False
-    teams.set_member_caps(org_id, member, credit_cap=0)     # 0 = blocked
+    teams.set_member_caps(org_id, member, credit_cap=0)  # 0 = blocked
     assert teams.credit_cap_exceeded(member) is True
 
 
@@ -178,12 +182,12 @@ def test_org_pools_minutes_separately_from_credits():
     assert st["org_pool_minutes"] == 600
     assert st["minutes_left"] == 600 + work_access.included_minutes(member)
 
-    credits.spend(member, 200, kind="llm", model="m")        # tokens
-    assert teams.minute_pool(org_id) == 600                  # minutes untouched
+    credits.spend(member, 200, kind="llm", model="m")  # tokens
+    assert teams.minute_pool(org_id) == 600  # minutes untouched
 
-    for _ in range(30):                                      # machine time
+    for _ in range(30):  # machine time
         credits.spend(member, 0, kind=work_access.MINUTE_KIND, model="dshwork")
-    assert teams.pool_balance(org_id) == 4_800               # credits untouched
+    assert teams.pool_balance(org_id) == 4_800  # credits untouched
     assert work_access.state(member)["used_minutes"] == 30
 
 
@@ -208,8 +212,8 @@ def test_seat_volume_discount_applies_to_the_fee_not_the_allowance():
     real cost and must scale linearly."""
     small = pay_base.resolve_item("seats:5")
     large = pay_base.resolve_item("seats:50")
-    assert large["unit_cents"] < small["unit_cents"]          # volume discount
-    assert large["credits"] == small["credits"] // 5 * 50     # allowance is linear
+    assert large["unit_cents"] < small["unit_cents"]  # volume discount
+    assert large["credits"] == small["credits"] // 5 * 50  # allowance is linear
     assert large["minutes"] == small["minutes"] // 5 * 50
 
 
@@ -217,6 +221,7 @@ def test_seat_price_never_undercuts_the_individual_plan():
     """An org buys governance, not a bulk discount — if seats were cheaper than
     a personal plan, buyers would just expense personal plans instead."""
     from app import config as cfg
+
     cheapest = pay_base.seat_unit_price(500)
     paid_tiers = [t for k, t in plans.pricing()["tiers"].items() if k != "free"]
     individual = min(int(t["monthly_cents"]) for t in paid_tiers)
@@ -254,11 +259,14 @@ def test_joining_a_team_never_removes_your_own_allowance():
 
 # --- API surface: these endpoints move money, so authorisation is the test ----
 
+
 def _client_for(uid, email):
     """A TestClient carrying a session for an existing user id."""
     from fastapi.testclient import TestClient
+
     from app import security
     from app.main import app
+
     c = TestClient(app)
     c.cookies.set("dhc_session", security.sign_token(uid, ttl=3600))
     return c
@@ -273,7 +281,7 @@ def test_only_the_owner_may_set_caps():
 
     as_member = _client_for(member, "u_t_api_m@t.local")
     r = as_member.post("/api/team/member-caps", json={"user_id": member, "credit_cap": 999999})
-    assert r.status_code == 403                      # a member cannot lift their own cap
+    assert r.status_code == 403  # a member cannot lift their own cap
 
     as_owner = _client_for(owner, "u_t_api_o@t.local")
     r = as_owner.post("/api/team/member-caps", json={"user_id": member, "credit_cap": 250})
@@ -293,7 +301,7 @@ def test_caps_accept_null_to_fall_back_to_the_default():
     c.post("/api/team/member-caps", json={"user_id": member, "credit_cap": 900})
     assert teams.effective_caps(teams.org_of(member), member)[0] == 900
     c.post("/api/team/member-caps", json={"user_id": member, "credit_cap": None})
-    assert teams.effective_caps(teams.org_of(member), member)[0] == 100   # back to default
+    assert teams.effective_caps(teams.org_of(member), member)[0] == 100  # back to default
 
 
 def test_caps_cannot_target_someone_outside_the_org():

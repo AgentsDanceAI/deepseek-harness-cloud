@@ -22,15 +22,16 @@ costs bandwidth.
 Deliberately not a byte-rate limiter: throttling each stream would keep every
 connection alive LONGER, which is the opposite of what protects the box.
 """
+
 from __future__ import annotations
 
 import json
 import time
 from collections import defaultdict
 
-MAX_CONCURRENT = 4   # whole machine
-PER_IP = 2           # one person resuming a download should not use the budget
-STALE_AFTER = 1800   # a slot older than this is assumed leaked, not in flight
+MAX_CONCURRENT = 4  # whole machine
+PER_IP = 2  # one person resuming a download should not use the budget
+STALE_AFTER = 1800  # a slot older than this is assumed leaked, not in flight
 
 _BUSY_BODY = json.dumps(
     {"detail": "download_busy", "message": "下载通道繁忙，请 30 秒后重试。"},
@@ -84,9 +85,13 @@ class ReleaseThrottle:
         ip = self._client(scope)
         total = self._prune(now)
         if total >= MAX_CONCURRENT or len(self._active[ip]) >= PER_IP:
-            await send({"type": "http.response.start", "status": 503,
-                        "headers": [(b"content-type", b"application/json"),
-                                    (b"retry-after", b"30")]})
+            await send(
+                {
+                    "type": "http.response.start",
+                    "status": 503,
+                    "headers": [(b"content-type", b"application/json"), (b"retry-after", b"30")],
+                }
+            )
             await send({"type": "http.response.body", "body": _BUSY_BODY})
             return
 
@@ -96,9 +101,11 @@ class ReleaseThrottle:
         async def send_wrapper(message):
             nonlocal released
             await send(message)
-            if (message["type"] == "http.response.body"
-                    and not message.get("more_body", False)
-                    and not released):
+            if (
+                message["type"] == "http.response.body"
+                and not message.get("more_body", False)
+                and not released
+            ):
                 released = True
                 self._release(ip)
 

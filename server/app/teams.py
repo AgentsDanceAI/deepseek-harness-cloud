@@ -13,14 +13,15 @@ One person belongs to at most one org — a shared wallet with ambiguous priorit
 would make "who paid for this" unanswerable, which is the question the feature
 exists to answer.
 """
+
 from __future__ import annotations
 
 import time
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException
 
 from . import config, credits, db, security
-from .accounts import resolve_user
+from .accounts import normalize_email, resolve_user
 
 router = APIRouter(prefix="/api/team", tags=["team"])
 
@@ -29,17 +30,20 @@ INVITE_TTL_S = 14 * 86400
 
 # --- model -------------------------------------------------------------------
 
+
 def org_of(user_id: str) -> dict | None:
     row = db.query_one(
-        "SELECT o.*, m.role FROM orgs o JOIN org_members m ON m.org_id=o.id WHERE m.user_id=?",
-        (user_id,))
+        "SELECT o.*, m.role FROM orgs o JOIN org_members m ON m.org_id=o.id WHERE m.user_id=?", (user_id,)
+    )
     return dict(row) if row is not None else None
 
 
 def members(org_id: str) -> list[dict]:
     rows = db.query(
         "SELECT m.user_id, m.role, m.joined, u.email FROM org_members m "
-        "JOIN users u ON u.id=m.user_id WHERE m.org_id=? ORDER BY m.joined", (org_id,))
+        "JOIN users u ON u.id=m.user_id WHERE m.org_id=? ORDER BY m.joined",
+        (org_id,),
+    )
     return [dict(r) for r in rows]
 
 
@@ -51,7 +55,8 @@ def seats_used(org_id: str) -> int:
 def pool_balance(org_id: str) -> int:
     row = db.query_one(
         "SELECT COALESCE(SUM(remaining),0) AS bal FROM credit_grants WHERE user_id=? AND expires>?",
-        (org_id, time.time()))
+        (org_id, time.time()),
+    )
     return int(row["bal"]) if row else 0
 
 
@@ -59,7 +64,8 @@ def minute_pool(org_id: str) -> int:
     """Unexpired workspace minutes held by the organisation."""
     row = db.query_one(
         "SELECT COALESCE(SUM(remaining),0) AS n FROM minute_grants WHERE user_id=? AND expires>?",
-        (org_id, time.time()))
+        (org_id, time.time()),
+    )
     return int((row["n"] if row is not None else 0) or 0)
 
 
@@ -78,7 +84,9 @@ def member_usage(org_id: str, since: float) -> list[dict]:
         "FROM org_members m JOIN users u ON u.id=m.user_id "
         "LEFT JOIN usage_log l ON l.user_id=m.user_id AND l.created>? "
         "WHERE m.org_id=? GROUP BY m.user_id, u.email, m.role, m.credit_cap, m.minute_cap "
-        "ORDER BY credits DESC", (since, org_id))
+        "ORDER BY credits DESC",
+        (since, org_id),
+    )
     return [dict(r) for r in rows]
 
 
@@ -87,8 +95,9 @@ def member_row(org_id: str, user_id: str) -> dict | None:
     return dict(row) if row is not None else None
 
 
-def set_member_caps(org_id: str, user_id: str, *, credit_cap: int | None = ...,
-                    minute_cap: int | None = ...) -> None:
+def set_member_caps(
+    org_id: str, user_id: str, *, credit_cap: int | None = ..., minute_cap: int | None = ...
+) -> None:
     """Ceilings for one member. None = follow the org default; 0 = blocked."""
     sets, params = [], []
     if credit_cap is not ...:
@@ -101,8 +110,7 @@ def set_member_caps(org_id: str, user_id: str, *, credit_cap: int | None = ...,
         return
     params += [org_id, user_id]
     with db.tx() as conn:
-        conn.execute(f"UPDATE org_members SET {', '.join(sets)} WHERE org_id=? AND user_id=?",
-                     tuple(params))
+        conn.execute(f"UPDATE org_members SET {', '.join(sets)} WHERE org_id=? AND user_id=?", tuple(params))
 
 
 def _period_start() -> float:
@@ -116,7 +124,9 @@ def member_used(user_id: str, since: float | None = None) -> tuple[int, int]:
     row = db.query_one(
         "SELECT COALESCE(SUM(CASE WHEN kind!='workspace' THEN credits ELSE 0 END),0) AS credits, "
         "COALESCE(SUM(CASE WHEN kind='workspace' THEN 1 ELSE 0 END),0) AS minutes "
-        "FROM usage_log WHERE user_id=? AND created>?", (user_id, since))
+        "FROM usage_log WHERE user_id=? AND created>?",
+        (user_id, since),
+    )
     if row is None:
         return 0, 0
     return int(row["credits"] or 0), int(row["minutes"] or 0)
@@ -154,19 +164,21 @@ def work_state(org: dict, user_id: str, personal: dict) -> dict:
     elif total_left <= 0:
         blocked = "work_quota"
     out = dict(personal)
-    out.update({
-        "scope": "org",
-        "org_id": org["id"],
-        "org_name": org["name"],
-        "plan_name": org["name"],
-        "org_pool_minutes": pool,
-        "minutes_left": left,
-        "member_minute_cap": minute_cap,
-        "member_minutes_used": used_minutes,
-        "allowed": blocked is None,
-        "blocked_reason": blocked,
-        "free_minutes_left": left,
-    })
+    out.update(
+        {
+            "scope": "org",
+            "org_id": org["id"],
+            "org_name": org["name"],
+            "plan_name": org["name"],
+            "org_pool_minutes": pool,
+            "minutes_left": left,
+            "member_minute_cap": minute_cap,
+            "member_minutes_used": used_minutes,
+            "allowed": blocked is None,
+            "blocked_reason": blocked,
+            "free_minutes_left": left,
+        }
+    )
     return out
 
 
@@ -176,21 +188,23 @@ def create_org(owner_id: str, name: str, seats: int = 1) -> str:
     org_id = security.new_id("org_")
     now = time.time()
     with db.tx() as conn:
-        conn.execute("INSERT INTO orgs (id, name, owner_id, seats, seats_expires, created) "
-                     "VALUES (?,?,?,?,?,?)", (org_id, name[:80], owner_id, max(1, seats), 0, now))
-        conn.execute("INSERT INTO org_members (org_id, user_id, role, joined) VALUES (?,?,?,?)",
-                     (org_id, owner_id, "owner", now))
+        conn.execute(
+            "INSERT INTO orgs (id, name, owner_id, seats, seats_expires, created) VALUES (?,?,?,?,?,?)",
+            (org_id, name[:80], owner_id, max(1, seats), 0, now),
+        )
+        conn.execute(
+            "INSERT INTO org_members (org_id, user_id, role, joined) VALUES (?,?,?,?)",
+            (org_id, owner_id, "owner", now),
+        )
     return org_id
 
 
 def set_seats(org_id: str, seats: int, expires: float) -> None:
     with db.tx() as conn:
-        conn.execute("UPDATE orgs SET seats=?, seats_expires=? WHERE id=?",
-                     (max(1, seats), expires, org_id))
+        conn.execute("UPDATE orgs SET seats=?, seats_expires=? WHERE id=?", (max(1, seats), expires, org_id))
 
 
-def set_default_caps(org_id: str, *, credit_cap: int | None = ...,
-                     minute_cap: int | None = ...) -> None:
+def set_default_caps(org_id: str, *, credit_cap: int | None = ..., minute_cap: int | None = ...) -> None:
     """Org-wide ceilings applied to members without their own override."""
     sets, params = [], []
     if credit_cap is not ...:
@@ -214,6 +228,7 @@ def grant_pool(org_id: str, amount: int, ttl_s: float, ref: str = "") -> str:
 def grant_minute_pool(org_id: str, minutes: int, ttl_s: float, ref: str = "") -> str:
     """Top up the shared MACHINE-TIME pool — the other resource seats buy."""
     from . import work_access
+
     return work_access.grant_minutes(org_id, minutes, ttl_s, kind="grant_team", ref=ref)
 
 
@@ -236,30 +251,63 @@ def credit_cap_exceeded(user_id: str) -> bool:
 def create_invite(org_id: str, email: str = "") -> str:
     code = security.new_id("inv_")[4:].upper()[:10]
     now = time.time()
+    bound_email = normalize_email(email) if str(email or "").strip() else ""
     with db.tx() as conn:
-        conn.execute("INSERT INTO org_invites (code, org_id, email, expires, created) "
-                     "VALUES (?,?,?,?,?)", (code, org_id, email.strip().lower(), now + INVITE_TTL_S, now))
+        conn.execute(
+            "INSERT INTO org_invites (code, org_id, email, expires, created) VALUES (?,?,?,?,?)",
+            (code, org_id, bound_email, now + INVITE_TTL_S, now),
+        )
     return code
 
 
 def accept_invite(code: str, user_id: str) -> str:
-    row = db.query_one("SELECT * FROM org_invites WHERE code=?", (code.strip().upper(),))
-    if row is None or row["used_by"] or row["expires"] < time.time():
-        raise HTTPException(400, "invite_invalid")
-    org_id = row["org_id"]
-    org = db.query_one("SELECT seats FROM orgs WHERE id=?", (org_id,))
-    if org is None:
-        raise HTTPException(400, "invite_invalid")
-    if org_of(user_id):
-        raise HTTPException(409, "already_in_org")
-    if seats_used(org_id) >= int(org["seats"]):
-        raise HTTPException(409, "no_seats")
+    normalized = code.strip().upper()
     now = time.time()
     with db.tx() as conn:
-        conn.execute("INSERT INTO org_members (org_id, user_id, role, joined) VALUES (?,?,?,?)",
-                     (org_id, user_id, "member", now))
-        conn.execute("UPDATE org_invites SET used_by=? WHERE code=?", (user_id, row["code"]))
-    return org_id
+        # Claim first. On SQLite this also takes the writer lock before any
+        # read/check; on PostgreSQL the conditional UPDATE row-locks this exact
+        # invite. A failed later check rolls the transaction back, making a
+        # correctly addressed invite retryable.
+        claimed = conn.execute(
+            "UPDATE org_invites SET used_by=? WHERE code=? AND used_by='' AND expires>=?",
+            (user_id, normalized, now),
+        )
+        if claimed.rowcount != 1:
+            row = conn.execute(
+                "SELECT used_by, expires FROM org_invites WHERE code=?", (normalized,)
+            ).fetchone()
+            if row is None or float(row["expires"]) < now:
+                raise HTTPException(400, "invite_invalid")
+            raise HTTPException(409, "invite_already_used")
+
+        row = conn.execute(
+            "SELECT i.*, u.email AS joining_email FROM org_invites i JOIN users u ON u.id=? WHERE i.code=?",
+            (user_id, normalized),
+        ).fetchone()
+        if row is None:
+            raise HTTPException(400, "invite_invalid")
+        if row["email"] and row["email"] != str(row["joining_email"]).lower():
+            raise HTTPException(403, "invite_email_mismatch")
+        if conn.execute("SELECT 1 FROM org_members WHERE user_id=? LIMIT 1", (user_id,)).fetchone():
+            raise HTTPException(409, "already_in_org")
+        seat_query = "SELECT seats FROM orgs WHERE id=?"
+        if config.DB_BACKEND == "postgres":
+            # Different invitation rows can target the same organisation. Lock
+            # the shared seat row so their count-and-insert sections serialize.
+            seat_query += " FOR UPDATE"
+        org = conn.execute(seat_query, (row["org_id"],)).fetchone()
+        used = conn.execute(
+            "SELECT COUNT(*) AS n FROM org_members WHERE org_id=?", (row["org_id"],)
+        ).fetchone()
+        if org is None:
+            raise HTTPException(400, "invite_invalid")
+        if int(used["n"]) >= int(org["seats"]):
+            raise HTTPException(409, "no_seats")
+        conn.execute(
+            "INSERT INTO org_members (org_id, user_id, role, joined) VALUES (?,?,?,?)",
+            (row["org_id"], user_id, "member", now),
+        )
+        return row["org_id"]
 
 
 def remove_member(org_id: str, user_id: str) -> None:
@@ -271,6 +319,7 @@ def remove_member(org_id: str, user_id: str) -> None:
 
 
 # --- API ---------------------------------------------------------------------
+
 
 def _require_owner(user: dict) -> dict:
     org = org_of(user["id"])
@@ -320,8 +369,7 @@ def team_invite(body: dict, user: dict = Depends(resolve_user)):
     if seats_used(org["id"]) >= int(org["seats"]):
         raise HTTPException(409, "no_seats")
     code = create_invite(org["id"], str(body.get("email", "")))
-    return {"ok": True, "code": code,
-            "url": f"{config.PUBLIC_BASE.rstrip('/')}/team/join?code={code}"}
+    return {"ok": True, "code": code, "url": f"{config.PUBLIC_BASE.rstrip('/')}/team/join?code={code}"}
 
 
 @router.post("/join")
@@ -357,9 +405,9 @@ def team_member_caps(body: dict, user: dict = Depends(resolve_user)):
     target = str(body.get("user_id", ""))
     if member_row(org["id"], target) is None:
         raise HTTPException(404, "not_a_member")
-    set_member_caps(org["id"], target,
-                    credit_cap=_cap_arg(body, "credit_cap"),
-                    minute_cap=_cap_arg(body, "minute_cap"))
+    set_member_caps(
+        org["id"], target, credit_cap=_cap_arg(body, "credit_cap"), minute_cap=_cap_arg(body, "minute_cap")
+    )
     return {"ok": True}
 
 
@@ -367,7 +415,7 @@ def team_member_caps(body: dict, user: dict = Depends(resolve_user)):
 def team_defaults(body: dict, user: dict = Depends(resolve_user)):
     """Org-wide ceilings for members without their own override."""
     org = _require_owner(user)
-    set_default_caps(org["id"],
-                     credit_cap=_cap_arg(body, "credit_cap"),
-                     minute_cap=_cap_arg(body, "minute_cap"))
+    set_default_caps(
+        org["id"], credit_cap=_cap_arg(body, "credit_cap"), minute_cap=_cap_arg(body, "minute_cap")
+    )
     return {"ok": True}

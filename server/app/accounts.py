@@ -5,11 +5,12 @@ Credential resolution order (resolve_user):
   2. Cookie dhc_session              — browser console
 Tokens carry the user's session_epoch; bumping it revokes everything at once.
 """
+
 from __future__ import annotations
 
+import logging
 import re
 import secrets
-import logging
 import smtplib
 import time
 from email.header import Header
@@ -23,14 +24,40 @@ from . import config, credits, db, rate_limit, security
 log = logging.getLogger("dhc.accounts")
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
-EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+EMAIL_RE = re.compile(
+    r"^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@"
+    r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?"
+    r"(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+$"
+)
+LEGACY_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 # API key 的形状: ak- 前缀让它与签名令牌一眼可分, 也便于用户在自己的配置里辨认。
 API_KEY_PREFIX = "ak-"
 API_KEY_MAX_PER_USER = 20
 
 
+def normalize_email_identity(raw: object) -> str:
+    """Canonicalize an identity accepted by earlier DSH Cloud releases.
+
+    This function is for looking up existing accounts only. New identities must
+    still pass :func:`normalize_email` before they are persisted.
+    """
+    email = str(raw or "").strip().lower()
+    if len(email) > 254 or not LEGACY_EMAIL_RE.fullmatch(email):
+        raise HTTPException(400, "invalid_email")
+    return email
+
+
+def normalize_email(raw: object) -> str:
+    """Canonicalize and validate an email before creating a new identity."""
+    email = normalize_email_identity(raw)
+    if not EMAIL_RE.fullmatch(email):
+        raise HTTPException(400, "invalid_email")
+    return email
+
+
 # --- credential resolution ---------------------------------------------------
+
 
 def _load_user(user_id: str):
     return db.query_one("SELECT * FROM users WHERE id=?", (user_id,))
@@ -90,12 +117,15 @@ def try_resolve_user(request: Request) -> dict | None:
     if not token:
         return None
     if from_cookie and not _cookie_write_allowed(request):
-        log.warning("[auth] 拒绝跨源 cookie 写入: %s %s origin=%r",
-                    request.method, request.url.path,
-                    request.headers.get("origin", ""))
+        log.warning(
+            "[auth] 拒绝跨源 cookie 写入: %s %s origin=%r",
+            request.method,
+            request.url.path,
+            request.headers.get("origin", ""),
+        )
         return None
     # API key 先判: 它有 ak- 前缀, 与签名令牌的形状不会混淆, 一眼分流不必两边都试。
-    # 放在最前是因为 verify_token 会做签名验算, 对一把 API key 是白费的开销。
+    # Dispatch by prefix before running the signed-token verifier.
     if token.startswith(API_KEY_PREFIX):
         return _user_from_api_key(token)
     payload = security.verify_token(token)
@@ -121,9 +151,16 @@ def try_resolve_user(request: Request) -> dict | None:
 def set_session_cookie(response: Response, user: dict) -> None:
     token = security.sign_token(user["id"], epoch=int(user["session_epoch"]))
     extra = {"domain": config.COOKIE_DOMAIN} if config.COOKIE_DOMAIN else {}
-    response.set_cookie(config.SESSION_COOKIE, token, max_age=config.SESSION_TTL,
-                        httponly=True, samesite="lax", secure=not config.DEV_MODE,
-                        path="/", **extra)
+    response.set_cookie(
+        config.SESSION_COOKIE,
+        token,
+        max_age=config.SESSION_TTL,
+        httponly=True,
+        samesite="lax",
+        secure=not config.DEV_MODE,
+        path="/",
+        **extra,
+    )
 
 
 def _client_ip(request: Request) -> str:
@@ -135,14 +172,17 @@ def _client_ip(request: Request) -> str:
 
 # --- registration / login ----------------------------------------------------
 
+
 def _create_user(email: str, password: str = "") -> dict:
+    email = normalize_email(email)
     uid = security.new_id("u_")
     now = time.time()
     with db.tx() as conn:
         conn.execute(
             "INSERT INTO users (id, email, password_hash, display_name, created, last_login) "
             "VALUES (?,?,?,?,?,?)",
-            (uid, email, security.hash_password(password) if password else "", email.split("@")[0], now, now))
+            (uid, email, security.hash_password(password) if password else "", email.split("@")[0], now, now),
+        )
     if config.FREE_SIGNUP_CREDITS > 0:
         # lifetime free allowance: 10-year expiry stands in for "never expires"
         credits.grant(uid, config.FREE_SIGNUP_CREDITS, 10 * 365 * 86400, kind="grant_signup")
@@ -155,11 +195,12 @@ def find_or_create_oauth_user(email: str, display_name: str = "") -> dict | None
     logins, so a Google/GitHub login lands on the existing account for that
     address. Creates the account on first sight when OAUTH_AUTO_REGISTER is on;
     returns None when the email has no account and auto-register is off."""
-    email = email.strip().lower()
+    email = normalize_email_identity(email)
     row = db.query_one("SELECT * FROM users WHERE email=?", (email,))
     if row is None:
         if not config.OAUTH_AUTO_REGISTER:
             return None
+        email = normalize_email(email)
         row = _create_user(email)
     user = dict(row)
     # only seed the display name — never clobber a name the user later changed
@@ -169,22 +210,23 @@ def find_or_create_oauth_user(email: str, display_name: str = "") -> dict | None
     return user
 
 
-# /api/auth/register 已于 2026-08-18 移除 —— 它不验证邮箱就建号并当场发放
-# FREE_SIGNUP_CREDITS + WORK_FREE_MINUTES, 唯一的闸是"每 IP 每小时 10 个",
-# 换 IP 池即形同虚设 (实测: 一条 curl 用 @example.com 假邮箱就能建号拿额度)。
-# 新号一律走 /api/auth/email/login (验证码即注册, 邮箱所有权已验证) 或
-# Google/GitHub OAuth —— 这三条是登录页实际提供的全部入口。
-# /api/auth/login (密码登录) 保留: 历史用户可能已设密码。
+# New accounts require verified email-code or OAuth ownership. Password login
+# remains available for existing accounts.
+
 
 @router.post("/login")
 def login(body: dict, request: Request, response: Response):
-    email = str(body.get("email", "")).strip().lower()
+    email = normalize_email_identity(body.get("email"))
     password = str(body.get("password", ""))
     ip = _client_ip(request)
     if rate_limit.login_locked(email, ip):
         raise HTTPException(429, "locked_try_later")
     user = db.query_one("SELECT * FROM users WHERE email=?", (email,))
-    if user is None or not user["password_hash"] or not security.verify_password(password, user["password_hash"]):
+    if (
+        user is None
+        or not user["password_hash"]
+        or not security.verify_password(password, user["password_hash"])
+    ):
         rate_limit.login_failed(email, ip)
         raise HTTPException(401, "bad_credentials")
     if user["status"] != "active":
@@ -195,6 +237,7 @@ def login(body: dict, request: Request, response: Response):
 
 
 # --- email verification codes ------------------------------------------------
+
 
 def _send_mail(to: str, subject: str, text: str) -> None:
     if not config.MAIL_SMTP_HOST:
@@ -231,36 +274,46 @@ def _send_mail(to: str, subject: str, text: str) -> None:
 
 @router.post("/email/send")
 def email_send(body: dict, request: Request):
-    email = str(body.get("email", "")).strip().lower()
-    if not EMAIL_RE.match(email):
+    email = normalize_email_identity(body.get("email"))
+    if not EMAIL_RE.fullmatch(email) and db.query_one("SELECT id FROM users WHERE email=?", (email,)) is None:
         raise HTTPException(400, "invalid_email")
     ip = _client_ip(request)
-    if not (rate_limit.allow(f"code:i:{ip}", 5, 600)
-            and rate_limit.allow(f"code:e:{email}", 10, 86400)
-            and rate_limit.allow("code:all", 500, 86400)):
+    if not (
+        rate_limit.allow(f"code:i:{ip}", 5, 600)
+        and rate_limit.allow(f"code:e:{email}", 10, 86400)
+        and rate_limit.allow("code:all", 500, 86400)
+    ):
         raise HTTPException(429, "too_many_requests")
     code = f"{secrets.randbelow(1000000):06d}"
     now = time.time()
     with db.tx() as conn:
         conn.execute("DELETE FROM email_codes WHERE email=? AND purpose=?", (email, "login"))
-        conn.execute("INSERT INTO email_codes (email, code_hash, purpose, expires, created) VALUES (?,?,?,?,?)",
-                     (email, security.token_hash(code), "login", now + 600, now))
+        conn.execute(
+            "INSERT INTO email_codes (email, code_hash, purpose, expires, created) VALUES (?,?,?,?,?)",
+            (email, security.token_hash(code), "login", now + 600, now),
+        )
     _send_mail(email, "DSH Cloud 登录验证码", f"您的登录验证码是 {code}，10 分钟内有效。若非本人操作请忽略。")
     return {"ok": True}
 
 
 @router.post("/email/login")
 def email_login(body: dict, request: Request, response: Response):
-    email = str(body.get("email", "")).strip().lower()
+    email = normalize_email_identity(body.get("email"))
     code = str(body.get("code", "")).strip()
     ip = _client_ip(request)
     if rate_limit.login_locked(email, ip):
         raise HTTPException(429, "locked_try_later")
     row = db.query_one("SELECT * FROM email_codes WHERE email=? AND purpose=?", (email, "login"))
-    if (row is None or float(row["expires"]) < time.time() or int(row["attempts"]) >= 5
-            or not secrets.compare_digest(row["code_hash"], security.token_hash(code))):
+    if (
+        row is None
+        or float(row["expires"]) < time.time()
+        or int(row["attempts"]) >= 5
+        or not secrets.compare_digest(row["code_hash"], security.token_hash(code))
+    ):
         if row is not None:
-            db.query("UPDATE email_codes SET attempts=attempts+1 WHERE email=? AND purpose=?", (email, "login"))
+            db.query(
+                "UPDATE email_codes SET attempts=attempts+1 WHERE email=? AND purpose=?", (email, "login")
+            )
         rate_limit.login_failed(email, ip)
         raise HTTPException(401, "bad_code")
     db.query("DELETE FROM email_codes WHERE email=? AND purpose=?", (email, "login"))
@@ -278,19 +331,31 @@ def email_login(body: dict, request: Request, response: Response):
 
 # --- session management ------------------------------------------------------
 
+
 def public_user(user: dict) -> dict:
-    return {"id": user["id"], "email": user["email"], "display_name": user["display_name"],
-            "created": user["created"]}
+    return {
+        "id": user["id"],
+        "email": user["email"],
+        "display_name": user["display_name"],
+        "created": user["created"],
+    }
 
 
 @router.get("/me")
 def me(user: dict = Depends(resolve_user)):
     from . import plans  # local import to avoid cycle
+
     plan = plans.current_plan(user["id"])
-    return {"user": public_user(user),
-            "plan": {"tier": plan["tier"], "name": plan.get("name", plan["tier"]),
-                     "expires": plan["expires"], "concurrency": plan["concurrency"]},
-            "credits": credits.balance(user["id"])}
+    return {
+        "user": public_user(user),
+        "plan": {
+            "tier": plan["tier"],
+            "name": plan.get("name", plan["tier"]),
+            "expires": plan["expires"],
+            "concurrency": plan["concurrency"],
+        },
+        "credits": credits.balance(user["id"]),
+    }
 
 
 def clear_session_cookie(response: Response) -> None:
@@ -336,16 +401,21 @@ def change_password(body: dict, user: dict = Depends(resolve_user)):
     if user["password_hash"] and not security.verify_password(old, user["password_hash"]):
         raise HTTPException(401, "bad_credentials")
     with db.tx() as conn:
-        conn.execute("UPDATE users SET password_hash=?, session_epoch=session_epoch+1 WHERE id=?",
-                     (security.hash_password(new), user["id"]))
+        conn.execute(
+            "UPDATE users SET password_hash=?, session_epoch=session_epoch+1 WHERE id=?",
+            (security.hash_password(new), user["id"]),
+        )
         conn.execute("UPDATE devices SET revoked=1 WHERE user_id=?", (user["id"],))
     return {"ok": True, "relogin": True}
 
 
 @router.get("/devices")
 def list_devices(user: dict = Depends(resolve_user)):
-    rows = db.query("SELECT id, name, platform, last_seen, created, revoked FROM devices "
-                    "WHERE user_id=? ORDER BY created DESC", (user["id"],))
+    rows = db.query(
+        "SELECT id, name, platform, last_seen, created, revoked FROM devices "
+        "WHERE user_id=? ORDER BY created DESC",
+        (user["id"],),
+    )
     return {"devices": [dict(r) for r in rows]}
 
 
@@ -358,7 +428,11 @@ def revoke_device(body: dict, user: dict = Depends(resolve_user)):
 
 @router.post("/delete-account")
 def delete_account(body: dict, user: dict = Depends(resolve_user)):
-    if str(body.get("confirm", "")) != user["email"]:
+    try:
+        confirmed_email = normalize_email_identity(body.get("confirm"))
+    except HTTPException:
+        raise HTTPException(400, "confirm_mismatch") from None
+    if confirmed_email != user["email"]:
         raise HTTPException(400, "confirm_mismatch")
     uid, email = user["id"], user["email"]
     with db.tx() as conn:
@@ -369,7 +443,8 @@ def delete_account(body: dict, user: dict = Depends(resolve_user)):
         conn.execute(
             "UPDATE users SET status='deleted', session_epoch=session_epoch+1, "
             "email=?, display_name='', password_hash='' WHERE id=?",
-            (f"deleted+{uid}@invalid.local", uid))
+            (f"deleted+{uid}@invalid.local", uid),
+        )
         conn.execute("DELETE FROM devices WHERE user_id=?", (uid,))
         conn.execute("DELETE FROM email_codes WHERE email=?", (email,))
         conn.execute("DELETE FROM org_invites WHERE email=?", (email,))
@@ -389,8 +464,8 @@ def delete_account(body: dict, user: dict = Depends(resolve_user)):
 def _user_from_api_key(key: str) -> dict | None:
     """API key → 用户。与 devices 一样只按哈希查, 明文不落库。"""
     row = db.query_one(
-        "SELECT id, user_id, revoked FROM api_keys WHERE key_hash=?",
-        (security.token_hash(key),))
+        "SELECT id, user_id, revoked FROM api_keys WHERE key_hash=?", (security.token_hash(key),)
+    )
     if row is None or int(row["revoked"]):
         return None
     user = _load_user(row["user_id"])
@@ -399,7 +474,7 @@ def _user_from_api_key(key: str) -> dict | None:
     # last_used 是用户排查"这把还在用吗"的唯一依据, 也是将来做异常检测的原料
     db.query("UPDATE api_keys SET last_used=? WHERE id=?", (time.time(), row["id"]))
     out = dict(user)
-    out["device_id"] = ""          # API key 不绑设备
+    out["device_id"] = ""  # API key 不绑设备
     out["api_key_id"] = row["id"]
     out["is_admin"] = user["email"].lower() in config.ADMIN_EMAILS or user["role"] == "admin"
     return out
@@ -409,28 +484,28 @@ def _user_from_api_key(key: str) -> dict | None:
 def list_api_keys(user: dict = Depends(resolve_user)):
     rows = db.query(
         "SELECT id, prefix, label, created, last_used FROM api_keys "
-        "WHERE user_id=? AND revoked=0 ORDER BY created DESC", (user["id"],))
+        "WHERE user_id=? AND revoked=0 ORDER BY created DESC",
+        (user["id"],),
+    )
     return {"keys": [dict(r) for r in rows]}
 
 
 @router.post("/api-keys")
 def create_api_key(body: dict, user: dict = Depends(resolve_user)):
     label = str(body.get("label", "")).strip()[:64]
-    live = db.query_one("SELECT COUNT(*) c FROM api_keys WHERE user_id=? AND revoked=0",
-                        (user["id"],))
+    live = db.query_one("SELECT COUNT(*) c FROM api_keys WHERE user_id=? AND revoked=0", (user["id"],))
     if int(live["c"]) >= API_KEY_MAX_PER_USER:
         raise HTTPException(400, "too_many_keys")
     key = API_KEY_PREFIX + secrets.token_urlsafe(32)
-    db.query("INSERT INTO api_keys (id, user_id, key_hash, prefix, label, created) "
-             "VALUES (?,?,?,?,?,?)",
-             ("k_" + secrets.token_hex(12), user["id"], security.token_hash(key),
-              key[:12], label, time.time()))
+    db.query(
+        "INSERT INTO api_keys (id, user_id, key_hash, prefix, label, created) VALUES (?,?,?,?,?,?)",
+        ("k_" + secrets.token_hex(12), user["id"], security.token_hash(key), key[:12], label, time.time()),
+    )
     # 明文只在这一次返回 —— 库里只有哈希, 之后任何人 (包括我们) 都取不回来
     return {"ok": True, "key": key, "label": label}
 
 
 @router.post("/api-keys/revoke")
 def revoke_api_key(body: dict, user: dict = Depends(resolve_user)):
-    db.query("UPDATE api_keys SET revoked=1 WHERE id=? AND user_id=?",
-             (str(body.get("id", "")), user["id"]))
+    db.query("UPDATE api_keys SET revoked=1 WHERE id=? AND user_id=?", (str(body.get("id", "")), user["id"]))
     return {"ok": True}

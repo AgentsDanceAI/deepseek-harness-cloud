@@ -1,11 +1,12 @@
 """Plan definitions and entitlement checks.
 
 config/pricing.json is the single source of truth for prices and quotas.
-Principles carried over from a sibling production system:
+Core entitlement principles:
   - gates only block NEW requests, never kill in-flight work;
   - every check fails open if the check itself breaks;
   - amounts are always resolved server-side from the price table.
 """
+
 from __future__ import annotations
 
 import json
@@ -33,6 +34,7 @@ def pricing(cur: str | None = None) -> dict:
         p = config.CONFIG_DIR / config.PRICING_FILE
     else:
         from . import currency as _cur
+
         p = config.CONFIG_DIR / _cur.price_file(key)
         if not p.is_file():
             p = config.CONFIG_DIR / config.PRICING_FILE
@@ -86,14 +88,24 @@ def apply_plan(user_id: str, tier: str, cycle: str, order_id: str = "") -> None:
         base = max(now, float(row["expires"])) if row and row["tier"] == tier else now
         expires = base + days * 86400
         if row:
-            conn.execute("UPDATE subscriptions SET tier=?, cycle=?, expires=?, updated=? WHERE user_id=?",
-                         (tier, cycle, expires, now, user_id))
+            conn.execute(
+                "UPDATE subscriptions SET tier=?, cycle=?, expires=?, updated=? WHERE user_id=?",
+                (tier, cycle, expires, now, user_id),
+            )
         else:
-            conn.execute("INSERT INTO subscriptions (user_id, tier, cycle, started, expires, updated) "
-                         "VALUES (?,?,?,?,?,?)", (user_id, tier, cycle, now, expires, now))
+            conn.execute(
+                "INSERT INTO subscriptions (user_id, tier, cycle, started, expires, updated) "
+                "VALUES (?,?,?,?,?,?)",
+                (user_id, tier, cycle, now, expires, now),
+            )
     months = 12 if cycle == "yearly" else 1
-    credits.grant(user_id, int(tdef["monthly_credits"]) * months, days * 86400,
-                  kind="grant_plan", ref=order_id or f"{tier}:{cycle}")
+    credits.grant(
+        user_id,
+        int(tdef["monthly_credits"]) * months,
+        days * 86400,
+        kind="grant_plan",
+        ref=order_id or f"{tier}:{cycle}",
+    )
 
 
 def concurrency_limit(user_id: str) -> int:
@@ -115,6 +127,7 @@ def check_run_blocked(user_id: str) -> str | None:
         # A member of an organisation also has their own ceiling on the shared
         # pool: hitting it stops THAT member, never the whole team.
         from . import teams
+
         if teams.credit_cap_exceeded(user_id):
             return "member_cap_reached"
         return None

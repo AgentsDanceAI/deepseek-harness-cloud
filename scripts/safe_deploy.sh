@@ -4,14 +4,12 @@
 #   ./scripts/safe_deploy.sh            # 重建并重启 server
 #   SKIP_SMOKE=1 ./scripts/safe_deploy.sh   # 应急: 跳过部署后冒烟
 #
-# 为什么不直接 `docker compose up -d --build`: 那样没有任何闸门。镜像构建失败、
-# 新代码在**鉴权之后**第一行就崩、部署时正有人在跑任务 —— 三种都没人拦。
-# 姊妹产品线 2026-08-10 出过一次: 构建成功、容器起来、/health 返回 ok, 而真实
-# 业务端点全量 500。雷在鉴权之后的处理器里, 不带 token 的健康探测根本够不着。
+# 仅有容器启动和匿名健康检查不足以覆盖鉴权后的业务链路。本脚本在重启前后设置
+# 明确门禁，并用不消耗上游额度的鉴权请求检查关键前置路径。
 #
-# 闸门顺序 (任一不过就停在部署之前, 线上维持原样):
+# 闸门顺序（任一不过就停止继续变更）:
 #   1. 工作树干净 —— 不把别条线的半成品一起部署上去
-#   2. 部署前基线 —— 本来就带病的话, 别把锅算到这次部署头上
+#   2. 部署前基线 —— 区分既有故障与本次发布回归
 #   3. 构建 + 重启
 #   4. 等健康
 #   5. **带鉴权的深链路冒烟** (见 smoke 函数)
@@ -31,8 +29,7 @@ PORT="${PORT:-8100}"
 [ -f "$ENVFILE" ] || { echo "!! 找不到 $ENVFILE" >&2; exit 1; }
 
 # --- 闸门 1: 工作树干净 ------------------------------------------------------
-# 这台机器上常有多条线并行, 工作区里可能躺着别人的在制品。构建用的是工作树而非
-# HEAD, 脏工作树会把半成品一起打进镜像。
+# 镜像从工作树而非 HEAD 构建，因此默认拒绝未提交的受控文件改动。
 dirty="$(git status --porcelain 2>/dev/null | grep -v '^?? ' || true)"
 if [ -n "$dirty" ] && [ "${ALLOW_DIRTY:-0}" != "1" ]; then
   echo "!! 工作树有未提交改动, 拒绝部署 (构建取的是工作树, 会把半成品打进镜像):" >&2
@@ -42,8 +39,7 @@ if [ -n "$dirty" ] && [ "${ALLOW_DIRTY:-0}" != "1" ]; then
 fi
 
 # --- 闸门 2: 部署前基线 ------------------------------------------------------
-# 先记下部署**之前**是否健康。若本来就带病, 冒烟失败不该算到这次部署头上 ——
-# 那会把人引向错误的回滚。
+# 记录部署前健康状态，避免将既有故障误判为发布回归。
 before="$(docker exec "$CONTAINER" python -c "
 import urllib.request
 try:
@@ -73,7 +69,7 @@ done
 # 网关的 chat/completions, 但模型故意给一个目录里没有的 —— gateway 在
 # 鉴权 → 账号 → 并发 → QPS → 积分 都过了之后才解析模型, 然后确定性 404。
 # 于是这一发覆盖整条前置链路, 却不碰上游、不扣任何积分。
-# 期望 404; 5xx 或连不上 = 线上带病。
+# 期望 404；5xx 或连接失败表示鉴权后的链路不健康。
 smoke() {
   [ "${SKIP_SMOKE:-0}" = "1" ] && { echo "⚠️  SKIP_SMOKE=1 — 跳过冒烟" >&2; return 0; }
   local code
@@ -85,8 +81,7 @@ if not row:
     print('nouser'); raise SystemExit
 # epoch 必须带上: try_resolve_user 会逐位比对它, 而 sign_token 默认给 0。
 # 那个用户一旦改过密码 (或任何让 session_epoch 自增的操作), 不带 epoch 的
-# token 就会被拒 -> 401 -> 这道冒烟每次部署都喊"线上带病"。
-# 一个会狼来了的告警, 比没有告警更糟。
+# token 就会被拒 -> 401，因此冒烟令牌必须使用当前 epoch。
 token = security.sign_token(row['id'], epoch=int(row['session_epoch']))
 req = urllib.request.Request(
     'http://127.0.0.1:$PORT/llm/v1/chat/completions',
@@ -104,9 +99,9 @@ except Exception:
     404) echo "✓ 冒烟通过: 网关前置链路健康 (404 如预期 — 鉴权/账号/配额都过了, 只是模型不存在)"; return 0 ;;
     nouser) echo "⚠️  冒烟跳过: 库里没有 active 用户, 签不出 token" >&2; return 0 ;;
     401|403) echo "✗ 冒烟失败: 鉴权返回 $code — 签出来的 token 被拒, 会话/密钥链路有问题" >&2; return 1 ;;
-    5*|000) echo "✗ 冒烟失败: 返回 $code — 线上可能带病!" >&2
+    5*|000) echo "✗ 冒烟失败: 返回 $code — 服务链路不健康" >&2
             echo "  详查: docker logs $CONTAINER --since 5m 2>&1 | grep -A 20 Traceback" >&2
-            [ "$before" = "sick" ] && echo "  注意: 部署**之前**就已经不健康, 未必是这次部署引入的。" >&2
+            [ "$before" = "sick" ] && echo "  注意: 部署前基线已不健康，请先排除既有故障。" >&2
             return 1 ;;
     *) echo "✗ 冒烟失败: 意外状态 $code" >&2; return 1 ;;
   esac
@@ -114,15 +109,14 @@ except Exception:
 smoke
 
 # --- 闸门 6: 工作台镜像缓存有没有跟上 ------------------------------------
-# 只在 ECI 后端下有意义。缓存是**按镜像引用**建的, WORK_IMAGE_REF 一升而缓存
-# 没重建, 每个用户每次冷启动就从 ~25s 退回 ~50s —— 不报错、不告警, 只是慢,
-# 所以除非在这里问一句, 没人会发现。
+# 只在 ECI 后端下有意义。缓存按镜像引用创建；镜像更新后应同步刷新缓存，
+# 否则工作区冷启动会出现静默性能退化。
 # 不因此让部署失败: 那是性能退化而不是故障, 拦下一次正常发版不成比例。
 if docker exec "$CONTAINER" sh -c '[ "$WORK_BACKEND" = eci ]' 2>/dev/null; then
   if ! docker exec -w /srv/dhc "$CONTAINER" \
         python3 -m scripts.eci_image_cache check >/dev/null 2>&1; then
     echo
-    echo "⚠️  工作台镜像缓存与 WORK_IMAGE_REF 对不上 —— 冷启动会从 ~25s 退回 ~50s。" >&2
+    echo "⚠️  工作台镜像缓存与 WORK_IMAGE_REF 不一致，冷启动性能可能退化。" >&2
     docker exec -w /srv/dhc "$CONTAINER" \
       python3 -m scripts.eci_image_cache check 2>&1 | sed 's/^/    /' >&2
   fi

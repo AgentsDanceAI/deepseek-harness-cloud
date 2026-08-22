@@ -1,8 +1,9 @@
 """In-process sliding-window rate limits and login brute-force lockout.
 
-Single-worker semantics. For multi-worker deployments put a shared Redis in
-front (same approach as a sibling production system) — the interfaces here are the seam.
+Single-worker semantics. Multi-worker deployments require a shared backend such
+as Redis; these interfaces are the replacement boundary.
 """
+
 from __future__ import annotations
 
 import threading

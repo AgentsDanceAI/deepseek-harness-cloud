@@ -3,28 +3,31 @@
 Environment is pinned before app imports (config reads env at import time).
 Upstream LLM calls are stubbed at the gateway's _upstream_client seam.
 """
+
 import json
 import os
 import tempfile
+import time
 
 _TMP = tempfile.mkdtemp(prefix="dhc-core-")
-os.environ.update({
-    "DHC_DEV": "1",
-    "AUTH_SECRET": "test-secret",
-    "DHC_DATA_DIR": _TMP,
-    "DB_PATH": os.path.join(_TMP, "test.db"),
-    "UPSTREAM_API_KEY": "sk-upstream-test",
-    "FREE_SIGNUP_CREDITS": "500",
-})
+os.environ.update(
+    {
+        "DHC_DEV": "1",
+        "AUTH_SECRET": "test-secret",
+        "DHC_DATA_DIR": _TMP,
+        "DB_PATH": os.path.join(_TMP, "test.db"),
+        "UPSTREAM_API_KEY": "sk-upstream-test",
+        "FREE_SIGNUP_CREDITS": "500",
+    }
+)
 
 import httpx  # noqa: E402
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
-import pytest  # noqa: E402
-
 from app import config, credits, db, gateway, plans, security  # noqa: E402
 from app.main import app  # noqa: E402
+
 from ._signup import signup, signup_with_password
 
 client = TestClient(app)
@@ -52,13 +55,14 @@ def _user_id(email: str) -> str:
 
 # --- accounts ----------------------------------------------------------------
 
+
 def test_register_login_me():
     _register()
     me = client.get("/api/auth/me")
     assert me.status_code == 200
     body = me.json()
     assert body["user"]["email"] == "u1@test.local"
-    assert body["credits"] == 500          # signup grant
+    assert body["credits"] == 500  # signup grant
     assert body["plan"]["tier"] == "free"
 
     client.post("/api/auth/logout")
@@ -80,6 +84,7 @@ def test_bad_password_and_lockout():
 
 # --- device flow -------------------------------------------------------------
 
+
 def test_device_flow_and_revocation():
     browser = TestClient(app)
     signup_with_password(browser, "dev@test.local")
@@ -89,7 +94,10 @@ def test_device_flow_and_revocation():
     assert "-" in start["user_code"] and start["device_code"]
 
     # pending until the browser user approves
-    assert desktop.post("/api/device/poll", json={"device_code": start["device_code"]}).json()["status"] == "pending"
+    assert (
+        desktop.post("/api/device/poll", json={"device_code": start["device_code"]}).json()["status"]
+        == "pending"
+    )
     info = browser.get(f"/api/device/info?code={start['user_code']}").json()
     assert info["client"]["name"] == "mac-mini"
     assert browser.post("/api/device/approve", json={"user_code": start["user_code"]}).status_code == 200
@@ -109,8 +117,10 @@ def test_device_flow_and_revocation():
 
 
 def test_device_password_login():
-    r = client.post("/api/device/login", json={
-        "email": "dev@test.local", "password": "password123", "name": "win-pc", "platform": "win32"})
+    r = client.post(
+        "/api/device/login",
+        json={"email": "dev@test.local", "password": "password123", "name": "win-pc", "platform": "win32"},
+    )
     assert r.status_code == 200
     token = r.json()["token"]
     assert client.get("/api/auth/me", headers={"authorization": f"Bearer {token}"}).status_code == 200
@@ -119,30 +129,36 @@ def test_device_password_login():
 def test_epoch_revocation_on_password_change():
     fresh = TestClient(app)
     signup_with_password(fresh, "epoch@test.local")
-    token = fresh.post("/api/device/login", json={
-        "email": "epoch@test.local", "password": "password123", "name": "x", "platform": "linux"}).json()["token"]
-    assert fresh.post("/api/auth/password", json={"old": "password123", "new": "password456"}).status_code == 200
+    token = fresh.post(
+        "/api/device/login",
+        json={"email": "epoch@test.local", "password": "password123", "name": "x", "platform": "linux"},
+    ).json()["token"]
+    assert (
+        fresh.post("/api/auth/password", json={"old": "password123", "new": "password456"}).status_code == 200
+    )
     assert client.get("/api/auth/me", headers={"authorization": f"Bearer {token}"}).status_code == 401
 
 
 # --- credits -----------------------------------------------------------------
 
+
 def test_credit_buckets_expiry_and_overdraft():
     uid = "u_credit_test"
     with db.tx() as conn:
-        conn.execute("INSERT INTO users (id, email, created) VALUES (?,?,?)",
-                     (uid, "credit@test.local", db.now()))
-    credits.grant(uid, 100, ttl_s=-1, kind="grant_topup")       # already expired
-    credits.grant(uid, 50, ttl_s=3600, kind="grant_plan")       # expires first
+        conn.execute(
+            "INSERT INTO users (id, email, created) VALUES (?,?,?)", (uid, "credit@test.local", db.now())
+        )
+    credits.grant(uid, 100, ttl_s=-1, kind="grant_topup")  # already expired
+    credits.grant(uid, 50, ttl_s=3600, kind="grant_plan")  # expires first
     credits.grant(uid, 200, ttl_s=86400, kind="grant_topup")
-    assert credits.balance(uid) == 250                          # expired bucket ignored
+    assert credits.balance(uid) == 250  # expired bucket ignored
 
-    credits.spend(uid, 60, kind="llm", model="m")               # 50 from soonest + 10 from next
+    credits.spend(uid, 60, kind="llm", model="m")  # 50 from soonest + 10 from next
     assert credits.balance(uid) == 190
     rows = db.query("SELECT remaining FROM credit_grants WHERE user_id=? AND kind='grant_plan'", (uid,))
     assert int(rows[0]["remaining"]) == 0
 
-    credits.spend(uid, 250, kind="llm", model="m")              # overdraft by 60
+    credits.spend(uid, 250, kind="llm", model="m")
     assert credits.balance(uid) == -60
     assert plans.check_run_blocked(uid) == "insufficient_credits"
 
@@ -150,19 +166,21 @@ def test_credit_buckets_expiry_and_overdraft():
 def test_plan_apply_and_renewal():
     uid = "u_plan_test"
     with db.tx() as conn:
-        conn.execute("INSERT INTO users (id, email, created) VALUES (?,?,?)",
-                     (uid, "plan@test.local", db.now()))
+        conn.execute(
+            "INSERT INTO users (id, email, created) VALUES (?,?,?)", (uid, "plan@test.local", db.now())
+        )
     plans.apply_plan(uid, "pro", "monthly", order_id="o1")
     first = plans.current_plan(uid)
     assert first["tier"] == "pro" and first["concurrency"] == 5
     assert credits.balance(uid) == plans.pricing()["tiers"]["pro"]["monthly_credits"]
 
-    plans.apply_plan(uid, "pro", "monthly", order_id="o2")      # renewal extends
+    plans.apply_plan(uid, "pro", "monthly", order_id="o2")  # renewal extends
     assert plans.current_plan(uid)["expires"] > first["expires"]
     assert credits.balance(uid) == plans.pricing()["tiers"]["pro"]["monthly_credits"] * 2
 
 
 # --- gateway -----------------------------------------------------------------
+
 
 class _FakeStreamResponse:
     status_code = 200
@@ -191,6 +209,7 @@ class _FakeStreamCtx:
 
 class _FakeClient:
     """Stub for gateway._upstream_client covering stream and non-stream."""
+
     last_request = None
 
     def __init__(self, *, chunks=None, json_body=None, status=200):
@@ -210,8 +229,7 @@ class _FakeClient:
 
     async def post(self, url, **kw):
         _FakeClient.last_request = {"url": url, **kw}
-        return httpx.Response(self._status, json=self._json,
-                              request=httpx.Request("POST", url))
+        return httpx.Response(self._status, json=self._json, request=httpx.Request("POST", url))
 
 
 @pytest.fixture()
@@ -231,16 +249,19 @@ def test_gateway_requires_auth():
 def test_gateway_stream_bills_from_usage_chunk(gw_user, monkeypatch):
     fresh, uid = gw_user
     before = credits.balance(uid)
-    usage_chunk = {"choices": [], "usage": {
-        "prompt_tokens": 1000, "prompt_cache_hit_tokens": 400, "completion_tokens": 2000}}
+    usage_chunk = {
+        "choices": [],
+        "usage": {"prompt_tokens": 1000, "prompt_cache_hit_tokens": 400, "completion_tokens": 2000},
+    }
     chunks = [
         b'data: {"choices":[{"delta":{"content":"hi"}}]}\n\n',
         b"data: " + json.dumps(usage_chunk).encode() + b"\n\n",
         b"data: [DONE]\n\n",
     ]
     monkeypatch.setattr(gateway, "_upstream_client", lambda: _FakeClient(chunks=chunks))
-    r = fresh.post("/llm/v1/chat/completions",
-                   json={"model": "deepseek-v4-flash", "stream": True, "messages": []})
+    r = fresh.post(
+        "/llm/v1/chat/completions", json={"model": "deepseek-v4-flash", "stream": True, "messages": []}
+    )
     assert r.status_code == 200
     assert "hi" in r.text and "[DONE]" in r.text
     # upstream got OUR key, not the user token
@@ -252,14 +273,74 @@ def test_gateway_stream_bills_from_usage_chunk(gw_user, monkeypatch):
     assert spent == row["credits"] >= 1
 
 
+@pytest.mark.asyncio
+async def test_gateway_disconnect_bills_forwarded_bytes(gw_user, monkeypatch):
+    """Closing before the provider usage event must not collapse billing to 1."""
+    from starlette.requests import Request
+
+    fresh, uid = gw_user
+    del fresh
+    chunks = [
+        b'data: {"choices":[{"delta":{"content":"' + b"x" * 200_000 + b'"}}]}\n\n',
+        b'data: {"choices":[],"usage":{"prompt_tokens":1,"completion_tokens":1}}\n\n',
+    ]
+    monkeypatch.setattr(gateway, "_upstream_client", lambda: _FakeClient(chunks=chunks))
+    body = json.dumps(
+        {
+            "model": "deepseek-v4-flash",
+            "stream": True,
+            "max_tokens": 4096,
+            "messages": [{"role": "user", "content": "write a report"}],
+        }
+    ).encode()
+    delivered = False
+
+    async def receive():
+        nonlocal delivered
+        if delivered:
+            return {"type": "http.disconnect"}
+        delivered = True
+        return {"type": "http.request", "body": body, "more_body": False}
+
+    request = Request(
+        {
+            "type": "http",
+            "http_version": "1.1",
+            "method": "POST",
+            "scheme": "https",
+            "path": "/llm/v1/chat/completions",
+            "raw_path": b"/llm/v1/chat/completions",
+            "query_string": b"",
+            "headers": [],
+            "client": ("127.0.0.1", 1234),
+            "server": ("test", 443),
+        },
+        receive,
+    )
+    user = dict(db.query_one("SELECT * FROM users WHERE id=?", (uid,)))
+    before = credits.balance(uid)
+    response = await gateway.chat_completions(request, user)
+    iterator = response.body_iterator
+    await anext(iterator)
+    await iterator.aclose()
+
+    row = db.query_one("SELECT * FROM usage_log WHERE user_id=? ORDER BY created DESC", (uid,))
+    assert row["output"] > 0
+    assert row["credits"] > 1
+    assert credits.balance(uid) == before - row["credits"]
+
+
 def test_gateway_nonstream_and_model_rewrite(gw_user, monkeypatch):
     fresh, uid = gw_user
     body = {"id": "x", "usage": {"prompt_tokens": 10, "completion_tokens": 5}, "choices": []}
     monkeypatch.setattr(gateway, "_upstream_client", lambda: _FakeClient(json_body=body))
     r = fresh.post("/llm/v1/chat/completions", json={"model": "deepseek-v4-pro", "messages": []})
     assert r.status_code == 200 and r.json()["id"] == "x"
-    sent = json.loads(_FakeClient.last_request["json"] if isinstance(
-        _FakeClient.last_request.get("json"), str) else json.dumps(_FakeClient.last_request["json"]))
+    sent = json.loads(
+        _FakeClient.last_request["json"]
+        if isinstance(_FakeClient.last_request.get("json"), str)
+        else json.dumps(_FakeClient.last_request["json"])
+    )
     assert sent["model"] == "deepseek-v4-pro"
 
 
@@ -273,8 +354,11 @@ def test_gateway_unknown_model_rejected(gw_user):
 def test_gateway_upstream_auth_error_not_leaked(gw_user, monkeypatch):
     """Our upstream key being rejected must NOT surface as 401 (dsh would blame the user)."""
     fresh, _ = gw_user
-    monkeypatch.setattr(gateway, "_upstream_client",
-                        lambda: _FakeClient(json_body={"error": {"message": "bad key"}}, status=401))
+    monkeypatch.setattr(
+        gateway,
+        "_upstream_client",
+        lambda: _FakeClient(json_body={"error": {"message": "bad key"}}, status=401),
+    )
     r = fresh.post("/llm/v1/chat/completions", json={"model": "deepseek-v4-flash", "messages": []})
     assert r.status_code == 502
     assert "sk-upstream" not in r.text
@@ -293,6 +377,7 @@ def test_gateway_blocks_when_credits_exhausted(monkeypatch):
 
 def test_gateway_anthropic_search_surface(gw_user, monkeypatch):
     from app import config as app_config
+
     monkeypatch.setattr(app_config, "SEARCH_PROVIDER", "upstream")  # this test covers passthrough
     fresh, uid = gw_user
     before = credits.balance(uid)
@@ -333,11 +418,13 @@ def test_gateway_concurrency_headroom(gw_user, monkeypatch):
 
 # --- credit convention (must stay aligned with AgentsDance for portability) ---
 
+
 def test_multiplier_is_anchored_on_the_baseline_model():
     """1.00x is defined as the baseline model, and 1.00x == 1000 credits / 1M.
     These two facts are what make a credit balance mean the same thing in both
     products, so they are locked here rather than left to the generator."""
     from app import model_catalog
+
     meta = model_catalog.meta()
     baseline = meta.get("baseline_model")
     assert baseline, "generated catalog must record its 1.00x anchor"
@@ -349,6 +436,7 @@ def test_multiplier_is_anchored_on_the_baseline_model():
 
 def test_cheaper_model_costs_proportionally_fewer_credits():
     from app import model_catalog
+
     cat = model_catalog.catalog()
     baseline = model_catalog.meta()["baseline_model"]
     cheap = min(cat.values(), key=lambda m: m["multiplier"])
@@ -366,17 +454,73 @@ def test_cheaper_model_costs_proportionally_fewer_credits():
 def test_unknown_model_bills_at_the_priciest_entry():
     """A gap in the catalog must never become a free ride."""
     from app import model_catalog
-    priciest = max(model_catalog.catalog().values(),
-                   key=lambda m: m.get("output_usd_per_m", 0))
-    assert (model_catalog.charge_credits("no-such-model", 0, 0, 100_000)
-            == model_catalog.charge_credits(priciest["id"], 0, 0, 100_000))
+
+    priciest = max(model_catalog.catalog().values(), key=lambda m: m.get("output_usd_per_m", 0))
+    assert model_catalog.charge_credits("no-such-model", 0, 0, 100_000) == model_catalog.charge_credits(
+        priciest["id"], 0, 0, 100_000
+    )
 
 
 def test_any_token_flow_costs_at_least_one_credit():
     from app import model_catalog
+
     cheapest = min(model_catalog.catalog().values(), key=lambda m: m["multiplier"])
     assert model_catalog.charge_credits(cheapest["id"], 1, 0, 1) >= 1
     assert model_catalog.charge_credits(cheapest["id"], 0, 0, 0) == 0
+
+
+def test_multiple_in_flight_completions_preserve_every_charge_as_debt(monkeypatch):
+    monkeypatch.setattr(config, "OVERDRAFT_LIMIT_CREDITS", 20)
+    uid = security.new_id("u_overdraft_")
+    with db.tx() as conn:
+        conn.execute(
+            "INSERT INTO users (id,email,created) VALUES (?,?,?)",
+            (uid, f"{uid}@example.test", time.time()),
+        )
+    credits.grant(uid, 5, 3600, kind="test")
+
+    credits.spend(uid, 100, kind="llm", model="test")
+    credits.spend(uid, 100, kind="llm", model="test")
+
+    assert credits.balance(uid) == -195
+    assert db.query_one("SELECT SUM(credits) AS n FROM usage_log WHERE user_id=?", (uid,))["n"] == 200
+
+
+def test_spend_preserves_full_debt_so_a_small_topup_cannot_reopen_admission(monkeypatch):
+    monkeypatch.setattr(config, "OVERDRAFT_LIMIT_CREDITS", 20)
+    uid = security.new_id("u_debt_")
+    with db.tx() as conn:
+        conn.execute(
+            "INSERT INTO users (id,email,created) VALUES (?,?,?)",
+            (uid, f"{uid}@example.test", time.time()),
+        )
+    credits.grant(uid, 5, 3600, kind="test")
+
+    credits.spend(uid, 100, kind="llm", model="test")
+    assert credits.balance(uid) == -95
+
+    credits.grant(uid, 21, 3600, kind="test_topup")
+    assert credits.balance(uid) == -74
+    assert plans.check_run_blocked(uid) == "insufficient_credits"
+
+
+def test_overdraft_does_not_disappear_when_the_original_grant_expires(monkeypatch):
+    clock = [1_000.0]
+    monkeypatch.setattr(credits.time, "time", lambda: clock[0])
+    uid = security.new_id("u_debt_expiry_")
+    with db.tx() as conn:
+        conn.execute(
+            "INSERT INTO users (id,email,created) VALUES (?,?,?)",
+            (uid, f"{uid}@example.test", clock[0]),
+        )
+    credits.grant(uid, 5, 1, kind="short_grant")
+    credits.spend(uid, 10, kind="llm", model="test")
+    assert credits.balance(uid) == -5
+
+    clock[0] += 2
+
+    assert credits.balance(uid) == -5
+    assert plans.check_run_blocked(uid) == "insufficient_credits"
 
 
 def test_query_tolerates_writes_that_return_no_rows():
@@ -385,6 +529,7 @@ def test_query_tolerates_writes_that_return_no_rows():
     records". That difference took production login down after the Postgres
     switch, so the layer must absorb it rather than every call site."""
     from app import db
+
     db.query("DELETE FROM email_codes WHERE email=?", ("nobody@nowhere.invalid",))
     assert db.query("UPDATE users SET display_name=display_name WHERE id=?", ("no-such-id",)) == []
     assert db.query_one("SELECT COUNT(*) AS n FROM users") is not None
@@ -415,12 +560,14 @@ def test_boot_fingerprint_tracks_configuration_not_the_user():
     """Recreating stale containers hinges on this: if the digest moved per user
     (or per call) every workspace would be rebuilt on every visit."""
     from app import workspace
+
     a = workspace._boot_fingerprint(workspace._boot_script())
     b = workspace._boot_fingerprint(workspace._boot_script())
     assert a == b
     from app.workbackend import WorkInfo
+
     blank = WorkInfo(running=True, boot_fp="", image_id="i", host="h")
-    assert workspace._boot_is_stale(blank) is True          # 没盖过戳 = 早于这套机制
+    assert workspace._boot_is_stale(blank) is True  # 没盖过戳 = 早于这套机制
     assert workspace._boot_is_stale(WorkInfo(True, a, "i", "h")) is False
 
 
@@ -431,30 +578,39 @@ def test_smtp_rejection_is_a_client_error_not_a_500():
     address was the problem."""
     import smtplib
     from unittest.mock import patch
+
     from fastapi import HTTPException
+
     from app import accounts
 
     def reject(code, text):
         exc = smtplib.SMTPDataError(code, text)
         # without a host configured _send_mail short-circuits to the dev printer
-        with patch.object(accounts.config, "MAIL_SMTP_HOST", "smtp.test"), \
-                patch("smtplib.SMTP_SSL", side_effect=exc):
+        with (
+            patch.object(accounts.config, "MAIL_SMTP_HOST", "smtp.test"),
+            patch("smtplib.SMTP_SSL", side_effect=exc),
+        ):
             try:
                 accounts._send_mail("someone@nowhere.invalid", "s", "t")
             except HTTPException as e:
                 return e.status_code
         return None
 
-    assert reject(550, b"Invalid `to` field") == 400      # permanent -> user fixes the address
-    assert reject(451, b"try again later") == 503         # transient -> not the user's fault
+    assert reject(550, b"Invalid `to` field") == 400  # permanent -> user fixes the address
+    assert reject(451, b"try again later") == 503  # transient -> not the user's fault
 
 
 def test_smtp_transport_failure_is_503():
     from unittest.mock import patch
+
     from fastapi import HTTPException
+
     from app import accounts
-    with patch.object(accounts.config, "MAIL_SMTP_HOST", "smtp.test"), \
-            patch("smtplib.SMTP_SSL", side_effect=OSError("connection refused")):
+
+    with (
+        patch.object(accounts.config, "MAIL_SMTP_HOST", "smtp.test"),
+        patch("smtplib.SMTP_SSL", side_effect=OSError("connection refused")),
+    ):
         try:
             accounts._send_mail("a@b.com", "s", "t")
             raise AssertionError("expected HTTPException")
@@ -466,15 +622,22 @@ def test_account_deletion_actually_erases_personal_data():
     """The privacy policy promises erasure. A status flag beside an intact
     display name and password hash is not erasure, and would make the published
     policy untrue."""
-    from app import accounts, db, security
     import time
+
+    from app import accounts, db, security
+
     uid = security.new_id("u_")
     email = "erase-me@example.test"
     with db.tx() as c:
-        c.execute("INSERT INTO users (id,email,display_name,password_hash,role,session_epoch,created) "
-                  "VALUES (?,?,?,?,?,?,?)", (uid, email, "要删的人", "hash", "user", 1, time.time()))
-        c.execute("INSERT INTO email_codes (email,code_hash,purpose,expires,created) VALUES (?,?,?,?,?)",
-                  (email, "h", "login", time.time() + 600, time.time()))
+        c.execute(
+            "INSERT INTO users (id,email,display_name,password_hash,role,session_epoch,created) "
+            "VALUES (?,?,?,?,?,?,?)",
+            (uid, email, "要删的人", "hash", "user", 1, time.time()),
+        )
+        c.execute(
+            "INSERT INTO email_codes (email,code_hash,purpose,expires,created) VALUES (?,?,?,?,?)",
+            (email, "h", "login", time.time() + 600, time.time()),
+        )
 
     user = dict(db.query_one("SELECT * FROM users WHERE id=?", (uid,)))
     accounts.delete_account({"confirm": email}, user=user)
@@ -493,7 +656,9 @@ def test_waffo_product_amount_is_a_display_string():
     JSON number gets {"message":"Invalid input"} with no field named, which is
     almost impossible to diagnose from the response alone."""
     import inspect
+
     from app.payments import waffo_provider
+
     src = inspect.getsource(waffo_provider.catalog_prices)
     assert 'f"{cents / 100:.2f}"' in src
     assert "round(cents" not in src
@@ -505,18 +670,20 @@ def test_waffo_products_carry_every_quoted_currency():
     local price."""
     from app import currency
     from app.payments import waffo_provider
+
     prices = waffo_provider.catalog_prices("plan:plus:monthly")
     assert set(prices) == set(currency.SUPPORTED)
     # 价目表是商业决定, 会变 —— 读表而不是钉死数字, 否则改价必然连累这条测试
     table = plans.pricing("USD")["tiers"]["plus"], plans.pricing("CNY")["tiers"]["plus"]
-    assert prices["USD"]["amount"] == f'{table[0]["monthly_cents"] / 100:.2f}'
-    assert prices["CNY"]["amount"] == f'{table[1]["monthly_cents"] / 100:.2f}'
+    assert prices["USD"]["amount"] == f"{table[0]['monthly_cents'] / 100:.2f}"
+    assert prices["CNY"]["amount"] == f"{table[1]['monthly_cents'] / 100:.2f}"
 
 
 def test_item_of_round_trips_every_sellable_kind():
     """resolve_item accepts plan / pack / seats; _item_of has to rebuild all three. It knew only two, so seats and the workspace pass raised
     KeyError on the way to checkout and could never be bought."""
     from app.payments import base, waffo_provider
+
     for item in ("plan:pro:yearly", "pack:pack1000", "seats:3"):
         info = dict(base.resolve_item(item))
         assert waffo_provider._item_of(info) == item, item
@@ -527,7 +694,9 @@ def test_workspace_assets_are_version_stamped():
     layout fixes, so an unversioned URL means a layout fix ships a day late —
     the stale copy IS the bug being fixed."""
     import re
+
     from app import workspace
+
     head = workspace._pwa_inject()
     assert "{asset_v}" not in head, "version placeholder was not substituted"
     for asset in ("mobile.css", "workspace-chrome.css", "workspace-chrome.js"):
@@ -538,20 +707,26 @@ def test_i18n_catalogs_are_in_parity():
     """Both languages must define the same keys with the same placeholders.
     A key present in only one language renders that language's text inside the
     other's page; a placeholder mismatch throws away a runtime value."""
-    import json, re
+    import json
+    import re
+
     from app import config, i18n
+
     cats = {}
     for lang in i18n.SUPPORTED:
         p = config.CONFIG_DIR / "i18n" / f"{lang}.json"
         cats[lang] = {k: v for k, v in json.loads(p.read_text()).items() if not k.startswith("_")}
     zh, en = cats["zh"], cats["en"]
-    assert set(zh) == set(en), f"key drift: only-zh={sorted(set(zh)-set(en))} only-en={sorted(set(en)-set(zh))}"
+    assert set(zh) == set(en), (
+        f"key drift: only-zh={sorted(set(zh) - set(en))} only-en={sorted(set(en) - set(zh))}"
+    )
     for k in zh:
         assert set(re.findall(r"{(\w+)}", zh[k])) == set(re.findall(r"{(\w+)}", en[k])), k
 
 
 def test_i18n_falls_back_rather_than_blanking():
     from app import i18n
+
     assert i18n.t("en", "nav.pricing") == "Pricing"
     # an unknown key renders as itself — visible in review, never a blank page
     assert i18n.t("en", "no.such.key") == "no.such.key"
@@ -579,8 +754,10 @@ def test_query_survives_a_literal_percent():
     "only '%s', '%b', '%t' are allowed as placeholders" — on SQLite the same
     query works fine, so this only ever failed in production."""
     from app import db
-    db.query("INSERT INTO kv (k, v) VALUES (?, ?) ON CONFLICT (k) DO UPDATE SET v=EXCLUDED.v",
-             ("pcttest_a", "1"))
+
+    db.query(
+        "INSERT INTO kv (k, v) VALUES (?, ?) ON CONFLICT (k) DO UPDATE SET v=EXCLUDED.v", ("pcttest_a", "1")
+    )
     rows = db.query("SELECT k FROM kv WHERE k LIKE 'pcttest%'")
     assert any(r["k"] == "pcttest_a" for r in rows)
     db.query("DELETE FROM kv WHERE k LIKE 'pcttest%'")
@@ -591,14 +768,18 @@ def test_admin_role_guards_cannot_lock_everyone_out():
     demoting the only one left, and demoting someone the env grants anyway
     (which the UI would then be lying about, since the next request restores it)."""
     import time
+
     from fastapi import HTTPException
+
     from app import admin, config, db, security
 
     def mk(email, role="user"):
         uid = security.new_id("u_")
         with db.tx() as c:
-            c.execute("INSERT INTO users (id,email,display_name,role,session_epoch,created) "
-                      "VALUES (?,?,?,?,?,?)", (uid, email, "", role, 1, time.time()))
+            c.execute(
+                "INSERT INTO users (id,email,display_name,role,session_epoch,created) VALUES (?,?,?,?,?,?)",
+                (uid, email, "", role, 1, time.time()),
+            )
         return dict(db.query_one("SELECT * FROM users WHERE id=?", (uid,)))
 
     a = mk("guard-a@t.local", "admin")
@@ -606,7 +787,8 @@ def test_admin_role_guards_cannot_lock_everyone_out():
 
     for body, expect in (({"user_id": a["id"], "admin": False}, "cannot_demote_self"),):
         try:
-            admin.set_role(body, user=a); raise AssertionError("expected refusal")
+            admin.set_role(body, user=a)
+            raise AssertionError("expected refusal")
         except HTTPException as e:
             assert expect in str(e.detail)
 
@@ -636,10 +818,12 @@ def test_product_id_is_cached_before_publish():
     after it succeeds, every retry creates another product — that is how the
     store accumulated three copies of all eleven items."""
     import inspect
+
     from app.payments import waffo_provider
+
     src = inspect.getsource(waffo_provider.ensure_product_id)
-    cache_pos = src.index('_kv_set(cache_key, pid)')
-    publish_pos = src.index('publish-product')
+    cache_pos = src.index("_kv_set(cache_key, pid)")
+    publish_pos = src.index("publish-product")
     assert cache_pos < publish_pos, "the id must be cached before the publish call"
 
 
@@ -649,14 +833,17 @@ def test_existing_product_scan_sees_the_whole_store():
     asked for more, and a name match against a DEACTIVATED product would have
     handed checkout a product Waffo refuses to sell."""
     import inspect
+
     from app.payments import waffo_provider
+
     src = inspect.getsource(waffo_provider.ensure_product_id)
     assert "limit:200" in src
-    scan = src[src.index("onetimeProducts"):src.index('"/v1/actions/onetime-product/create-product"')]
+    scan = src[src.index("onetimeProducts") : src.index('"/v1/actions/onetime-product/create-product"')]
     assert 'p.get("status") != "active"' in scan
 
 
 # --- CSRF: 只有 cookie 认证的写操作才有风险 ---------------------------------
+
 
 def test_cookie_write_from_a_foreign_origin_is_refused():
     """预览页跑的是智能体生成的内容。
@@ -665,32 +852,46 @@ def test_cookie_write_from_a_foreign_origin_is_refused():
     CORS 只挡"读响应", 挡不住"请求已经执行" —— 改密码这种操作读不到响应也照样
     成立。所以只能在服务端按 Origin 白名单拒。
     """
-    from app import accounts, config
     from fastapi import Request
 
+    from app import accounts, config
+
     def req(method, origin):
-        scope = {"type": "http", "method": method, "path": "/api/auth/password",
-                 "headers": [(b"origin", origin.encode())] if origin else [],
-                 "query_string": b"", "scheme": "https", "server": ("x", 443)}
+        scope = {
+            "type": "http",
+            "method": method,
+            "path": "/api/auth/password",
+            "headers": [(b"origin", origin.encode())] if origin else [],
+            "query_string": b"",
+            "scheme": "https",
+            "server": ("x", 443),
+        }
         return Request(scope)
 
     base = config.PUBLIC_BASE.rstrip("/")
     assert accounts._cookie_write_allowed(req("POST", base)) is True
-    assert accounts._cookie_write_allowed(req("POST", base + "/")) is True    # 尾斜杠
+    assert accounts._cookie_write_allowed(req("POST", base + "/")) is True  # 尾斜杠
     assert accounts._cookie_write_allowed(req("POST", "https://preview.dshcloud.online")) is False
-    assert accounts._cookie_write_allowed(req("POST", "null")) is False       # 沙箱不透明源
+    assert accounts._cookie_write_allowed(req("POST", "null")) is False  # 沙箱不透明源
     assert accounts._cookie_write_allowed(req("POST", "https://evil.example")) is False
 
 
 def test_reads_and_headerless_clients_are_untouched():
     """GET 不改状态; 桌面端/CLI 不发 Origin 且用 Bearer —— 都不该被这道闸拦住。"""
-    from app import accounts, config
     from fastapi import Request
 
+    from app import accounts
+
     def req(method, origin):
-        scope = {"type": "http", "method": method, "path": "/api/x",
-                 "headers": [(b"origin", origin.encode())] if origin else [],
-                 "query_string": b"", "scheme": "https", "server": ("x", 443)}
+        scope = {
+            "type": "http",
+            "method": method,
+            "path": "/api/x",
+            "headers": [(b"origin", origin.encode())] if origin else [],
+            "query_string": b"",
+            "scheme": "https",
+            "server": ("x", 443),
+        }
         return Request(scope)
 
     assert accounts._cookie_write_allowed(req("GET", "https://evil.example")) is True
@@ -701,6 +902,7 @@ def test_the_workspace_shell_origin_stays_allowed(monkeypatch):
     """work.<domain> 上的外壳会调 /api/work/stop 与 /api/auth/logout。
     白名单漏了它, 用户点"停止"就静默 401。"""
     from app import accounts, config
+
     monkeypatch.setattr(config, "WORK_DOMAIN", "work.dshcloud.online")
     monkeypatch.setattr(config, "PUBLIC_BASE", "https://dshcloud.online")
     assert "https://work.dshcloud.online" in accounts._write_origins()
@@ -713,8 +915,10 @@ def test_the_origin_gate_is_actually_wired_into_auth(monkeypatch):
     这条走真实请求: 同一个会话 cookie, 只有 Origin 不同, 结果必须不同。
     """
     from fastapi.testclient import TestClient
+
     from app import config
     from app.main import app
+
     from ._signup import signup
 
     # PUBLIC_BASE 必须与浏览器实际的 Origin 一字不差, 否则站点自己的写操作全部
@@ -725,25 +929,22 @@ def test_the_origin_gate_is_actually_wired_into_auth(monkeypatch):
     signup(c, "csrf-probe@test.local")
 
     # 自家页面: 正常受理 (密码太短 -> 400, 说明已经进到业务逻辑里了)
-    ok = c.post("/api/auth/password", json={"old": "", "new": "x"},
-                headers={"origin": "http://testserver"})
+    ok = c.post("/api/auth/password", json={"old": "", "new": "x"}, headers={"origin": "http://testserver"})
     assert ok.status_code != 401, "自家 Origin 被误伤了"
 
     # 预览域 / 沙箱不透明源: 必须在认证阶段就被拒
     for bad in ("https://preview.dshcloud.online", "null", "https://evil.example"):
-        r = c.post("/api/auth/password", json={"old": "", "new": "whatever-long"},
-                   headers={"origin": bad})
+        r = c.post("/api/auth/password", json={"old": "", "new": "whatever-long"}, headers={"origin": bad})
         assert r.status_code == 401, f"来自 {bad} 的带凭据写入没有被拦下"
 
 
 # --- 日志得有个出口 ----------------------------------------------------------
 
+
 def test_info_logs_actually_reach_a_handler(capsys):
-    """应用此前从未配置 logging。Python 的 lastResort 兜底**只输出 WARNING 及
-    以上**, 于是 log.info 全部落空 —— "谁的工作台什么时候被回收了"这类问题永远
-    查不到, 而 ECI 上回收就是销毁实例, 那正是要能对账的事。
-    """
+    """Operational INFO events must reach the configured application logger."""
     import logging
+
     from app.main import setup_logging
 
     setup_logging()
@@ -752,24 +953,33 @@ def test_info_logs_actually_reach_a_handler(capsys):
     assert "回收了 u_x" in err, "INFO 没有出口"
     assert "dhc.work" in err, "看不出是哪个模块打的"
     assert "INFO" in err
-    # 时间戳: 出事时要能和别的日志对上时间线
+    # Timestamps allow events from different services to be correlated.
     import re
+
     assert re.search(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}", err), "没有时间戳"
 
 
 def test_setting_up_twice_does_not_double_print():
     """create_app 在测试里会被反复调用; handler 叠加会让每条日志重复 N 次。"""
     import logging
+
     from app.main import setup_logging
-    setup_logging(); setup_logging(); setup_logging()
+
+    setup_logging()
+    setup_logging()
+    setup_logging()
     assert len(logging.getLogger("dhc").handlers) == 1
 
 
 def test_uvicorns_own_loggers_are_left_alone(capsys):
     """只挂在 dhc 这一支上。动 root 会把 uvicorn 的 access/error 格式一起改掉。"""
     import logging
+
     from app.main import setup_logging
+
     setup_logging()
-    assert logging.getLogger().handlers == [] or \
-        logging.getLogger("dhc").handlers is not logging.getLogger().handlers
+    assert (
+        logging.getLogger().handlers == []
+        or logging.getLogger("dhc").handlers is not logging.getLogger().handlers
+    )
     assert logging.getLogger("dhc").propagate is False

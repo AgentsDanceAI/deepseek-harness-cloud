@@ -3,16 +3,10 @@
 #
 #   bash desktop/scripts/wrap-signed-dmg.sh <signed.app|signed.zip> [输出目录]
 #
-# 为什么需要这一步 (2026-08-19):
-# 签名/公证在 Linux 构建机上做 (rcodesign 能签 mac 二进制), 但 Linux 打不出
-# UDIF 格式的 DMG —— 当时的结论是"那就发 zip", 代价是用户解压后就地双击运行,
-# 触发 macOS App Translocation: 系统把 App 挂到 /private/var/.../AppTranslocation
-# 的只读随机目录里跑, 自动更新一类的功能随之失效, 而且**没有任何提示**告诉
-# 用户应该先拖进「应用程序」。
-#
-# 正确的结论不是放弃 DMG, 而是把最后这层封装放回 macOS 做。已验证 (2026-08-19,
-# 线上 2.0.0 arm64 包实测): 重新封装**不损公证** —— 票据 staple 在 .app 本体上,
-# 外层容器换了照样 `stapler validate` 通过、spctl 判 Notarized Developer ID。
+# rcodesign can sign and notarize on Linux, but UDIF images must be created on
+# macOS. A DMG also provides the expected Applications drag target and avoids
+# running the app from a translocated archive location. Rewrapping does not
+# alter the notarization ticket stapled to the app bundle.
 #
 # 本脚本只做封装, 不做签名: 传进来的 .app 必须已经签好名并公证过, 否则直接拒绝
 # (未公证的包封进 DMG 只会把 Gatekeeper 问题原样带给用户)。

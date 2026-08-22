@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/AgentsDanceAI/deepseek-harness-cloud/release/release-source.schema.json",
+  "type": "object",
+  "required": ["version", "stackSchema", "databaseSchema", "minCliVersion", "minUpgradeFrom", "legacyCompatibility", "harnessRuntime", "desktopRuntime", "productImages", "baseImages"],
+  "properties": {
+    "$schema": {"type": "string"},
+    "version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"},
+    "stackSchema": {"type": "integer", "minimum": 1},
+    "databaseSchema": {"type": "integer", "minimum": 1},
+    "minCliVersion": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"},
+    "minUpgradeFrom": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"},
+    "legacyCompatibility": {
+      "type": "object",
+      "required": ["introduced", "supportedThrough", "paths"],
+      "properties": {
+        "introduced": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"},
+        "supportedThrough": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"},
+        "paths": {"const": ["scripts/quickstart.sh", "deploy/docker-compose.yml"]}
+      },
+      "additionalProperties": false
+    },
+    "harnessRuntime": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+-rc\\.[0-9]+$"},
+    "desktopRuntime": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+-rc\\.[0-9]+$"},
+    "productImages": {
+      "type": "object",
+      "required": ["server", "workspace"],
+      "additionalProperties": false,
+      "properties": {"server": {"type": "string"}, "workspace": {"type": "string"}}
+    },
+    "baseImages": {
+      "type": "object",
+      "required": ["python", "uv", "node", "caddy", "postgres", "socketProxy"],
+      "additionalProperties": false,
+      "properties": {
+        "python": {"type": "string", "pattern": "^[^@\\s]+@sha256:[0-9a-f]{64}$"},
+        "uv": {"type": "string", "pattern": "^[^@\\s]+@sha256:[0-9a-f]{64}$"},
+        "node": {"type": "string", "pattern": "^[^@\\s]+@sha256:[0-9a-f]{64}$"},
+        "caddy": {"type": "string", "pattern": "^[^@\\s]+@sha256:[0-9a-f]{64}$"},
+        "postgres": {"type": "string", "pattern": "^[^@\\s]+@sha256:[0-9a-f]{64}$"},
+        "socketProxy": {"type": "string", "pattern": "^[^@\\s]+@sha256:[0-9a-f]{64}$"}
+      }
+    }
+  },
+  "additionalProperties": false
+}

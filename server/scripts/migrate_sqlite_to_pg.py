@@ -10,6 +10,7 @@ The destination schema is created by app.db.ensure_schema(), so the two stay in
 step automatically — this script only moves rows and then PROVES it moved them
 by comparing counts per table.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -19,17 +20,30 @@ import sys
 
 # Order matters only for readability; there are no FK constraints in the schema.
 TABLES = [
-    "users", "email_codes", "devices", "device_codes", "subscriptions",
-    "credit_grants", "minute_grants", "usage_log", "orders", "consents", "kv",
-    "orgs", "org_members", "org_invites", "work_passes",
+    "users",
+    "email_codes",
+    "devices",
+    "device_codes",
+    "subscriptions",
+    "credit_grants",
+    "minute_grants",
+    "usage_log",
+    "orders",
+    "consents",
+    "kv",
+    "orgs",
+    "org_members",
+    "org_invites",
+    "work_passes",
 ]
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--sqlite", required=True)
-    ap.add_argument("--force", action="store_true",
-                    help="overwrite non-empty destination tables (deletes first)")
+    ap.add_argument(
+        "--force", action="store_true", help="overwrite non-empty destination tables (deletes first)"
+    )
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
 
@@ -67,7 +81,8 @@ def main() -> int:
             for row in rows:
                 conn.execute(
                     f"INSERT INTO {table} ({collist}) VALUES ({placeholders})",  # noqa: S608
-                    tuple(row[c] for c in cols))
+                    tuple(row[c] for c in cols),
+                )
         moved[table] = len(rows)
 
     print("copied:")

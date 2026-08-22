@@ -1,0 +1,17 @@
+schema_version = 1
+active_license = "AGPL-3.0-only"
+license_file = "LICENSE"
+license_sha256 = "0d96a4ff68ad6d4b6f1f30f713b18d5184912ba8dd389f86aa7710db079abcb0"
+already_distributed_rights_revocable = false
+future_requirements_are_license_text = false
+transition_status = "blocked-pending-counsel-and-rights-audit"
+community_baseline_commit = "945439f346a291722f8f0883e3c3c789d3c0463c"
+community_baseline_manifest = "legal/licensing/COMMUNITY_BASELINE.manifest"
+
+[transition_gates]
+qualified_counsel_approval = false
+copyright_inventory_complete = false
+third_party_notices_verified = false
+contribution_terms_approved = false
+community_boundary_verified = false
+external_release_authorization = false

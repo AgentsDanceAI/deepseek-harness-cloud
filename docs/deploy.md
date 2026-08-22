@@ -1,68 +1,259 @@
-# 部署手册
+# Self-host deployment
 
-## 1. 前置
+This guide covers the public Community Edition. It does not describe any live DSH
+Cloud environment. For the managed service, use
+[DSH Cloud Hosted](https://dshcloud.online/login?next=%2Fwork); the remaining
+steps are intentionally neutral self-host instructions.
 
-- 一台公网服务器（境内主体走备案流程后用境内机，或先用境外机 + 海外域名验证产品）
-- 域名 A 记录指向服务器；`deploy/.env` 的 `DHC_DOMAIN`/`PUBLIC_BASE` 填该域名
-- Docker + Docker Compose v2
+## Choose an installation path
 
-## 2. 首次上线
+| Path | Best for | Network exposure |
+|---|---|---|
+| Canonical Docker Compose | Persistent self-hosted installation with Caddy/TLS | Caddy publishes configured HTTP/HTTPS ports; app remains internal |
+| Docker single container | Local evaluation or integration behind your own proxy | Bind to loopback unless a trusted proxy is in place |
+| npm/npx or uv/uvx CLI | Guided configuration and lifecycle commands | Generates and operates the same versioned stack |
+| Source development | Contributors changing server behavior | Development mode; never expose publicly |
+
+Published packages and images are usable only after their immutable version is
+present in the relevant registry. Before that publication gate, build from this
+source checkout. The repository currently coordinates version `0.2.0` in
+`release/release.json`; a version number in source is not proof that an artifact
+has been published.
+
+## Prerequisites
+
+- Docker Engine or Docker Desktop with Compose v2;
+- a supported Linux host for a public deployment;
+- an OpenAI-compatible upstream URL and API key;
+- a domain whose DNS points to the host for automatic public TLS; and
+- enough persistent storage for the database, logs, releases, and optional
+  workspaces.
+
+For public use, also prepare SMTP or an approved identity provider, a backup and
+restore process, monitoring, and the security controls in [security.md](security.md).
+
+## Canonical Compose deployment
+
+From a source checkout:
 
 ```bash
-git clone https://github.com/AgentsDanceAI/deepseek-harness-cloud && cd deepseek-harness-cloud
-cp deploy/.env.example deploy/.env
-openssl rand -hex 32        # 填入 AUTH_SECRET
-vi deploy/.env              # UPSTREAM_API_KEY、域名、SMTP、支付(可后补)
-docker compose -f deploy/docker-compose.yml --env-file deploy/.env up -d --build
-curl -s https://<域名>/api/health   # {"ok":true,...}
+git clone https://github.com/AgentsDanceAI/deepseek-harness-cloud.git
+cd deepseek-harness-cloud
+cp deploy/selfhost/.env.example deploy/selfhost/.env
+chmod 600 deploy/selfhost/.env
 ```
 
-支付渠道是"配了即开"：`.env` 里补齐某渠道的变量并重启，`/api/pay/context`
-即出现该渠道；一个都没配时，购买按钮降级为"意向收集"。
+Edit `deploy/selfhost/.env`. At minimum, review:
 
-## 3. 管理员
+- `DOMAIN`, `SITE_SCHEME`, and `PUBLIC_BASE`;
+- `AUTH_SECRET` (generate with `openssl rand -hex 32`);
+- `UPSTREAM_BASE_URL` and `UPSTREAM_API_KEY`; and
+- `ADMIN_EMAILS`; and
+- for public mode, either `MAIL_SMTP_HOST` (plus the credentials required by
+  your SMTP provider), a complete Google OAuth client, or a complete GitHub
+  OAuth client.
 
-`.env` 的 `ADMIN_EMAILS=you@example.com`（逗号分隔）。该邮箱注册的账号自动获得
-管理接口权限（`/api/admin/*`：查用户、送积分、改套餐、封禁、发桌面版本号）。
+For a local trial, use `DOMAIN=localhost`, `SITE_SCHEME=http`, `DHC_DEV=1`,
+`PUBLIC_BASE=http://localhost:8787`, `BIND_ADDRESS=127.0.0.1`,
+`HTTP_PORT=8787`, and `HTTPS_PORT=8443`. For every public deployment, use HTTPS
+and `DHC_DEV=0`; choose public bind addresses only after firewall and
+reverse-proxy review. Do not run the public `up` command until an identity path
+is configured: new accounts require verified email or OAuth ownership.
 
-## 4. 数据与备份
-
-- 默认 SQLite，落在 docker volume `dhc-data`（`/app/data/dhc.db`，WAL 模式）。
-  备份：`docker compose exec dhc-server sqlite3 /app/data/dhc.db ".backup /app/data/backup.db"`
-  后拷出 volume；或直接快照 volume。
-- 规模上来后切 PostgreSQL：`.env` 里 `DB_BACKEND=postgres` + `POSTGRES_DSN=...`，
-  并 `pip install -e '.[postgres]'`（Dockerfile 里加一行即可）。表结构自动建。
-
-## 5. 桌面安装包发布
+Validate interpolation before starting:
 
 ```bash
-# 1) 构建（见 README 桌面端一节；mac 需 Developer ID 签名+公证，win 需代码签名证书）
-# 2) 传到 Caddy 的 releases volume：
-docker cp DSH-Cloud-Desktop-2.0.0-mac.dmg <caddy容器>:/srv/releases/
-# 3) .env 里设 DOWNLOAD_URL_MAC=https://<域名>/releases/DSH-Cloud-Desktop-2.0.0-mac.dmg 并重启
-# 4) 通知客户端自动更新：
-curl -X POST https://<域名>/api/admin/desktop-version \
-  -H "authorization: Bearer <管理员token>" -d '{"version":"2.0.0"}'
+docker compose \
+  --env-file deploy/selfhost/.env \
+  -f deploy/selfhost/docker-compose.yml \
+  -f deploy/selfhost/compose.build.yml \
+  config --quiet
 ```
 
-客户端每 6 小时查一次 `/api/desktop/version`（严格 stable SemVer），用户确认后
-从 `/api/downloads/mac|windows` 下载（302 到 releases 文件）。
+Start and verify:
 
-## 6. 多 worker / 扩容注意
+```bash
+docker compose \
+  --env-file deploy/selfhost/.env \
+  -f deploy/selfhost/docker-compose.yml \
+  -f deploy/selfhost/compose.build.yml \
+  up -d --build
 
-当前限流、并发闸、QPS 桶是**单进程语义**（uvicorn 单 worker 正确）。要开多
-worker 或多机，先把这三处换 Redis 实现（接口都在 `rate_limit.py` / `gateway.py`
-的 `_inflight`，另一套自有生产系统有生产验证过的 Redis Lua 版本可移植），
-DB 同步切 PostgreSQL。单 worker + SQLite 支撑早期完全够用。
+docker compose \
+  --env-file deploy/selfhost/.env \
+  -f deploy/selfhost/docker-compose.yml \
+  -f deploy/selfhost/compose.build.yml \
+  ps
 
-## 7. 监控与日志
+curl --fail --show-error http://localhost:8787/readyz
+```
 
-- 容器日志即应用日志；`docker compose logs -f dhc-server`。
-- 日志不含消息正文（隐私政策口径）；含 request_id 可与 `usage_log` 关联。
-- 建议接 Uptime 监控打 `/api/health`。
+For a real domain, replace the final URL with the configured HTTPS origin. Use
+`/livez` for restart probes and `/readyz` for traffic readiness. `/api/health`
+remains a liveness-only compatibility endpoint, not a readiness gate.
 
-## 8. 密钥轮换
+The assisted source-checkout flow performs the same setup:
 
-- 上游 key：改 `.env` 重启即可（无状态）。
-- `AUTH_SECRET`：轮换会使所有 token/session 失效（用户需重新登录），
-  低峰期执行；不影响数据。
+```bash
+bash scripts/quickstart.sh --domain localhost --admin-email you@example.com
+```
+
+It prompts for the upstream key and never overwrites an existing environment file
+without applying explicit flags.
+
+## Versioned CLI paths
+
+After version `0.2.0` has been published, the one-shot npm path is:
+
+```bash
+npx --yes @agentsdanceai/dsh-cloud@0.2.0 init --mode trial
+npx --yes @agentsdanceai/dsh-cloud@0.2.0 doctor
+npx --yes @agentsdanceai/dsh-cloud@0.2.0 up --wait
+```
+
+The installed npm equivalent is:
+
+```bash
+npm install --global @agentsdanceai/dsh-cloud@0.2.0
+dsh-cloud init --mode trial
+dsh-cloud doctor
+dsh-cloud up --wait
+```
+
+The isolated Python path is:
+
+```bash
+uvx dsh-cloud==0.2.0 init --mode trial
+uvx dsh-cloud==0.2.0 doctor
+uvx dsh-cloud==0.2.0 up --wait
+```
+
+The installed `uv` equivalent is:
+
+```bash
+uv tool install dsh-cloud==0.2.0
+dsh-cloud init --mode trial
+dsh-cloud doctor
+dsh-cloud up --wait
+```
+
+Do not replace pinned versions with `latest` in unattended automation. Review the
+generated environment file before `up`, especially public origin, secret,
+provider, storage, and workspace settings.
+
+## Docker single-container path
+
+After the image exists in GHCR, the versioned image name is:
+
+```text
+ghcr.io/agentsdanceai/dsh-cloud-server:0.2.0
+```
+
+A version tag can be moved by a registry administrator. For immutable
+automation, resolve the published manifest digest and use
+`ghcr.io/agentsdanceai/dsh-cloud-server@sha256:<digest>`.
+
+Use an environment file with permissions `0600`, a persistent `/app/data` volume,
+and a loopback bind when another proxy will terminate TLS:
+
+```bash
+docker volume create dsh-cloud-data
+mkdir -p .dsh-cloud
+umask 077
+printf 'AUTH_SECRET=%s\nDHC_DEV=1\nPUBLIC_BASE=http://127.0.0.1:8081\nPRICING_FILE=pricing.cny.json\n' \
+  "$(openssl rand -hex 32)" > .dsh-cloud/docker.env
+docker run --detach --name dsh-cloud \
+  --env-file .dsh-cloud/docker.env \
+  --mount source=dsh-cloud-data,target=/app/data \
+  --publish 127.0.0.1:8081:8100 \
+  ghcr.io/agentsdanceai/dsh-cloud-server:0.2.0
+curl --fail --show-error http://127.0.0.1:8081/readyz
+```
+
+To build the same server from the current checkout before publication:
+
+```bash
+docker build --file server/Dockerfile --tag dsh-cloud-server:local .
+docker run --rm \
+  --env-file .dsh-cloud/docker.env \
+  --mount source=dsh-cloud-data,target=/app/data \
+  --publish 127.0.0.1:8081:8100 \
+  dsh-cloud-server:local
+```
+
+The single container does not terminate TLS. Keep the loopback bind and put a
+reviewed reverse proxy in front for network access.
+
+## Configuration boundaries
+
+The self-host example contains placeholders only. Do not use another operator's
+legal documents, OAuth applications, payment merchant identifiers, domains, or
+provider credentials. Optional integrations remain off or unavailable until their
+required values are supplied.
+
+Model IDs come from `server/config/models.json`. Configure identifiers actually
+served by your upstream. Keep configuration changes under review: a valid YAML,
+JSON, or Compose file is not necessarily a secure or useful deployment.
+
+## Data, backup, and restore
+
+The canonical Compose project stores SQLite data in its named `dhc-data` volume.
+Back up with a database-consistent mechanism before every upgrade. SQLite WAL
+state means copying only the live `.db` file is not a verified backup. Stop writes
+or use the SQLite backup API, then copy the backup to encrypted storage outside
+the host.
+
+For PostgreSQL, use the database provider's consistent dump/snapshot and restore
+procedure. Test every backup generation by restoring into a disposable instance
+and checking `/readyz`, account access, schema version, and representative data.
+
+Record backup location, retention, restore owner, and last successful restore in
+a private operations system—not this repository.
+
+## Upgrades and rollback
+
+1. Read [CHANGELOG.md](../CHANGELOG.md) and version-specific release notes.
+2. Record the current image/package version, configuration checksum, and database
+   schema.
+3. Create and test a current backup.
+4. Pull or install an immutable target version; do not use a floating branch or
+   tag as rollback evidence.
+5. Run configuration validation and a disposable upgrade rehearsal.
+6. Upgrade, wait for `/readyz`, and run authenticated smoke tests.
+7. Roll back application artifacts only when the documented schema compatibility
+   allows it; otherwise restore the matching backup.
+
+Never assume `docker compose down` deletes data, and never add `--volumes` to a
+routine stop command. Review the resolved Compose project and volume names before
+changing directory, project name, or stack layout.
+
+## Scaling
+
+SQLite and process-local rate/concurrency state are suited to a single application
+instance. Before multiple workers or hosts, use PostgreSQL, external coordination
+for distributed limits and jobs, shared artifact/storage design, and load-tested
+readiness/rollback behavior. Do not infer high availability from multiple
+containers alone.
+
+## Optional workspaces
+
+Workspaces are disabled by default. They execute user-controlled code and require
+Docker authority, separate DNS/origin design, persistent storage, resource limits,
+and a reviewed isolation model. Follow [security.md](security.md) before enabling
+the `work` profile. The example is not a claim of hostile multi-tenant isolation.
+
+## Troubleshooting
+
+```bash
+docker compose \
+  --env-file deploy/selfhost/.env \
+  -f deploy/selfhost/docker-compose.yml \
+  logs --tail 200 dhc-server dhc-caddy
+
+curl --fail --show-error http://localhost:8787/livez
+curl --fail --show-error http://localhost:8787/readyz
+```
+
+Redact secrets, cookies, tokens, email addresses, order references, private
+addresses, and user content before opening a public issue. See
+[SUPPORT.md](../SUPPORT.md).

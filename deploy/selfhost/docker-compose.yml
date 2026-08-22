@@ -4,7 +4,9 @@
 #
 #    cd deploy/selfhost
 #    cp .env.example .env && $EDITOR .env        # or: scripts/quickstart.sh
-#    docker compose --env-file .env up -d --build
+#    docker compose --env-file .env up -d
+#    # Source build instead of the release image:
+#    docker compose --env-file .env -f docker-compose.yml -f compose.build.yml up -d --build
 #
 #  What runs here / 本编排包含:
 #    dhc-caddy         public listener, automatic HTTPS (Let's Encrypt)
@@ -15,7 +17,7 @@
 #  The app is never published on a host port: Caddy is the only way in.
 #  应用不暴露宿主端口，唯一入口是 Caddy。
 # =============================================================================
-name: dsh-selfhost
+name: ${COMPOSE_PROJECT_NAME:-dsh-selfhost}
 
 x-logging: &logging
   driver: json-file
@@ -25,16 +27,17 @@ x-logging: &logging
 
 services:
   # ---------------------------------------------------------------------------
-  # The application. Built from ../../server (Dockerfile pins deps, runs uvicorn
-  # on :8100 with a single worker — the rate/concurrency guards are per-process).
+  # The application. The default path pulls the versioned release image. Source
+  # builds are an explicit compose.build.yml overlay so package installs do not
+  # require a Git checkout or a repository-root Docker build context.
   # ---------------------------------------------------------------------------
   dhc-server:
-    build:
-      context: ../..
-      dockerfile: server/Dockerfile
-    image: dsh-cloud-server:selfhost
+    image: ${DHC_SERVER_IMAGE:-ghcr.io/agentsdanceai/dsh-cloud-server:0.2.0}
+    pull_policy: missing
     restart: unless-stopped
-    env_file: [".env"]
+    env_file:
+      - path: .env
+        required: false
     environment:
       DHC_DATA_DIR: /app/data
       # Single source of truth for the public origin: whatever Caddy serves is
@@ -48,11 +51,10 @@ services:
       # Desktop installers dropped into /app/data/releases are served at
       # /releases/<file> by the app itself.
       - dhc-data:/app/data
-      # Price tables, editable without rebuilding the image:
-      #   server/config/models.json   which model ids you offer + list prices
-      #   server/config/pricing.json  plans and credit packs (PRICING_FILE)
-      # models.json hot-reloads on mtime; after editing pricing.json restart.
-      - ../../server/config:/srv/dhc/config:ro
+      # A source checkout defaults this to ../../server/config. The npm/uv CLIs
+      # generate ./config and set DHC_CONFIG_DIR=./config, so the exact same
+      # Compose file also works when installed from a package.
+      - ${DHC_CONFIG_DIR:-../../server/config}:/srv/dhc/config:ro
       # Legal pages (/legal/terms ...) render "待发布" until you provide your own
       # documents. The drafts in ../../legal name the original operator, so they
       # are NOT mounted by default — write your own, then uncomment:
@@ -63,7 +65,7 @@ services:
     expose:
       - "8100"
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8100/api/health')"]
+      test: ["CMD", "/usr/local/bin/python3", "-I", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8100/readyz')"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -77,18 +79,19 @@ services:
   # http://localhost serves plain HTTP with no certificate at all.
   # ---------------------------------------------------------------------------
   dhc-caddy:
-    image: caddy:2
+    image: ${CADDY_IMAGE:-caddy:2@sha256:df7f1c2fb114453b951de51a98efc010db1655a92c2e86be6706714e2417a78d}
     restart: unless-stopped
     depends_on: [dhc-server]
     ports:
-      # Host port == container port on purpose: the site address below may carry
-      # a port, and Caddy then listens on exactly that port.
-      - "${HTTP_PORT:-80}:${HTTP_PORT:-80}"
-      - "${HTTPS_PORT:-443}:${HTTPS_PORT:-443}"
-      - "${HTTPS_PORT:-443}:${HTTPS_PORT:-443}/udp" # HTTP/3
+      # Trial defaults bind only to loopback. Public operators must opt in with
+      # BIND_ADDRESS=0.0.0.0 (the checked-in .env.example does this explicitly).
+      - "${BIND_ADDRESS:-127.0.0.1}:${HTTP_PORT:-8787}:80"
+      - "${BIND_ADDRESS:-127.0.0.1}:${HTTPS_PORT:-8443}:443"
+      - "${BIND_ADDRESS:-127.0.0.1}:${HTTPS_PORT:-8443}:443/udp" # HTTP/3
     environment:
-      # Main site. Same expression as PUBLIC_BASE above — they cannot drift.
-      DSH_SITE: ${PUBLIC_BASE:-${SITE_SCHEME:-https}://${DOMAIN:-localhost}}
+      # Internal Caddy listener. PUBLIC_BASE may contain a host-published port
+      # (trial uses :8787), while Caddy always listens on container 80/443.
+      DSH_SITE: ${DSH_SITE:-${SITE_SCHEME:-https}://${DOMAIN:-localhost}}
       # Cloud-workspace site. Empty WORK_DOMAIN (workspaces off) falls back to
       # work.localhost, which Caddy serves from its internal CA — so a disabled
       # workspace never triggers a certificate request for a domain you do not
@@ -110,15 +113,16 @@ services:
   # in this stack sees the docker socket at all.
   #
   # SECURITY: do NOT widen these flags. The app must create/start/stop
-  # containers and read the image/network/info endpoints — nothing else.
-  #   EXEC=0     every /exec/* call is refused (403), so an exec instance can
-  #              never be STARTED: no command ever runs in another container
-  #   VOLUMES=0  the volume API is refused; the app can still get the named
-  #              volumes it declares at container-create time, and nothing else
-  # 权限不得放宽：这两个 0 是「应用被攻破也不能在别的容器里执行命令、不能翻卷」的边界。
+  # containers and read the image/network/info endpoints. EXEC=0 and VOLUMES=0
+  # deny those dedicated API routes, but the proxy does not inspect HostConfig
+  # fields in a container-create POST. It therefore does not prevent a
+  # compromised control plane from requesting privileged mode, host mounts,
+  # devices, or host namespaces. This optional profile is for a trusted,
+  # single-operator installation, not a hostile multi-tenant boundary.
+  # 这些开关只缩小 API 面，不能过滤容器创建请求体；不要把它当作不可信多租户隔离边界。
   # ---------------------------------------------------------------------------
   dhc-docker-proxy:
-    image: tecnativa/docker-socket-proxy
+    image: ${SOCKET_PROXY_IMAGE:-tecnativa/docker-socket-proxy@sha256:1f5038b54f06c3e18422902cf00ba21803d1c97805aae032e5e6673d532d3459}
     profiles: ["work"]
     restart: unless-stopped
     environment:
@@ -148,5 +152,8 @@ networks:
 
 volumes:
   dhc-data:
+    name: ${COMPOSE_PROJECT_NAME:-dsh-selfhost}_dhc-data
   caddy-data:
+    name: ${COMPOSE_PROJECT_NAME:-dsh-selfhost}_caddy-data
   caddy-config:
+    name: ${COMPOSE_PROJECT_NAME:-dsh-selfhost}_caddy-config

@@ -14,6 +14,7 @@ callback, binding the state to the browser that started the flow (RFC 6749
 §10.12): an attacker's valid state replayed at the victim's browser fails the
 signature because the victim holds no matching nonce cookie.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -28,6 +29,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import RedirectResponse
 
 from . import accounts, config, db, security
+from .redirects import safe_local_path
 
 log = logging.getLogger("dhc")
 
@@ -40,6 +42,7 @@ _SECURE = not config.DEV_MODE
 
 
 # --- signed state (CSRF) -----------------------------------------------------
+
 
 def _signed_state(ctx: str, nonce: str = "") -> str:
     ts = str(int(time.time()))
@@ -61,8 +64,9 @@ def _signed_state_ok(ctx: str, state: str, nonce: str = "") -> bool:
 def _issue_nonce(resp: RedirectResponse) -> str:
     """Drop a short-lived httpOnly nonce cookie; return the nonce (signed into state)."""
     nonce = secrets.token_urlsafe(16)
-    resp.set_cookie(_NONCE_COOKIE, nonce, max_age=_STATE_TTL,
-                    httponly=True, samesite="lax", path="/", secure=_SECURE)
+    resp.set_cookie(
+        _NONCE_COOKIE, nonce, max_age=_STATE_TTL, httponly=True, samesite="lax", path="/", secure=_SECURE
+    )
     return nonce
 
 
@@ -72,11 +76,8 @@ def _clear_flow_cookies(resp: RedirectResponse) -> None:
 
 
 def _safe_next(nxt: str) -> str:
-    """Allow only in-site paths (single leading '/', never '//' or '/\\').
-    Anything else — protocol-relative or external URLs — falls back to /console."""
-    if nxt.startswith("/") and not nxt.startswith("//") and not nxt.startswith("/\\"):
-        return nxt
-    return "/console"
+    """Backward-compatible name for the shared local redirect canonicalizer."""
+    return safe_local_path(nxt, "/console")
 
 
 def providers_configured() -> dict:
@@ -90,6 +91,7 @@ def providers_configured() -> dict:
 
 # --- Google ------------------------------------------------------------------
 
+
 @router.get("/api/auth/google/start")
 async def google_start(next: str = ""):
     """Login-page button entry — 302 to Google's consent screen; unconfigured
@@ -98,20 +100,30 @@ async def google_start(next: str = ""):
     cid, secret = config.GOOGLE_LOGIN_CLIENT_ID, config.GOOGLE_LOGIN_CLIENT_SECRET
     if not (cid and secret):
         return RedirectResponse(
-            "/login?google_error=" + urllib.parse.quote("Google 登录未配置"), status_code=302)
+            "/login?google_error=" + urllib.parse.quote("Google 登录未配置"), status_code=302
+        )
     resp = RedirectResponse("https://accounts.google.com/o/oauth2/v2/auth", status_code=302)
     nonce = _issue_nonce(resp)
-    query = urllib.parse.urlencode({
-        "client_id": cid,
-        "redirect_uri": config.GOOGLE_LOGIN_REDIRECT_URI,
-        "response_type": "code",
-        "scope": "openid email profile",
-        "state": _signed_state("gglogin", nonce),
-        "prompt": "select_account",  # let multi-account users pick each time
-    })
+    query = urllib.parse.urlencode(
+        {
+            "client_id": cid,
+            "redirect_uri": config.GOOGLE_LOGIN_REDIRECT_URI,
+            "response_type": "code",
+            "scope": "openid email profile",
+            "state": _signed_state("gglogin", nonce),
+            "prompt": "select_account",  # let multi-account users pick each time
+        }
+    )
     resp.headers["location"] = f"https://accounts.google.com/o/oauth2/v2/auth?{query}"
-    resp.set_cookie(_NEXT_COOKIE, _safe_next(next), max_age=_STATE_TTL,
-                    httponly=True, samesite="lax", path="/", secure=_SECURE)
+    resp.set_cookie(
+        _NEXT_COOKIE,
+        _safe_next(next),
+        max_age=_STATE_TTL,
+        httponly=True,
+        samesite="lax",
+        path="/",
+        secure=_SECURE,
+    )
     return resp
 
 
@@ -119,6 +131,7 @@ async def google_start(next: str = ""):
 async def google_callback(request: Request, code: str = "", state: str = "", error: str = ""):
     """Consent callback: code → token → userinfo verified email → login/auto-register.
     Any failure 302s back to /login with google_error — never a half-login."""
+
     def back(msg: str) -> RedirectResponse:
         r = RedirectResponse(f"/login?google_error={urllib.parse.quote(msg)}", status_code=302)
         _clear_flow_cookies(r)
@@ -135,18 +148,25 @@ async def google_callback(request: Request, code: str = "", state: str = "", err
         return back("登录状态已过期, 请重新发起")
     try:
         async with httpx.AsyncClient(timeout=10) as http:
-            tr = await http.post("https://oauth2.googleapis.com/token", data={
-                "code": code, "client_id": cid, "client_secret": secret,
-                "redirect_uri": config.GOOGLE_LOGIN_REDIRECT_URI,
-                "grant_type": "authorization_code",
-            })
+            tr = await http.post(
+                "https://oauth2.googleapis.com/token",
+                data={
+                    "code": code,
+                    "client_id": cid,
+                    "client_secret": secret,
+                    "redirect_uri": config.GOOGLE_LOGIN_REDIRECT_URI,
+                    "grant_type": "authorization_code",
+                },
+            )
             td = tr.json() if tr.content else {}
             access_token = str(td.get("access_token") or "")
             if not access_token:
                 log.warning("[google] token exchange failed: %s", td.get("error"))
                 return back("Google 授权失败, 请重试")
-            ur = await http.get("https://www.googleapis.com/oauth2/v3/userinfo",
-                                headers={"Authorization": f"Bearer {access_token}"})
+            ur = await http.get(
+                "https://www.googleapis.com/oauth2/v3/userinfo",
+                headers={"Authorization": f"Bearer {access_token}"},
+            )
             if ur.status_code != 200:
                 # Google-side 429/500 etc: an API fault, not "email unverified"
                 log.warning("[google] userinfo failed: HTTP %s", ur.status_code)
@@ -164,6 +184,7 @@ async def google_callback(request: Request, code: str = "", state: str = "", err
 
 # --- GitHub ------------------------------------------------------------------
 
+
 @router.get("/api/auth/github/start")
 async def github_start(next: str = ""):
     """Login-page button entry — 302 to GitHub's consent screen. Same pattern as
@@ -171,18 +192,28 @@ async def github_start(next: str = ""):
     cid, secret = config.GITHUB_LOGIN_CLIENT_ID, config.GITHUB_LOGIN_CLIENT_SECRET
     if not (cid and secret):
         return RedirectResponse(
-            "/login?github_error=" + urllib.parse.quote("GitHub 登录未配置"), status_code=302)
+            "/login?github_error=" + urllib.parse.quote("GitHub 登录未配置"), status_code=302
+        )
     resp = RedirectResponse("https://github.com/login/oauth/authorize", status_code=302)
     nonce = _issue_nonce(resp)
-    query = urllib.parse.urlencode({
-        "client_id": cid,
-        "redirect_uri": config.GITHUB_LOGIN_REDIRECT_URI,
-        "scope": "user:email",
-        "state": _signed_state("ghlogin", nonce),
-    })
+    query = urllib.parse.urlencode(
+        {
+            "client_id": cid,
+            "redirect_uri": config.GITHUB_LOGIN_REDIRECT_URI,
+            "scope": "user:email",
+            "state": _signed_state("ghlogin", nonce),
+        }
+    )
     resp.headers["location"] = f"https://github.com/login/oauth/authorize?{query}"
-    resp.set_cookie(_NEXT_COOKIE, _safe_next(next), max_age=_STATE_TTL,
-                    httponly=True, samesite="lax", path="/", secure=_SECURE)
+    resp.set_cookie(
+        _NEXT_COOKIE,
+        _safe_next(next),
+        max_age=_STATE_TTL,
+        httponly=True,
+        samesite="lax",
+        path="/",
+        secure=_SECURE,
+    )
     return resp
 
 
@@ -190,6 +221,7 @@ async def github_start(next: str = ""):
 async def github_callback(request: Request, code: str = "", state: str = "", error: str = ""):
     """Consent callback: code → token → primary verified email → login/auto-register.
     Any failure 302s back to /login with github_error — never a half-login."""
+
     def back(msg: str) -> RedirectResponse:
         r = RedirectResponse(f"/login?github_error={urllib.parse.quote(msg)}", status_code=302)
         _clear_flow_cookies(r)
@@ -206,18 +238,26 @@ async def github_callback(request: Request, code: str = "", state: str = "", err
         return back("登录状态已过期, 请重新发起")
     try:
         async with httpx.AsyncClient(timeout=10) as http:
-            tr = await http.post("https://github.com/login/oauth/access_token", data={
-                "code": code, "client_id": cid, "client_secret": secret,
-                "redirect_uri": config.GITHUB_LOGIN_REDIRECT_URI,
-            }, headers={"Accept": "application/json"})
+            tr = await http.post(
+                "https://github.com/login/oauth/access_token",
+                data={
+                    "code": code,
+                    "client_id": cid,
+                    "client_secret": secret,
+                    "redirect_uri": config.GITHUB_LOGIN_REDIRECT_URI,
+                },
+                headers={"Accept": "application/json"},
+            )
             td = tr.json() if tr.content else {}
             access_token = str(td.get("access_token") or "")
             if not access_token:
                 log.warning("[github] token exchange failed: %s", td.get("error"))
                 return back("GitHub 授权失败, 请重试")
-            gh = {"Authorization": f"Bearer {access_token}",
-                  "Accept": "application/vnd.github+json",
-                  "User-Agent": "dhc-cloud"}  # GitHub rejects requests with no UA
+            gh = {
+                "Authorization": f"Bearer {access_token}",
+                "Accept": "application/vnd.github+json",
+                "User-Agent": "dhc-cloud",
+            }  # GitHub rejects requests with no UA
             ur = await http.get("https://api.github.com/user", headers=gh)
             er = await http.get("https://api.github.com/user/emails", headers=gh)
             if ur.status_code != 200 or er.status_code != 200:
@@ -234,8 +274,7 @@ async def github_callback(request: Request, code: str = "", state: str = "", err
     # be squatted, so they are never trusted
     email = ""
     if isinstance(emails, list):
-        verified = [e for e in emails
-                    if isinstance(e, dict) and e.get("verified") is True and e.get("email")]
+        verified = [e for e in emails if isinstance(e, dict) and e.get("verified") is True and e.get("email")]
         primary = [e for e in verified if e.get("primary") is True]
         email = str((primary or verified or [{}])[0].get("email") or "").strip().lower()
     if not email:
@@ -245,6 +284,7 @@ async def github_callback(request: Request, code: str = "", state: str = "", err
 
 
 # --- shared login tail -------------------------------------------------------
+
 
 def _finish(request: Request, email: str, display_name: str, back):
     """Verified email → session cookie → 302 to the safe next (default /console)."""

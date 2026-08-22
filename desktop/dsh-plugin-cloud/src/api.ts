@@ -102,10 +102,8 @@ export interface CloudModel {
 /**
  * 拉取网关**当前**提供的模型目录 (GET /llm/v1/models, pi-ai discovery 兼容)。
  *
- * 为什么动态拉而不是把清单写死在客户端: 目录是服务端的
- * (server/config 下的 catalog), 服务端上/下架模型不该要求用户换客户端。
- * 写死必然漂移 —— 2026-08-19 桌面端只能用到 20 个模型里的 2 个, 根子就是
- * 客户端只认上游内置的那份 deepseek 清单。
+ * The server owns the catalog, so adding or removing a model must not require a
+ * desktop release. Fetching it at startup prevents a stale client-side list.
  */
 export async function fetchModels(token: string): Promise<CloudModel[]> {
   const { status, json } = await request('/llm/v1/models', { token })

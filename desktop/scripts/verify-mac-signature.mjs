@@ -4,10 +4,8 @@
  *
  *   node desktop/scripts/verify-mac-signature.mjs "<path>/DSH Cloud Desktop.app"
  *
- * 为什么要有这个: 公证一轮 3-5 分钟, 失败只回一句 "The executable does not have
- * the hardened runtime enabled" 加一个路径。2026-08-18 用公证当测试循环跑了五轮,
- * 每轮五分钟, 才定位到问题 —— 而同样的信息在本地解析 Mach-O 几秒就能拿到, 还能
- * 一次列出**所有**没开的文件而不是 Apple 挑出来的头几个。
+ * Local inspection reports every missing runtime flag before the slower
+ * notarization step, with the exact path for each failure.
  *
  * 直接读 CodeDirectory 的 flags 位 (0x10000 = CS_RUNTIME), 不依赖 codesign
  * (macOS 独有) 也不依赖 rcodesign 的输出格式。
@@ -73,7 +71,7 @@ for (const p of walk(app)) {
 
 console.log(`    hardened runtime: ${ok} 个已开, ${bad.length} 个未开`)
 
-// ── Helper 的 entitlements (2026-08-18 用户实测崩溃后加) ────────────────────
+// ── Helper entitlements ─────────────────────────────────────────────────────
 // 光有 hardened runtime 不够。Electron 的渲染进程跑在 Helper (Renderer).app 里,
 // 开了 runtime 却没有 com.apple.security.cs.allow-jit 的话, V8 申请不到 JIT 内存,
 // 报 "Failed to reserve virtual memory for CodeRange" 后渲染进程死, 应用启动即退。
@@ -87,12 +85,9 @@ for (const h of helpers) {
   const exeDir = join(h, 'Contents', 'MacOS')
   let exe
   try {
-    // 主二进制按 Info.plist 的 CFBundleExecutable 定位, 不能取目录里的第一个文件。
-    // 2026-08-20 实测: 在 macOS 上用 tar 打包 .app、传到 Linux 上解开, 扩展属性会
-    // 被外化成 ._<同名> 的 AppleDouble 文件 (那次 25662 个) —— `.` 在 ASCII 里排在
-    // 字母前, readdirSync()[0] 于是读到那个空壳, 里面自然没有 entitlements 特征串,
-    // 把**签得好好的**包报成 "0/4 缺 allow-jit"。误报比漏报更贵: 它会让人回头去改
-    // 本来正确的签名参数。
+    // Locate the executable through CFBundleExecutable rather than directory
+    // order. AppleDouble metadata files can otherwise be mistaken for it after
+    // transferring an app bundle between macOS and Linux.
     const names = readdirSync(exeDir).filter(n => !n.startsWith('._'))
     let exeName = names[0]
     try {

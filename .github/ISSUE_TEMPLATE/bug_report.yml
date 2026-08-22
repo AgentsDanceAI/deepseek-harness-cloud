@@ -1,0 +1,87 @@
+name: Bug report
+description: Report a reproducible problem in the public repository
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve DSH Cloud. Search existing issues first.
+
+        Do not use this form for security vulnerabilities. Report those privately using SECURITY.md. Never paste credentials, session tokens, personal data, customer data, private topology, or production database contents.
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      description: Provide the release version, image digest, package version, or full commit SHA.
+      placeholder: "0.2.0 or 0123456789abcdef..."
+    validations:
+      required: true
+  - type: dropdown
+    id: installation
+    attributes:
+      label: Installation method
+      options:
+        - Docker Compose
+        - Docker container
+        - npm / npx CLI
+        - uv / uvx CLI
+        - Source checkout
+        - DSH Cloud Hosted
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: Platform
+      description: OS, architecture, Docker/Node/Python version, and browser or client when relevant.
+      placeholder: "Ubuntu 24.04, arm64, Docker 27, Compose 2.29"
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction
+      description: List the smallest deterministic steps using synthetic data.
+      placeholder: |
+        1. Start with ...
+        2. Configure ...
+        3. Request ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Redacted logs or diagnostics
+      description: Include only the relevant lines. Replace secrets and identifiers; do not merely blur a screenshot.
+      render: shell
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Mention regression range, frequency, workarounds, or related issues.
+  - type: checkboxes
+    id: confirmations
+    attributes:
+      label: Confirmations
+      options:
+        - label: I searched existing issues and reproduced this on a maintained version or the default branch.
+          required: true
+        - label: This is not an undisclosed security vulnerability; I will use SECURITY.md for those.
+          required: true
+        - label: I removed secrets, personal data, customer data, and private environment details.
+          required: true

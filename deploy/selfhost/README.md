@@ -42,18 +42,17 @@ No domain yet? Start with the local mode in [§4](#4-本地模式--local-trial-m
 git clone https://github.com/AgentsDanceAI/deepseek-harness-cloud
 cd deepseek-harness-cloud
 
-./scripts/quickstart.sh \
-  --domain dsh.example.com \
-  --admin-email you@example.com \
-  --upstream-base https://api.deepseek.com/v1 \
-  --upstream-key  sk-your-upstream-key
+./scripts/quickstart.sh --domain dsh.example.com --admin-email you@example.com
+# The first public run creates deploy/selfhost/.env and stops safely.
+$EDITOR deploy/selfhost/.env  # set SMTP or Google/GitHub OAuth, and UPSTREAM_API_KEY
+./scripts/quickstart.sh --domain dsh.example.com --admin-email you@example.com
 ```
 
-脚本做四件事：拷 `.env.example` → 生成 `AUTH_SECRET` → `docker compose up -d --build`
-→ 轮询 `/api/health`。不带参数运行会交互式询问；可重复执行，已有 `.env` 不会被覆盖。
-The script copies the env template, generates `AUTH_SECRET`, builds and starts the
-stack, then waits for `/api/health`. Run it with no flags for an interactive
-prompt; re-running never overwrites an existing `.env`.
+脚本会拷 `.env.example`、生成 `AUTH_SECRET`，并在公网身份入口未配置时先停止；配置
+SMTP 或 Google/GitHub OAuth 后重跑，它会构建并启动服务，再轮询 `/readyz`。已有
+`.env` 不会被覆盖。The script scaffolds the environment and stops before a
+public launch until SMTP or Google/GitHub OAuth is configured. Re-run it to
+build, start, and wait for `/readyz`; the existing `.env` is preserved.
 
 等价的手工步骤 / The manual equivalent:
 
@@ -61,8 +60,8 @@ prompt; re-running never overwrites an existing `.env`.
 cd deploy/selfhost
 cp .env.example .env
 openssl rand -hex 32          # -> AUTH_SECRET
-$EDITOR .env                  # DOMAIN / AUTH_SECRET / UPSTREAM_* / ADMIN_EMAILS
-docker compose --env-file .env up -d --build
+$EDITOR .env                  # DOMAIN / AUTH_SECRET / upstream / admin / identity
+docker compose --env-file .env -f docker-compose.yml -f compose.build.yml up -d --build
 ```
 
 首次构建约 1–3 分钟；证书在域名解析正确时 10–30 秒内签发。
@@ -87,8 +86,9 @@ Everything in `.env` is commented line by line; these three are non-negotiable:
 - `ZHIPU_SEARCH_API_KEY` — 不配则智能体**不能联网搜索**（`web_search` 返回 503），
   聊天与写代码不受影响。申请：<https://open.bigmodel.cn>。
   Without it the agent still chats and codes, it just cannot browse.
-- `MAIL_SMTP_*` — 不配则**验证码登录不可用**，但「邮箱 + 密码」注册登录始终可用。
-  Without SMTP, e-mail codes are off; email+password sign-up still works.
+- `MAIL_SMTP_*` 或 Google/GitHub OAuth — 公网首次建号必须先验证邮箱或身份；密码仅供
+  已完成验证并设置密码的账号后续登录。A public deployment needs SMTP or OAuth
+  for first-account verification; password login is for an existing verified account.
 - 支付 / Payments — 一个都不配时购买页降级为「意向收集」，其他功能不受影响。
   With no payment provider configured the pricing page just records intent.
 
@@ -105,12 +105,13 @@ an id that is not listed there answers 404.
 
 ```bash
 ./scripts/quickstart.sh --domain localhost -y
-# -> http://localhost
+# -> http://localhost:8787
 ```
 
 本地模式做了三件不同的事 / What differs in local mode:
 
-- `SITE_SCHEME=http`：Caddy 站点地址是 `http://localhost`，**完全不签证书**。
+- `SITE_SCHEME=http`：Caddy 站点地址是 `http://localhost`，入口映射到
+  `http://localhost:8787`，**完全不签证书**。
 - `DHC_DEV=1`：登录验证码打印到容器日志（不需要 SMTP），会话 cookie 不要求 https，
   `/api/docs` 打开。**公网部署必须 `DHC_DEV=0`。**
   ```bash
@@ -131,11 +132,9 @@ There is no separate admin signup — `ADMIN_EMAILS` *is* the admin list.
 ADMIN_EMAILS=you@example.com,ops@example.com     # 逗号分隔
 docker compose --env-file .env up -d             # 改完重启生效
 
-# 2) 用该邮箱在站点上注册一个普通账号（密码 ≥ 8 位）
-#    Register a normal account with that address
-curl -fsS -X POST https://dsh.example.com/api/auth/register \
-  -H 'content-type: application/json' \
-  -d '{"email":"you@example.com","password":"a-long-password"}'
+# 2) 在浏览器用该邮箱的验证码登录（公网需先配置 SMTP；也可用已配置的 OAuth）。
+#    Sign in with that address's e-mail code, or a configured OAuth provider.
+# 3) 可选：在账号设置里设一个至少 8 位的密码，供后续设备/CLI 密码登录。
 ```
 
 该账号立刻拥有 `/api/admin/*`：查用户、送积分、改套餐、封禁账号、发布桌面版本号。
@@ -164,22 +163,32 @@ curl -fsS $BASE/api/health
 # 2) 站点与证书 —— 期望 HTTP/2 200 且证书有效
 curl -sSI $BASE/ | head -1
 
-# 3) 注册并换一个设备 token（桌面端用的就是这条路径）
-curl -fsS -X POST $BASE/api/auth/register -H 'content-type: application/json' \
-  -d "{\"email\":\"$EMAIL\",\"password\":\"$PASS\"}"
+# 3) 请求邮箱验证码并完成已验证注册。把邮件中的 6 位码填入 CODE。
+curl -fsS -X POST $BASE/api/auth/email/send -H 'content-type: application/json' \
+  -d "{\"email\":\"$EMAIL\"}"
+read -r -p 'E-mail code: ' CODE
+COOKIE_JAR="$(mktemp)"
+curl -fsS -c "$COOKIE_JAR" -X POST $BASE/api/auth/email/login \
+  -H 'content-type: application/json' \
+  -d "{\"email\":\"$EMAIL\",\"code\":\"$CODE\"}"
+
+# 4) 可选：设置密码后换一个设备 token（设置密码会主动吊销旧会话）。
+curl -fsS -b "$COOKIE_JAR" -X POST $BASE/api/auth/password \
+  -H 'content-type: application/json' -d "{\"old\":\"\",\"new\":\"$PASS\"}"
+rm -f "$COOKIE_JAR"
 TOKEN=$(curl -fsS -X POST $BASE/api/device/login -H 'content-type: application/json' \
   -d "{\"email\":\"$EMAIL\",\"password\":\"$PASS\",\"name\":\"smoke\",\"platform\":\"cli\"}" \
   | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')
 
-# 4) 网关目录 —— 期望列出 models.json 里的模型
+# 5) 网关目录 —— 期望列出 models.json 里的模型
 curl -fsS $BASE/llm/v1/models -H "authorization: Bearer $TOKEN"
 
-# 5) 真实推理（会扣积分）—— 证明上游 key 打通
+# 6) 真实推理（会扣积分）—— 证明上游 key 打通
 curl -fsS -X POST $BASE/llm/v1/chat/completions -H "authorization: Bearer $TOKEN" \
   -H 'content-type: application/json' \
   -d '{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"ping"}]}'
 
-# 6) 控制台 —— 浏览器打开 $BASE/console，应看到余额（默认赠送 500 积分）与设备列表
+# 7) 控制台 —— 浏览器打开 $BASE/console，应看到余额与设备列表
 ```
 
 全部通过即代表：TLS、账号、设备 token、网关、计量、控制台 六条链路都活着。
@@ -196,26 +205,24 @@ code-executing sandbox and costs RAM, so it is **off by default**.
 
 ### 7.1 需要的东西 / What it needs
 
-1. **宿主 docker**：应用通过 `tecnativa/docker-socket-proxy` 访问引擎，权限被限死为
-   `CONTAINERS/NETWORKS/IMAGES/INFO/POST=1`、`EXEC=0`、`VOLUMES=0`。
-   **不要放宽这些开关**——它们是「应用被攻破也不能在别的容器里执行命令、不能读任意卷」的边界。
-   The app never sees the raw socket; do not widen those flags.
-2. **一个 dsh 镜像**（`WORK_IMAGE`）。仓库不分发镜像，自己构建一次即可：
-
-   ```dockerfile
-   # Dockerfile.dsh
-   FROM node:24-bookworm-slim
-   RUN apt-get update -qq \
-    && apt-get install -y -qq --no-install-recommends python3 make g++ socat ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
-   # 版本与 desktop/upstream.json 的 runtimePackageVersion 对齐
-   RUN npm install -g @deepseek-ai/dsh@0.1.0-rc.8
-   WORKDIR /workspace
-   EXPOSE 3081
-   ```
+1. **宿主 docker**：应用通过 `tecnativa/docker-socket-proxy` 访问引擎，并将 API
+   缩小为 `CONTAINERS/NETWORKS/IMAGES/INFO/POST=1`、`EXEC=0`、`VOLUMES=0`。
+   **不要放宽这些开关**。但代理不会检查 container-create 的 `HostConfig` 请求体，
+   因而不能阻止已攻陷的控制面请求特权容器、宿主挂载、设备或宿主命名空间；此配置只适合
+   受信任的单一运维方，不是不可信多租户的安全边界。The app never sees the raw
+   socket, but these flags only reduce API surface; they do not make the optional
+   profile a hostile-tenant isolation boundary.
+2. **一个 dsh 镜像**（`WORK_IMAGE`）。正式发行会提供版本化镜像；从源码工作时，
+   用 `release/release.json` 的唯一版本来源构建 canonical Dockerfile：
 
    ```bash
-   docker build -t dsh-local:rc8 -f Dockerfile.dsh .
+   NODE_IMAGE=$(node -p "require('./release/release.json').baseImages.node")
+   HARNESS_RUNTIME=$(node -p "require('./release/release.json').harnessRuntime")
+   VERSION=$(node -p "require('./release/release.json').version")
+   docker build -t dsh-cloud-workspace:local -f deploy/workspace/Dockerfile \
+     --build-arg NODE_IMAGE="$NODE_IMAGE" \
+     --build-arg HARNESS_RUNTIME="$HARNESS_RUNTIME" \
+     --build-arg VERSION="$VERSION" .
    ```
 
    镜像里不需要写 `CMD`：应用创建容器时会自己下发启动命令（写入 `settings.yaml`
@@ -232,7 +239,7 @@ WORK_ENABLED=1                      # 应用开关
 COMPOSE_PROFILES=work               # 启动 docker-socket-proxy（编排开关）
 WORK_DOMAIN=work.dsh.example.com    # Caddy 的 work 站点 + 应用跳转目标
 COOKIE_DOMAIN=.dsh.example.com      # 会话 cookie 必须能带到子域，注意前导点
-WORK_IMAGE=dsh-local:rc8
+WORK_IMAGE=dsh-cloud-workspace:local
 ```
 
 ```bash
@@ -333,8 +340,8 @@ docker compose -f deploy/selfhost/docker-compose.yml exec -T dhc-server \
 
 ### 登录不进去 / Cannot log in
 
-- 验证码收不到：`MAIL_SMTP_*` 没配（`/api/auth/email/send` 返回 503）。先用「邮箱 + 密码」
-  注册；或本地模式下 `DHC_DEV=1` 从日志里读验证码。
+- 验证码收不到：`MAIL_SMTP_*` 没配（`/api/auth/email/send` 返回 503）。公网请配置 SMTP
+  或 OAuth；本地模式可用 `DHC_DEV=1` 从日志里读验证码。
 - 提示 `registration_disabled`：`ALLOW_REGISTRATION=0`，这是私有化部署的邀请制开关。
 - OAuth 回调 400/redirect_uri_mismatch：Google/GitHub 后台登记的回调必须与
   `${PUBLIC_BASE}/api/auth/google|github/callback` **逐字符一致**。
@@ -359,7 +366,7 @@ docker compose -f deploy/selfhost/docker-compose.yml logs dhc-server | grep -i w
 逐项对照 / Check list:
 
 - `COMPOSE_PROFILES=work` 是否生效（`docker compose ps` 里要有 `dhc-docker-proxy`）；
-- `WORK_IMAGE` 是否真的在**本机**（`docker image inspect dsh-local:rc8`）；没人会替你拉；
+- `WORK_IMAGE` 是否真的在**本机**（如 `docker image inspect dsh-cloud-workspace:local`）；
 - `work.<域名>` 的 DNS 记录与证书是否就绪；
 - `COOKIE_DOMAIN=.<域名>`（带前导点）——否则会话带不到子域，表现为无限跳登录页；
 - 页面能开但**回复永远不来** → 多半是有人删了 Caddyfile 里 `forward_auth` 的

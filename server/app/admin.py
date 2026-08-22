@@ -1,5 +1,6 @@
 """Admin endpoints. Authorization: the resolved user must be an admin
 (ADMIN_EMAILS env or users.role='admin')."""
+
 from __future__ import annotations
 
 import time
@@ -23,7 +24,9 @@ def list_users(q: str = "", limit: int = 50, _: dict = Depends(require_admin)):
     like = f"%{q}%"
     rows = db.query(
         "SELECT id, email, display_name, role, status, created, last_login FROM users "
-        "WHERE email LIKE ? ORDER BY created DESC LIMIT ?", (like, min(limit, 200)))
+        "WHERE email LIKE ? ORDER BY created DESC LIMIT ?",
+        (like, min(limit, 200)),
+    )
     out = []
     for r in rows:
         d = dict(r)
@@ -66,8 +69,7 @@ def set_status(body: dict, _: dict = Depends(require_admin)):
     if status not in ("active", "suspended"):
         raise HTTPException(400, "bad_status")
     with db.tx() as conn:
-        conn.execute("UPDATE users SET status=?, session_epoch=session_epoch+1 WHERE id=?",
-                     (status, user_id))
+        conn.execute("UPDATE users SET status=?, session_epoch=session_epoch+1 WHERE id=?", (status, user_id))
     return {"ok": True}
 
 
@@ -78,11 +80,12 @@ def stats(_: dict = Depends(require_admin)):
         "users": db.query_one("SELECT COUNT(*) AS n FROM users")["n"],
         "paid_orders": db.query_one("SELECT COUNT(*) AS n FROM orders WHERE status='paid'")["n"],
         "revenue_cents": db.query_one(
-            "SELECT COALESCE(SUM(amount_cents),0) AS n FROM orders WHERE status='paid'")["n"],
-        "calls_24h": db.query_one(
-            "SELECT COUNT(*) AS n FROM usage_log WHERE created>?", (day_ago,))["n"],
+            "SELECT COALESCE(SUM(amount_cents),0) AS n FROM orders WHERE status='paid'"
+        )["n"],
+        "calls_24h": db.query_one("SELECT COUNT(*) AS n FROM usage_log WHERE created>?", (day_ago,))["n"],
         "credits_24h": db.query_one(
-            "SELECT COALESCE(SUM(credits),0) AS n FROM usage_log WHERE created>?", (day_ago,))["n"],
+            "SELECT COALESCE(SUM(credits),0) AS n FROM usage_log WHERE created>?", (day_ago,)
+        )["n"],
     }
 
 
@@ -113,8 +116,8 @@ def set_role(body: dict, user: dict = Depends(require_admin)):
         if (row["email"] or "").lower() in config.ADMIN_EMAILS:
             raise HTTPException(400, "admin_from_env")
         others = db.query_one(
-            "SELECT COUNT(*) AS n FROM users WHERE role='admin' AND id<>? AND status<>'deleted'",
-            (target_id,))
+            "SELECT COUNT(*) AS n FROM users WHERE role='admin' AND id<>? AND status<>'deleted'", (target_id,)
+        )
         env_admins = len(config.ADMIN_EMAILS)
         if int((others["n"] if others else 0) or 0) + env_admins == 0:
             raise HTTPException(400, "last_admin")

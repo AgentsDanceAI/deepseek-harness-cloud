@@ -4,7 +4,7 @@ config/models.json is GENERATED (server/scripts/gen_models.py) from the gateway'
 catalog plus a price table — never hand-edited, because a hand-kept price table
 drifts and nobody notices.
 
-Credit convention, identical to AgentsDance so entitlements stay portable:
+Credit convention used by every catalog and entitlement path:
   * blended price  = input * 0.75 + output * 0.25   (USD per 1M tokens)
   * multiplier     = blended / blended(baseline)     ← Claude Sonnet is 1.00x
   * 1.00x          = 1000 credits per 1M tokens
@@ -15,6 +15,7 @@ never the advertised multiplier.
 Every charge rounds up to at least 1 credit, so streaming freeloaders can't ride
 for free on sub-credit requests.
 """
+
 from __future__ import annotations
 
 import json
@@ -93,11 +94,7 @@ def charge_credits(model_id: str, uncached_input: int, cache_read: int, output: 
     # Cached prompt tokens are far cheaper upstream; when the catalog does not
     # say, assume the common 10% of the input rate rather than full price.
     cache_usd = _usd_per_m(m, "cache_read") or input_usd * 0.1
-    usd = (
-        uncached_input * input_usd
-        + cache_read * cache_usd
-        + output * output_usd
-    ) / 1_000_000
+    usd = (uncached_input * input_usd + cache_read * cache_usd + output * output_usd) / 1_000_000
     credits = math.ceil(usd * CREDITS_PER_USD * config.MODEL_PRICE_MARKUP)
     if credits < 1 and (uncached_input or cache_read or output):
         credits = 1
@@ -108,13 +105,15 @@ def public_catalog() -> list[dict]:
     """Catalog for the pricing page: what a model costs, in credits."""
     out = []
     for m in catalog().values():
-        out.append({
-            "id": m["id"],
-            "name": m.get("display_name", m["id"]),
-            "provider": m.get("provider", ""),
-            "multiplier": m.get("multiplier"),
-            "credits_per_m": m.get("credits_per_m"),
-            "default": bool(m.get("default")),
-        })
+        out.append(
+            {
+                "id": m["id"],
+                "name": m.get("display_name", m["id"]),
+                "provider": m.get("provider", ""),
+                "multiplier": m.get("multiplier"),
+                "credits_per_m": m.get("credits_per_m"),
+                "default": bool(m.get("default")),
+            }
+        )
     out.sort(key=lambda m: (m["multiplier"] is None, m["multiplier"] or 0, m["id"]))
     return out

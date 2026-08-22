@@ -23,15 +23,10 @@ if (!existsSync(modules)) {
 
 // 1. the Cordis rows we patch must still exist in the base bundle
 const basePatch = readFileSync(join(modules, '@deepseek-ai', 'dsh-base', 'cordis.patch.yml'), 'utf8')
-// llm-pi-ai 是 2026-08-20 起新增的依赖: 网关的整份目录靠它以 hand-declared
-// 路由暴露, 同时我们**禁用** llm-deepseek 以免同一个模型在选择器里出现两次。
-// 这两件事是一对 —— 若上游改掉 pi-ai 的 row id, 注入静默失效而禁用照旧生效,
-// 结果是一个模型都不剩, 而无可用模型时上游会禁用输入框 (2026-08-19 那次死锁)。
-// 所以这一行必须在构建期就拦住, 不能等用户装上才发现。
-// agent-default-model 是 2026-08-20 起新增的依赖: 我们禁用 llm-deepseek 之后
-// 必须把默认模型改指到 dsh-cloud 路由, 否则默认值指向一个不存在的 provider,
-// 客户端首次启动就"当前模型不可用"、输入框锁死。上游若改掉这个 row id, 我们的
-// 注入静默失效而禁用照旧生效 —— 又是那个死锁。
+// The catalog is exposed through llm-pi-ai while llm-deepseek is disabled to
+// avoid duplicate models. The default-model row must therefore point at the
+// cloud provider. Assert all related rows together so an upstream rename cannot
+// leave the client without an available model.
 for (const rowId of ['llm-deepseek', 'web-search-deepseek', 'session-telemetry-otel', 'llm-pi-ai', 'agent-default-model']) {
   check(basePatch.includes(`id: ${rowId}`), `base bundle lost row id '${rowId}'`)
 }
@@ -79,8 +74,7 @@ for (const banned of [
 check(existsSync(join(plugin, 'src', 'cloud', 'index.ts')), 'src/cloud overlay missing — run assemble.mjs')
 check(existsSync(join(plugin, 'build', 'cloud', 'login.html')), 'build/cloud assets missing — run assemble.mjs')
 // Present on disk is not enough: electron-builder's `files` is an allow-list,
-// and an unlisted path is dropped SILENTLY at packaging time. 2.0.0 shipped
-// that way — the login window loaded a missing file and showed a blank page.
+// and an unlisted path is dropped silently at packaging time.
 check((manifest.build?.files ?? []).includes('build/cloud/**'),
   'build.files does not list build/cloud/** — the login assets would be dropped at packaging')
 check(readFileSync(join(plugin, 'src', 'main.ts'), 'utf8').includes('cloudGate'),

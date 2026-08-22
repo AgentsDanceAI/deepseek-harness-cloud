@@ -27,13 +27,12 @@
 }
 
 # --- cloud workspaces: per-user dsh containers + PWA shell -------------------
-# Routing is identical to the production deployment (deploy/prod/
-# cutover.sh, "DHC sites v3"). The three header_up lines are load-bearing:
+# The following request-header transformations are required by the workspace
+# protocol:
 #   header_up -Upgrade      on the AUTH subrequest only — dsh's chat uses
 #     WebSocket upgrades (/api/events.mux, /api/events.host). With Upgrade
-#     present, uvicorn routes the /api/work/route subrequest as a WS handshake
-#     against an HTTP-only path -> 403 -> forward_auth fails -> the chat socket
-#     is killed (the page loads but replies never arrive).
+#     present, uvicorn treats the HTTP-only authorization subrequest as a
+#     WebSocket handshake and rejects it.
 #   header_up Host 127.0.0.1:3080
 #   header_up Origin http://127.0.0.1:3080
 #     dsh only trusts requests that look like they came from its own loopback

@@ -47,10 +47,8 @@ async function loadCatalog(token: string): Promise<void> {
 /**
  * 把已经在跑的应用带到前台。
  *
- * ⚠️ 只有在**系统已经允许**我们前台化时才有效 —— 即这次调用源自用户在前台
- * 浏览器里点开的 dshcloud:// 深链。单纯在后台调 app.focus({steal:true}) 是
- * 不行的 (2026-08-19 实测: 2.0.0 包里就有这行, macOS 照样不切换, 顶多 Dock
- * 图标跳一下), 所以焦点这件事必须由深链驱动, 不能自己硬抢。
+ * 操作系统只允许由用户触发的深链可靠地将应用带到前台。后台主动调用 focus
+ * 不能替代这个激活信号。
  */
 function bringToFront(): void {
   try {
@@ -141,24 +139,18 @@ export function cloudProfilePatches(): { id: string, disabled?: boolean, config?
     ...catalogReady
       ? [
           {
-            // 目录到手, 网关的全部模型都由下面那条 pi-ai 路由提供 —— 这时必须把
-            // 上游内置的 deepseek 行**关掉**, 否则模型选择器里会并排出现「DeepSeek」
-            // 和「DSH Cloud」两组, 而且同一个 DeepSeek-V4-Flash 在两边各来一次。
-            //
-            // 那两组看着像"官方 vs 我们", 实则**都是我们**: 这一行的 baseURL 早就被
-            // 指到了网关, 用的是设备 token、扣的是我们的积分。让用户对着两个同名
-            // 模型猜哪个是哪个, 是白白制造困惑 (2026-08-20 老板实测提出)。
+            // Once the catalog is available, pi-ai owns the complete model list.
+            // Disable the built-in row to avoid duplicate entries for the same
+            // gateway-backed models.
             id: 'llm-deepseek',
             disabled: true,
           },
           {
             // 默认模型必须跟着一起改。base bundle 的默认是
             // `provider: deepseek-official / model: deepseek-v4-flash`, 而
-            // deepseek-official 是 llm-deepseek 独占的路由 —— 我们在上面把那行
-            // 关掉之后, 默认模型就指向了一个**不存在的 provider**: 客户端解析不到,
-            // 于是首次启动直接"当前模型不可用", 输入框锁死, 新用户装完就卡在这里
-            // (2026-08-20 老板全新安装实测)。这与 8-19 那次退掉千面后的死锁同一个
-            // 模式 —— provider 没了, 指向它的默认值成了悬空引用。
+            // deepseek-official is supplied only by llm-deepseek. Disabling that
+            // row requires a valid cloud default so the provider reference is not
+            // left dangling.
             //
             // 插件 config 只是**底座**: 用户在 UI 里选过之后, settings provider 会
             // 把用户的选择层叠在上面 (见 dsh-agent-default-model 的 README), 所以
@@ -190,17 +182,14 @@ export function cloudProfilePatches(): { id: string, disabled?: boolean, config?
         ]
       : [
           {
-            // 降级路径下默认模型必须**指回上游路由**: 这时 llm-deepseek 仍然启用、
-            // pi-ai 那条不注入, 若默认还指着 dsh-cloud 就又成了悬空引用 —— 同一个
-            // 坑换个方向再踩一次。写回 base bundle 的原值。
+            // In fallback mode llm-deepseek remains enabled and pi-ai is absent,
+            // so restore the base bundle's default provider.
             id: 'agent-default-model',
             config: { provider: 'deepseek-official', model: 'deepseek-v4-flash' },
           },
           {
-            // 降级路径: 目录没拉到 (离线 / 网关故障)。**绝不能**在这里禁掉这一行 ——
-            // pi-ai 那条也不会注入, 两边都没了就一个模型都不剩, 而上游在无可用模型时
-            // 会把输入框禁用, 用户连"换个模型"都打不出来 (2026-08-19 那次死锁就是
-            // 这么来的)。所以退回原来的做法: 这一行仍指向网关, 至少内置的两个能用。
+            // If the catalog is unavailable, keep the built-in row enabled and
+            // route it through the gateway. This preserves a usable model set.
             id: 'llm-deepseek',
             config: {
               baseURL: `${CLOUD_BASE}/llm/v1`,

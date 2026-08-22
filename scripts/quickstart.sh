@@ -17,6 +17,19 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 STACK_DIR="$REPO/deploy/selfhost"
 ENV_FILE="$STACK_DIR/.env"
 ENV_TEMPLATE="$STACK_DIR/.env.example"
+STACK_FILES=(-f "$STACK_DIR/docker-compose.yml" -f "$STACK_DIR/compose.build.yml")
+
+stack_compose() {
+  docker compose --env-file "$ENV_FILE" "${STACK_FILES[@]}" "$@"
+}
+
+compose_hint() {
+  local hint="docker compose --env-file deploy/selfhost/.env" index
+  for ((index = 1; index < ${#STACK_FILES[@]}; index += 2)); do
+    hint+=" -f deploy/selfhost/$(basename "${STACK_FILES[$index]}")"
+  done
+  printf '%s' "$hint"
+}
 
 DOMAIN_ARG=""
 ADMIN_ARG=""
@@ -125,18 +138,35 @@ if [ -z "$DOMAIN" ] && [ "$FIRST_RUN" = "1" ]; then
   DOMAIN="$(ask 'Domain (a hostname pointing at this machine, or "localhost")' localhost)"
 fi
 if [ -n "$DOMAIN" ]; then
-  set_kv "$ENV_FILE" DOMAIN "$DOMAIN"
   if [ "$DOMAIN" = "localhost" ] || [ "${DOMAIN#localhost:}" != "$DOMAIN" ]; then
+    LOCAL_HTTP_PORT="8787"
+    if [ "${DOMAIN#localhost:}" != "$DOMAIN" ]; then
+      LOCAL_HTTP_PORT="${DOMAIN#localhost:}"
+      [[ "$LOCAL_HTTP_PORT" =~ ^[0-9]+$ ]] || die "localhost port must be numeric"
+      if ((10#$LOCAL_HTTP_PORT < 1 || 10#$LOCAL_HTTP_PORT > 65535)); then
+        die "localhost port must be between 1 and 65535"
+      fi
+    fi
     # Local mode: plain HTTP, and DHC_DEV=1 so login codes are printed to the
     # log and the session cookie is not marked Secure.
+    set_kv "$ENV_FILE" DOMAIN "localhost"
     set_kv "$ENV_FILE" SITE_SCHEME "http"
+    set_kv "$ENV_FILE" PUBLIC_BASE "http://localhost:$LOCAL_HTTP_PORT"
+    set_kv "$ENV_FILE" BIND_ADDRESS "127.0.0.1"
+    set_kv "$ENV_FILE" HTTP_PORT "$LOCAL_HTTP_PORT"
+    set_kv "$ENV_FILE" HTTPS_PORT "8443"
     set_kv "$ENV_FILE" DHC_DEV "1"
     set_kv "$ENV_FILE" WORK_ENABLED "0"
     set_kv "$ENV_FILE" COMPOSE_PROFILES ""
     ENABLE_WORK=0
-    ok "local mode: http://$DOMAIN, DHC_DEV=1 (login codes go to the log)"
+    ok "local mode: http://localhost:$LOCAL_HTTP_PORT, loopback only, DHC_DEV=1"
   else
+    set_kv "$ENV_FILE" DOMAIN "$DOMAIN"
     set_kv "$ENV_FILE" SITE_SCHEME "https"
+    set_kv "$ENV_FILE" PUBLIC_BASE ""
+    set_kv "$ENV_FILE" BIND_ADDRESS "0.0.0.0"
+    set_kv "$ENV_FILE" HTTP_PORT "80"
+    set_kv "$ENV_FILE" HTTPS_PORT "443"
     set_kv "$ENV_FILE" DHC_DEV "0"
     ok "public mode: https://$DOMAIN (Caddy will request a certificate)"
   fi
@@ -173,17 +203,48 @@ if [ "$ENABLE_WORK" = "1" ]; then
   fi
 fi
 
+if [ "$CUR_DOMAIN" != "localhost" ]; then
+  SMTP_HOST="$(get_kv "$ENV_FILE" MAIL_SMTP_HOST)"
+  SMTP_USER="$(get_kv "$ENV_FILE" MAIL_SMTP_USER)"
+  SMTP_FROM="$(get_kv "$ENV_FILE" MAIL_FROM)"
+  GOOGLE_ID="$(get_kv "$ENV_FILE" GOOGLE_LOGIN_CLIENT_ID)"
+  GOOGLE_SECRET="$(get_kv "$ENV_FILE" GOOGLE_LOGIN_CLIENT_SECRET)"
+  GITHUB_ID="$(get_kv "$ENV_FILE" GITHUB_LOGIN_CLIENT_ID)"
+  GITHUB_SECRET="$(get_kv "$ENV_FILE" GITHUB_LOGIN_CLIENT_SECRET)"
+  if { [ -z "$SMTP_HOST" ] || { [ -z "$SMTP_FROM" ] && [ -z "$SMTP_USER" ]; }; } \
+      && { [ -z "$GOOGLE_ID" ] || [ -z "$GOOGLE_SECRET" ]; } \
+      && { [ -z "$GITHUB_ID" ] || [ -z "$GITHUB_SECRET" ]; }; then
+    die "public mode requires SMTP or Google/GitHub OAuth for the first verified account. Configure it in $ENV_FILE, then re-run this command."
+  fi
+fi
+
 # --- 3/5 build + start -------------------------------------------------------
 info "3/5 building and starting the stack (first build takes a few minutes)"
+
+# Preserve the supported PostgreSQL overlay once an operator has enabled it.
+# Omitting the overlay on a later run would recreate dhc-server with SQLite and
+# make the existing data appear to have vanished. Check both the service label
+# and the named volume so this remains safe after `docker compose down`.
+PROJECT_NAME="$(get_kv "$ENV_FILE" COMPOSE_PROJECT_NAME)"
+PROJECT_NAME="${PROJECT_NAME:-dsh-selfhost}"
+POSTGRES_CONTAINER="$(docker ps -aq \
+  --filter "label=com.docker.compose.project=$PROJECT_NAME" \
+  --filter "label=com.docker.compose.service=postgres" | sed -n '1p')"
+if [ -n "$POSTGRES_CONTAINER" ] || docker volume inspect "${PROJECT_NAME}_dhc-pgdata" >/dev/null 2>&1; then
+  STACK_FILES+=("-f" "$STACK_DIR/compose.postgres.yml")
+  ok "preserving the existing PostgreSQL overlay"
+fi
+COMPOSE_HINT="$(compose_hint)"
+
 cd "$STACK_DIR"
-docker compose --env-file .env up -d --build --remove-orphans
+stack_compose up -d --build
 
 # --- 4/5 health --------------------------------------------------------------
-info "4/5 waiting for the app to answer /api/health"
+info "4/5 waiting for the app to become ready"
 HEALTHY=0
 for _ in $(seq 1 45); do
-  if docker compose --env-file .env exec -T dhc-server \
-      python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8100/api/health')" >/dev/null 2>&1; then
+  if stack_compose exec -T dhc-server \
+      python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8100/readyz')" >/dev/null 2>&1; then
     HEALTHY=1; break
   fi
   sleep 2
@@ -191,7 +252,7 @@ done
 if [ "$HEALTHY" = "1" ]; then
   ok "dhc-server is healthy"
 else
-  docker compose --env-file .env logs --tail 40 dhc-server || true
+  stack_compose logs --tail 40 dhc-server || true
   die "dhc-server did not become healthy — see the log above (most often: AUTH_SECRET empty, or port 80/443 already in use)."
 fi
 
@@ -200,12 +261,12 @@ if [ -z "$PUBLIC_BASE" ]; then
   PUBLIC_BASE="$(get_kv "$ENV_FILE" SITE_SCHEME)://$(get_kv "$ENV_FILE" DOMAIN)"
 fi
 if command -v curl >/dev/null 2>&1; then
-  if curl -fsS --max-time 20 "$PUBLIC_BASE/api/health" >/dev/null 2>&1; then
-    ok "$PUBLIC_BASE/api/health answers"
+  if curl -fsS --max-time 20 "$PUBLIC_BASE/readyz" >/dev/null 2>&1; then
+    ok "$PUBLIC_BASE/readyz answers"
   else
     warn "$PUBLIC_BASE/api/health not reachable yet — normal for a fresh domain:"
     warn "  DNS must point here, and the first certificate takes ~10-30s."
-    warn "  Watch it with: docker compose -f deploy/selfhost/docker-compose.yml logs -f dhc-caddy"
+    warn "  Watch it with: $COMPOSE_HINT logs -f dhc-caddy"
   fi
 fi
 
@@ -213,27 +274,27 @@ fi
 info "5/5 done"
 echo
 echo "  Console        $PUBLIC_BASE"
-echo "  Admin          $(get_kv "$ENV_FILE" ADMIN_EMAILS)  (register with this address, then open /console)"
+echo "  Admin          $(get_kv "$ENV_FILE" ADMIN_EMAILS)  (verify this address, then open /console)"
 echo "  Config         $ENV_FILE"
-echo "  Logs           docker compose -f deploy/selfhost/docker-compose.yml logs -f dhc-server"
-echo "  Stop / start   docker compose -f deploy/selfhost/docker-compose.yml down | up -d"
+echo "  Logs           $COMPOSE_HINT logs -f dhc-server"
+echo "  Stop / start   $COMPOSE_HINT down | up -d --build"
 echo
 
 CUR_ADMIN="$(get_kv "$ENV_FILE" ADMIN_EMAILS)"
 if [ -z "$CUR_ADMIN" ] || [ "$CUR_ADMIN" = "you@example.com" ]; then
   warn "ADMIN_EMAILS is still the placeholder: nobody can reach /api/admin/*."
-  warn "  Set it in $ENV_FILE and re-run, then register an account with that address."
+  warn "  Set it in $ENV_FILE and re-run, then verify an account with that address."
 fi
 if [ -z "$(get_kv "$ENV_FILE" UPSTREAM_API_KEY)" ]; then
   warn "UPSTREAM_API_KEY is empty: every model request will answer 503."
-  warn "  Fill it in $ENV_FILE, then: docker compose -f deploy/selfhost/docker-compose.yml up -d"
+  warn "  Fill it in $ENV_FILE, then re-run this quickstart command."
 fi
 if [ -z "$(get_kv "$ENV_FILE" ZHIPU_SEARCH_API_KEY)" ] && [ "$(get_kv "$ENV_FILE" SEARCH_PROVIDER)" = "zhipu" ]; then
   warn "ZHIPU_SEARCH_API_KEY is empty: the agent can chat and code, but not search the web."
 fi
 if [ "$(get_kv "$ENV_FILE" DHC_DEV)" = "1" ]; then
   warn "DHC_DEV=1 (local mode): login codes are printed to the log, cookies are not Secure."
-  warn "  Read a code with: docker compose -f deploy/selfhost/docker-compose.yml logs dhc-server | grep dev-mail"
+  warn "  Read a code with the Logs command above and filter for dev-mail."
 fi
 if [ "$(get_kv "$ENV_FILE" WORK_ENABLED)" = "1" ]; then
   WORK_IMAGE="$(get_kv "$ENV_FILE" WORK_IMAGE)"

@@ -8,6 +8,7 @@ Security model:
     session is re-fetched from Stripe and payment_status must be "paid" before
     the caller may fulfil ("verify, then confirm").
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -32,8 +33,11 @@ def _headers() -> dict:
 def create_checkout(order: dict) -> str:
     """Creates a Checkout Session for the order; returns the redirect URL."""
     oid = order["order_id"]
-    methods = [m.strip() for m in
-               os.environ.get("STRIPE_PAYMENT_METHODS", "card,alipay,wechat_pay").split(",") if m.strip()]
+    methods = [
+        m.strip()
+        for m in os.environ.get("STRIPE_PAYMENT_METHODS", "card,alipay,wechat_pay").split(",")
+        if m.strip()
+    ]
     data = {
         "mode": "payment",
         "client_reference_id": oid,
@@ -79,7 +83,7 @@ def _verify_signature(payload: bytes, header: str) -> dict:
     try:
         ts = float(t)
     except ValueError:
-        raise HTTPException(400, "bad_signature")
+        raise HTTPException(400, "bad_signature") from None
     if not sigs or abs(time.time() - ts) > SIG_TOLERANCE_S:
         raise HTTPException(400, "bad_signature")
     expect = hmac.new(secret.encode(), f"{t}.".encode() + payload, hashlib.sha256).hexdigest()
@@ -88,7 +92,7 @@ def _verify_signature(payload: bytes, header: str) -> dict:
     try:
         return json.loads(payload)
     except ValueError:
-        raise HTTPException(400, "bad_payload")
+        raise HTTPException(400, "bad_payload") from None
 
 
 def process_webhook(payload: bytes, sig_header: str) -> dict | None:
@@ -104,8 +108,11 @@ def process_webhook(payload: bytes, sig_header: str) -> dict | None:
         session = _api_get(f"/v1/checkout/sessions/{session_id}")  # authoritative state
         if session.get("payment_status") != "paid":
             return None
-        return {"event": "paid", "order_id": order_id,
-                "provider_ref": str(session.get("payment_intent") or session_id)}
+        return {
+            "event": "paid",
+            "order_id": order_id,
+            "provider_ref": str(session.get("payment_intent") or session_id),
+        }
     if etype == "charge.refunded":
         pi = str(obj.get("payment_intent") or "")
         row = db.query_one("SELECT id FROM orders WHERE provider_ref=?", (pi,)) if pi else None

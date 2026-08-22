@@ -4,6 +4,7 @@ Config reads env at import time, so the environment is pinned BEFORE any app
 import. All outbound httpx calls are stubbed; RSA/AES material is generated
 locally so signature paths run for real.
 """
+
 from __future__ import annotations
 
 import base64
@@ -34,7 +35,7 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
-from app import plans, config, credits, db, security
+from app import config, credits, db, plans, security
 from app.payments import alipay_provider, base, stripe_provider, wechatpay_provider
 from app.payments.api import router as pay_router
 
@@ -45,14 +46,28 @@ client = TestClient(app)
 _seq = 0
 
 
+@pytest.fixture(autouse=True)
+def _isolate_waffo_config(monkeypatch):
+    """Collection order must not activate another module's Waffo fixture here."""
+    for name in (
+        "WAFFO_MERCHANT_ID",
+        "WAFFO_PRIVATE_KEY",
+        "WAFFO_WEBHOOK_PUBLIC_KEY",
+        "WAFFO_PRODUCT_ID",
+        "WAFFO_STORE_ID",
+    ):
+        monkeypatch.setattr(config, name, "")
+
+
 def make_user() -> tuple[str, dict]:
     """User row without signup credits so balances start at exactly 0."""
     global _seq
     _seq += 1
     uid = security.new_id("u_")
     with db.tx() as conn:
-        conn.execute("INSERT INTO users (id, email, created) VALUES (?,?,?)",
-                     (uid, f"t{_seq}@test.local", time.time()))
+        conn.execute(
+            "INSERT INTO users (id, email, created) VALUES (?,?,?)", (uid, f"t{_seq}@test.local", time.time())
+        )
     token = security.sign_token(uid, epoch=0)
     return uid, {"Authorization": f"Bearer {token}"}
 
@@ -73,18 +88,32 @@ def stripe_sig(payload: bytes, secret: str = "whsec_test", t: int | None = None)
 
 def rsa_keypair():
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-    priv = key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
-                             serialization.NoEncryption()).decode()
-    pub = key.public_key().public_bytes(serialization.Encoding.PEM,
-                                        serialization.PublicFormat.SubjectPublicKeyInfo).decode()
+    priv = key.private_bytes(
+        serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()
+    ).decode()
+    pub = (
+        key.public_key()
+        .public_bytes(serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo)
+        .decode()
+    )
     return key, priv, pub
 
 
 # --- item resolution ---------------------------------------------------------
 
+
 def test_resolve_item_rejects_unknown_and_free():
-    for bad in ("", "garbage", "plan:free:monthly", "plan:plus:weekly", "plan:nope:monthly",
-                "pack:nope", "pack", "plan:plus", "plan:plus:monthly:extra"):
+    for bad in (
+        "",
+        "garbage",
+        "plan:free:monthly",
+        "plan:plus:weekly",
+        "plan:nope:monthly",
+        "pack:nope",
+        "pack",
+        "plan:plus",
+        "plan:plus:monthly:extra",
+    ):
         with pytest.raises(HTTPException) as e:
             base.resolve_item(bad)
         assert e.value.status_code == 400
@@ -119,12 +148,16 @@ def test_first_month_is_charged_the_advertised_intro_price():
 
     # An unpaid checkout must not burn the offer — otherwise closing a tab, or
     # anyone hammering /checkout, spends an offer that was never sold.
-    assert base.create_order(uid, "stripe", "plan:plus:monthly")["amount_cents"] == \
-        table["plus"]["monthly_intro_cents"]
+    assert (
+        base.create_order(uid, "stripe", "plan:plus:monthly")["amount_cents"]
+        == table["plus"]["monthly_intro_cents"]
+    )
 
     assert base.mark_paid(first["order_id"], "pi_intro_plus") is True
-    assert base.create_order(uid, "stripe", "plan:plus:monthly")["amount_cents"] == \
-        table["plus"]["monthly_cents"]
+    assert (
+        base.create_order(uid, "stripe", "plan:plus:monthly")["amount_cents"]
+        == table["plus"]["monthly_cents"]
+    )
 
 
 def test_intro_is_per_tier_and_never_applies_to_a_year():
@@ -133,11 +166,12 @@ def test_intro_is_per_tier_and_never_applies_to_a_year():
     base.mark_paid(base.create_order(uid, "stripe", "plan:plus:monthly")["order_id"])
 
     # Plus is spent; Pro is a different offer this buyer has not been sold yet.
-    assert base.create_order(uid, "stripe", "plan:pro:monthly")["amount_cents"] == \
-        table["pro"]["monthly_intro_cents"]
+    assert (
+        base.create_order(uid, "stripe", "plan:pro:monthly")["amount_cents"]
+        == table["pro"]["monthly_intro_cents"]
+    )
     # A first month is a first MONTH: the yearly SKU is sold at its own price.
-    assert base.create_order(uid, "stripe", "plan:pro:yearly")["amount_cents"] == \
-        table["pro"]["yearly_cents"]
+    assert base.create_order(uid, "stripe", "plan:pro:yearly")["amount_cents"] == table["pro"]["yearly_cents"]
     # ...and buying the year does not consume the monthly offer either.
     assert base.intro_eligible(uid, "max") is True
 
@@ -152,8 +186,10 @@ def test_a_refund_gives_the_first_month_offer_back():
     assert base.intro_eligible(uid, "max") is False
     base.mark_refunded(o["order_id"])
     assert base.intro_eligible(uid, "max") is True
-    assert base.create_order(uid, "stripe", "plan:max:monthly")["amount_cents"] == \
-        table["max"]["monthly_intro_cents"]
+    assert (
+        base.create_order(uid, "stripe", "plan:max:monthly")["amount_cents"]
+        == table["max"]["monthly_intro_cents"]
+    )
 
 
 def test_pay_context_reports_intro_eligibility_and_stays_anonymous_safe():
@@ -188,8 +224,11 @@ def test_client_cannot_choose_its_own_currency():
     """Six independently set tables are not exact conversions of each other, so a
     body-supplied currency would let a caller shop for the cheapest one."""
     _, headers = make_user()
-    r = client.post("/api/pay/checkout", headers=headers,
-                    json={"item": "plan:plus:monthly", "currency": "JPY", "cur": "JPY"})
+    r = client.post(
+        "/api/pay/checkout",
+        headers=headers,
+        json={"item": "plan:plus:monthly", "currency": "JPY", "cur": "JPY"},
+    )
     order = base.get_order(r.json()["order_id"])
     assert order["currency"] == plans.pricing()["currency"]
 
@@ -200,11 +239,12 @@ def test_abandoned_checkouts_expire_but_stay_fulfillable():
     webhook still fulfils them, because expiry is our guess and the provider
     confirming a payment outranks it."""
     uid, headers = make_user()
-    oid = client.post("/api/pay/checkout", json={"item": "pack:pack1000"},
-                      headers=headers).json()["order_id"]
+    oid = client.post("/api/pay/checkout", json={"item": "pack:pack1000"}, headers=headers).json()["order_id"]
     with db.tx() as conn:
-        conn.execute("UPDATE orders SET status='pending', created=? WHERE id=?",
-                     (time.time() - base.PENDING_TTL_S - 60, oid))
+        conn.execute(
+            "UPDATE orders SET status='pending', created=? WHERE id=?",
+            (time.time() - base.PENDING_TTL_S - 60, oid),
+        )
 
     assert client.get("/api/pay/orders", headers=headers).status_code == 200
     assert base.get_order(oid)["status"] == "expired"
@@ -217,14 +257,20 @@ def test_abandoned_checkouts_expire_but_stay_fulfillable():
 
 def test_client_supplied_amount_is_ignored():
     _, headers = make_user()
-    r = client.post("/api/pay/checkout", headers=headers,
-                    json={"item": "pack:pack1000", "amount_cents": 1, "total_amount": "0.01"})
+    r = client.post(
+        "/api/pay/checkout",
+        headers=headers,
+        json={"item": "pack:pack1000", "amount_cents": 1, "total_amount": "0.01"},
+    )
     assert r.status_code == 200
     order = base.get_order(r.json()["order_id"])
-    assert order["amount_cents"] == plans.pricing()["packs"]["pack1000"]["cents"]  # from pricing.json, nothing else
+    assert (
+        order["amount_cents"] == plans.pricing()["packs"]["pack1000"]["cents"]
+    )  # from pricing.json, nothing else
 
 
 # --- context / intent path ---------------------------------------------------
+
 
 def test_context_lists_active_providers(monkeypatch):
     body = client.get("/api/pay/context").json()
@@ -252,15 +298,22 @@ def test_checkout_requires_auth():
 
 # --- stripe ------------------------------------------------------------------
 
+
 def test_stripe_webhook_bad_signature_rejected(monkeypatch):
     monkeypatch.setattr(config, "STRIPE_WEBHOOK_SECRET", "whsec_test")
     payload = json.dumps({"type": "checkout.session.completed"}).encode()
-    r = client.post("/api/pay/webhook/stripe", content=payload,
-                    headers={"stripe-signature": f"t={int(time.time())},v1=" + "0" * 64})
+    r = client.post(
+        "/api/pay/webhook/stripe",
+        content=payload,
+        headers={"stripe-signature": f"t={int(time.time())},v1=" + "0" * 64},
+    )
     assert r.status_code == 400
     # stale timestamp outside the 300 s tolerance
-    r = client.post("/api/pay/webhook/stripe", content=payload,
-                    headers={"stripe-signature": stripe_sig(payload, t=int(time.time()) - 4000)})
+    r = client.post(
+        "/api/pay/webhook/stripe",
+        content=payload,
+        headers={"stripe-signature": stripe_sig(payload, t=int(time.time()) - 4000)},
+    )
     assert r.status_code == 400
     # missing header entirely
     assert client.post("/api/pay/webhook/stripe", content=payload).status_code == 400
@@ -283,23 +336,28 @@ def test_stripe_happy_path_idempotence_and_refund(monkeypatch):
     assert body["provider"] == "stripe" and body["pay_url"].startswith("https://checkout.stripe.com")
     oid = body["order_id"]
     assert oid.startswith("DHS")
-    assert sent["data"]["line_items[0][price_data][unit_amount]"] == \
-        str(plans.pricing()["tiers"]["plus"]["monthly_intro_cents"])  # first month
+    assert sent["data"]["line_items[0][price_data][unit_amount]"] == str(
+        plans.pricing()["tiers"]["plus"]["monthly_intro_cents"]
+    )  # first month
     assert sent["data"]["line_items[0][price_data][currency]"] == plans.pricing()["currency"].lower()
     assert sent["data"]["client_reference_id"] == oid
     assert sent["data"]["payment_method_types[0]"] == "card"
     assert sent["data"]["payment_method_options[wechat_pay][client]"] == "web"
     assert f"order={oid}" in sent["data"]["success_url"]
 
-    event = {"type": "checkout.session.completed",
-             "data": {"object": {"id": "cs_1", "client_reference_id": oid,
-                                 "metadata": {"order_id": oid}}}}
+    event = {
+        "type": "checkout.session.completed",
+        "data": {"object": {"id": "cs_1", "client_reference_id": oid, "metadata": {"order_id": oid}}},
+    }
     payload = json.dumps(event).encode()
-    monkeypatch.setattr(stripe_provider.httpx, "get",
-                        lambda url, **kw: R({"id": "cs_1", "payment_status": "paid",
-                                             "payment_intent": "pi_1"}))
-    r = client.post("/api/pay/webhook/stripe", content=payload,
-                    headers={"stripe-signature": stripe_sig(payload)})
+    monkeypatch.setattr(
+        stripe_provider.httpx,
+        "get",
+        lambda url, **kw: R({"id": "cs_1", "payment_status": "paid", "payment_intent": "pi_1"}),
+    )
+    r = client.post(
+        "/api/pay/webhook/stripe", content=payload, headers={"stripe-signature": stripe_sig(payload)}
+    )
     assert r.status_code == 200 and r.json() == {"received": True}
 
     order = base.get_order(oid)
@@ -310,8 +368,9 @@ def test_stripe_happy_path_idempotence_and_refund(monkeypatch):
     expires_before = float(sub["expires"])
 
     # duplicate webhook: no double fulfilment
-    r = client.post("/api/pay/webhook/stripe", content=payload,
-                    headers={"stripe-signature": stripe_sig(payload)})
+    r = client.post(
+        "/api/pay/webhook/stripe", content=payload, headers={"stripe-signature": stripe_sig(payload)}
+    )
     assert r.status_code == 200
     assert credits.balance(uid) == plans.pricing()["tiers"]["plus"]["monthly_credits"]
     sub = db.query_one("SELECT * FROM subscriptions WHERE user_id=?", (uid,))
@@ -321,11 +380,14 @@ def test_stripe_happy_path_idempotence_and_refund(monkeypatch):
     uid2, headers2 = make_user()
     r = client.post("/api/pay/checkout", json={"item": "pack:pack1000"}, headers=headers2)
     oid2 = r.json()["order_id"]
-    ev2 = {"type": "checkout.session.completed",
-           "data": {"object": {"id": "cs_2", "client_reference_id": oid2}}}
+    ev2 = {
+        "type": "checkout.session.completed",
+        "data": {"object": {"id": "cs_2", "client_reference_id": oid2}},
+    }
     p2 = json.dumps(ev2).encode()
-    monkeypatch.setattr(stripe_provider.httpx, "get",
-                        lambda url, **kw: R({"id": "cs_2", "payment_status": "unpaid"}))
+    monkeypatch.setattr(
+        stripe_provider.httpx, "get", lambda url, **kw: R({"id": "cs_2", "payment_status": "unpaid"})
+    )
     client.post("/api/pay/webhook/stripe", content=p2, headers={"stripe-signature": stripe_sig(p2)})
     assert base.get_order(oid2)["status"] == "pending" and credits.balance(uid2) == 0
 
@@ -344,6 +406,7 @@ def test_stripe_happy_path_idempotence_and_refund(monkeypatch):
 
 # --- alipay ------------------------------------------------------------------
 
+
 def test_alipay_sign_verify_roundtrip(monkeypatch):
     key, priv_pem, pub_pem = rsa_keypair()
     monkeypatch.setattr(config, "ALIPAY_APP_ID", "2021000000000001")
@@ -351,8 +414,9 @@ def test_alipay_sign_verify_roundtrip(monkeypatch):
     monkeypatch.setattr(config, "ALIPAY_PUBLIC_KEY", pub_pem)
     uid, headers = make_user()
 
-    r = client.post("/api/pay/checkout", json={"item": "pack:pack1000", "provider": "alipay"},
-                    headers=headers)
+    r = client.post(
+        "/api/pay/checkout", json={"item": "pack:pack1000", "provider": "alipay"}, headers=headers
+    )
     body = r.json()
     assert body["provider"] == "alipay"
     oid = body["order_id"]
@@ -366,24 +430,44 @@ def test_alipay_sign_verify_roundtrip(monkeypatch):
     assert qs["notify_url"].endswith("/api/pay/webhook/alipay")
     # request signature verifies against our public key (sign covers everything but `sign`)
     content = "&".join(f"{k}={v}" for k, v in sorted(qs.items()) if k != "sign" and v != "")
-    key.public_key().verify(base64.b64decode(qs["sign"]), content.encode(),
-                            padding.PKCS1v15(), hashes.SHA256())
+    key.public_key().verify(
+        base64.b64decode(qs["sign"]), content.encode(), padding.PKCS1v15(), hashes.SHA256()
+    )
 
     def signed_notify(fields: dict) -> dict:
         content = "&".join(f"{k}={v}" for k, v in sorted(fields.items()) if v != "")
         out = dict(fields)
         out["sign"] = base64.b64encode(
-            key.sign(content.encode(), padding.PKCS1v15(), hashes.SHA256())).decode()
+            key.sign(content.encode(), padding.PKCS1v15(), hashes.SHA256())
+        ).decode()
         out["sign_type"] = "RSA2"
         return out
 
-    notify = signed_notify({"app_id": "2021000000000001", "out_trade_no": oid, "trade_no": "ali_1",
-                            "trade_status": "TRADE_SUCCESS", "total_amount": "10.00",
-                            "notify_id": "n1", "gmt_payment": "2026-08-16 10:00:00"})
-    monkeypatch.setattr(alipay_provider.httpx, "get",
-                        lambda url, **kw: R({"alipay_trade_query_response": {
-                            "code": "10000", "trade_status": "TRADE_SUCCESS",
-                            "trade_no": "ali_1", "out_trade_no": oid}}))
+    notify = signed_notify(
+        {
+            "app_id": "2021000000000001",
+            "out_trade_no": oid,
+            "trade_no": "ali_1",
+            "trade_status": "TRADE_SUCCESS",
+            "total_amount": "10.00",
+            "notify_id": "n1",
+            "gmt_payment": "2026-08-16 10:00:00",
+        }
+    )
+    monkeypatch.setattr(
+        alipay_provider.httpx,
+        "get",
+        lambda url, **kw: R(
+            {
+                "alipay_trade_query_response": {
+                    "code": "10000",
+                    "trade_status": "TRADE_SUCCESS",
+                    "trade_no": "ali_1",
+                    "out_trade_no": oid,
+                }
+            }
+        ),
+    )
     r = client.post("/api/pay/webhook/alipay", data=notify)
     assert r.text == "success"
     order = base.get_order(oid)
@@ -400,6 +484,7 @@ def test_alipay_sign_verify_roundtrip(monkeypatch):
 
 
 # --- wechat ------------------------------------------------------------------
+
 
 def test_wechat_native_and_webhook(monkeypatch, tmp_path):
     _, priv_pem, _ = rsa_keypair()
@@ -420,8 +505,9 @@ def test_wechat_native_and_webhook(monkeypatch, tmp_path):
         return R({"code_url": "weixin://wxpay/bizpayurl?pr=abc123"})
 
     monkeypatch.setattr(wechatpay_provider.httpx, "post", fake_post)
-    r = client.post("/api/pay/checkout", json={"item": "pack:pack1000", "provider": "wechat"},
-                    headers=headers)
+    r = client.post(
+        "/api/pay/checkout", json={"item": "pack:pack1000", "provider": "wechat"}, headers=headers
+    )
     body = r.json()
     assert body["provider"] == "wechat" and body["code_url"].startswith("weixin://")
     oid = body["order_id"]
@@ -430,18 +516,26 @@ def test_wechat_native_and_webhook(monkeypatch, tmp_path):
     req = json.loads(sent["content"])
     # WeChat settles in CNY only, so this one IS a literal — the provider
     # would reject anything else regardless of what the page was showing.
-    assert req["amount"] == {"total": plans.pricing()["packs"]["pack1000"]["cents"], "currency": "CNY"} and req["out_trade_no"] == oid
+    assert (
+        req["amount"] == {"total": plans.pricing()["packs"]["pack1000"]["cents"], "currency": "CNY"}
+        and req["out_trade_no"] == oid
+    )
 
     def encrypted_hook(event_type: str, payload: dict) -> dict:
         nonce = "abcdef123456"
-        ct = AESGCM(apiv3_key.encode()).encrypt(
-            nonce.encode(), json.dumps(payload).encode(), b"transaction")
-        return {"event_type": event_type,
-                "resource": {"ciphertext": base64.b64encode(ct).decode(), "nonce": nonce,
-                             "associated_data": "transaction"}}
+        ct = AESGCM(apiv3_key.encode()).encrypt(nonce.encode(), json.dumps(payload).encode(), b"transaction")
+        return {
+            "event_type": event_type,
+            "resource": {
+                "ciphertext": base64.b64encode(ct).decode(),
+                "nonce": nonce,
+                "associated_data": "transaction",
+            },
+        }
 
-    hook = encrypted_hook("TRANSACTION.SUCCESS",
-                          {"out_trade_no": oid, "trade_state": "SUCCESS", "transaction_id": "wx_1"})
+    hook = encrypted_hook(
+        "TRANSACTION.SUCCESS", {"out_trade_no": oid, "trade_state": "SUCCESS", "transaction_id": "wx_1"}
+    )
     queried = {}
 
     def fake_get(url, **kw):
@@ -467,8 +561,10 @@ def test_wechat_native_and_webhook(monkeypatch, tmp_path):
     assert base.get_order(oid)["status"] == "refunded"
 
     # garbage ciphertext is rejected
-    bad = {"event_type": "TRANSACTION.SUCCESS",
-           "resource": {"ciphertext": "AAAA", "nonce": "abcdef123456", "associated_data": "transaction"}}
+    bad = {
+        "event_type": "TRANSACTION.SUCCESS",
+        "resource": {"ciphertext": "AAAA", "nonce": "abcdef123456", "associated_data": "transaction"},
+    }
     r = client.post("/api/pay/webhook/wechat", json=bad)
     assert r.status_code == 400 and r.json()["code"] == "FAIL"
 
@@ -485,25 +581,27 @@ def test_wechat_notify_alone_never_fulfils(monkeypatch, tmp_path):
     monkeypatch.setattr(config, "WECHAT_PAY_SERIAL_NO", "SERIAL1")
     monkeypatch.setattr(config, "WECHAT_PAY_APPID", "wx0000000001")
     uid, headers = make_user()
-    monkeypatch.setattr(wechatpay_provider.httpx, "post",
-                        lambda url, **kw: R({"code_url": "weixin://x"}))
-    oid = client.post("/api/pay/checkout", json={"item": "pack:pack1000"},
-                      headers=headers).json()["order_id"]
+    monkeypatch.setattr(wechatpay_provider.httpx, "post", lambda url, **kw: R({"code_url": "weixin://x"}))
+    oid = client.post("/api/pay/checkout", json={"item": "pack:pack1000"}, headers=headers).json()["order_id"]
 
     nonce = "abcdef123456"
     ct = AESGCM(apiv3_key.encode()).encrypt(
-        nonce.encode(), json.dumps({"out_trade_no": oid, "trade_state": "SUCCESS"}).encode(), b"t")
-    hook = {"event_type": "TRANSACTION.SUCCESS",
-            "resource": {"ciphertext": base64.b64encode(ct).decode(), "nonce": nonce,
-                         "associated_data": "t"}}
-    monkeypatch.setattr(wechatpay_provider.httpx, "get",
-                        lambda url, **kw: R({"trade_state": "NOTPAY", "out_trade_no": oid}))
+        nonce.encode(), json.dumps({"out_trade_no": oid, "trade_state": "SUCCESS"}).encode(), b"t"
+    )
+    hook = {
+        "event_type": "TRANSACTION.SUCCESS",
+        "resource": {"ciphertext": base64.b64encode(ct).decode(), "nonce": nonce, "associated_data": "t"},
+    }
+    monkeypatch.setattr(
+        wechatpay_provider.httpx, "get", lambda url, **kw: R({"trade_state": "NOTPAY", "out_trade_no": oid})
+    )
     r = client.post("/api/pay/webhook/wechat", json=hook)
     assert r.status_code == 200  # acked so wechat stops retrying, but nothing fulfilled
     assert base.get_order(oid)["status"] == "pending" and credits.balance(uid) == 0
 
 
 # --- order listing / polling -------------------------------------------------
+
 
 def test_orders_listing_and_polling():
     _, headers = make_user()

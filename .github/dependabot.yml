@@ -1,0 +1,34 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+
+  - package-ecosystem: pip
+    directory: /server
+    schedule:
+      interval: weekly
+    groups:
+      server-runtime:
+        dependency-type: production
+        patterns: ["*"]
+      server-development:
+        dependency-type: development
+        patterns: ["*"]
+
+  - package-ecosystem: npm
+    directory: /mobile
+    schedule:
+      interval: weekly
+    groups:
+      mobile:
+        patterns: ["*"]
+
+  - package-ecosystem: docker
+    directory: /server
+    schedule:
+      interval: weekly

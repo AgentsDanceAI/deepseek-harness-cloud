@@ -36,8 +36,7 @@
       <p>正在连接 DSH Cloud…</p>
     </main>
     <script>
-      // 兜底页: 正常情况下 Capacitor 以 server.url 远程模式启动, 不会加载本页。
-      // 若因配置回退加载到本地资源, 立即跳转线上站点。
+      // Local startup fallback for cases where the configured remote page was not loaded.
       window.location.replace("https://dshcloud.online");
     </script>
   </body>

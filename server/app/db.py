@@ -1,11 +1,12 @@
 """SQLite / PostgreSQL dual-backend layer.
 
-Pattern proven in a sibling production system: callers write sqlite-style SQL (`?`
-placeholders, `with tx():` transactions, `row["col"]` access) and this layer
+Callers write sqlite-style SQL (`?` placeholders, `with tx():` transactions,
+`row["col"]` access) and this layer
 translates for Postgres. Constructs that do not translate (INSERT OR REPLACE,
 strftime, AUTOINCREMENT) are banned in app code; schema below sticks to the
 portable subset.
 """
+
 from __future__ import annotations
 
 import os
@@ -41,14 +42,10 @@ SCHEMA = [
         attempts INTEGER NOT NULL DEFAULT 0,
         created REAL NOT NULL
     )""",
-    # API key: 给"用任意 OpenAI 兼容客户端接我们网关"这条路一个体面的入口。
-    # 在此之前用户只能去翻桌面端的 cloud-auth.json 把设备令牌抠出来 —— 官网宣传了
-    # OpenAI 兼容接口, 却没有领钥匙的地方, 拦住的只有老实人。
-    #
-    # 只存 sha256, 明文仅在创建时返回一次 —— 与 devices 表同一约定 (security.
-    # token_hash 的注释: plaintext never persisted)。AgentsDance 那边为了"页面随时
-    # 可查"额外存了 key_plain, 这里不跟: 库一旦泄露, 存哈希只丢"能否验证", 存明文
-    # 直接把所有人的可用凭据一起送出去。用户丢了 key 就重新建一把, 成本很低。
+    # API keys provide a dedicated credential for OpenAI-compatible clients.
+    # Store only the SHA-256 digest; plaintext is returned once at creation and
+    # can be replaced by creating a new key. This limits credential exposure if
+    # the database is disclosed.
     """CREATE TABLE IF NOT EXISTS api_keys (
         id         TEXT PRIMARY KEY,
         user_id    TEXT NOT NULL,
@@ -256,12 +253,15 @@ def _sqlite_conn() -> sqlite3.Connection:
 def _postgres_conn():
     global _pg_pool
     if _pg_pool is None:
-        import psycopg
         from psycopg.rows import dict_row
         from psycopg_pool import ConnectionPool  # type: ignore[import-not-found]
 
-        _pg_pool = ConnectionPool(config.POSTGRES_DSN, min_size=1, max_size=10,
-                                  kwargs={"row_factory": dict_row, "autocommit": False})
+        _pg_pool = ConnectionPool(
+            config.POSTGRES_DSN,
+            min_size=1,
+            max_size=10,
+            kwargs={"row_factory": dict_row, "autocommit": False},
+        )
     return _pg_pool
 
 
@@ -339,8 +339,8 @@ def ensure_schema() -> None:
 
                 def pg_columns(table: str) -> set:
                     cur = raw.execute(
-                        "SELECT column_name FROM information_schema.columns WHERE table_name=%s",
-                        (table,))
+                        "SELECT column_name FROM information_schema.columns WHERE table_name=%s", (table,)
+                    )
                     return {r[0] for r in cur.fetchall()}
 
                 _apply_migrations(lambda s: raw.execute(_pg_schema(s)), pg_columns)

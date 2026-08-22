@@ -1201,7 +1201,7 @@ body:not([data-page="landing"]) .section:first-of-type { position: relative; z-i
 .nav-account .btn-sm { display: inline-flex; align-items: center; gap: 6px; }
 .nav-account .btn-sm svg { flex: none; opacity: .9; }
 
-/* Android 卡片的扫码直装 (2026-08-18): 免去"先下到电脑再传手机"。
+/* Android card supports QR installation without transferring through a desktop.
    二维码由 tinyQR 在前端画, 不产生额外请求。 */
 .dl-qr { margin-top: 14px; text-align: center; }
 .dl-qr canvas { border-radius: 8px; background: #fff; padding: 6px; box-shadow: 0 1px 4px rgb(15 23 42 / 10%); }
@@ -1221,7 +1221,7 @@ body:not([data-page="landing"]) .section:first-of-type { position: relative; z-i
   color: var(--muted); font-size: 13.5px; line-height: 1.6; text-align: center;
 }
 
-/* API 密钥 (2026-08-18) */
+/* API keys */
 .key-form { display: flex; gap: 8px; margin: 12px 0 4px; }
 .key-form input { flex: 1; min-width: 0; }
 .key-reveal { margin: 12px 0; padding: 12px 14px; border-radius: 10px;

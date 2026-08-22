@@ -3,11 +3,8 @@
  * the packaged app.
  *
  * Why this exists as its own step: electron-builder's `files` is an explicit
- * ALLOW-LIST, and anything unlisted is dropped SILENTLY — no warning, no error,
- * a green build. Version 2.0.0 shipped exactly that way: `build/cloud/login.html`
- * was present in the assembled tree (so verify-contract passed) but absent from
- * the DMG, so the login window loaded a missing file and every user saw a blank
- * white window. Checking the source tree cannot catch that; only the artifact can.
+ * allow-list, and anything unlisted is dropped without a build error. Checking
+ * the source tree cannot catch a packaging omission; only the artifact can.
  *
  *   node desktop/scripts/verify-package.mjs <packaging-output-dir>
  *
@@ -70,27 +67,16 @@ if (missing.length > 0) {
 }
 console.log('verify-package: login-wall assets present in the packaged app')
 
-// ── 原生二进制校验 (2026-08-18 两次事故后定稿) ──────────────────────────
-// 判据只有一条: **目标平台的原生二进制必须在包里**。
-//
-// 不判"包里有没有其他平台的二进制": 装了全架构依赖后 node_modules 本就同时存在
-// linux/win32/darwin 三套, 它们躺在包里只是多占几十 MB, 运行时按平台选择, 无害。
-// 曾试图在 build.files 里裁掉它们, 两次都把目标平台自己那份也一起排掉, 导致包
-// 装上去启动即闪退 —— 所以现在不裁剪, 也不为此报错。
-//
-// 两次事故的真正教训是反过来的:
-//   ① 2026-08-17 win 包里 sharp/koffi/ripgrep 是 Linux ELF (yarn 只装了宿主平台
-//      那份), 目标平台的二进制根本不存在 → 装到 Windows 上一调就崩;
-//   ② 2026-08-18 extglob 取反把目标平台的也排掉 → 包里一个原生模块都没有 → 闪退。
-// 两次都是"该有的没有", 都能被下面这条判据抓住。
+// Native binary check: the target platform's binaries must be present. Other
+// platform variants may coexist in node_modules and are ignored here because
+// runtime resolution selects the appropriate binary.
 const NATIVE_REQUIRED = {
   darwin: ['node-pty/prebuilds/darwin', '@vscode/ripgrep-darwin', '@img/sharp-darwin'],
   win32:  ['node-pty/prebuilds/win32',  '@vscode/ripgrep-win32',  '@img/sharp-win32'],
 }
 const dirName = outDir.replace(/\\/g, '/').split('/').filter(Boolean).pop() || ''
 // 目标平台从**产物结构**判断, 不靠目录名。目录名 (mac-arm64 / win-unpacked) 是
-// electron-builder 的默认命名, 一旦谁改了输出目录或拷到别处, 靠名字推断就会静默
-// 跳过整段检查 —— 2026-08-18 写反向测试时就撞上了 (拷到 /tmp/ep 后检查不执行)。
+// electron-builder 的默认命名；若输出目录被重命名，靠名字推断会静默跳过检查。
 // .app 目录是 macOS 独有, .exe 主程序是 Windows 独有, 这两个信号不会因改名而变。
 const allPaths = [...walk(outDir)].map(p => p.replace(/\\/g, '/'))
 const targetOs = allPaths.some(p => p.includes('.app/Contents/'))  ? 'darwin'

@@ -4,6 +4,10 @@
   "private": true,
   "description": "DSH Cloud mobile shells (Capacitor WebView wrappers for https://dshcloud.online)",
   "scripts": {
+    "postinstall": "node scripts/patch-capacitor-tar.mjs",
+    "check": "npm run typecheck && npm run verify:webview",
+    "typecheck": "tsc --noEmit",
+    "verify:webview": "node scripts/verify_webview.mjs",
     "sync": "cap sync",
     "sync:android": "cap sync android",
     "sync:ios": "cap sync ios",
@@ -19,5 +23,8 @@
   "devDependencies": {
     "@capacitor/cli": "^6.2.1",
     "typescript": "^5.5.4"
+  },
+  "overrides": {
+    "tar": "7.5.22"
   }
 }

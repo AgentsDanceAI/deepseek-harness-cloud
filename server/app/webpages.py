@@ -5,6 +5,7 @@ Pages are Jinja2-rendered shells; interactivity is small vanilla JS in
 static/app.js that talks to the JSON APIs. This router is included LAST by
 main.py. All templates share templates/base.html.
 """
+
 from __future__ import annotations
 
 import html
@@ -19,6 +20,7 @@ from fastapi.templating import Jinja2Templates
 
 from . import config, credits, plans
 from .accounts import try_resolve_user
+from .redirects import safe_local_path
 
 router = APIRouter(include_in_schema=False)
 
@@ -30,22 +32,26 @@ try:
     ASSET_V = str(int(max(f.stat().st_mtime for f in _STATIC_DIR.rglob("*") if f.is_file())))
 except ValueError:
     ASSET_V = "0"
+
+
 # repo-root legal/ documents (terms.zh.md, ...). Overridable for tests/deploys.
 def _legal_dir() -> Path:
     # resolved per request so tests/deploys can repoint via env at any time
     return Path(os.environ.get("DHC_LEGAL_DIR") or Path(__file__).resolve().parents[2] / "legal")
+
 
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 
 # --- shared context ----------------------------------------------------------
 
+
 def _ctx(request: Request, page: str, **extra) -> dict:
     try:
         user = try_resolve_user(request)
     except Exception:
         user = None
-    from . import plans as _plans
+
     _cur_ctx = _currency_ctx(request)
     ctx = {
         "request": request,
@@ -100,6 +106,7 @@ def _switch_url(request: Request, **overrides) -> str:
 def _currency_ctx(request: Request) -> dict:
     """Currency shown to this visitor, and the table that goes with it."""
     from . import currency as _cur
+
     cur, _explicit = _cur.resolve(request)
     return {
         "currency": cur,
@@ -109,10 +116,10 @@ def _currency_ctx(request: Request) -> dict:
         # cookie: without a visible way back, one link pinned a visitor to a
         # currency their country would never have chosen.
         "currency_glyph": _cur.glyph(cur),
-        "currency_options": [{"code": c, "symbol": _cur.glyph(c),
-                              "active": c == cur,
-                              "href": _switch_url(request, cur=c)}
-                             for c in _cur.SUPPORTED],
+        "currency_options": [
+            {"code": c, "symbol": _cur.glyph(c), "active": c == cur, "href": _switch_url(request, cur=c)}
+            for c in _cur.SUPPORTED
+        ],
         "currency_auto": _cur.from_country(request.headers.get("cf-ipcountry", "")) or _cur.DEFAULT,
     }
 
@@ -120,6 +127,7 @@ def _currency_ctx(request: Request) -> dict:
 def _i18n_ctx(request: Request) -> dict:
     """Language and the bound translator every template uses."""
     from . import i18n
+
     lang, _explicit = i18n.resolve(request)
     # Only the js.* namespace crosses into the browser. Shipping the whole
     # catalog would put every page's copy on every page for no benefit.
@@ -142,13 +150,15 @@ def _stars_ctx() -> dict:
     """Star badge inputs. Absent until the repo is public — see github_stars."""
     try:
         from . import github_stars
+
         n = github_stars.stars()
     except Exception:  # noqa: BLE001 — the badge must never break a page
         n = None
     return {
         "github_stars": n,
-        "github_stars_text": None if n is None else __import__(
-            "app.github_stars", fromlist=["x"]).format_count(n),
+        "github_stars_text": None
+        if n is None
+        else __import__("app.github_stars", fromlist=["x"]).format_count(n),
         "github_repo_url": "https://github.com/AgentsDanceAI/deepseek-harness-cloud",
     }
 
@@ -158,6 +168,7 @@ def _team_terms_ctx(cur: str | None = None) -> dict:
     quoted in, so the displayed price is the one their order actually charges."""
     try:
         from .payments import base as _pay
+
         t = _pay.team_terms(cur)
     except Exception:
         t = {}
@@ -171,20 +182,32 @@ def _team_terms_ctx(cur: str | None = None) -> dict:
 
 def _render(request: Request, template: str, page: str, **extra):
     from . import i18n
+
     response = templates.TemplateResponse(request, template, _ctx(request, page, **extra))
     lang, explicit = i18n.resolve(request)
     from . import currency as _cur
+
     cur, cur_explicit = _cur.resolve(request)
     if cur_explicit:
-        response.set_cookie(_cur.COOKIE, cur, max_age=_cur.COOKIE_MAX_AGE,
-                            path="/", samesite="lax",
-                            secure=config.PUBLIC_BASE.startswith("https://"))
+        response.set_cookie(
+            _cur.COOKIE,
+            cur,
+            max_age=_cur.COOKIE_MAX_AGE,
+            path="/",
+            samesite="lax",
+            secure=config.PUBLIC_BASE.startswith("https://"),
+        )
     if explicit:
         # Persist the click. Without this the switcher works for exactly one
         # page view and every link after it snaps back to the browser locale.
-        response.set_cookie(i18n.COOKIE, lang, max_age=i18n.COOKIE_MAX_AGE,
-                            path="/", samesite="lax",
-                            secure=config.PUBLIC_BASE.startswith("https://"))
+        response.set_cookie(
+            i18n.COOKIE,
+            lang,
+            max_age=i18n.COOKIE_MAX_AGE,
+            path="/",
+            samesite="lax",
+            secure=config.PUBLIC_BASE.startswith("https://"),
+        )
     return response
 
 
@@ -330,6 +353,7 @@ def markdown_to_html(md: str) -> str:
 
 # --- landing -----------------------------------------------------------------
 
+
 @router.get("/")
 def landing(request: Request):
     pricing = _pricing_safe()
@@ -338,8 +362,14 @@ def landing(request: Request):
 
 # --- auth pages --------------------------------------------------------------
 
+
 @router.get("/login")
 def login_page(request: Request, next: str = "/console"):
+    safe_next = safe_local_path(next, "/console")
+    if safe_next != next:
+        from urllib.parse import urlencode
+
+        return RedirectResponse("/login?" + urlencode({"next": safe_next}), status_code=303)
     return _render(request, "login.html", "login")
 
 
@@ -349,6 +379,7 @@ def activate_page(request: Request, code: str = ""):
 
 
 # --- marketing sections (the nav's Product / Solutions / Resources) ----------
+
 
 @router.get("/product")
 def product_page(request: Request):
@@ -382,9 +413,13 @@ def team_page(request: Request):
     user = try_resolve_user(request)
     if user is None:
         return RedirectResponse("/login?next=/console/team", status_code=303)
-    return _render(request, "team.html", "team",
-                   team_seat_price=config.TEAM_SEAT_PRICE,
-                   team_seat_credits=config.TEAM_SEAT_CREDITS)
+    return _render(
+        request,
+        "team.html",
+        "team",
+        team_seat_price=config.TEAM_SEAT_PRICE,
+        team_seat_credits=config.TEAM_SEAT_CREDITS,
+    )
 
 
 @router.get("/team/join")
@@ -394,10 +429,14 @@ def team_join_page(request: Request):
     user = try_resolve_user(request)
     if user is None:
         return RedirectResponse(f"/login?next=/team/join%3Fcode%3D{code}", status_code=303)
-    return _render(request, "team.html", "team",
-                   team_seat_price=config.TEAM_SEAT_PRICE,
-                   team_seat_credits=config.TEAM_SEAT_CREDITS,
-                   auto_join_code=code)
+    return _render(
+        request,
+        "team.html",
+        "team",
+        team_seat_price=config.TEAM_SEAT_PRICE,
+        team_seat_credits=config.TEAM_SEAT_CREDITS,
+        auto_join_code=code,
+    )
 
 
 # --- cloud workspace paywall --------------------------------------------------
@@ -420,10 +459,13 @@ def console_page(request: Request):
         r["created_str"] = _fmt_ts(r.get("created"))
         recent.append(r)
     from . import teams, work_access
+
     wa = work_access.state(uid)
     org = teams.org_of(uid)
     return _render(
-        request, "console.html", "console",
+        request,
+        "console.html",
+        "console",
         balance=balance,
         balance_yuan=f"{balance / 100:.2f}",
         work_used=wa["used_minutes"],
@@ -469,16 +511,19 @@ def download_redirect(key: str):
     if not url:
         return JSONResponse(status_code=404, content={"detail": "not_available"})
     from . import db
+
     with db.tx() as conn:
         # UPSERT keeps this one statement on both backends; a read-modify-write
         # would lose counts whenever two people download at the same moment.
         conn.execute(
             "INSERT INTO kv (k, v) VALUES (?, ?) "
             "ON CONFLICT (k) DO UPDATE SET v = CAST(CAST(kv.v AS INTEGER) + 1 AS TEXT)",
-            (f"dl_{key}", "1"))
+            (f"dl_{key}", "1"),
+        )
         conn.execute(
             "INSERT INTO kv (k, v) VALUES ('downloads_total', '1') "
-            "ON CONFLICT (k) DO UPDATE SET v = CAST(CAST(kv.v AS INTEGER) + 1 AS TEXT)")
+            "ON CONFLICT (k) DO UPDATE SET v = CAST(CAST(kv.v AS INTEGER) + 1 AS TEXT)"
+        )
     return RedirectResponse(url, status_code=302)
 
 
@@ -488,14 +533,16 @@ def public_stats():
     served from our own /releases so they can be counted honestly, and logins
     are device authorisations plus browser sign-ins."""
     from . import db
+
     def _n(sql, params=()):
         row = db.query_one(sql, params)
         return int((row["n"] if row is not None else 0) or 0)
+
     return {
         "downloads": _n("SELECT COALESCE(v,'0') AS n FROM kv WHERE k='downloads_total'")
-                     + config.DOWNLOAD_COUNT_BASE,
+        + config.DOWNLOAD_COUNT_BASE,
         "logins": _n("SELECT COUNT(*) AS n FROM devices")
-                  + _n("SELECT COUNT(*) AS n FROM users WHERE last_login>0"),
+        + _n("SELECT COUNT(*) AS n FROM users WHERE last_login>0"),
         "users": _n("SELECT COUNT(*) AS n FROM users"),
         "models": len(__import__("app.model_catalog", fromlist=["x"]).catalog()),
     }
@@ -506,14 +553,18 @@ def models_public():
     """Public model catalog with credit multipliers — the pricing page reads it
     so the advertised rate and the billed rate can never disagree."""
     from . import model_catalog
-    return {"baseline": model_catalog.meta().get("baseline_model"),
-            "credits_per_baseline_m": model_catalog.meta().get("credits_per_baseline_m"),
-            "models": model_catalog.public_catalog()}
+
+    return {
+        "baseline": model_catalog.meta().get("baseline_model"),
+        "credits_per_baseline_m": model_catalog.meta().get("credits_per_baseline_m"),
+        "models": model_catalog.public_catalog(),
+    }
 
 
 @router.get("/pricing")
 def pricing_page(request: Request):
     from . import currency as _cur
+
     cur, _ = _cur.resolve(request)
     pricing = _pricing_safe(cur)
     tier_order = [t for t in ("free", "plus", "pro", "max") if t in pricing.get("tiers", {})]
@@ -521,8 +572,14 @@ def pricing_page(request: Request):
     # told why makes the price list look like an ad. `reason` was already being
     # passed on those redirects and had never been rendered.
     reason = request.query_params.get("reason")
-    return _render(request, "pricing.html", "pricing", pricing=pricing, tier_order=tier_order,
-                   reason=reason if reason in ("work", "credits") else None)
+    return _render(
+        request,
+        "pricing.html",
+        "pricing",
+        pricing=pricing,
+        tier_order=tier_order,
+        reason=reason if reason in ("work", "credits") else None,
+    )
 
 
 @router.get("/orders")
@@ -552,6 +609,7 @@ def legal_page(request: Request, doc: str):
     # a half-translated clause is a liability. Falls back to Chinese so a
     # not-yet-translated policy still renders its real text.
     from . import i18n
+
     lang, _ = i18n.resolve(request)
     path = _legal_dir() / f"{doc}.{lang}.md"
     if not path.is_file():
@@ -564,8 +622,9 @@ def legal_page(request: Request, doc: str):
             pending = False
     except Exception:
         body_html, pending = "", True
-    return _render(request, "legal.html", f"legal-{doc}",
-                   doc=doc, doc_title=title, body_html=body_html, pending=pending)
+    return _render(
+        request, "legal.html", f"legal-{doc}", doc=doc, doc_title=title, body_html=body_html, pending=pending
+    )
 
 
 @router.get("/privacy")
@@ -580,6 +639,7 @@ def terms_redirect():
 
 # --- download ----------------------------------------------------------------
 
+
 @router.get("/logout")
 def logout_alias():
     """Top-level sign-out.
@@ -591,6 +651,7 @@ def logout_alias():
     template will reach for.
     """
     from .accounts import clear_session_cookie
+
     response = RedirectResponse(config.PUBLIC_BASE.rstrip("/") + "/", status_code=303)
     clear_session_cookie(response)
     return response

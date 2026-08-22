@@ -7,6 +7,7 @@ Revocation gate: users.session_epoch is stored per user; a token is only valid
 while its "e" matches. Password change / account deletion / kick-devices bumps
 the epoch and every outstanding token dies at once.
 """
+
 from __future__ import annotations
 
 import base64
@@ -28,6 +29,7 @@ def _secret() -> bytes:
 
 # --- passwords --------------------------------------------------------------
 
+
 def hash_password(password: str) -> str:
     salt = secrets.token_bytes(16)
     digest = hashlib.scrypt(password.encode(), salt=salt, n=2**14, r=8, p=1)
@@ -47,9 +49,14 @@ def verify_password(password: str, stored: str) -> bool:
 
 # --- tokens -----------------------------------------------------------------
 
+
 def sign_token(user_id: str, device_id: str = "", epoch: int = 0, ttl: int | None = None) -> str:
-    payload = {"u": user_id, "d": device_id, "e": int(epoch),
-               "exp": time.time() + (ttl if ttl is not None else config.SESSION_TTL)}
+    payload = {
+        "u": user_id,
+        "d": device_id,
+        "e": int(epoch),
+        "exp": time.time() + (ttl if ttl is not None else config.SESSION_TTL),
+    }
     raw = base64.urlsafe_b64encode(json.dumps(payload, separators=(",", ":")).encode()).decode().rstrip("=")
     sig = hmac.new(_secret(), raw.encode(), hashlib.sha256).hexdigest()
     return f"{raw}.{sig}"

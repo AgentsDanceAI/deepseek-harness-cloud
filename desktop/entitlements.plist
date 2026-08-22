@@ -9,9 +9,8 @@
   <true/>
   <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
   <true/>
-  <!-- 本机电脑 (2026-07-27): 智能体要在用户机器上跑命令、按需控制访达
-       (如清空废纸篓)。hardened runtime 下不给这两条, 子进程会被拦、
-       Apple Event 发不出去 —— 表现是"开了全部目录权限还是没权限"。 -->
+  <!-- Desktop automation requires child-process execution and Apple Events.
+       These capabilities remain subject to macOS user consent. -->
   <key>com.apple.security.automation.apple-events</key>
   <true/>
   <key>com.apple.security.cs.allow-dyld-environment-variables</key>

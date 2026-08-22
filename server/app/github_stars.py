@@ -16,6 +16,7 @@ Three things this has to get right:
 * Survive restarts. The value is persisted, so a redeploy does not blank the
   badge until the first refresh completes.
 """
+
 from __future__ import annotations
 
 import json
@@ -25,14 +26,14 @@ import time
 
 import httpx
 
-from . import config, db
+from . import db
 
 log = logging.getLogger("dhc.stars")
 
 REPO = "AgentsDanceAI/deepseek-harness-cloud"
 KV_KEY = "github_stars"
-REFRESH_AFTER = 1800     # seconds before a value is considered stale
-RETRY_AFTER = 300        # do not hammer GitHub when it is failing
+REFRESH_AFTER = 1800  # seconds before a value is considered stale
+RETRY_AFTER = 300  # do not hammer GitHub when it is failing
 
 _lock = threading.Lock()
 _refreshing = False
@@ -52,19 +53,17 @@ def _read() -> dict:
 def _write(state: dict) -> None:
     with db.tx() as conn:
         conn.execute(
-            "INSERT INTO kv (k, v) VALUES (?, ?) "
-            "ON CONFLICT (k) DO UPDATE SET v = EXCLUDED.v",
-            (KV_KEY, json.dumps(state)))
+            "INSERT INTO kv (k, v) VALUES (?, ?) ON CONFLICT (k) DO UPDATE SET v = EXCLUDED.v",
+            (KV_KEY, json.dumps(state)),
+        )
 
 
 def _fetch() -> None:
     """Refresh in the background; failures leave the previous value alone."""
     global _refreshing
     try:
-        headers = {"Accept": "application/vnd.github+json",
-                   "User-Agent": "deepseek-harness-cloud"}
-        r = httpx.get(f"https://api.github.com/repos/{REPO}",
-                      headers=headers, timeout=8.0)
+        headers = {"Accept": "application/vnd.github+json", "User-Agent": "deepseek-harness-cloud"}
+        r = httpx.get(f"https://api.github.com/repos/{REPO}", headers=headers, timeout=8.0)
         if r.status_code == 200:
             stars = int(r.json().get("stargazers_count", 0))
             _write({"stars": stars, "public": True, "checked": time.time()})

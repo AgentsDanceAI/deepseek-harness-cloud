@@ -9,6 +9,7 @@ Contract (verified against upstream update-checker/update-download):
 Release procedure: upload installers under Caddy /releases/, then
   POST /api/admin/desktop-version {"version": "2.1.0"}
 """
+
 from __future__ import annotations
 
 import os

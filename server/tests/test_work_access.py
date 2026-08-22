@@ -8,24 +8,25 @@ The rules that must hold no matter what the client sends:
   * the intro pass price is a first-purchase offer, decided server-side;
   * a renewal bought early extends, it never burns the remainder.
 """
+
 import os
 import tempfile
-import time
 
 _TMP = tempfile.mkdtemp(prefix="dhc-wa-")
-os.environ.update({
-    "DHC_DEV": "1",
-    "AUTH_SECRET": "test-secret",
-    "DHC_DATA_DIR": _TMP,
-    "DB_PATH": os.path.join(_TMP, "test.db"),
-    "UPSTREAM_API_KEY": "sk-upstream-test",
-    "FREE_SIGNUP_CREDITS": "500",
-})
+os.environ.update(
+    {
+        "DHC_DEV": "1",
+        "AUTH_SECRET": "test-secret",
+        "DHC_DATA_DIR": _TMP,
+        "DB_PATH": os.path.join(_TMP, "test.db"),
+        "UPSTREAM_API_KEY": "sk-upstream-test",
+        "FREE_SIGNUP_CREDITS": "500",
+    }
+)
 
 import pytest  # noqa: E402
 
 from app import config, credits, db, plans, work_access  # noqa: E402
-from app.payments import base as pay_base  # noqa: E402
 
 db.ensure_schema()
 
@@ -52,8 +53,9 @@ def _user(uid):
         c.execute("DELETE FROM minute_grants WHERE user_id=?", (uid,))
         c.execute("DELETE FROM credit_grants WHERE user_id=?", (uid,))
         c.execute("DELETE FROM subscriptions WHERE user_id=?", (uid,))
-        c.execute("INSERT INTO users (id,email,session_epoch,created) VALUES (?,?,0,0)",
-                  (uid, uid + "@t.local"))
+        c.execute(
+            "INSERT INTO users (id,email,session_epoch,created) VALUES (?,?,0,0)", (uid, uid + "@t.local")
+        )
     return uid
 
 
@@ -100,9 +102,9 @@ def test_token_spend_never_eats_the_minute_allowance():
 def test_plan_tier_sets_the_allowance():
     """Included minutes come from the plan, GitHub-Actions style."""
     uid = _user("u_wa2c")
-    assert work_access.included_minutes(uid) == 120          # free
+    assert work_access.included_minutes(uid) == 120  # free
     plans.apply_plan(uid, "pro", "monthly")
-    assert work_access.included_minutes(uid) == 3600         # pro: 60h
+    assert work_access.included_minutes(uid) == 3600  # pro: 60h
     st = work_access.state(uid)
     assert st["plan_tier"] == "pro" and st["minutes_left"] == 3600
 
@@ -112,7 +114,9 @@ def test_machine_hours_are_the_only_gate():
     monthly hours. Two meters that can disagree is one more than the product
     needs, so access is now decided by hours alone."""
     import inspect
+
     from app import work_access
+
     src = inspect.getsource(work_access)
     for gone in ("active_pass", "grant_pass", "next_price", "PASS_INTRO"):
         assert gone not in src, f"{gone} survived the pass removal"
@@ -120,9 +124,10 @@ def test_machine_hours_are_the_only_gate():
     assert "pass_active" not in st and "next_price" not in st
     assert st["allowed"] == (st["minutes_left"] > 0)
 
+
 def test_purchased_minutes_extend_beyond_the_plan():
     uid = _user("u_wa2d")
-    _burn(uid, 120)                                          # allowance spent
+    _burn(uid, 120)  # allowance spent
     assert work_access.blocked_reason(uid) == "work_quota"
     work_access.grant_minutes(uid, 300, 30 * 86400, kind="pack")
     assert work_access.blocked_reason(uid) is None

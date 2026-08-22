@@ -3,42 +3,50 @@
 The docker socket proxy and the dsh container's :3081 are stubbed at the
 httpx boundary so the whole ensure/route/bill flow runs without Docker.
 """
+
 import asyncio
 import os
 import tempfile
 import time
+from types import SimpleNamespace
 
 _TMP = tempfile.mkdtemp(prefix="dhc-work-")
-os.environ.update({
-    "DHC_DEV": "1",
-    "AUTH_SECRET": "test-secret",
-    "DHC_DATA_DIR": _TMP,
-    "DB_PATH": os.path.join(_TMP, "test.db"),
-    "WORK_ENABLED": "1",
-    "WORK_CREDITS_PER_MIN": "2",
-    "WORK_MAX_CONCURRENT": "2",
-    "UPSTREAM_API_KEY": "sk-upstream-test",
-    "FREE_SIGNUP_CREDITS": "500",
-})
+os.environ.update(
+    {
+        "DHC_DEV": "1",
+        "AUTH_SECRET": "test-secret",
+        "DHC_DATA_DIR": _TMP,
+        "DB_PATH": os.path.join(_TMP, "test.db"),
+        "WORK_ENABLED": "1",
+        "WORK_CREDITS_PER_MIN": "2",
+        "WORK_MAX_CONCURRENT": "2",
+        "UPSTREAM_API_KEY": "sk-upstream-test",
+        "FREE_SIGNUP_CREDITS": "500",
+    }
+)
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
+from starlette.requests import Request  # noqa: E402
+from starlette.responses import StreamingResponse  # noqa: E402
 
-from app import config, credits, db, rate_limit, work_access, workspace, workbackend  # noqa: E402
+from app import config, credits, db, rate_limit, work_access, workbackend, workspace  # noqa: E402
 from app.main import app  # noqa: E402
+
 from ._signup import signup
 
 
 class FakeDocker:
     """Emulates the scoped docker socket proxy + the container's readiness."""
+
     def __init__(self):
-        self.containers = {}      # cname -> {"State": {"Status": ...}}
-        self.ready = set()        # cnames that answer on :3081
+        self.containers = {}  # cname -> {"State": {"Status": ...}}
+        self.ready = set()  # cnames that answer on :3081
         self.creates = 0
         self.starts = 0
         self.stops = 0
         self.deletes = 0
-        self.created_cmd = []   # boot script of each created container
+        self.created_cmd = []  # boot script of each created container
         # WORK_IMAGE's currently resolved id. Rebuilding or retagging the image
         # moves this without moving the tag, which is the case the real engine
         # hits on every runtime bump.
@@ -47,6 +55,7 @@ class FakeDocker:
 
     async def docker(self, method, path, *, json_body=None, params=None):
         import httpx
+
         req = httpx.Request(method, "http://proxy" + path)
 
         def resp(code, body=None):
@@ -57,15 +66,19 @@ class FakeDocker:
             cname = params["name"]
             # carry the caller's labels verbatim: the real _LABEL value is the
             # user id, and the reaper bills whoever that label names
-            self.containers[cname] = {"State": {"Status": "created"},
-                                      "Image": self.image_id,
-                                      "Config": {"Labels": (json_body or {}).get("Labels", {})}}
+            self.containers[cname] = {
+                "State": {"Status": "created"},
+                "Image": self.image_id,
+                "Config": {"Labels": (json_body or {}).get("Labels", {})},
+            }
             self.created_cmd.append(((json_body or {}).get("Cmd") or ["", "", ""])[-1])
             return resp(201, {"Id": cname})
-        if path == "/containers/json":   # list — must precede the inspect pattern
-            out = [{"Names": ["/" + n], "Labels": c["Config"]["Labels"]}
-                   for n, c in self.containers.items()
-                   if c["State"]["Status"] == "running"]
+        if path == "/containers/json":  # list — must precede the inspect pattern
+            out = [
+                {"Names": ["/" + n], "Labels": c["Config"]["Labels"]}
+                for n, c in self.containers.items()
+                if c["State"]["Status"] == "running"
+            ]
             return resp(200, out)
         if path.startswith("/containers/") and path.endswith("/json"):
             cname = path.split("/")[2]
@@ -76,7 +89,7 @@ class FakeDocker:
             cname = path.split("/")[2]
             self.starts += 1
             self.containers[cname]["State"]["Status"] = "running"
-            self.ready.add(cname)   # boots "instantly" in the stub
+            self.ready.add(cname)  # boots "instantly" in the stub
             return resp(204)
         if path.endswith("/stop"):
             cname = path.split("/")[2]
@@ -118,6 +131,7 @@ def fake(monkeypatch):
     # 真正的请求构造与响应解析, 而不只是 workspace.py 的调用顺序。
     async def api(self, method, path, *, json_body=None, params=None):
         return await fd.docker(method, path, json_body=json_body, params=params)
+
     monkeypatch.setattr(workbackend.DockerBackend, "_api", api)
     monkeypatch.setattr(config, "WORK_BACKEND", "docker")
     monkeypatch.setattr(workspace, "_backend", workbackend.DockerBackend())
@@ -125,6 +139,7 @@ def fake(monkeypatch):
 
     async def ready(uid):
         return workspace._cname(uid) in fd.ready
+
     monkeypatch.setattr(workspace, "_ready", ready)
     # fresh in-process state each test
     workspace._last_seen.clear()
@@ -168,7 +183,8 @@ def test_route_blocks_when_no_credits(fake):
 def test_capacity_cap(fake, monkeypatch):
     monkeypatch.setattr(config, "WORK_MAX_CONCURRENT", 1)
     c1, _ = _user("cap1@test.local")
-    c1.get("/api/work/route"); c1.get("/api/work/route")  # boots + ready
+    c1.get("/api/work/route")
+    c1.get("/api/work/route")  # boots + ready
     c2, _ = _user("cap2@test.local")
     r = c2.get("/api/work/route", follow_redirects=False)
     assert r.status_code == 302 and "state=busy" in r.headers["location"]
@@ -176,20 +192,16 @@ def test_capacity_cap(fake, monkeypatch):
 
 def _mark_agent_active(uid, ago_s=0.0):
     """Move the workspace device's last_seen — the 'agent worked' signal."""
-    db.query("UPDATE devices SET last_seen=? WHERE user_id=? AND platform='cloud'",
-             (time.time() - ago_s, uid))
+    db.query(
+        "UPDATE devices SET last_seen=? WHERE user_id=? AND platform='cloud'", (time.time() - ago_s, uid)
+    )
 
 
 def test_meters_every_minute_the_workspace_runs(fake):
-    """按**容器存在的时间**计量, 不是按智能体干活的时间。
-
-    2026-08-20 之前是后者 (这条测试原名 test_meters_only_minutes_the_agent_worked)。
-    那在工作台跑在自己机器上时成立 —— 多存在一分钟不花钱。切到 ECI 按秒计费之后,
-    同一个决定变成由我们垫付闲置时间, 而且每次智能体活动都会重置回收窗口: 一个每
-    29 分钟发一条消息的用户可以让容器永不回收, 计量却几乎为零。
-    """
+    """按容器运行时间计量；智能体活跃时间只参与空闲回收判定。"""
     c, uid = _user("bill@test.local")
-    c.get("/api/work/route"); c.get("/api/work/route")
+    c.get("/api/work/route")
+    c.get("/api/work/route")
 
     # 智能体刚干过活 —— 计一分钟
     _mark_agent_active(uid, ago_s=5)
@@ -200,16 +212,15 @@ def test_meters_every_minute_the_workspace_runs(fake):
     # 机时永远不扣积分 —— 这条没变, 两种额度互不占用
     assert credits.balance(uid) == before_credits
 
-    # 页面开着但智能体闲着 —— **也要计**, 因为云厂商照样在收我们的钱
+    # 页面开着但智能体闲着时，容器仍在运行，因此继续计量。
     _mark_agent_active(uid, ago_s=300)
     workspace._last_seen[uid] = time.time()
     workspace._started_at[uid] = time.time()
     before_minutes = work_access.used_minutes(uid)
     stops_before = fake.stops
     asyncio.run(workspace.reaper_tick(time.time()))
-    assert work_access.used_minutes(uid) == before_minutes + 1, \
-        "闲置分钟没计量 —— 那部分成本会由我们垫"
-    assert fake.stops == stops_before          # 还没到回收窗口
+    assert work_access.used_minutes(uid) == before_minutes + 1, "运行中的闲置分钟必须计量"
+    assert fake.stops == stops_before  # 还没到回收窗口
 
 
 def test_idle_workspaces_are_reclaimed_within_the_stated_window(fake, monkeypatch):
@@ -219,10 +230,11 @@ def test_idle_workspaces_are_reclaimed_within_the_stated_window(fake, monkeypatc
     """
     monkeypatch.setattr(config, "WORK_AGENT_IDLE_STOP_MIN", 10)
     c, uid = _user("idle10@test.local")
-    c.get("/api/work/route"); c.get("/api/work/route")
+    c.get("/api/work/route")
+    c.get("/api/work/route")
 
     now = time.time()
-    workspace._last_seen[uid] = now                    # 页面还开着
+    workspace._last_seen[uid] = now  # 页面还开着
     _mark_agent_active(uid, ago_s=9 * 60)
     workspace._started_at[uid] = now - 9 * 60
     stops = fake.stops
@@ -239,7 +251,8 @@ def test_agent_last_active_ignores_browser_polling(fake):
     """Browser traffic hits /api/work/route with the session cookie (no device),
     so it must not register as agent work."""
     c, uid = _user("idlebill@test.local")
-    c.get("/api/work/route"); c.get("/api/work/route")
+    c.get("/api/work/route")
+    c.get("/api/work/route")
     _mark_agent_active(uid, ago_s=600)
     stale = workspace.agent_last_active(uid)
     for _ in range(3):
@@ -250,11 +263,12 @@ def test_agent_last_active_ignores_browser_polling(fake):
 def test_abandoned_open_tab_is_reaped(fake, monkeypatch):
     """Free idle minutes must not let an open tab hold RAM forever."""
     c, uid = _user("abandon@test.local")
-    c.get("/api/work/route"); c.get("/api/work/route")
+    c.get("/api/work/route")
+    c.get("/api/work/route")
     monkeypatch.setattr(config, "WORK_AGENT_IDLE_STOP_MIN", 30)
-    _mark_agent_active(uid, ago_s=31 * 60)             # agent quiet past the backstop
+    _mark_agent_active(uid, ago_s=31 * 60)  # agent quiet past the backstop
     workspace._started_at[uid] = time.time() - 31 * 60  # and running that long
-    workspace._last_seen[uid] = time.time()            # …but the tab is still polling
+    workspace._last_seen[uid] = time.time()  # …but the tab is still polling
     stops_before = fake.stops
     asyncio.run(workspace.reaper_tick(time.time()))
     assert fake.stops == stops_before + 1
@@ -265,14 +279,15 @@ def test_resumed_workspace_gets_a_grace_window(fake, monkeypatch):
     not reap it before the user can type — otherwise returning after a long break
     starts a start/stop loop."""
     c, uid = _user("resume@test.local")
-    c.get("/api/work/route"); c.get("/api/work/route")
+    c.get("/api/work/route")
+    c.get("/api/work/route")
     monkeypatch.setattr(config, "WORK_AGENT_IDLE_STOP_MIN", 30)
-    _mark_agent_active(uid, ago_s=6 * 3600)     # last worked hours ago
-    workspace._started_at[uid] = time.time()    # …but just started now
+    _mark_agent_active(uid, ago_s=6 * 3600)  # last worked hours ago
+    workspace._started_at[uid] = time.time()  # …but just started now
     workspace._last_seen[uid] = time.time()
     stops_before = fake.stops
     asyncio.run(workspace.reaper_tick(time.time()))
-    assert fake.stops == stops_before           # still alive
+    assert fake.stops == stops_before  # still alive
     # and the grace window is not infinite: once it lapses, the backstop fires
     workspace._started_at[uid] = time.time() - 31 * 60
     asyncio.run(workspace.reaper_tick(time.time()))
@@ -281,7 +296,8 @@ def test_resumed_workspace_gets_a_grace_window(fake, monkeypatch):
 
 def test_user_gone_still_reaps(fake, monkeypatch):
     c, uid = _user("gone@test.local")
-    c.get("/api/work/route"); c.get("/api/work/route")
+    c.get("/api/work/route")
+    c.get("/api/work/route")
     _mark_agent_active(uid, ago_s=10)
     workspace._last_seen[uid] = time.time() - (config.WORK_IDLE_STOP_MIN + 1) * 60
     stops_before = fake.stops
@@ -291,7 +307,8 @@ def test_user_gone_still_reaps(fake, monkeypatch):
 
 def test_stop_endpoint(fake):
     c, uid = _user("stop@test.local")
-    c.get("/api/work/route"); c.get("/api/work/route")
+    c.get("/api/work/route")
+    c.get("/api/work/route")
     r = c.post("/api/work/stop")
     assert r.status_code == 200 and r.json()["ok"] is True
     assert fake.stops >= 1
@@ -299,7 +316,8 @@ def test_stop_endpoint(fake):
 
 def test_status_reports_state(fake):
     c, uid = _user("status@test.local")
-    c.get("/api/work/route"); c.get("/api/work/route")
+    c.get("/api/work/route")
+    c.get("/api/work/route")
     s = c.get("/api/work/status").json()
     assert s["enabled"] is True
     assert s["credits_per_min"] == 2
@@ -308,19 +326,15 @@ def test_status_reports_state(fake):
 
 # --- runtime upgrades: a new image has to actually reach existing workspaces --
 
-def test_existing_workspace_is_recreated_when_the_image_changes(fake):
-    """Bumping WORK_IMAGE must rebuild the container, not just restart it.
 
-    The boot fingerprint does not move when only the image does. Before the
-    image check, a runtime bump (rc6 -> rc8) reached brand-new users only:
-    anyone who already had a container got it started again on the old image,
-    with nothing in the logs to say so.
-    """
+def test_existing_workspace_is_recreated_when_the_image_changes(fake):
+    """Changing WORK_IMAGE must rebuild an existing container, not restart it."""
     c, uid = _user("upgrade@test.local")
-    c.get("/api/work/route"); c.get("/api/work/route")
+    c.get("/api/work/route")
+    c.get("/api/work/route")
     assert fake.creates == 1
 
-    fake.image_id = "sha256:img-new"      # operator rebuilt / retagged WORK_IMAGE
+    fake.image_id = "sha256:img-new"  # operator rebuilt / retagged WORK_IMAGE
     # Staleness is a cold-path check: /route's 30s fast path returns without
     # touching the engine at all, deliberately, because it gates every asset
     # and WebSocket frame. Backdate last_seen so this request is a cold one —
@@ -341,17 +355,151 @@ def test_image_lookup_failure_leaves_the_workspace_alone(fake):
     outcome than running one build behind.
     """
     c, uid = _user("hiccup@test.local")
-    c.get("/api/work/route"); c.get("/api/work/route")
+    c.get("/api/work/route")
+    c.get("/api/work/route")
     assert fake.creates == 1
 
     fake.image_lookup_ok = False
-    workspace._last_seen[uid] = time.time() - 31   # cold path; see the test above
+    workspace._last_seen[uid] = time.time() - 31  # cold path; see the test above
     c.get("/api/work/route")
 
     assert fake.creates == 1 and fake.deletes == 0
 
 
 # --- port preview: the agent's server runs on the CONTAINER's loopback -------
+
+
+class _StreamingUpstream:
+    def __init__(self, chunks: list[bytes], headers: dict[str, str], status_code: int = 200):
+        self.status_code = status_code
+        self.headers = headers
+        self._chunks = chunks
+        self.yielded = 0
+        self.eager_reads = 0
+        self.closed = False
+
+    @property
+    def content(self):
+        self.eager_reads += 1
+        self.yielded = len(self._chunks)
+        return b"".join(self._chunks)
+
+    async def aread(self):
+        return self.content
+
+    async def aiter_raw(self):
+        for chunk in self._chunks:
+            self.yielded += 1
+            yield chunk
+
+    async def aclose(self):
+        self.closed = True
+
+
+class _StreamingClient:
+    def __init__(self, upstream: _StreamingUpstream):
+        self.upstream = upstream
+        self.closed = False
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_args):
+        await self.aclose()
+        return False
+
+    async def request(self, *_args, **_kwargs):
+        return self.upstream
+
+    def build_request(self, method, url, **kwargs):
+        import httpx
+
+        return httpx.Request(method, url, **kwargs)
+
+    async def send(self, _request, *, stream=False):
+        assert stream is True
+        return self.upstream
+
+    async def aclose(self):
+        self.closed = True
+
+
+def _preview_request(method: str = "GET") -> Request:
+    async def receive():
+        raise AssertionError(f"{method} preview unexpectedly read a request body")
+
+    return Request(
+        {
+            "type": "http",
+            "http_version": "1.1",
+            "method": method,
+            "scheme": "https",
+            "path": "/preview/8080/download.bin",
+            "raw_path": b"/preview/8080/download.bin",
+            "query_string": b"",
+            "headers": [],
+            "client": ("127.0.0.1", 1234),
+            "server": ("test", 443),
+        },
+        receive,
+    )
+
+
+@pytest.mark.asyncio
+async def test_preview_non_html_response_streams_and_closes_after_iteration(monkeypatch):
+    upstream = _StreamingUpstream(
+        [b"abc", b"def"],
+        {
+            "content-type": "application/octet-stream",
+            "content-encoding": "gzip",
+            "content-length": "6",
+        },
+    )
+    client = _StreamingClient(upstream)
+
+    async def running(_user_id):
+        return SimpleNamespace(running=True)
+
+    monkeypatch.setattr(workspace, "try_resolve_user", lambda _request: {"id": "u_stream"})
+    monkeypatch.setattr(workspace, "_inspect", running)
+    monkeypatch.setattr(workspace, "_upstream_host", lambda _user_id: "workspace")
+    monkeypatch.setattr(workspace.httpx, "AsyncClient", lambda **_kwargs: client)
+
+    response = await workspace.preview_proxy(_preview_request(), 8080, "download.bin")
+
+    assert isinstance(response, StreamingResponse)
+    assert upstream.eager_reads == 0
+    assert upstream.yielded == 0
+    assert upstream.closed is False and client.closed is False
+    assert response.headers["content-encoding"] == "gzip"
+    assert b"".join([chunk async for chunk in response.body_iterator]) == b"abcdef"
+    assert upstream.closed is True and client.closed is True
+
+
+@pytest.mark.asyncio
+async def test_preview_html_stops_at_rewrite_limit_and_closes_upstream(monkeypatch):
+    upstream = _StreamingUpstream(
+        [b"<html>123", b"must-not-be-read"],
+        {"content-type": "text/html; charset=utf-8"},
+    )
+    client = _StreamingClient(upstream)
+
+    async def running(_user_id):
+        return SimpleNamespace(running=True)
+
+    monkeypatch.setattr(config, "PREVIEW_HTML_MAX_BYTES", 8, raising=False)
+    monkeypatch.setattr(workspace, "try_resolve_user", lambda _request: {"id": "u_html_limit"})
+    monkeypatch.setattr(workspace, "_inspect", running)
+    monkeypatch.setattr(workspace, "_upstream_host", lambda _user_id: "workspace")
+    monkeypatch.setattr(workspace.httpx, "AsyncClient", lambda **_kwargs: client)
+
+    response = await workspace.preview_proxy(_preview_request(), 8080, "index.html")
+
+    assert response.status_code == 502
+    assert b"preview_html_too_large" in response.body
+    assert upstream.yielded == 1
+    assert upstream.closed is True and client.closed is True
+
 
 @pytest.fixture()
 def container_http(monkeypatch):
@@ -361,8 +509,12 @@ def container_http(monkeypatch):
     class FakeUpstream:
         def __init__(self):
             self.routes = {
-                "/": (200, "text/html", b"<html><head><title>Snake</title></head>"
-                                        b"<body><script src='./game.js'></script></body></html>"),
+                "/": (
+                    200,
+                    "text/html",
+                    b"<html><head><title>Snake</title></head>"
+                    b"<body><script src='./game.js'></script></body></html>",
+                ),
                 "/game.js": (200, "application/javascript", b"// snake"),
                 "/dir": (301, "text/html", b""),
             }
@@ -373,17 +525,25 @@ def container_http(monkeypatch):
         async def __aexit__(self, *exc):
             return False
 
-        async def request(self, method, url, **kw):
+        def build_request(self, method, url, **kw):
             import httpx as _h
+
             seen["url"] = url
             seen["method"] = method
-            path = "/" + url.split("/", 3)[3] if url.count("/") >= 3 else "/"
+            seen["content"] = kw.get("content")
+            return _h.Request(method, url, **kw)
+
+        async def send(self, request, *, stream=False):
+            assert stream is True
+            path = request.url.path
             code, ctype, body = self.routes.get(path, (404, "text/plain", b"nope"))
             headers = {"content-type": ctype}
             if code == 301:
                 headers["location"] = "/dir/"
-            return _h.Response(code, headers=headers, content=body,
-                               request=_h.Request(method, url))
+            return _StreamingUpstream([body], headers, status_code=code)
+
+        async def aclose(self):
+            return None
 
     monkeypatch.setattr(workspace.httpx, "AsyncClient", lambda **kw: FakeUpstream())
     return seen
@@ -396,9 +556,9 @@ def test_boot_seeds_platform_instructions_mergeably(fake):
     c.get("/api/work/route")
     boot = fake.created_cmd[-1]
     assert "/root/.dsh/AGENTS.md" in boot
-    assert "/preview/" in boot                      # the URL the agent hands out
-    assert "0.0.0.0" in boot                        # bind guidance
-    assert "dshcloud:begin" in boot and "dshcloud:end" in boot   # marker-delimited
+    assert "/preview/" in boot  # the URL the agent hands out
+    assert "0.0.0.0" in boot  # bind guidance
+    assert "dshcloud:begin" in boot and "dshcloud:end" in boot  # marker-delimited
     assert "cat > /root/.dsh/AGENTS.md" not in boot  # never a wholesale overwrite
 
 
@@ -409,26 +569,43 @@ def test_preview_requires_login():
 
 def test_preview_proxies_container_port(fake, container_http):
     c, uid = _user("prev@test.local")
-    c.get("/api/work/route"); c.get("/api/work/route")
+    c.get("/api/work/route")
+    c.get("/api/work/route")
     r = c.get("/preview/8080/")
     assert r.status_code == 200
     assert container_http["url"] == f"http://{workspace._cname(uid)}:8080/"
+    assert container_http["content"] is None
     # relative asset refs must resolve under the preview prefix, not the site root
     assert '<base href="/preview/8080/">' in r.text
     assert "Snake" in r.text
 
 
+def test_preview_chunked_upload_is_limited_after_login(fake, container_http, monkeypatch):
+    c, _ = _user("prev-upload@test.local")
+    c.get("/api/work/route")
+    c.get("/api/work/route")
+    monkeypatch.setattr(config, "PREVIEW_BODY_MAX_BYTES", 5)
+    monkeypatch.setattr(config, "REQUEST_BODY_TIMEOUT_S", 1)
+
+    r = c.post("/preview/8080/upload", content=iter([b"123", b"456"]))
+
+    assert r.status_code == 413
+    assert r.json()["detail"] == "request_body_too_large"
+
+
 def test_preview_rejects_dsh_own_ports(fake, container_http):
     """3080/3081 drive the agent with the session's authority — never proxy them."""
     c, _ = _user("prevblock@test.local")
-    c.get("/api/work/route"); c.get("/api/work/route")
+    c.get("/api/work/route")
+    c.get("/api/work/route")
     for port in (3080, 3081):
         assert c.get(f"/preview/{port}/").status_code == 400
 
 
 def test_preview_rewrites_upstream_redirect(fake, container_http):
     c, _ = _user("prevredir@test.local")
-    c.get("/api/work/route"); c.get("/api/work/route")
+    c.get("/api/work/route")
+    c.get("/api/work/route")
     r = c.get("/preview/8080/dir", follow_redirects=False)
     assert r.status_code == 301
     assert r.headers["location"] == "/preview/8080/dir/"
@@ -438,8 +615,9 @@ def test_absolute_asset_path_falls_back_through_cookie(fake, container_http):
     """A previewed page asking for "/game.js" escapes the prefix; the preview
     cookie routes it back instead of 404ing."""
     c, uid = _user("prevfall@test.local")
-    c.get("/api/work/route"); c.get("/api/work/route")
-    c.get("/preview/8080/")                       # sets the cookie
+    c.get("/api/work/route")
+    c.get("/api/work/route")
+    c.get("/preview/8080/")  # sets the cookie
     r = c.get("/game.js")
     assert r.status_code == 200
     assert container_http["url"] == f"http://{workspace._cname(uid)}:8080/game.js"
@@ -448,8 +626,9 @@ def test_absolute_asset_path_falls_back_through_cookie(fake, container_http):
 def test_fallback_never_shadows_real_routes(fake, container_http):
     """The catch-all is registered last; real pages and APIs must still win."""
     c, _ = _user("prevshadow@test.local")
-    c.get("/api/work/route"); c.get("/api/work/route")
-    c.get("/preview/8080/")                       # cookie is set for this client
+    c.get("/api/work/route")
+    c.get("/api/work/route")
+    c.get("/preview/8080/")  # cookie is set for this client
     assert c.get("/api/health").json()["ok"] is True
     assert c.get("/api/work/status").json()["enabled"] is True
     assert c.get("/pricing").status_code == 200
@@ -460,6 +639,7 @@ def test_unknown_path_without_cookie_is_404():
 
 
 # --- outputs survive the container ------------------------------------------
+
 
 def test_products_are_listed_from_the_volume_when_the_container_is_asleep(tmp_path, monkeypatch):
     """The workspace stops after 15 idle minutes, and 個人成品 read its listing
@@ -474,7 +654,7 @@ def test_products_are_listed_from_the_volume_when_the_container_is_asleep(tmp_pa
     (vol / "report.html").write_text("<h1>hi</h1>")
     (vol / "deck.pptx").write_bytes(b"PK")
     (vol / "game").mkdir()
-    (vol / "node_modules").mkdir()          # plumbing, not a product
+    (vol / "node_modules").mkdir()  # plumbing, not a product
     (vol / ".cache").mkdir()
 
     monkeypatch.setattr(config, "WORK_VOLUME_ROOT", str(tmp_path))
@@ -482,7 +662,7 @@ def test_products_are_listed_from_the_volume_when_the_container_is_asleep(tmp_pa
     assert names == ["deck.pptx", "game/", "report.html"]
 
     monkeypatch.setattr(config, "WORK_VOLUME_ROOT", "")
-    assert workspace._workspace_files_offline(uid) == []   # unset -> feature off
+    assert workspace._workspace_files_offline(uid) == []  # unset -> feature off
 
 
 def test_offline_file_route_cannot_walk_out_of_the_volume(tmp_path, monkeypatch):
@@ -498,6 +678,7 @@ def test_offline_file_route_cannot_walk_out_of_the_volume(tmp_path, monkeypatch)
     assert root is not None
     for attempt in ("../secret", "../../etc/passwd", "%2e%2e%2fsecret"):
         from urllib.parse import unquote
+
         try:
             target = (root / unquote(attempt)).resolve()
             target.relative_to(root.resolve())
@@ -511,6 +692,7 @@ def test_out_of_hours_lands_on_a_page_that_exists():
     """The paywall redirected to /work/upgrade, deleted with the workspace pass:
     every visitor whose hours ran out got a 404 instead of a way to fix it."""
     import inspect
+
     from app import workspace
 
     src = inspect.getsource(workspace)
@@ -521,6 +703,7 @@ def test_out_of_hours_lands_on_a_page_that_exists():
 
 # ── 容量闸门: 静态并发上限之外的那道内存闸 ────────────────────────────────
 
+
 def test_free_memory_is_read_from_the_host_not_the_container(monkeypatch, tmp_path):
     """容器里的 /proc/meminfo 就是宿主的 —— 这道闸门的全部前提。
 
@@ -529,13 +712,15 @@ def test_free_memory_is_read_from_the_host_not_the_container(monkeypatch, tmp_pa
     meminfo = tmp_path / "meminfo"
     meminfo.write_text(
         "MemTotal:       15690236 kB\n"
-        "MemFree:          204800 kB\n"        # 只有 200M "空闲"
-        "MemAvailable:    7821312 kB\n")       # 但 7.4G 可用
+        "MemFree:          204800 kB\n"  # 只有 200M "空闲"
+        "MemAvailable:    7821312 kB\n"
+    )  # 但 7.4G 可用
     real_open = open
-    monkeypatch.setattr("builtins.open",
-                        lambda p, *a, **k: real_open(meminfo, *a, **k)
-                        if p == "/proc/meminfo" else real_open(p, *a, **k))
-    assert workbackend.host_free_mb() == 7638        # 取的是 MemAvailable
+    monkeypatch.setattr(
+        "builtins.open",
+        lambda p, *a, **k: real_open(meminfo, *a, **k) if p == "/proc/meminfo" else real_open(p, *a, **k),
+    )
+    assert workbackend.host_free_mb() == 7638  # 取的是 MemAvailable
 
 
 def test_capacity_blocks_when_the_host_is_low_on_memory(monkeypatch):
@@ -543,69 +728,59 @@ def test_capacity_blocks_when_the_host_is_low_on_memory(monkeypatch):
     monkeypatch.setattr(config, "WORK_MIN_FREE_MB", 1536)
     # 需要 512 + 1536 = 2048
     monkeypatch.setattr(workbackend, "host_free_mb", lambda: 2048)
-    assert workspace._capacity_reason() == ""          # 刚好够, 放行
+    assert workspace._capacity_reason() == ""  # 刚好够, 放行
     monkeypatch.setattr(workbackend, "host_free_mb", lambda: 2047)
-    assert workspace._capacity_reason().startswith("memory:")   # 差 1M, 拦下
+    assert workspace._capacity_reason().startswith("memory:")  # 差 1M, 拦下
 
 
 def test_unreadable_meminfo_lets_the_workspace_start(monkeypatch):
-    """读不到就放行 —— 与本模块其余闸门同一姿态。反过来的话, 一个读不到 /proc
-    的环境异常会把所有人挡在门外, 而那比偶尔一次内存紧张糟得多。"""
+    """缺少可选的宿主内存指标时保持现有可用性。"""
     monkeypatch.setattr(workbackend, "host_free_mb", lambda: None)
     assert workspace._capacity_reason() == ""
 
 
 def test_workspace_containers_are_first_in_line_for_the_oom_killer():
-    """OOM killer 按内存占用挑, 同机最大的是 postgres / elasticsearch —— 那是别人
-    的数据库, 而且不是它闯的祸。工作台可随时重启、卷还在, 该它先死。"""
+    """可重建的工作区应优先于持久化控制面进程被系统回收。"""
     assert config.WORK_OOM_SCORE_ADJ > 0
 
 
 def test_running_workspace_falls_back_to_storage_when_unreachable(fake, monkeypatch, caplog):
-    """容器在跑却读不到文件, 而存储里有 —— 那不是"用户还没产出东西"。
-
-    ECI 上最常见的原因是安全组只放行 3081, 于是预览端口的包被直接丢弃。
-    症状是「個人成品」一片空白, 看起来像用户什么都没做过 —— 最难查的那种错。
-
-    这条必须能和"容器不在"那条路分开: 两者渲染出的链接完全相同 (都是
-    /preview/file/...), 只有那句告警能区分。第一版测试就是因为没分开而
-    在撤掉修复后照样通过。
-    """
+    """运行时预览不可达时，从持久化存储列出已有产物并记录降级。"""
     c, uid = _user("fallback@test.local")
-    c.get("/api/work/route"); c.get("/api/work/route")
+    c.get("/api/work/route")
+    c.get("/api/work/route")
     # 先确认容器确实在跑 —— 否则下面测的是另一条分支
     assert c.get("/api/work/status").json()["state"] in ("running", "starting")
 
     async def unreachable(user_id, limit=60):
         return []
+
     monkeypatch.setattr(workspace, "_workspace_files", unreachable)
 
     async def no_ports(user_id):
         return []
+
     monkeypatch.setattr(workspace, "_open_ports", no_ports)
-    monkeypatch.setattr(workspace, "_workspace_files_offline",
-                        lambda user_id, limit=60: ["report.html", "src/"])
+    monkeypatch.setattr(
+        workspace, "_workspace_files_offline", lambda user_id, limit=60: ["report.html", "src/"]
+    )
 
     with caplog.at_level("WARNING"):
         r = c.get("/preview")
     assert r.status_code == 200
     assert "report.html" in r.text, "存储里有文件却没列出来 —— 用户会以为东西丢了"
     assert "/preview/file/report.html" in r.text
-    assert "安全组" in caplog.text, "降级了却没喊 —— 那就没人会去修安全组"
+    assert "preview endpoint" in caplog.text, "降级时必须记录可操作诊断"
 
 
 # --- 预览路径: 被预览的东西不能自己决定防护 ----------------------------------
 
-def test_live_preview_is_sandboxed_like_the_offline_one(fake, container_http):
-    """上游是智能体自己起的服务, 它的响应头由智能体决定。
 
-    没有沙箱, 页面就以站点自身的源运行 —— 同源 fetch 自动带上会话 cookie
-    (httponly 挡的是读, 不是发), API 认证的兜底正是读它, 而除 OAuth 外没有
-    CSRF 防护。于是被提示注入的智能体写出的页面, 在用户点开预览那一刻就能
-    以他的身份调 /api/auth/password, 且无密码账号的旧密码校验是跳过的。
-    """
+def test_live_preview_is_sandboxed_like_the_offline_one(fake, container_http):
+    """用户控制的在线预览与离线文件使用相同的源隔离策略。"""
     c, uid = _user("sandbox@test.local")
-    c.get("/api/work/route"); c.get("/api/work/route")
+    c.get("/api/work/route")
+    c.get("/api/work/route")
     r = c.get("/preview/8080/")
     csp = r.headers.get("content-security-policy", "")
     assert "sandbox" in csp, "活容器预览没有沙箱 —— 智能体写的页面能以用户身份调 API"
@@ -617,26 +792,42 @@ def test_upstream_cannot_override_our_csp_or_set_cookies(fake, monkeypatch):
     种 cookie。大小写不敏感地剔除 —— 这道防线不该押在"上游规规矩矩"上, 上游
     正是被预览的那个东西。"""
     c, uid = _user("hdr@test.local")
-    c.get("/api/work/route"); c.get("/api/work/route")
+    c.get("/api/work/route")
+    c.get("/api/work/route")
 
     class Hostile:
-        async def __aenter__(self): return self
-        async def __aexit__(self, *exc): return False
-        async def request(self, method, url, **kw):
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        def build_request(self, method, url, **kw):
             import httpx as _h
-            return _h.Response(200, content=b"<html>hi</html>", headers=[
-                ("content-type", "text/html"),
-                ("Content-Security-Policy", "default-src *"),   # 故意用大写
-                ("Set-Cookie", "evil=1; Path=/"),
-            ], request=_h.Request(method, url))
+
+            return _h.Request(method, url, **kw)
+
+        async def send(self, request, *, stream=False):
+            assert stream is True
+            return _StreamingUpstream(
+                [b"<html>hi</html>"],
+                {
+                    "content-type": "text/html",
+                    "Content-Security-Policy": "default-src *",  # 故意用大写
+                    "Set-Cookie": "evil=1; Path=/",
+                },
+            )
+
+        async def aclose(self):
+            return None
+
     monkeypatch.setattr(workspace.httpx, "AsyncClient", lambda **kw: Hostile())
 
     r = c.get("/preview/8080/")
     csp = r.headers.get("content-security-policy", "")
     assert "sandbox" in csp, "上游的 CSP 盖住了我们的"
     assert "default-src *" not in csp
-    assert "evil=1" not in "; ".join(r.headers.get_list("set-cookie")), \
-        "智能体的服务在我们的域上种了 cookie"
+    assert "evil=1" not in "; ".join(r.headers.get_list("set-cookie")), "智能体的服务在我们的域上种了 cookie"
 
 
 def test_both_listings_hide_the_same_noise(fake, monkeypatch, tmp_path):
@@ -646,25 +837,34 @@ def test_both_listings_hide_the_same_noise(fake, monkeypatch, tmp_path):
     成品列表凭空多出 package-lock.json 又消失。
     """
     c, uid = _user("noise@test.local")
-    c.get("/api/work/route"); c.get("/api/work/route")
+    c.get("/api/work/route")
+    c.get("/api/work/route")
 
     # 容器的目录索引: 名字按百分号编码给出, 中文名也走这条路
-    index = ('<a href="report.html">report.html</a>'
-             '<a href="package-lock.json">package-lock.json</a>'
-             '<a href="node_modules/">node_modules/</a>'
-             '<a href="AI-%E5%87%BA%E6%B5%B7.pptx">x</a>')
+    index = (
+        '<a href="report.html">report.html</a>'
+        '<a href="package-lock.json">package-lock.json</a>'
+        '<a href="node_modules/">node_modules/</a>'
+        '<a href="AI-%E5%87%BA%E6%B5%B7.pptx">x</a>'
+    )
 
     class Idx:
-        async def __aenter__(self): return self
-        async def __aexit__(self, *e): return False
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *e):
+            return False
+
         async def get(self, url, **kw):
             import httpx as _h
+
             return _h.Response(200, text=index, request=_h.Request("GET", url))
+
     monkeypatch.setattr(workspace.httpx, "AsyncClient", lambda **kw: Idx())
 
     import asyncio
-    got = asyncio.get_event_loop_policy().new_event_loop().run_until_complete(
-        workspace._workspace_files(uid))
+
+    got = asyncio.get_event_loop_policy().new_event_loop().run_until_complete(workspace._workspace_files(uid))
     assert "package-lock.json" not in got
     assert not any(n.startswith("node_modules") for n in got)
     assert "report.html" in got
@@ -673,6 +873,7 @@ def test_both_listings_hide_the_same_noise(fake, monkeypatch, tmp_path):
 
 
 # --- 预览源隔离 --------------------------------------------------------------
+
 
 @pytest.fixture()
 def isolated(monkeypatch):
@@ -721,7 +922,8 @@ def test_isolation_off_keeps_the_sandbox(fake, container_http, monkeypatch):
     """没有独立预览域时, 沙箱是唯一的防线, 不能跟着一起去掉。"""
     monkeypatch.setattr(config, "PREVIEW_DOMAIN", "")
     c, uid = _user("iso5@test.local")
-    c.get("/api/work/route"); c.get("/api/work/route")
+    c.get("/api/work/route")
+    c.get("/api/work/route")
     r = c.get("/preview/8080/")
     assert "sandbox" in r.headers.get("content-security-policy", "")
 
@@ -730,7 +932,8 @@ def test_isolation_on_drops_the_sandbox(fake, container_http, isolated):
     """有了独立域 + Origin 白名单, 跨源写入那条路已经断了, 就不必再为沙箱付
     掉 dev server 的 localStorage 与 HMR。"""
     c, uid = _user("iso6@test.local")
-    c.get("/api/work/route"); c.get("/api/work/route")
+    c.get("/api/work/route")
+    c.get("/api/work/route")
     r = c.get("/preview/8080/", headers={"host": "preview.dshcloud.online"})
     assert "sandbox" not in r.headers.get("content-security-policy", "")
 
@@ -760,9 +963,10 @@ def test_the_progress_bar_is_driven_by_real_phases(fake, monkeypatch):
     s0 = c.get("/api/work/status").json()
     assert s0["phase"] in ("queued", "booting", "warming", "ready"), s0
 
-    c.get("/api/work/route"); c.get("/api/work/route")
+    c.get("/api/work/route")
+    c.get("/api/work/route")
     s1 = c.get("/api/work/status").json()
-    assert s1["phase"] == "ready"          # FakeDocker 里容器瞬间就绪
+    assert s1["phase"] == "ready"  # FakeDocker 里容器瞬间就绪
 
     # 页面把这套词汇用起来了吗 —— 后端给了而页面不认, 等于没给
     page = c.get("/work/starting").text
@@ -776,7 +980,9 @@ def test_the_bar_never_claims_to_be_done_early():
     一条走到满格却还没进去的进度条, 比没有进度条更让人以为坏了。
     """
     import re
+
     from app import workspace as w
+
     bands = re.findall(r"(\w+):\[(\d+),(\d+),", w._BOOT_JS.replace(" ", ""))
     assert bands, "解析不到 BAND 定义"
     got = {name: (int(lo), int(hi)) for name, lo, hi in bands}
@@ -792,6 +998,7 @@ def test_the_loading_animation_does_not_ship_someone_elses_logo():
     """页脚已经声明"与 DeepSeek 无背书关系"。把对方的标识摆进自家加载动画,
     会正好抵消那句声明 —— 这里用的是自己画的鲸鱼。"""
     from app import workspace as w
+
     assert "<svg" in w._BOOT_WHALE
     assert "deepseek" not in w._BOOT_WHALE.lower()
     assert "currentColor" in w._BOOT_WHALE, "颜色要跟随 --brand, 不写死"
@@ -800,10 +1007,11 @@ def test_the_loading_animation_does_not_ship_someone_elses_logo():
 def test_reduced_motion_users_still_get_the_progress():
     """关掉游动动画, 但进度本身不能一起关掉。"""
     from app import workspace as w
+
     assert "prefers-reduced-motion" in w._BOOT_CSS
-    tail = w._BOOT_CSS[w._BOOT_CSS.index("prefers-reduced-motion"):]
+    tail = w._BOOT_CSS[w._BOOT_CSS.index("prefers-reduced-motion") :]
     assert "animation:none" in tail.replace(" ", "")
-    assert ".fill{height" in w._BOOT_CSS.replace(" ", "")   # 填充本身照常存在
+    assert ".fill{height" in w._BOOT_CSS.replace(" ", "")  # 填充本身照常存在
 
 
 def test_the_whale_faces_the_way_it_swims():
@@ -813,6 +1021,7 @@ def test_the_whale_faces_the_way_it_swims():
     组翻过来。谁把这个组去掉, 鲸鱼就会倒着游而不会报任何错。
     """
     from app import workspace as w
+
     assert "scale(-1,1)" in w._BOOT_WHALE, "镜像组没了 —— 鲸鱼会倒着游"
     # 眼睛仍画在 x<19 (左半), 说明确实靠镜像而不是重画; 两者一起变才是对的
     assert 'cx="11.4"' in w._BOOT_WHALE
@@ -825,6 +1034,7 @@ def test_the_fluke_pivots_on_its_own_box_not_the_viewbox():
     歪到别处 —— 尾巴会绕着一个不相干的点甩。
     """
     from app import workspace as w
+
     css = w._BOOT_CSS.replace(" ", "").replace("\n", "")
     assert "transform-box:fill-box" in css, "没有 fill-box, 支点会按 viewBox 算"
     assert "transform-origin:0%50%" in css, "支点要在尾鳍与身体的连接处"
@@ -832,10 +1042,13 @@ def test_the_fluke_pivots_on_its_own_box_not_the_viewbox():
 
 # --- 手机端外壳与 dsh 的接缝 -------------------------------------------------
 
+
 def _pwa(name):
     from pathlib import Path
-    return (Path(__file__).resolve().parent.parent / "app" / "static" / "pwa"
-            / name).read_text(encoding="utf-8")
+
+    return (Path(__file__).resolve().parent.parent / "app" / "static" / "pwa" / name).read_text(
+        encoding="utf-8"
+    )
 
 
 def test_sidebar_tap_behaviour_actually_runs(tmp_path):
@@ -867,10 +1080,11 @@ def test_the_scrim_is_not_a_pseudo_element_on_a_clipped_container():
     从未渲染。改成挂在 body 上的真实元素。
     """
     from pathlib import Path
+
     pwa = Path(__file__).resolve().parent.parent / "app" / "static" / "pwa"
     css = (pwa / "mobile.css").read_text(encoding="utf-8")
     assert "#dhc-scrim" in css
-    assert "sidebarCol" not in css[css.index("#dhc-scrim"):], "遮罩又挂回侧栏里了"
+    assert "sidebarCol" not in css[css.index("#dhc-scrim") :], "遮罩又挂回侧栏里了"
 
 
 def test_tap_outside_is_scoped_to_narrow_screens():
@@ -886,7 +1100,7 @@ def test_the_tap_must_still_reach_what_it_hit():
     吞掉它会让人以为"点了没反应" —— 而那正是这次要修的毛病。
     """
     js = _pwa("workspace-chrome.js")
-    body = js[js.index("function tapOutsideSidebar"):js.index("function watchSidebar")]
+    body = js[js.index("function tapOutsideSidebar") : js.index("function watchSidebar")]
     assert "preventDefault" not in body, "吞掉了原本的点击"
     assert "stopPropagation" not in body
 
@@ -894,6 +1108,7 @@ def test_the_tap_must_still_reach_what_it_hit():
 def test_the_tap_handler_runs_in_capture_phase():
     """抽屉里的条目自己会 stopPropagation, 冒泡阶段收不到抽屉外那一下。"""
     import re
+
     js = _pwa("workspace-chrome.js")
     m = re.search(r"addEventListener\(\s*['\"]click['\"]\s*,\s*tapOutsideSidebar\s*,\s*(\w+)\s*\)", js)
     assert m, "没有注册抽屉外点击处理"

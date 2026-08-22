@@ -1,0 +1,54 @@
+schema_version = 1
+
+[repository]
+canonical_remote = "https://github.com/AgentsDanceAI/deepseek-harness-cloud.git"
+public_branch = "main"
+current_license = "AGPL-3.0-only"
+licensing_state = "legal/licensing/LICENSE_STATE.toml"
+community_baseline = "legal/licensing/COMMUNITY_BASELINE.manifest"
+
+[profiles.working-tree]
+forbidden_paths = []
+
+[profiles.public-candidate]
+forbidden_paths = [
+  "deploy/prod",
+  "docs/workspace-scaling.md",
+]
+
+[content]
+excluded_prefixes = [
+  ".git/",
+  "docs/superpowers/",
+]
+public_contact_allowlist = [
+  "support@agentsdance.ai",
+  "security@agentsdance.ai",
+  "legal@agentsdance.ai",
+]
+forbidden_secret_markers = [
+  "-----BEGIN PRIVATE KEY-----",
+  "-----BEGIN RSA PRIVATE KEY-----",
+  "-----BEGIN OPENSSH PRIVATE KEY-----",
+]
+forbidden_operational_categories = [
+  "live credentials or tokens",
+  "customer or user identifiers",
+  "private network addresses or cloud resource identifiers",
+  "production backup, cutover, capacity, or cost records",
+  "incident diary or blame narrative",
+]
+
+[licensing]
+future_source_available_requirements_are_operative = false
+existing_agpl_rights_revocable = false
+transition_requires_counsel = true
+transition_requires_complete_rights_audit = true
+transition_is_prospective_only = true
+
+[external_gates]
+license_replacement = "closed"
+production_change = "closed"
+registry_publish = "closed"
+public_history_rewrite = "closed"
+github_team_or_ruleset_change = "closed"

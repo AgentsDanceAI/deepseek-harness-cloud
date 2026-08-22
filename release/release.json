@@ -1,0 +1,27 @@
+{
+  "$schema": "./release-source.schema.json",
+  "version": "0.2.0",
+  "stackSchema": 1,
+  "databaseSchema": 1,
+  "minCliVersion": "0.2.0",
+  "minUpgradeFrom": "0.1.0",
+  "legacyCompatibility": {
+    "introduced": "0.2.0",
+    "supportedThrough": "0.4.0",
+    "paths": ["scripts/quickstart.sh", "deploy/docker-compose.yml"]
+  },
+  "harnessRuntime": "0.1.0-rc.8",
+  "desktopRuntime": "0.1.0-rc.6",
+  "productImages": {
+    "server": "ghcr.io/agentsdanceai/dsh-cloud-server:0.2.0",
+    "workspace": "ghcr.io/agentsdanceai/dsh-cloud-workspace:0.2.0"
+  },
+  "baseImages": {
+    "python": "python:3.11-slim-bookworm@sha256:2e32f7d302adc1c37428355c1e646897c0c53f4fd60b6a551245fb90ee129f91",
+    "uv": "ghcr.io/astral-sh/uv:0.8.11@sha256:8101ad825250a114e7bef89eefaa73c31e34e10ffbe5aff01562740bac97553c",
+    "node": "node:24-bookworm-slim@sha256:3638d9a6fe4030bd716be989438248074489337ba3275657f93595428be4fc03",
+    "caddy": "caddy:2@sha256:df7f1c2fb114453b951de51a98efc010db1655a92c2e86be6706714e2417a78d",
+    "postgres": "postgres:18-alpine@sha256:d3e1620b530c944afa6e887d22eb899824da68e19c52024bf98f5220c88a65b2",
+    "socketProxy": "tecnativa/docker-socket-proxy@sha256:1f5038b54f06c3e18422902cf00ba21803d1c97805aae032e5e6673d532d3459"
+  }
+}

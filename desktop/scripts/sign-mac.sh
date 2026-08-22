@@ -3,33 +3,21 @@
 #
 #   ./desktop/scripts/sign-mac.sh <mac-arm64|mac> [...]
 #
-# 凭据 (与 AgentsDance 共用 Team GKT967HB5K —— Developer ID 证书发给 Team 而非
-# 单个 App, bundle id 无关, 且 Apple 限额 5 张, 复用是推荐做法):
-#   /root/.agentsdance-signing/{devid-application.p12,p12-password,notary-key.json}
+# 凭据通过 SIGN_DIR 提供，包括 Developer ID 证书、密码文件和公证 API 密钥。
 #
 # ── 关键: 用 --for-notarization, 别手工枚举嵌套实体 ──────────────────────────
 # 该标志对**所有 Mach-O 二进制**统一开 hardened runtime (help 原文: "equivalent to
 # --code-signature-flags runtime for all signed paths"), 并强制 Developer ID 证书
 # + 时间戳服务器。
 #
-# 2026-08-18 曾手工枚举每个 Helper/framework 用 "<相对路径>:runtime" 的 scoped 语法
-# 逐个指定, 结果撞上 rcodesign 把 <path>@<int> 用作 fat binary 索引 ——
-# "@vscode/ripgrep-darwin-arm64/bin/rg" 这个路径无法写进 scope 且无转义。为绕它试过
-# --exclude(该文件不进封印 → macOS 判定 bundle 被篡改 → 用户机器上启动即闪退,
-# 而公证却能通过, 骗过了验收)、临时改名(封印路径对不上 → 主二进制签名无效)、
-# TOML 配置(rcodesign 静默忽略不认识的字段, 三种结构都验证不了)、bundle 签完后
-# 补签(改了哈希 → 封印失效)。全部白费 —— --for-notarization 一行解决。
+# 手工为嵌套二进制逐个指定 runtime 标志容易遗漏或受路径语法限制；
+# `--for-notarization` 统一处理所有 Mach-O 文件。
 #
 # ── 验证纪律: 本地读签名标志, 别拿公证当测试 ────────────────────────────────
-# 公证一轮 3-5 分钟且只回一句"拒了"。verify-mac-signature.mjs 直接解析每个 Mach-O
-# 的 CodeDirectory flags, 几秒出结果, 且能指出是哪个文件没开 runtime。
+# verify-mac-signature.mjs 在提交公证前直接检查每个 Mach-O 的 CodeDirectory flags。
 #
-# ⚠️ 从 macOS 把 .app 传过来时, tar 必须带 COPYFILE_DISABLE=1
-#    (2026-08-20 踩到): macOS 的 bsdtar 默认把扩展属性外化成 ._<同名> 的
-#    AppleDouble 文件, 在 Linux 上解开就会在每个目录里多出一份 —— 那次一个包里
-#    多了 25662 个。危害有两层: 它们会被一起签进封印 (体积/完整性都受影响), 而且
-#    Contents/MacOS/ 里的 ._ 排在真二进制前面, 让 verify-mac-signature 读错文件、
-#    把签好的包误报成 "0/4 缺 allow-jit"。正确姿势:
+# ⚠️ 从 macOS 传输 .app 时，使用 COPYFILE_DISABLE=1，避免 bsdtar 生成
+#    AppleDouble 文件。这些文件会污染签名清单并干扰二进制检测：
 #      COPYFILE_DISABLE=1 tar -czf app.tar.gz -C dist/mac-arm64 "DSH Cloud Desktop.app"
 #    传到之后先 `find <app> -name "._*" -delete` 复查一遍再签, 便宜且能兜住。
 #
@@ -59,9 +47,8 @@ for dir in "$@"; do
   # ⚠️ --for-notarization 只统一处理 hardened runtime **标志**; entitlements 仍然
   # 按 rcodesign 的通用规则**只作用于主实体**。Electron 的渲染进程跑在
   # Helper (Renderer).app 里, 它开了 hardened runtime 却拿不到 allow-jit 的话,
-  # V8 申请不到 JIT 内存 → "Failed to reserve virtual memory for CodeRange" →
-  # 渲染进程死 → 应用启动即退出 (2026-08-18 用户实测)。
-  # 而**公证照样能过** —— Apple 只校验 runtime 标志, 不校验 entitlements 够不够用。
+  # V8 申请不到 JIT 内存，渲染进程会退出。Apple 公证只校验 runtime 标志，
+  # 不验证应用运行所需的 entitlements 是否完整。
   # 所以每个 Helper.app 必须用 "<相对路径>:<文件>" 显式再给一遍 entitlements。
   # (这些路径不含 @, scope 能正常表达; 含 @ 的 ripgrep 不需要 entitlements。)
   ent_args=(--entitlements-xml-file "$ENT")
@@ -91,4 +78,4 @@ echo "下一步 (必须在 macOS 上做, 本机是 Linux 就把 .app 传过去):
 echo "  bash desktop/scripts/wrap-signed-dmg.sh <signed.app|signed.zip> <输出目录>"
 echo "发布必须是 DMG 而非 zip —— zip 会让用户吃 App Translocation, 且应用内更新"
 echo "读安装包尾部比对 'koly' (UDIF 标记), zip 过不了, 更新下载完必定失败。"
-echo "publish-r2.sh 已加闸: 发现 mac 产物是 zip 或尾部无 koly 会直接拒绝发布。"
+echo "发布流程还应拒绝 zip 或尾部缺少 koly 标记的 macOS 产物。"

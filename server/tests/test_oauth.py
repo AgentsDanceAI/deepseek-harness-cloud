@@ -4,25 +4,28 @@ Environment is pinned before app imports (config reads env at import time).
 Provider HTTP calls are stubbed by monkeypatching httpx.AsyncClient at the
 oauth module boundary; no real network is touched.
 """
+
 import os
 import tempfile
 import urllib.parse
 
 _TMP = tempfile.mkdtemp(prefix="dhc-oauth-")
-os.environ.update({
-    "DHC_DEV": "1",
-    "AUTH_SECRET": "test",
-    "DHC_DATA_DIR": _TMP,
-    "DB_PATH": os.path.join(_TMP, "test.db"),
-    "GOOGLE_LOGIN_CLIENT_ID": "gid",
-    "GOOGLE_LOGIN_CLIENT_SECRET": "gsec",
-    "GITHUB_LOGIN_CLIENT_ID": "hid",
-    "GITHUB_LOGIN_CLIENT_SECRET": "hsec",
-    # config freezes at first app import; when this module imports before
-    # test_core (e.g. `pytest test_oauth.py test_core.py`), core's gateway
-    # tests still need our upstream key present in config.
-    "UPSTREAM_API_KEY": "sk-upstream-test",
-})
+os.environ.update(
+    {
+        "DHC_DEV": "1",
+        "AUTH_SECRET": "test",
+        "DHC_DATA_DIR": _TMP,
+        "DB_PATH": os.path.join(_TMP, "test.db"),
+        "GOOGLE_LOGIN_CLIENT_ID": "gid",
+        "GOOGLE_LOGIN_CLIENT_SECRET": "gsec",
+        "GITHUB_LOGIN_CLIENT_ID": "hid",
+        "GITHUB_LOGIN_CLIENT_SECRET": "hsec",
+        # config freezes at first app import; when this module imports before
+        # test_core (e.g. `pytest test_oauth.py test_core.py`), core's gateway
+        # tests still need our upstream key present in config.
+        "UPSTREAM_API_KEY": "sk-upstream-test",
+    }
+)
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
@@ -41,6 +44,7 @@ def _oauth_config(monkeypatch):
     monkeypatch.setattr(config, "GOOGLE_LOGIN_CLIENT_SECRET", "gsec")
     monkeypatch.setattr(config, "GITHUB_LOGIN_CLIENT_ID", "hid")
     monkeypatch.setattr(config, "GITHUB_LOGIN_CLIENT_SECRET", "hsec")
+
 
 GOOGLE_TOKEN = "https://oauth2.googleapis.com/token"
 GOOGLE_USERINFO = "https://www.googleapis.com/oauth2/v3/userinfo"
@@ -89,6 +93,7 @@ def _state_from(location: str) -> str:
 
 # --- start -------------------------------------------------------------------
 
+
 def test_google_start_redirects_and_sets_nonce():
     c = TestClient(app, follow_redirects=False)
     r = c.get("/api/auth/google/start?next=/console")
@@ -111,6 +116,7 @@ def test_github_start_redirects_and_sets_nonce():
 
 # --- state / CSRF ------------------------------------------------------------
 
+
 def test_google_callback_bad_state_redirects_error():
     c = TestClient(app, follow_redirects=False)
     r = c.get("/api/auth/google/callback?code=abc&state=bogus")
@@ -127,6 +133,7 @@ def test_google_callback_missing_state_redirects_error():
 
 # --- google happy / unverified ----------------------------------------------
 
+
 def test_google_callback_happy_creates_user_and_logs_in(monkeypatch):
     c = TestClient(app, follow_redirects=False)
     start = c.get("/api/auth/google/start?next=/console")
@@ -134,8 +141,11 @@ def test_google_callback_happy_creates_user_and_logs_in(monkeypatch):
     _stub_httpx(
         monkeypatch,
         post={GOOGLE_TOKEN: _Resp(200, {"access_token": "tok"})},
-        get={GOOGLE_USERINFO: _Resp(200, {
-            "email": "g@test.local", "email_verified": True, "name": "Google User"})},
+        get={
+            GOOGLE_USERINFO: _Resp(
+                200, {"email": "g@test.local", "email_verified": True, "name": "Google User"}
+            )
+        },
     )
     r = c.get(f"/api/auth/google/callback?code=abc&state={state}")
     assert r.status_code == 302
@@ -153,8 +163,7 @@ def test_google_callback_unverified_email_no_login(monkeypatch):
     _stub_httpx(
         monkeypatch,
         post={GOOGLE_TOKEN: _Resp(200, {"access_token": "tok"})},
-        get={GOOGLE_USERINFO: _Resp(200, {
-            "email": "unverified@test.local", "email_verified": False})},
+        get={GOOGLE_USERINFO: _Resp(200, {"email": "unverified@test.local", "email_verified": False})},
     )
     r = c.get(f"/api/auth/google/callback?code=abc&state={state}")
     assert r.status_code == 302
@@ -165,6 +174,7 @@ def test_google_callback_unverified_email_no_login(monkeypatch):
 
 # --- github happy ------------------------------------------------------------
 
+
 def test_github_callback_happy_primary_verified_logs_in(monkeypatch):
     c = TestClient(app, follow_redirects=False)
     start = c.get("/api/auth/github/start")
@@ -174,11 +184,14 @@ def test_github_callback_happy_primary_verified_logs_in(monkeypatch):
         post={GITHUB_TOKEN: _Resp(200, {"access_token": "tok"})},
         get={
             GITHUB_USER: _Resp(200, {"login": "octocat", "name": "The Octocat"}),
-            GITHUB_EMAILS: _Resp(200, [
-                {"email": "secondary@test.local", "verified": True, "primary": False},
-                {"email": "primary@test.local", "verified": True, "primary": True},
-                {"email": "junk@test.local", "verified": False, "primary": False},
-            ]),
+            GITHUB_EMAILS: _Resp(
+                200,
+                [
+                    {"email": "secondary@test.local", "verified": True, "primary": False},
+                    {"email": "primary@test.local", "verified": True, "primary": True},
+                    {"email": "junk@test.local", "verified": False, "primary": False},
+                ],
+            ),
         },
     )
     r = c.get(f"/api/auth/github/callback?code=abc&state={state}")
@@ -199,8 +212,9 @@ def test_github_callback_no_verified_email_no_login(monkeypatch):
         post={GITHUB_TOKEN: _Resp(200, {"access_token": "tok"})},
         get={
             GITHUB_USER: _Resp(200, {"login": "nobody"}),
-            GITHUB_EMAILS: _Resp(200, [
-                {"email": "unverified@test.local", "verified": False, "primary": True}]),
+            GITHUB_EMAILS: _Resp(
+                200, [{"email": "unverified@test.local", "verified": False, "primary": True}]
+            ),
         },
     )
     r = c.get(f"/api/auth/github/callback?code=abc&state={state}")
@@ -210,6 +224,7 @@ def test_github_callback_no_verified_email_no_login(monkeypatch):
 
 
 # --- _safe_next --------------------------------------------------------------
+
 
 def test_safe_next_rejects_open_redirects():
     assert oauth._safe_next("/console") == "/console"

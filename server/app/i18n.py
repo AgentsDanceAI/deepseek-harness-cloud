@@ -16,6 +16,7 @@ Language resolution order: explicit ?lang= (and it sticks, via cookie) ->
 cookie -> Accept-Language -> DEFAULT_LANG. The explicit choice wins over the
 browser because someone who clicked "EN" means it, even on a zh-CN laptop.
 """
+
 from __future__ import annotations
 
 import json

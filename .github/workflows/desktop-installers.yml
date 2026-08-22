@@ -3,8 +3,8 @@
 # under your own deployment's /releases/ path.
 #
 # Unsigned: macOS users right-click-open on first launch (or `xattr -cr`),
-# Windows shows SmartScreen "more info -> run anyway". Proper signing needs the
-# an Apple Developer ID and a Windows code-signing certificate.
+# Windows shows SmartScreen "more info -> run anyway". Proper signing needs an
+# Apple Developer ID and a Windows code-signing certificate.
 name: desktop-installers
 
 on:
@@ -25,10 +25,12 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
+      - name: Verify release contract
+        run: node desktop/scripts/verify-version.mjs
       - name: Assemble upstream + overlay
         run: node desktop/scripts/assemble.mjs --no-submodule
       - name: Install dependencies
@@ -41,6 +43,11 @@ jobs:
         run: corepack yarn add -D unrun
       - name: Verify upstream contract
         run: node desktop/scripts/verify-contract.mjs desktop/build/upstream
+      - name: Typecheck and test
+        working-directory: desktop/build/upstream
+        run: |
+          corepack yarn typecheck
+          corepack yarn test --run
       - name: Build
         working-directory: desktop/build/upstream/dsh-plugin-desktop
         run: corepack yarn build
@@ -54,15 +61,14 @@ jobs:
           corepack yarn exec electron-builder -- --win nsis --publish=never
       - name: Verify login assets shipped
         # electron-builder's `files` is an allow-list and drops unlisted paths
-        # SILENTLY: 2.0.0 shipped with no login.html and every user got a blank
-        # window. Only the artifact can prove it made it in.
+        # silently. Verify the packaged artifact, not only the source tree.
         run: node desktop/scripts/verify-package.mjs desktop/build/upstream/dsh-plugin-desktop/dist
       - name: Collect artifact
         run: |
           mkdir -p out
           cp desktop/build/upstream/dsh-plugin-desktop/dist/*Setup.exe out/
           ls -la out/
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: windows-installer
           path: out/*.exe
@@ -70,13 +76,15 @@ jobs:
 
   macos-arm64:
     if: ${{ inputs.only == 'all' || inputs.only == 'macos' }}
-    runs-on: macos-latest
+    runs-on: macos-15
     timeout-minutes: 90
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
+      - name: Verify release contract
+        run: node desktop/scripts/verify-version.mjs
       - name: Assemble upstream + overlay
         run: node desktop/scripts/assemble.mjs --no-submodule
       - name: Install dependencies
@@ -89,6 +97,11 @@ jobs:
         run: corepack yarn add -D unrun
       - name: Verify upstream contract
         run: node desktop/scripts/verify-contract.mjs desktop/build/upstream
+      - name: Typecheck and test
+        working-directory: desktop/build/upstream
+        run: |
+          corepack yarn typecheck
+          corepack yarn test --run
       - name: Build
         working-directory: desktop/build/upstream/dsh-plugin-desktop
         run: corepack yarn build
@@ -98,8 +111,7 @@ jobs:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
         run: corepack yarn package:dir
       - name: Verify login assets shipped
-        # See the Windows job: an unlisted asset is dropped silently at packaging
-        # time, which is how 2.0.0 shipped a blank login window.
+        # See the Windows job: unlisted assets are dropped during packaging.
         run: node desktop/scripts/verify-package.mjs desktop/build/upstream/dsh-plugin-desktop/dist
       - name: Wrap DMG
         working-directory: desktop/build/upstream/dsh-plugin-desktop
@@ -111,15 +123,12 @@ jobs:
           mkdir -p ../out && STAGE=$(mktemp -d)
           cp -R "$APP" "$STAGE/"
           ln -s /Applications "$STAGE/Applications"
-          # 未签名期间的首次打开说明, 放进 DMG 窗口 (用户拖拽前就能看见)。
-          # 内容给的是「系统设置 → 隐私与安全性 → 仍要打开」+ xattr 兜底 ——
-          # macOS 15 Sequoia 已移除「右键点图标 → 打开」那条老路子, 别再写它。
-          # 签名+公证上线后这个文件就该删掉 (连同本步骤)。
+          # Include first-launch guidance while distributing an unsigned build.
           cp "$GITHUB_WORKSPACE/desktop/dmg-extras/请先阅读.txt" "$STAGE/"
           hdiutil create -volname "DSH Cloud Desktop" -srcfolder "$STAGE" -ov -format UDZO \
             "../out/DSH-Cloud-Desktop-${VERSION}-mac-${ARCH_LABEL:-arm64}.dmg"
           ls -la ../out/
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: macos-arm64-dmg
           path: desktop/build/upstream/out/*.dmg
@@ -127,13 +136,15 @@ jobs:
 
   macos-x64:
     if: ${{ inputs.only == 'all' || inputs.only == 'macos-intel' }}
-    runs-on: macos-13   # Intel x64 runner
+    runs-on: macos-15-intel
     timeout-minutes: 90
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
+      - name: Verify release contract
+        run: node desktop/scripts/verify-version.mjs
       - name: Assemble upstream + overlay
         run: node desktop/scripts/assemble.mjs --no-submodule
       - name: Install dependencies
@@ -146,6 +157,11 @@ jobs:
         run: corepack yarn add -D unrun
       - name: Verify upstream contract
         run: node desktop/scripts/verify-contract.mjs desktop/build/upstream
+      - name: Typecheck and test
+        working-directory: desktop/build/upstream
+        run: |
+          corepack yarn typecheck
+          corepack yarn test --run
       - name: Build
         working-directory: desktop/build/upstream/dsh-plugin-desktop
         run: corepack yarn build
@@ -155,8 +171,7 @@ jobs:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
         run: corepack yarn package:dir
       - name: Verify login assets shipped
-        # See the Windows job: an unlisted asset is dropped silently at packaging
-        # time, which is how 2.0.0 shipped a blank login window.
+        # See the Windows job: unlisted assets are dropped during packaging.
         run: node desktop/scripts/verify-package.mjs desktop/build/upstream/dsh-plugin-desktop/dist
       - name: Wrap DMG
         env:
@@ -170,15 +185,12 @@ jobs:
           mkdir -p ../out && STAGE=$(mktemp -d)
           cp -R "$APP" "$STAGE/"
           ln -s /Applications "$STAGE/Applications"
-          # 未签名期间的首次打开说明, 放进 DMG 窗口 (用户拖拽前就能看见)。
-          # 内容给的是「系统设置 → 隐私与安全性 → 仍要打开」+ xattr 兜底 ——
-          # macOS 15 Sequoia 已移除「右键点图标 → 打开」那条老路子, 别再写它。
-          # 签名+公证上线后这个文件就该删掉 (连同本步骤)。
+          # Include first-launch guidance while distributing an unsigned build.
           cp "$GITHUB_WORKSPACE/desktop/dmg-extras/请先阅读.txt" "$STAGE/"
           hdiutil create -volname "DSH Cloud Desktop" -srcfolder "$STAGE" -ov -format UDZO \
             "../out/DSH-Cloud-Desktop-${VERSION}-mac-${ARCH_LABEL:-arm64}.dmg"
           ls -la ../out/
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: macos-x64-dmg
           path: desktop/build/upstream/out/*.dmg

@@ -1,5 +1,5 @@
 {
-  "_comment": "由 server/scripts/gen_models.py 生成，请勿手改——手写的价目表迟早会漂。倍率以 claude-sonnet-5 为 1.00x 基准（倍率是比值，改毛利率不影响它）；1.00x = 1000 积分 / 1M tokens；$1 = 100 积分。混合单价 = 输入 × 0.75 + 输出 × 0.25。实际扣费再乘 MODEL_PRICE_MARKUP。",
+  "_comment": "由 server/scripts/gen_models.py 生成，请勿手改——手写的价目表迟早会漂。倍率以 claude-sonnet-5 为 1.00x 基准（倍率是相对值）；1.00x = 1000 积分 / 1M tokens；$1 = 100 积分。混合单价 = 输入 × 0.75 + 输出 × 0.25。实际扣费再乘 MODEL_PRICE_MARKUP。",
   "baseline_model": "claude-sonnet-5",
   "credits_per_baseline_m": 1000,
   "models": [

@@ -2,6 +2,7 @@
 
 Deployment notes live in deploy/.env.example — keep the two in sync.
 """
+
 from __future__ import annotations
 
 import os
@@ -40,13 +41,24 @@ def _env_bool(name: str, default: bool = False) -> bool:
 # MUST be a long random value in production. Startup refuses to serve without it
 # unless DHC_DEV=1 (see main.py).
 def auth_secret() -> str:
-    return _env("AUTH_SECRET")
+    inline = _env("AUTH_SECRET")
+    if inline:
+        return inline
+    secret_file = _env("AUTH_SECRET_FILE")
+    if not secret_file:
+        return ""
+    try:
+        return Path(secret_file).read_text(encoding="utf-8").strip()
+    except OSError:
+        # Startup treats an absent or unreadable secret mount as no secret.
+        return ""
 
 
 DEV_MODE = _env_bool("DHC_DEV", False)
-# dhc.* 日志级别。默认 INFO —— 全仓只有十来处 log.info 且都不在每请求路径上,
-# 不会淹掉容器日志 (5×20MB 轮转)。调成 WARNING 会让"工作台被回收"这类记录消失。
+# Application log level; INFO preserves lifecycle and billing diagnostics.
 LOG_LEVEL = _env("LOG_LEVEL", "INFO")
+RELEASE_VERSION = _env("RELEASE_VERSION", "dev")
+RELEASE_REVISION = _env("RELEASE_REVISION", "")
 SESSION_COOKIE = "dhc_session"
 SESSION_TTL = _env_int("AUTH_TOKEN_TTL", 90 * 24 * 3600)  # browser session tokens
 DEVICE_TOKEN_TTL = _env_int("DEVICE_TOKEN_TTL", 365 * 24 * 3600)  # desktop device tokens
@@ -56,12 +68,27 @@ DB_BACKEND = _env("DB_BACKEND", "sqlite")  # sqlite | postgres
 DB_PATH = _env("DB_PATH", str(DATA_DIR / "dhc.db"))
 POSTGRES_DSN = _env("POSTGRES_DSN")  # required when DB_BACKEND=postgres
 
-# --- upstream LLM (the money secret: never leaves this process) -------------
-# Default points at the Alibaba-hosted qianmian gateway, which is OpenAI-compatible
-# and serves deepseek-v4-flash / deepseek-v4-pro under the same ids dsh sends.
+# --- upstream LLM (the provider credential never leaves this process) -------
+# The default endpoint is OpenAI-compatible; operators may replace it.
 UPSTREAM_BASE_URL = _env("UPSTREAM_BASE_URL", "https://api.qianmian.ai/v1")
 UPSTREAM_API_KEY = _env("UPSTREAM_API_KEY")
 UPSTREAM_TIMEOUT_S = _env_float("UPSTREAM_TIMEOUT_S", 600.0)
+
+# --- inbound HTTP bounds ----------------------------------------------------
+# Ordinary JSON API requests should remain small.
+API_BODY_MAX_BYTES = _env_int("API_BODY_MAX_BYTES", 2 * 1024 * 1024)
+# Multimodal prompts and tool definitions are commonly larger than account API
+# payloads. The gateway still buffers JSON, so keep the default finite.
+GATEWAY_BODY_MAX_BYTES = _env_int("GATEWAY_BODY_MAX_BYTES", 32 * 1024 * 1024)
+# Preview applications may accept file uploads through the authenticated proxy.
+PREVIEW_BODY_MAX_BYTES = _env_int("PREVIEW_BODY_MAX_BYTES", 64 * 1024 * 1024)
+# HTML preview responses must be buffered briefly to inject their base URL.
+PREVIEW_HTML_MAX_BYTES = _env_int("PREVIEW_HTML_MAX_BYTES", 8 * 1024 * 1024)
+# Provider notifications are small signed documents; keep their attack surface
+# narrower without changing the normal webhook contract.
+WEBHOOK_BODY_MAX_BYTES = _env_int("WEBHOOK_BODY_MAX_BYTES", 256 * 1024)
+# Total time allowed to receive a protected request body, including all chunks.
+REQUEST_BODY_TIMEOUT_S = _env_float("REQUEST_BODY_TIMEOUT_S", 30.0)
 
 # --- web_search backend -----------------------------------------------------
 # dsh's web-search-deepseek speaks Anthropic Messages and expects native
@@ -72,13 +99,11 @@ UPSTREAM_TIMEOUT_S = _env_float("UPSTREAM_TIMEOUT_S", 600.0)
 #                             (DeepSeek official — a full billed model turn)
 SEARCH_PROVIDER = _env("SEARCH_PROVIDER", "zhipu").lower()
 ZHIPU_SEARCH_API_KEY = _env("ZHIPU_SEARCH_API_KEY")
-# Engine ladder. dsh discards any result without a url, and as of 2026-08-16
-# Zhipu's search_pro/search_std answer 200 with rich content but an EMPTY link
-# on every row — so the default leads with an engine that carries real links
-# and falls back through the others (each may have its own quota).
+# Prefer a search engine that returns source URLs; fallbacks may have separate quotas.
 ZHIPU_SEARCH_ENGINE = _env("ZHIPU_SEARCH_ENGINE", "search_pro_sogou")
-ZHIPU_SEARCH_FALLBACKS = [e.strip() for e in _env(
-    "ZHIPU_SEARCH_FALLBACKS", "search_pro,search_std").split(",") if e.strip()]
+ZHIPU_SEARCH_FALLBACKS = [
+    e.strip() for e in _env("ZHIPU_SEARCH_FALLBACKS", "search_pro,search_std").split(",") if e.strip()
+]
 ZHIPU_SEARCH_BASE = _env("ZHIPU_SEARCH_BASE", "https://open.bigmodel.cn/api/paas/v4")
 UPSTREAM_ANTHROPIC_BASE = _env("UPSTREAM_ANTHROPIC_BASE", "https://api.deepseek.com/anthropic/v1")
 
@@ -111,10 +136,14 @@ ALLOW_REGISTRATION = _env_bool("ALLOW_REGISTRATION", True)
 # --- oauth login (Google / GitHub; a provider activates when its pair is set) ---
 GOOGLE_LOGIN_CLIENT_ID = _env("GOOGLE_LOGIN_CLIENT_ID") or _env("AGENT_PLUGIN_GOOGLE_CLIENT_ID")
 GOOGLE_LOGIN_CLIENT_SECRET = _env("GOOGLE_LOGIN_CLIENT_SECRET") or _env("AGENT_PLUGIN_GOOGLE_CLIENT_SECRET")
-GOOGLE_LOGIN_REDIRECT_URI = _env("GOOGLE_LOGIN_REDIRECT_URI") or (PUBLIC_BASE.rstrip("/") + "/api/auth/google/callback")
+GOOGLE_LOGIN_REDIRECT_URI = _env("GOOGLE_LOGIN_REDIRECT_URI") or (
+    PUBLIC_BASE.rstrip("/") + "/api/auth/google/callback"
+)
 GITHUB_LOGIN_CLIENT_ID = _env("GITHUB_LOGIN_CLIENT_ID")
 GITHUB_LOGIN_CLIENT_SECRET = _env("GITHUB_LOGIN_CLIENT_SECRET")
-GITHUB_LOGIN_REDIRECT_URI = _env("GITHUB_LOGIN_REDIRECT_URI") or (PUBLIC_BASE.rstrip("/") + "/api/auth/github/callback")
+GITHUB_LOGIN_REDIRECT_URI = _env("GITHUB_LOGIN_REDIRECT_URI") or (
+    PUBLIC_BASE.rstrip("/") + "/api/auth/github/callback"
+)
 OAUTH_AUTO_REGISTER = _env_bool("OAUTH_AUTO_REGISTER", True)
 
 # --- payments (a provider activates when its variables are set) -------------
@@ -155,9 +184,8 @@ WORK_IMAGE_REF = _env("WORK_IMAGE_REF", "")
 ECI_REGION_ID = _env("ECI_REGION_ID", "")
 ECI_ZONE_ID = _env("ECI_ZONE_ID", "")
 ECI_VSWITCH_ID = _env("ECI_VSWITCH_ID", "")
-# 只放行 3081 <- 应用机那一个 IP。ECI 上安全组是**唯一**那层边界: 3081 那一跳
-# 没有任何应用层鉴权 (socat 从容器回环连向 dsh, dsh 的可达性围栏恒真), 所以
-# 能连上它的就能完全操作该用户的工作台。绝不要复用应用机的安全组。
+# The workspace bridge has no application authentication. Its security group
+# must allow only the application service and must not be shared broadly.
 ECI_SECURITY_GROUP_ID = _env("ECI_SECURITY_GROUP_ID", "")
 ECI_ACCESS_KEY_ID = _env("ECI_ACCESS_KEY_ID", "")
 ECI_ACCESS_KEY_SECRET = _env("ECI_ACCESS_KEY_SECRET", "")
@@ -185,7 +213,7 @@ WORK_CREDITS_PER_MIN = _env_int("WORK_CREDITS_PER_MIN", 2)
 # what lets 個人成品 keep showing a user's files instead of an empty page for
 # the 23 hours a day the container is asleep. Empty disables the offline view.
 WORK_VOLUME_ROOT = _env("WORK_VOLUME_ROOT", "")
-WORK_IDLE_STOP_MIN = _env_int("WORK_IDLE_STOP_MIN", 15)      # no browser traffic -> stop
+WORK_IDLE_STOP_MIN = _env_int("WORK_IDLE_STOP_MIN", 15)  # no browser traffic -> stop
 # Capacity backstop: idle minutes are free, RAM is not. A tab left open with the
 # agent doing nothing this long is stopped too (volumes persist, resume is fast).
 WORK_AGENT_IDLE_STOP_MIN = _env_int("WORK_AGENT_IDLE_STOP_MIN", 30)
@@ -202,31 +230,28 @@ WORK_FREE_MINUTES = _env_int("WORK_FREE_MINUTES", 180)
 # --- teams ------------------------------------------------------------------
 # Seats bound how many people may share an organisation's credit pool. Price is
 # minor units per seat per month, in PRICING_CURRENCY.
-TEAM_SEAT_PRICE = _env_int("TEAM_SEAT_PRICE", 1500)      # per seat, monthly (minor units)
+TEAM_SEAT_PRICE = _env_int("TEAM_SEAT_PRICE", 1500)  # per seat, monthly (minor units)
 TEAM_SEAT_CREDITS = _env_int("TEAM_SEAT_CREDITS", 3500)  # pool credits added per seat per cycle
 TEAM_SEAT_MINUTES = _env_int("TEAM_SEAT_MINUTES", 1200)  # pool workspace minutes per seat
-TEAM_SEAT_MIN = _env_int("TEAM_SEAT_MIN", 3)             # below this it is an individual plan
+TEAM_SEAT_MIN = _env_int("TEAM_SEAT_MIN", 3)  # below this it is an individual plan
 # Volume bands as "minSeats:percentOff,..." — the discount applies to the seat
 # fee only, never to the included credits/minutes (those are real cost).
 TEAM_SEAT_TIERS = [
     (int(b.split(":")[0]), int(b.split(":")[1]))
-    for b in _env("TEAM_SEAT_TIERS", "10:10,25:15,50:20").split(",") if ":" in b
+    for b in _env("TEAM_SEAT_TIERS", "10:10,25:15,50:20").split(",")
+    if ":" in b
 ]
 # Default per-member ceilings on the shared pools (None = unlimited). Sized as a
 # multiple of one seat's contribution so a single person cannot spend the team's
 # month, while a normally-heavy user is never nagged.
 TEAM_DEFAULT_CREDIT_CAP_X = _env_float("TEAM_DEFAULT_CREDIT_CAP_X", 3.0)
 TEAM_DEFAULT_MINUTE_CAP_X = _env_float("TEAM_DEFAULT_MINUTE_CAP_X", 3.0)
-WORK_MAX_CONCURRENT = _env_int("WORK_MAX_CONCURRENT", 40)    # global running-container cap
+WORK_MAX_CONCURRENT = _env_int("WORK_MAX_CONCURRENT", 40)  # global running-container cap
 WORK_MEM_LIMIT_MB = _env_int("WORK_MEM_LIMIT_MB", 512)
-# 起新工作台前要求宿主至少还剩这么多可用内存(MB, 不含即将分配的那 512)。
-# WORK_MAX_CONCURRENT 是**静态**上限, 它不知道同机还跑着别的东西 —— 本机与
-# 另一套自有生产系统全栈共用 14G, 8 × 512M 的额度在对方峰值时可能就是压垮线。
-# 而 Linux 的 OOM killer 不挑肇事者, 它按内存占用选, 最可能被杀的是 postgres
-# 或 elasticsearch 这种大块头, 而不是闯祸的工作台。所以在**分配之前**就拦。
+# Require this much free host memory before allocating another workspace. The
+# static concurrency cap alone cannot account for unrelated host workloads.
 WORK_MIN_FREE_MB = _env_int("WORK_MIN_FREE_MB", 1536)
-# 工作台容器的 OOM 优先级(-1000..1000, 越大越先被杀)。真到了内存悬崖, 该死的是
-# 一个可随时重启、卷还在的工作台, 不是别人的数据库。0 = 与系统默认同权。
+# Workspace OOM priority (-1000..1000); higher values are reclaimed first.
 WORK_OOM_SCORE_ADJ = _env_int("WORK_OOM_SCORE_ADJ", 800)
 WORK_CPUS = _env_float("WORK_CPUS", 1.0)
 WORK_START_TIMEOUT_S = _env_float("WORK_START_TIMEOUT_S", 45.0)
@@ -235,9 +260,7 @@ WORK_START_TIMEOUT_S = _env_float("WORK_START_TIMEOUT_S", 45.0)
 # session to the work subdomain too. Empty = host-only (single-domain deploys).
 COOKIE_DOMAIN = _env("COOKIE_DOMAIN", "")
 
-# Downloads served before we started counting (installers published by hand).
-# Shown on the homepage so the number reflects reality rather than restarting
-# at zero on every deploy.
+# Optional starting value for download counters migrated from another system.
 DOWNLOAD_COUNT_BASE = _env_int("DOWNLOAD_COUNT_BASE", 0)
 
 # --- admin ------------------------------------------------------------------

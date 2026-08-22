@@ -1,4 +1,5 @@
 """Web console page tests. Environment is prepared BEFORE the app import."""
+
 from __future__ import annotations
 
 import importlib
@@ -32,6 +33,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
+
 from ._signup import signup, signup_with_password
 
 
@@ -42,6 +44,7 @@ def client():
 
 
 # --- public pages ------------------------------------------------------------
+
 
 def test_landing_renders(client):
     r = client.get("/")
@@ -148,6 +151,7 @@ def test_download_redirect_counts_then_forwards(client):
     os.environ["DOWNLOAD_URL_MAC"] = "https://example.com/dsh.dmg"
     try:
         from app import db
+
         before = db.query_one("SELECT v FROM kv WHERE k='downloads_total'")
         before = int((before["v"] if before else 0) or 0)
         r = client.get("/dl/mac-arm64", follow_redirects=False)
@@ -165,6 +169,7 @@ def test_download_redirect_404s_for_a_platform_we_do_not_ship(client):
 
 
 # --- legal pages -------------------------------------------------------------
+
 
 def test_legal_pages_placeholder_when_missing(client):
     for doc in ("terms", "privacy", "refund", "aup"):
@@ -215,6 +220,7 @@ def test_markdown_escapes_html():
 
 # --- auth-gated pages --------------------------------------------------------
 
+
 def test_console_redirects_anonymous(client):
     r = client.get("/console", follow_redirects=False)
     assert r.status_code in (302, 303, 307)
@@ -264,8 +270,10 @@ def test_release_downloads_are_capped_per_ip(client):
     Two concurrent transfers per address is the budget; the third is told to
     come back rather than being served a trickle that pins a worker."""
     from app.release_throttle import ReleaseThrottle
+
     mw = ReleaseThrottle(None)
     import time
+
     now = time.time()
     mw._active["1.2.3.4"] = [now, now]
     assert mw._prune(now) == 2
@@ -279,6 +287,7 @@ def test_release_throttle_holds_the_slot_until_the_body_ends():
     slot when the response STARTED, so a 282MB transfer occupied the limiter
     for microseconds and nothing was ever rejected."""
     import asyncio
+
     from app.release_throttle import ReleaseThrottle
 
     started = asyncio.Event()
@@ -287,7 +296,7 @@ def test_release_throttle_holds_the_slot_until_the_body_ends():
     async def slow_app(scope, receive, send):
         await send({"type": "http.response.start", "status": 200, "headers": []})
         started.set()
-        await finish.wait()            # body still streaming
+        await finish.wait()  # body still streaming
         await send({"type": "http.response.body", "body": b"x", "more_body": False})
 
     mw = ReleaseThrottle(slow_app)
@@ -308,6 +317,7 @@ def test_release_throttle_holds_the_slot_until_the_body_ends():
 
 # --- currency picker ---------------------------------------------------------
 
+
 def test_currency_picker_is_only_on_the_pricing_page(client):
     """It belongs next to the billing-period toggle, not in the nav: currency
     changes nothing anywhere else, and a control on every page reads as
@@ -315,7 +325,7 @@ def test_currency_picker_is_only_on_the_pricing_page(client):
     assert "cur-picker" in client.get("/pricing").text
     for path in ("/", "/product", "/solutions", "/download"):
         assert "cur-picker" not in client.get(path).text, path
-        assert "lang-switch" in client.get(path).text, path   # language still is global
+        assert "lang-switch" in client.get(path).text, path  # language still is global
 
 
 def test_currency_defaults_to_the_visitor_country(client):
@@ -340,7 +350,7 @@ def test_currency_picker_offers_every_currency_and_a_way_back(client):
     assert r.cookies.get(currency.COOKIE) == "USD"
     body = r.text
     for code in currency.SUPPORTED:
-        assert f'>{code}<' in body, code
+        assert f">{code}<" in body, code
     # the country's own currency is labelled, so the way back is findable
     assert "按所在地" in body or "your region" in body
 
@@ -353,13 +363,13 @@ def test_picker_drops_the_country_qualifier_but_prices_keep_it(client):
 
     assert currency.glyph("HKD") == "$" and currency.symbol("HKD") == "HK$"
     body = client.get("/pricing?cur=HKD").text
-    assert "HK$780" in body or "HK$</span>780" in body      # prices stay qualified
-    assert "<b>HK$</b>" not in body                          # the picker row does not
+    assert "HK$780" in body or "HK$</span>780" in body  # prices stay qualified
+    assert "<b>HK$</b>" not in body  # the picker row does not
 
 
 def test_switchers_do_not_reset_each_other(client):
     """Bare `?lang=en` hrefs replace the whole query string; switching language
     on /pricing?cur=CNY used to silently drop the currency."""
     body = client.get("/pricing?lang=en&cur=CNY").text
-    assert "cur=CNY" in body and "lang=zh" in body      # language link keeps cur
-    assert "lang=en" in body and "cur=EUR" in body      # currency links keep lang
+    assert "cur=CNY" in body and "lang=zh" in body  # language link keeps cur
+    assert "lang=en" in body and "cur=EUR" in body  # currency links keep lang

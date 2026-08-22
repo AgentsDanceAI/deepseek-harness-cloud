@@ -71,6 +71,13 @@
     var d = new Date(ts * 1000), p = function (n) { return (n < 10 ? "0" : "") + n; };
     return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate());
   }
+  function addCell(row, text, className) {
+    var cell = document.createElement("td");
+    if (className) cell.className = className;
+    cell.textContent = text;
+    row.appendChild(cell);
+    return cell;
+  }
 
   function loadStats() {
     fetch("/api/admin/stats").then(function (r) { return r.json(); }).then(function (s) {
@@ -87,22 +94,34 @@
       .then(function (r) { return r.json(); })
       .then(function (d) {
         var tb = $("#users tbody");
-        tb.innerHTML = "";
+        tb.textContent = "";
         (d.users || []).forEach(function (u) {
           var tr = document.createElement("tr");
           var mins = u.work_minutes_used || 0, inc = u.work_minutes_included || 0;
-          tr.innerHTML =
-            "<td>" + u.email + (u.role === "admin" ? ' <span class="tag">' + T.admin_tag + "</span>" : "") + "</td>" +
-            '<td><select class="cap-input" style="width:96px"></select></td>' +
-            '<td class="num">' + (u.credits || 0).toLocaleString() + "</td>" +
-            '<td class="num">' + Math.floor(mins / 60) + "h / " + Math.floor(inc / 60) + "h</td>" +
-            "<td>" + (u.status === "active"
-              ? '<span class="badge badge-ok">' + T.status_active + "</span>"
-              : '<span class="badge badge-danger">' + T.status_suspended + "</span>") + "</td>" +
-            "<td>" + fmtDate(u.created) + "</td><td></td>";
+          var emailCell = addCell(tr, "");
+          emailCell.textContent = u.email;
+          if (u.role === "admin") {
+            var tag = document.createElement("span");
+            tag.className = "tag";
+            tag.textContent = T.admin_tag;
+            emailCell.append(" ", tag);
+          }
+          var planCell = addCell(tr, "");
+          var sel = document.createElement("select");
+          sel.className = "cap-input";
+          sel.style.width = "96px";
+          planCell.appendChild(sel);
+          addCell(tr, (u.credits || 0).toLocaleString(), "num");
+          addCell(tr, Math.floor(mins / 60) + "h / " + Math.floor(inc / 60) + "h", "num");
+          var statusCell = addCell(tr, "");
+          var badge = document.createElement("span");
+          badge.className = u.status === "active" ? "badge badge-ok" : "badge badge-danger";
+          badge.textContent = u.status === "active" ? T.status_active : T.status_suspended;
+          statusCell.appendChild(badge);
+          addCell(tr, fmtDate(u.created));
+          var act = addCell(tr, "");
 
           // plan: change takes effect immediately
-          var sel = tr.querySelector("select");
           ["free", "plus", "pro", "max"].forEach(function (t) {
             var o = document.createElement("option");
             o.value = t; o.textContent = t;
@@ -115,7 +134,6 @@
               .then(loadUsers).catch(function (e) { alert(e.message); loadUsers(); });
           };
 
-          var act = tr.lastElementChild;
           var grant = document.createElement("button");
           grant.className = "link-btn"; grant.textContent = T.grant_btn;
           grant.onclick = function () {

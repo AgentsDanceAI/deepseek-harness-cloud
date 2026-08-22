@@ -3,14 +3,13 @@
     python3 -m scripts.eci_image_cache check      # 缓存与 WORK_IMAGE_REF 对得上吗
     python3 -m scripts.eci_image_cache rebuild    # 按当前 WORK_IMAGE_REF 重建
 
-为什么需要这个: 冷启动 25s 全靠命中镜像缓存, 未命中会退回 50s。而缓存是**按
-镜像引用**建的 —— WORK_IMAGE_REF 一升到 rc9, 缓存还指着 rc8, 于是每个用户每次
-都多等半分钟。这件事**不报错、不告警**, 只是慢, 所以没人会发现。
+镜像缓存按镜像引用匹配。WORK_IMAGE_REF 更新后必须同步重建缓存，否则新实例会
+静默回退到完整镜像拉取并增加冷启动时间。
 
-构建缓存的那个任务不共享业务实例的 EIP, 自己没有公网出口, 从公网仓库拉不到镜像
-(实测: 一直 Preparing / 进度 0 / "start to pull images")。所以要临时申请一个 EIP
-传给 CreateImageCache, 用完释放。
+缓存构建任务不共享业务实例的网络出口，因此脚本临时申请 EIP 并传给
+CreateImageCache，完成后释放。
 """
+
 from __future__ import annotations
 
 import base64
@@ -32,11 +31,14 @@ def _pe(s) -> str:
 
 
 def _call(product: str, version: str, action: str, params: dict | None = None) -> dict:
-    """阿里云 RPC 调用。签名与 workbackend._sign 同一套 (已对着真实端点验过)。"""
+    """阿里云 RPC 调用；签名算法与 workbackend._sign 保持一致。"""
     p = {
-        "Action": action, "Version": version, "Format": "JSON",
+        "Action": action,
+        "Version": version,
+        "Format": "JSON",
         "AccessKeyId": config.ECI_ACCESS_KEY_ID,
-        "SignatureMethod": "HMAC-SHA1", "SignatureVersion": "1.0",
+        "SignatureMethod": "HMAC-SHA1",
+        "SignatureVersion": "1.0",
         "SignatureNonce": uuid.uuid4().hex,
         "Timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "RegionId": config.ECI_REGION_ID,
@@ -45,17 +47,17 @@ def _call(product: str, version: str, action: str, params: dict | None = None) -
     canon = "&".join(f"{_pe(k)}={_pe(v)}" for k, v in sorted(p.items()))
     sts = f"POST&{_pe('/')}&{_pe(canon)}"
     p["Signature"] = base64.b64encode(
-        hmac.new((config.ECI_ACCESS_KEY_SECRET + "&").encode(), sts.encode(),
-                 hashlib.sha1).digest()).decode()
+        hmac.new((config.ECI_ACCESS_KEY_SECRET + "&").encode(), sts.encode(), hashlib.sha1).digest()
+    ).decode()
     # quotas 是全局服务, 没有分地域的域名; 其余产品带地域。
-    host = "quotas.aliyuncs.com" if product == "quotas" \
-        else f"{product}.{config.ECI_REGION_ID}.aliyuncs.com"
+    host = "quotas.aliyuncs.com" if product == "quotas" else f"{product}.{config.ECI_REGION_ID}.aliyuncs.com"
     r = httpx.post(f"https://{host}/", data=p, timeout=60.0)
     body = r.json()
     # 阿里云把错误也放在非 200 之外的地方, Code 字段才是权威的
     if r.status_code != 200 or body.get("Code"):
-        raise RuntimeError(f"{action}: {body.get('Code') or r.status_code} "
-                           f"{body.get('Message', r.text[:200])}")
+        raise RuntimeError(
+            f"{action}: {body.get('Code') or r.status_code} {body.get('Message', r.text[:200])}"
+        )
     return body
 
 
@@ -73,9 +75,7 @@ def _ref() -> str:
 def eip_headroom() -> int | None:
     """并发上限与 EIP 配额的余量; 读不到返回 **None**。
 
-    不要用 -1 表示"未知": 余量本身就可能是负数 (上限配得比配额还高), 而那正是
-    最该报警的情况 —— 用同一个哨兵值会把最坏的一种当成"不知道"直接放过。
-    第一版就是这么写的, 并发设成 185 时一声没吭。
+    不要用 -1 表示“未知”：余量本身可能为负，复用同一个哨兵值会漏掉超额配置。
 
     每个工作台自动创建一个 EIP, 所以**并发的真正天花板是 EIP 配额**, 不是
     WORK_MAX_CONCURRENT。把上限配得比配额高不会有任何提示: 前 N 个用户一切
@@ -84,8 +84,7 @@ def eip_headroom() -> int | None:
     所以同账号下别的产品线用掉的 EIP 也算在里面。
     """
     try:
-        body = _call("quotas", "2020-05-10", "ListProductQuotas",
-                     {"ProductCode": "eip", "MaxResults": 50})
+        body = _call("quotas", "2020-05-10", "ListProductQuotas", {"ProductCode": "eip", "MaxResults": 50})
     except Exception as e:  # noqa: BLE001
         print(f"  (读不到 EIP 配额, 跳过并发检查: {e})", file=sys.stderr)
         return None
@@ -97,22 +96,29 @@ def eip_headroom() -> int | None:
 
 def check() -> int:
     ref = _ref()
-    ready = [c for c in _caches()
-             if c.get("Status") == "Ready" and ref in (c.get("Images") or [])]
+    ready = [c for c in _caches() if c.get("Status") == "Ready" and ref in (c.get("Images") or [])]
     rc = 0
     # 至少留几个 EIP 给"重建镜像缓存"和人工排查 —— 前者恰好在升级镜像版本时跑,
     # 是最不该因为抢不到 EIP 而失败的时刻。
     head = eip_headroom()
     if head is not None and head < 5:
         if head < 0:
-            print(f"✗ WORK_MAX_CONCURRENT={config.WORK_MAX_CONCURRENT} **超过** EIP 配额 "
-                  f"{config.WORK_MAX_CONCURRENT + head} 个 —— 超出的那部分用户会看到"
-                  f"“启动失败”, 而错误里不会提配额。", file=sys.stderr)
+            print(
+                f"✗ WORK_MAX_CONCURRENT={config.WORK_MAX_CONCURRENT} **超过** EIP 配额 "
+                f"{config.WORK_MAX_CONCURRENT + head} 个 —— 超出的那部分用户会看到"
+                f"“启动失败”, 而错误里不会提配额。",
+                file=sys.stderr,
+            )
         else:
-            print(f"✗ WORK_MAX_CONCURRENT={config.WORK_MAX_CONCURRENT} 距 EIP 配额只剩 {head} 个。",
-                  file=sys.stderr)
-        print("  每个工作台占一个 EIP, 配额是**账号级**的 (别的产品线也算在里面)。"
-              "留不足 5 个时, 重建镜像缓存会抢不到 EIP 而失败。", file=sys.stderr)
+            print(
+                f"✗ WORK_MAX_CONCURRENT={config.WORK_MAX_CONCURRENT} 距 EIP 配额只剩 {head} 个。",
+                file=sys.stderr,
+            )
+        print(
+            "  每个工作台占一个 EIP, 配额是**账号级**的 (别的产品线也算在里面)。"
+            "留不足 5 个时, 重建镜像缓存会抢不到 EIP 而失败。",
+            file=sys.stderr,
+        )
         rc = 1
     if ready:
         print(f"✓ 镜像缓存与 WORK_IMAGE_REF 一致: {ref}")
@@ -121,51 +127,62 @@ def check() -> int:
             print(f"✓ EIP 余量 {head} 个 (配额 - WORK_MAX_CONCURRENT)")
         return rc
     print(f"✗ 没有对应 {ref} 的 Ready 镜像缓存。", file=sys.stderr)
-    print("  后果不是报错, 是每个用户每次冷启动从 ~25s 退回 ~50s —— 只会慢, 不会响。",
-          file=sys.stderr)
+    print("  缓存未命中会回退到完整镜像拉取并增加冷启动时间。", file=sys.stderr)
     for c in _caches():
-        print(f"  现有: {c.get('ImageCacheId')} {c.get('Status')} {c.get('Images')}",
-              file=sys.stderr)
+        print(f"  现有: {c.get('ImageCacheId')} {c.get('Status')} {c.get('Images')}", file=sys.stderr)
     print("  修复: python3 -m scripts.eci_image_cache rebuild", file=sys.stderr)
     return 1
 
 
 def rebuild() -> int:
     ref = _ref()
-    stale = [c["ImageCacheId"] for c in _caches()
-             if ref not in (c.get("Images") or [])
-             or c.get("Status") not in ("Ready", "Creating", "Preparing")]
+    stale = [
+        c["ImageCacheId"]
+        for c in _caches()
+        if ref not in (c.get("Images") or []) or c.get("Status") not in ("Ready", "Creating", "Preparing")
+    ]
     print(f"==> 目标镜像: {ref}")
 
     print("==> 申请临时 EIP (构建任务不共享业务实例的 EIP, 自己没有出网能力)")
-    eip = _call("vpc", "2016-04-28", "AllocateEipAddress",
-                {"Bandwidth": 100, "InternetChargeType": "PayByTraffic",
-                 "Name": "dsh-imagecache-build"})
+    eip = _call(
+        "vpc",
+        "2016-04-28",
+        "AllocateEipAddress",
+        {"Bandwidth": 100, "InternetChargeType": "PayByTraffic", "Name": "dsh-imagecache-build"},
+    )
     alloc, addr = eip["AllocationId"], eip["EipAddress"]
     print(f"    {alloc}  {addr}")
 
     try:
         name = "dsh-" + hashlib.sha256(ref.encode()).hexdigest()[:10]
         print(f"==> 建缓存 {name}")
-        made = _call("eci", "2018-08-08", "CreateImageCache", {
-            "ImageCacheName": name, "Image.1": ref,
-            "VSwitchId": config.ECI_VSWITCH_ID,
-            "SecurityGroupId": config.ECI_SECURITY_GROUP_ID,
-            "ZoneId": config.ECI_ZONE_ID or None,
-            "EipInstanceId": alloc,
-            "ImageCacheSize": 20, "RetentionDays": 90,
-        })
+        made = _call(
+            "eci",
+            "2018-08-08",
+            "CreateImageCache",
+            {
+                "ImageCacheName": name,
+                "Image.1": ref,
+                "VSwitchId": config.ECI_VSWITCH_ID,
+                "SecurityGroupId": config.ECI_SECURITY_GROUP_ID,
+                "ZoneId": config.ECI_ZONE_ID or None,
+                "EipInstanceId": alloc,
+                "ImageCacheSize": 20,
+                "RetentionDays": 90,
+            },
+        )
         cid = made["ImageCacheId"]
         t0 = time.time()
         while time.time() - t0 < 1800:
             cur = [c for c in _caches() if c.get("ImageCacheId") == cid]
             st = cur[0].get("Status") if cur else "?"
             if st == "Ready":
-                print(f"    Ready @ {int(time.time()-t0)}s")
+                print(f"    Ready @ {int(time.time() - t0)}s")
                 break
             if st == "Failed":
-                raise RuntimeError(f"缓存构建失败 ({cid}) —— 多半是构建任务没有出网"
-                                   f"能力, 检查 EIP 是否真的绑上了")
+                raise RuntimeError(
+                    f"缓存构建失败 ({cid}) —— 多半是构建任务没有出网能力, 检查 EIP 是否真的绑上了"
+                )
             time.sleep(10)
         else:
             raise RuntimeError("等了 30 分钟仍未 Ready")

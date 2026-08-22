@@ -2,31 +2,33 @@
 """Re-point the Waffo catalog at the current price table.
 
 Waffo product prices are placeholders — checkout overrides them with
-`priceSnapshot`, resolved server-side per order — so a stale catalog never
-overcharges anyone. It does, however, show the wrong number in the merchant
-dashboard and on the store page, and after two rounds of repricing every
-product was advertising a price we had stopped charging months earlier. Nothing
-had told us, because nothing was checking.
+`priceSnapshot`, resolved server-side per order. A stale catalog can still show
+incorrect values in the merchant dashboard or store page, so this command
+detects and optionally repairs drift.
 
 Run it after any price change:
 
-    docker exec dhc-server python scripts/waffo_sync_catalog.py         # report
-    docker exec dhc-server python scripts/waffo_sync_catalog.py --apply # fix
+    python server/scripts/waffo_sync_catalog.py         # report
+    python server/scripts/waffo_sync_catalog.py --apply # fix
 
 Only products the kv cache points at are touched: those are the ones checkout
 can actually reach. Everything else in the store is a deactivated leftover and
 is left alone.
 """
+
 from __future__ import annotations
 
 import asyncio
 import sys
 
 from app import db
-from app.payments import base, waffo_provider as w
+from app.payments import base
+from app.payments import waffo_provider as w
 
-LIST = ("query($s:String!){ onetimeProducts(storeId:$s, limit:200)"
-        "{ id name status prices { currency priceInfo { amount } } } }")
+LIST = (
+    "query($s:String!){ onetimeProducts(storeId:$s, limit:200)"
+    "{ id name status prices { currency priceInfo { amount } } } }"
+)
 
 
 def cached_items() -> dict:
@@ -52,8 +54,10 @@ async def main(apply: bool) -> int:
             print(f"  ! {item}: no longer in the price table — product {p['id']} is orphaned")
             continue
         want = w.catalog_prices(item)
-        have = {x.get("currency"): str((x.get("priceInfo") or {}).get("amount"))
-                for x in (p.get("prices") or [])}
+        have = {
+            x.get("currency"): str((x.get("priceInfo") or {}).get("amount")) for x in (p.get("prices") or [])
+        }
+
         # Compare numerically: Waffo normalises zero-decimal currencies, so the
         # "1500.00" we send for JPY reads back as "1500" and a string compare
         # would report drift on every single run.
@@ -62,6 +66,7 @@ async def main(apply: bool) -> int:
                 return a is not None and b is not None and abs(float(a) - float(b)) < 0.005
             except (TypeError, ValueError):
                 return False
+
         off = [c for c, v in want.items() if not same(have.get(c), v["amount"])]
         if not off and p["name"] == info["description"]:
             continue
@@ -69,20 +74,25 @@ async def main(apply: bool) -> int:
         detail = ", ".join(f"{c} {have.get(c) or '-'}->{want[c]['amount']}" for c in off) or "name"
         print(f"  {item}: {detail}")
         if apply:
-            st, d = await w._waffo_request("/v1/actions/onetime-product/update-product", {
-                "id": p["id"],
-                "name": info["description"],
-                "description": info["description"],
-                # update-product REPLACES the price map, so every currency has
-                # to be sent every time, not just the ones that drifted.
-                "prices": want,
-            })
+            st, d = await w._waffo_request(
+                "/v1/actions/onetime-product/update-product",
+                {
+                    "id": p["id"],
+                    "name": info["description"],
+                    "description": info["description"],
+                    # update-product REPLACES the price map, so every currency has
+                    # to be sent every time, not just the ones that drifted.
+                    "prices": want,
+                },
+            )
             if st >= 300:
                 print(f"    FAILED {st} {d}")
                 return 1
 
-    print(f"{len(products)} products in store, {len(items)} reachable, {drift} out of date"
-          + ("" if apply else " (run with --apply to fix)"))
+    print(
+        f"{len(products)} products in store, {len(items)} reachable, {drift} out of date"
+        + ("" if apply else " (run with --apply to fix)")
+    )
     return 1 if (drift and not apply) else 0
 
 

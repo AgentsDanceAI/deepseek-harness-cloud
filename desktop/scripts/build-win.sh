@@ -2,8 +2,8 @@
 # Build the Windows installers (x64 + arm64) on this machine, in Docker.
 #
 # Upstream's scripts/package-win.ts refuses to run anywhere but a native Windows
-# host. We have no Windows host, and CI minutes are not free — so the build runs
-# in electronuserland/builder:wine, which carries the Node 24 + Yarn 4 + Wine 11
+# host. This script uses electronuserland/builder:wine, which carries the Node 24
+# + Yarn 4 + Wine 11
 # combination electron-builder needs to produce NSIS installers off-Windows.
 #
 #   ./desktop/scripts/build-win.sh [--skip-install]
@@ -12,8 +12,7 @@
 #   node desktop/scripts/assemble.mjs
 #
 # Artifacts land in desktop/build/upstream/dsh-plugin-desktop/dist/ and are
-# verified before the script reports success. Publish them with
-# deploy/prod/publish-r2.sh.
+# verified before the script reports success.
 set -euo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
@@ -21,13 +20,8 @@ desktop_dir="$(dirname "$here")"
 tree="$desktop_dir/build/upstream"
 image="electronuserland/builder:wine"
 
-# ⚠️ 必须在 **x86_64** 主机上跑。该镜像只有 linux/amd64, 在 Apple Silicon 上
-# Docker 会用 qemu 模拟, 而 wine 在模拟层下必崩 (2026-08-20 实测):
-#   wine: dlls/ntdll/unix/virtual.c: anon_mmap_fixed:
-#         Assertion `!((UINT_PTR)start & host_page_mask)' failed.
-#   qemu: uncaught target signal 6 (Aborted) - core dumped
-# 崩在 NSIS 打包阶段, 前面的 yarn build 全绿, 所以看着像"构建完了没产物"。
-# 在 arm64 Mac 上直接拦下, 别浪费一轮镜像拉取和构建。
+# Wine in this image requires an x86_64 host. QEMU emulation on arm64 is not a
+# supported packaging path, so reject it before starting the build.
 if [ "$(uname -m)" != "x86_64" ] && [ "${ALLOW_EMULATED_WINE:-0}" != "1" ]; then
   echo "!! 本机是 $(uname -m); $image 只有 amd64, qemu 模拟下 wine 会崩。" >&2
   echo "   在 x86_64 Linux 主机上跑本脚本, 或用 CI 的 windows job。" >&2
@@ -51,12 +45,8 @@ cache_dir="$desktop_dir/.cache-electron"
 mkdir -p "$cache_dir"
 
 echo "==> building Windows x64 + arm64 in $image"
-# ⚠️ 容器里跑的脚本必须**单引号 heredoc** (<<'INNER') 传进来, 不能直接写在
-# bash -lc "..." 的双引号里 —— 2026-08-20 踩到: 里面一句注释写了
-# yarn install 并用反引号括起来, 而双引号内的反引号会被**宿主**当命令替换先执行掉,
-# 于是 docker run 根本没跑, 宿主莫名其妙跑了一遍 yarn, 替换结果又被当成命令
-# 报 "info: command not found", set -e 就地退出 —— 全程看着像"构建完成了但
-# 没有产物"。单引号 heredoc 内一切照字面传递, 变量则显式用 -e 注入。
+# Use a quoted heredoc so the host shell cannot expand commands or variables
+# intended for the container. Required values are passed explicitly with `-e`.
 IFS='' read -r -d '' INNER_SCRIPT <<'INNER' || true
 set -euo pipefail
 corepack enable
@@ -84,9 +74,8 @@ echo "--- electron-builder --win nsis x64,arm64"
 # on non-Windows hosts by design, and it only knows about x64.
 yarn electron-builder --win nsis --x64 --arm64 --publish never --config.npmRebuild=false
 INNER
-# BUILD_MEMORY 给容器设内存上限 (如 4g)。这个构建常在**同时跑着生产服务**的机器
-# 上做 —— electron-builder 打两个架构会吃掉好几个 G, 不设限就可能把同机的数据库
-# 或工作台挤出去 (那台机器的内存压力有案底)。不设则不限制。
+# BUILD_MEMORY optionally limits container memory (for example, 4g). Building
+# two architectures is memory-intensive; no limit is applied when it is unset.
 docker run --rm ${BUILD_MEMORY:+--memory "$BUILD_MEMORY" --memory-swap "$BUILD_MEMORY"} \
   -v "$tree:/project" \
   -v "$cache_dir:/root/.cache/electron-builder" \
@@ -102,11 +91,8 @@ dist="$tree/dsh-plugin-desktop/dist"
 # Name the two we actually ship rather than globbing *.exe: the glob neither
 # verified nor excluded the combined build, so "some .exe exists" was passing
 # for a success check even if a per-arch one was missing.
-# 版本号从装配树的 package.json 读, **不要写死** —— assemble 会按
-# runtimePackageVersion 派生对外版本 (0.1.0-rc.6 -> 0.1.6), 写死的话版本一变
-# 产物名就对不上, 于是三个 exe 明明都打出来了, 脚本却在最后一步报
-# "missing expected artifact" 退出 (2026-08-20 实测: 版本从 2.0.0 改成 0.1.6
-# 当天就踩到)。这正是加版本派生时写下的那句"版本号写死在两处就一定会漂"。
+# Read the version from the assembled package so expected artifact names stay in
+# sync with the release manifest.
 ver="$(node -p "require('$tree/dsh-plugin-desktop/package.json').version" 2>/dev/null)"
 [ -n "$ver" ] || { echo "!! 读不出装配树的版本号, 先跑 assemble.mjs" >&2; exit 1; }
 echo "    版本: $ver"
@@ -152,13 +138,11 @@ done
   exit 1
 }
 
-# publish-r2.sh uploads whatever sits in the server's data volume, NOT this
-# dist/ directory. Without this step a fresh build stays local and the publisher
-# silently re-uploads the previous release: that is exactly how win-x64 shipped
-# a build 17 commits behind while win-arm64 was current, both under 2.0.0.
+# When a local release container is available, stage both verified
+# architectures together so downstream release tooling sees a consistent set.
 if docker inspect dhc-server >/dev/null 2>&1; then
   echo
-  echo "==> stage into the server data volume (what publish-r2.sh reads)"
+  echo "==> stage verified installers for the local release workflow"
   for exe in "$x64_exe" "$arm_exe"; do
     docker cp "$exe" dhc-server:/app/data/releases/
     echo "    staged $(basename "$exe")"
@@ -170,5 +154,4 @@ else
 fi
 
 echo
-echo "Done. Publish with:"
-echo "  deploy/prod/publish-r2.sh"
+echo "Done. Verified installers are ready for the authorized release workflow."

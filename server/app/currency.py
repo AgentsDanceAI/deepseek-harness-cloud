@@ -13,6 +13,7 @@ A quoted price that moves with an exchange feed is a support ticket waiting to
 happen — someone screenshots $10 and is charged $10.40 an hour later. These are
 fixed price points; changing them is a deliberate edit to config/pricing.*.json.
 """
+
 from __future__ import annotations
 
 SUPPORTED = ("USD", "CNY", "EUR", "GBP", "HKD", "JPY")
@@ -26,13 +27,37 @@ SYMBOL = {"USD": "$", "CNY": "¥", "EUR": "€", "GBP": "£", "HKD": "HK$", "JPY
 # else sees USD rather than a currency the buyer has to convert in their head.
 BY_COUNTRY = {
     "CN": "CNY",
-    "HK": "HKD", "MO": "HKD",
+    "HK": "HKD",
+    "MO": "HKD",
     "JP": "JPY",
     "GB": "GBP",
-    "US": "USD", "CA": "USD", "AU": "USD", "SG": "USD",
+    "US": "USD",
+    "CA": "USD",
+    "AU": "USD",
+    "SG": "USD",
 }
-EUROZONE = {"AT", "BE", "CY", "DE", "EE", "ES", "FI", "FR", "GR", "HR", "IE",
-            "IT", "LT", "LU", "LV", "MT", "NL", "PT", "SI", "SK"}
+EUROZONE = {
+    "AT",
+    "BE",
+    "CY",
+    "DE",
+    "EE",
+    "ES",
+    "FI",
+    "FR",
+    "GR",
+    "HR",
+    "IE",
+    "IT",
+    "LT",
+    "LU",
+    "LV",
+    "MT",
+    "NL",
+    "PT",
+    "SI",
+    "SK",
+}
 
 
 def from_country(code: str) -> str | None:
