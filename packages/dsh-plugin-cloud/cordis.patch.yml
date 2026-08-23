@@ -1,0 +1,7 @@
+# dsh-plugin-cloud bundle layer — applied by `dsh add dsh-plugin-cloud`.
+# `name` is a package name resolved through the profile's node_modules, not a path.
+# The gateway provider row (id: dsh-cloud-models) is written separately by
+# `npx dsh-plugin-cloud setup`, because its model list comes from the live catalog.
+- insert:
+    - id: dsh-plugin-cloud
+      name: dsh-plugin-cloud

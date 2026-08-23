@@ -1,0 +1,62 @@
+{
+  "name": "dsh-plugin-cloud",
+  "version": "0.1.0",
+  "description": "Connect a stock DeepSeek Harness install to DSH Cloud: device login plus a 20-model gateway provider. Commercial hosted service by AgentsDance AI — new accounts include 500 free credits.",
+  "license": "Apache-2.0",
+  "author": "AgentsDance AI",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AgentsDanceAI/deepseek-harness-cloud.git",
+    "directory": "packages/dsh-plugin-cloud"
+  },
+  "homepage": "https://dshcloud.online",
+  "bugs": {
+    "url": "https://github.com/AgentsDanceAI/deepseek-harness-cloud/issues"
+  },
+  "keywords": [
+    "deepseek",
+    "deepseek-harness",
+    "dsh",
+    "dsh-plugin",
+    "cordis",
+    "dsh-cloud",
+    "gateway",
+    "llm",
+    "provider"
+  ],
+  "type": "module",
+  "main": "./src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./package.json": "./package.json",
+    "./cordis.patch.yml": "./cordis.patch.yml"
+  },
+  "bin": {
+    "dsh-plugin-cloud": "./src/cli.js"
+  },
+  "files": [
+    "src",
+    "cordis.patch.yml",
+    "README.md",
+    "README.zh-CN.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "dependencies": {
+    "yaml": "^2.5.0"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  }
+}
