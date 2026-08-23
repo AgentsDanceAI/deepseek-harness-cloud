@@ -48,7 +48,11 @@ def test_release_workflow_is_tag_locked_pinned_and_provenanced():
     assert 'tags: ["v*"]' in workflow
     assert "environment: release" in workflow
     assert "npm publish" in workflow and "--provenance" in workflow
-    assert "NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}" in workflow
+    # 0.2.0 首发后 npm 已绑 trusted publisher, 发布走 OIDC (id-token) —— 合同反向
+    # 钉死: 任何形式的 npm token 都不得回到 workflow 里 (bootstrap 时代到此为止)。
+    assert "NODE_AUTH_TOKEN" not in workflow
+    assert "NPM_TOKEN" not in workflow
+    assert "id-token: write" in workflow
     assert "uv publish --trusted-publishing always" in workflow
     assert "provenance: mode=max" in workflow
     assert "sbom: true" in workflow

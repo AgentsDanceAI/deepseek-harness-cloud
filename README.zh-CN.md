@@ -19,6 +19,18 @@
 
 </div>
 
+---
+
+一条命令在本机拉起整套 Community Edition（需要 Docker）：
+
+```bash
+npx --yes @agentsdanceai/dsh-cloud start
+```
+
+把你的模型上游密钥填进 `./dsh-cloud/.env` 的 `UPSTREAM_API_KEY=`，再跑一次同样的
+命令，打开 <http://localhost:8787> 即可。不用 Node 的话 `uvx dsh-cloud start`
+等效。详见[快速开始](#快速开始)。
+
 ## 选择使用方式
 
 ### DSH Cloud 托管版
@@ -26,6 +38,8 @@
 [DSH Cloud 托管版](https://dshcloud.online/login?next=%2Fwork)是托管订阅服务：
 无需安装服务器，按月度或年度服务期提供模型访问、工作台容量、升级、监控、
 备份与账号支持。当前方案按所选服务期一次性付费，**到期不自动续费**。
+
+**注册即送 500 积分**；网关内建 **20 个模型**，无需自备任何上游密钥。
 
 [**开始使用 DSH Cloud 托管版**](https://dshcloud.online/login?next=%2Fwork) ·
 [个人套餐](https://dshcloud.online/pricing#plans) ·
@@ -66,11 +80,68 @@ npm/npx、uv/uvx 遵循同一套版本化安装契约。
 自部署方负责基础设施、模型成本、提供方协议、TLS、身份与邮件、支付配置、
 数据保护、备份、监控及当地法律义务。
 
+## 20 个模型，一个入口
+
+<!-- model-catalog:start -->
+| Provider | Models |
+| --- | --- |
+| DeepSeek | `DeepSeek-V4-Flash` · `DeepSeek-V4-Pro` |
+| Google | `Gemini-3.6-Flash` |
+| Xiaomi | `MiMo-V2-Omni` |
+| MiniMax | `MiniMax-M2.7` · `MiniMax-M3` |
+| Alibaba | `Qwen3-Omni-30B-A3B` · `Qwen3-VL-32B` · `Qwen3.8-Max` |
+| Moonshot | `Kimi-K2.7-Code` · `Kimi-K3` |
+| Zhipu | `GLM-5.2` |
+| ByteDance | `Doubao-Seed-2.0-Pro` |
+| OpenAI | `GPT-5.6-Luna` · `GPT-5.6-Terra` · `GPT-5.6-Sol` |
+| xAI | `Grok-4.5` |
+| Anthropic | `Claude-Sonnet-5` · `Claude-Opus-5` · `Claude-Fable-5` |
+<!-- model-catalog:end -->
+
+**注册即送 500 积分——上面每一个模型开箱直接可用。** 不绑卡、不要任何
+API Key、不用挨家注册。到 [DSH Cloud 托管版](https://dshcloud.online)直接试，
+或者一条命令把它们接进你已有的原版 DeepSeek Harness：
+
+```bash
+npx --yes dsh-plugin-cloud setup
+```
+
+网关下发的是实时目录，本表与
+[`server/config/models.json`](server/config/models.json) 由合同测试互钉。
+
 ## 快速开始
 
 以下命令均固定使用 `0.2.0`；自动化环境也应固定精确版本。
 
-### 从源码使用 Docker Compose（现在可用）
+### 一条命令 — npm/npx
+
+```bash
+npx --yes @agentsdanceai/dsh-cloud@0.2.0 start --mode trial --wait
+
+npm install --global @agentsdanceai/dsh-cloud@0.2.0
+dsh-cloud start --mode trial --wait
+```
+
+栈初次拉起时上游密钥为空——聊天前把 `UPSTREAM_API_KEY` 填进 `./dsh-cloud/.env`，
+再执行一次同样的命令即可生效。
+
+
+### 一条命令 — uv/uvx
+
+```bash
+uvx dsh-cloud==0.2.0 start --mode trial --wait
+
+uv tool install dsh-cloud==0.2.0
+dsh-cloud start --mode trial --wait
+```
+
+两个 CLI 还提供 `init`、`doctor` 和 `up`，用于显式配置、诊断和生命周期控制。
+自动化必须固定不可变版本；启动前应审核生成的站点、密钥、提供方、存储和工作台配置。
+
+完整部署指南包含 GHCR 版本化路径、备份、升级、回滚、扩容和排障：
+[部署文档](docs/deploy.zh-CN.md)。
+
+### 从源码 — Docker Compose
 
 ```bash
 git clone https://github.com/AgentsDanceAI/deepseek-harness-cloud.git
@@ -99,7 +170,7 @@ docker compose --env-file deploy/selfhost/.env \
 curl --fail --show-error http://localhost:8787/readyz
 ```
 
-### 从源码使用单容器 Docker（现在可用）
+### 从源码 — 单容器 Docker
 
 ```bash
 docker build --tag dsh-cloud-server:local --file server/Dockerfile .
@@ -118,30 +189,6 @@ docker run --rm --name dsh-cloud \
 在另一终端检查 `http://127.0.0.1:8081/readyz`。调用模型前，把上游密钥加入
 `.dsh-cloud/docker.env`。单容器不负责 TLS；对外访问时应保留回环绑定，并使用
 经过审核的反向代理。
-
-### npm 与 npx
-
-```bash
-npx --yes @agentsdanceai/dsh-cloud@0.2.0 start --mode trial --wait
-
-npm install --global @agentsdanceai/dsh-cloud@0.2.0
-dsh-cloud start --mode trial --wait
-```
-
-### uv 与 uvx
-
-```bash
-uvx dsh-cloud==0.2.0 start --mode trial --wait
-
-uv tool install dsh-cloud==0.2.0
-dsh-cloud start --mode trial --wait
-```
-
-两个 CLI 还提供 `init`、`doctor` 和 `up`，用于显式配置、诊断和生命周期控制。
-自动化必须固定不可变版本；启动前应审核生成的站点、密钥、提供方、存储和工作台配置。
-
-完整部署指南包含 GHCR 版本化路径、备份、升级、回滚、扩容和排障：
-[部署文档](docs/deploy.zh-CN.md)。
 
 ## 架构概览
 

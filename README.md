@@ -19,6 +19,18 @@ Release: [`0.2.0`](release/release.json)
 
 </div>
 
+---
+
+Boot the whole Community Edition locally with one command (Docker required):
+
+```bash
+npx --yes @agentsdanceai/dsh-cloud start
+```
+
+Put your model upstream key into `./dsh-cloud/.env` (`UPSTREAM_API_KEY=`), run
+the same command again, and open <http://localhost:8787>. No Node? `uvx
+dsh-cloud start` does the same from PyPI. Details: [Quick start](#quick-start).
+
 ## Choose your path
 
 <!-- path:hosted -->
@@ -29,6 +41,9 @@ Release: [`0.2.0`](release/release.json)
 subscription service: no server installation, with model access, workspace
 capacity, upgrades, monitoring, backups, and account support. Current plans are
 paid once for the selected monthly or annual term and **do not renew automatically**.
+
+**New accounts start with 500 free credits**, and the hosted gateway serves
+**20 models** with no upstream key of your own.
 
 [**Start on DSH Cloud Hosted**](https://dshcloud.online/login?next=%2Fwork) ·
 [Individual plans](https://dshcloud.online/pricing#plans) ·
@@ -76,13 +91,82 @@ Self-hosters remain responsible for infrastructure, provider agreements, model
 costs, TLS, identity/email delivery, payment configuration, data protection,
 backups, monitoring, and applicable law.
 
+## 20 models, one gateway
+
+<!-- model-catalog:start -->
+| Provider | Models |
+| --- | --- |
+| DeepSeek | `DeepSeek-V4-Flash` · `DeepSeek-V4-Pro` |
+| Google | `Gemini-3.6-Flash` |
+| Xiaomi | `MiMo-V2-Omni` |
+| MiniMax | `MiniMax-M2.7` · `MiniMax-M3` |
+| Alibaba | `Qwen3-Omni-30B-A3B` · `Qwen3-VL-32B` · `Qwen3.8-Max` |
+| Moonshot | `Kimi-K2.7-Code` · `Kimi-K3` |
+| Zhipu | `GLM-5.2` |
+| ByteDance | `Doubao-Seed-2.0-Pro` |
+| OpenAI | `GPT-5.6-Luna` · `GPT-5.6-Terra` · `GPT-5.6-Sol` |
+| xAI | `Grok-4.5` |
+| Anthropic | `Claude-Sonnet-5` · `Claude-Opus-5` · `Claude-Fable-5` |
+<!-- model-catalog:end -->
+
+**New accounts start with 500 free credits — every model above works out of the
+box.** No card, no API keys, no per-provider signups. Try them on
+[DSH Cloud Hosted](https://dshcloud.online), or pipe them into a stock
+DeepSeek Harness install with one command:
+
+```bash
+npx --yes dsh-plugin-cloud setup
+```
+
+The gateway serves the live catalog, so this table is contract-tested against
+[`server/config/models.json`](server/config/models.json).
+
 ## Quick start
 
 All commands below pin release `0.2.0`; pin exact versions in automation.
 
 <!-- distribution-install:start -->
 
-### Docker Compose from source (available now)
+### One command — npm/npx
+
+One-shot:
+
+```bash
+npx --yes @agentsdanceai/dsh-cloud@0.2.0 start --mode trial --wait
+```
+
+Installed:
+
+```bash
+npm install --global @agentsdanceai/dsh-cloud@0.2.0
+dsh-cloud start --mode trial --wait
+```
+
+The stack boots with an empty upstream key. Before chatting, set
+`UPSTREAM_API_KEY` in `./dsh-cloud/.env` and run the same command again.
+
+
+### One command — uv/uvx
+
+One-shot:
+
+```bash
+uvx dsh-cloud==0.2.0 start --mode trial --wait
+```
+
+Installed:
+
+```bash
+uv tool install dsh-cloud==0.2.0
+dsh-cloud start --mode trial --wait
+```
+
+For explicit lifecycle control, both CLIs also provide `init`, `doctor`, and
+`up`. Pin immutable versions in automation and review generated configuration
+before starting it.
+
+
+### From source — Docker Compose
 
 ```bash
 git clone https://github.com/AgentsDanceAI/deepseek-harness-cloud.git
@@ -112,7 +196,7 @@ docker compose --env-file deploy/selfhost/.env \
 curl --fail --show-error http://localhost:8787/readyz
 ```
 
-### Docker single container from source (available now)
+### From source — single container
 
 ```bash
 docker build --tag dsh-cloud-server:local --file server/Dockerfile .
@@ -132,40 +216,6 @@ In another terminal, check `http://127.0.0.1:8081/readyz`. Add your upstream key
 to `.dsh-cloud/docker.env` before model calls. The single container does not
 terminate TLS; keep the loopback bind and use a reviewed reverse proxy for
 network access.
-
-### npm and npx
-
-One-shot:
-
-```bash
-npx --yes @agentsdanceai/dsh-cloud@0.2.0 start --mode trial --wait
-```
-
-Installed:
-
-```bash
-npm install --global @agentsdanceai/dsh-cloud@0.2.0
-dsh-cloud start --mode trial --wait
-```
-
-### uv and uvx
-
-One-shot:
-
-```bash
-uvx dsh-cloud==0.2.0 start --mode trial --wait
-```
-
-Installed:
-
-```bash
-uv tool install dsh-cloud==0.2.0
-dsh-cloud start --mode trial --wait
-```
-
-For explicit lifecycle control, both CLIs also provide `init`, `doctor`, and
-`up`. Pin immutable versions in automation and review generated configuration
-before starting it.
 
 <!-- distribution-install:end -->
 
@@ -247,6 +297,7 @@ tests, security routing, and edition-boundary review.
 | Path | Purpose |
 |---|---|
 | `server/` | FastAPI application, gateway, data layer, templates, configuration, tests |
+| `packages/dsh-plugin-cloud/` | Plugin that connects **stock** DeepSeek Harness installs to the cloud gateway |
 | `deploy/selfhost/` | Canonical public Compose stack, Caddy config, and environment template |
 | `packages/` | Version-matched npm and Python lifecycle CLIs |
 | `release/` | Canonical release identity and schemas |
