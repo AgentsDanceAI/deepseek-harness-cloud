@@ -1113,3 +1113,26 @@ def test_the_tap_handler_runs_in_capture_phase():
     m = re.search(r"addEventListener\(\s*['\"]click['\"]\s*,\s*tapOutsideSidebar\s*,\s*(\w+)\s*\)", js)
     assert m, "没有注册抽屉外点击处理"
     assert m.group(1) == "true", "不是捕获阶段 —— 会被抽屉内部的 stopPropagation 吃掉"
+
+
+def test_the_workspace_host_is_exempt_from_our_csp(monkeypatch):
+    """CSP 落在工作台文档上 = 整页白屏。
+
+    dsh 的打包产物用 new Function(), script-src 不带 'unsafe-eval' 会让它启动
+    即死, 页面只剩我们注入的外壳按钮。2026-08-23 生产真实发生。
+    dsh 在自己的子域上, 与主站不同源 —— 给它的 CSP 保护不了我们的会话。
+    注意验证方式: curl -I 看不出来 (HEAD 响应无 content-type, CSP 分支不触发),
+    这条测试用真实 GET。
+    """
+    monkeypatch.setattr(config, "WORK_DOMAIN", "work.dshcloud.online")
+    from fastapi.testclient import TestClient
+    from app.main import create_app
+    c = TestClient(create_app())
+
+    main_site = c.get("/", headers={"host": "dshcloud.online"})
+    assert "content-security-policy" in main_site.headers, "主站的 CSP 丢了"
+
+    r = c.get("/work/starting", headers={"host": "work.dshcloud.online"})
+    assert r.status_code == 200
+    assert "content-security-policy" not in r.headers, \
+        "work 域带了 CSP —— dsh 会启动即死, 整页白屏"

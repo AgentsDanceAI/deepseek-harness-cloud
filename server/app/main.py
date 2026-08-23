@@ -79,7 +79,8 @@ def create_app() -> FastAPI:
 
     from .security_headers import SecurityHeaders
 
-    app.add_middleware(SecurityHeaders, https=config.PUBLIC_BASE.startswith("https://"))
+    app.add_middleware(SecurityHeaders, https=config.PUBLIC_BASE.startswith("https://"),
+                       work_host=config.WORK_DOMAIN)
 
     from .accounts import router as accounts_router
     from .admin import router as admin_router
