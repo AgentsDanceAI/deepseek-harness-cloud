@@ -345,37 +345,79 @@ class EciBackend(Backend):
     def _tags_of(group: dict) -> dict[str, str]:
         return {t.get("Key", ""): t.get("Value", "") for t in (group.get("Tags") or [])}
 
-    async def _find(self, user_id: str) -> dict | None:
-        # Omit Limit because this API combination requires ContainerGroupId when
-        # it is present. A name lookup yields at most one active group here.
+    @staticmethod
+    def _alive(group: dict) -> bool:
+        status = group.get("Status", "")
+        return status in _ECI_RUNNING or status in _ECI_COMING_UP
+
+    async def _find_all(self, user_id: str) -> list[dict]:
+        """同名的**所有**容器组, 新的在前。
+
+        ECI 不保证 ContainerGroupName 唯一。这里原先写的是"一个名字最多对应一个
+        活着的组", 是错的: 2026-08-24 05:24:15 和 :16 各建出一台同名且都 Running
+        的实例 (forward_auth 在冷启动时并发扇出, 每个请求都看到"没有实例")。
+        错的后果全是钱:
+          - running_users() 把同一个人算两遍, 每分钟扣两分钟机时;
+          - destroy() 只删第一个, 另一个继续按秒计费, 而用户只看得到一台;
+          - 两台各自自动创建一个 EIP, 账号级配额也按两个算。
+        排序让"留哪一台"是确定的 —— 并发的自愈必须收敛到同一个选择, 否则两边
+        各删一台就把两台都删了。CreationTime 相同时用 Id 兜底。
+
+        不传 Limit: 这个参数组合里带上它, ECI 会反过来要求 ContainerGroupId。
+        """
         body = await self._call("DescribeContainerGroups", {"ContainerGroupName": cname(user_id)})
-        for g in body.get("ContainerGroups", []):
-            if g.get("ContainerGroupName") == cname(user_id):
-                return g
-        return None
+        groups = [g for g in body.get("ContainerGroups", []) if g.get("ContainerGroupName") == cname(user_id)]
+        groups.sort(
+            key=lambda g: (g.get("CreationTime") or "", g.get("ContainerGroupId") or ""), reverse=True
+        )
+        return groups
+
+    async def _find(self, user_id: str) -> dict | None:
+        groups = await self._find_all(user_id)
+        return groups[0] if groups else None
+
+    async def _delete(self, group: dict) -> None:
+        try:
+            await self._call("DeleteContainerGroup", {"ContainerGroupId": group["ContainerGroupId"]})
+        except Exception as e:  # noqa: BLE001
+            # 并发自愈时另一边可能已经删掉了 —— 那正是想要的结果, 不是故障。
+            # 但真删不掉的实例会一直计费, 所以还是要留下痕迹。
+            log.warning("[work] 删实例 %s 失败: %s", group.get("ContainerGroupId"), e)
 
     # -- Backend ------------------------------------------------------------
     async def inspect(self, user_id: str) -> WorkInfo | None:
-        g = await self._find(user_id)
-        if g is None:
+        groups = await self._find_all(user_id)
+        alive = [g for g in groups if self._alive(g)]
+        keep = alive[0] if alive else None
+        if len(alive) > 1:
+            log.error(
+                "[work] %s 有 %d 台同名实例在跑 —— 正在重复计费。留 %s, 删 %s",
+                user_id,
+                len(alive),
+                keep.get("ContainerGroupId"),
+                [g.get("ContainerGroupId") for g in alive[1:]],
+            )
+        # 留下的那台之外一概删掉: 多余的活实例在按秒烧钱, 终态 (Succeeded/
+        # Failed/...) 的实例白占着名字会让下一次 CreateContainerGroup 撞名。
+        for g in groups:
+            if g is keep:
+                continue
+            if not self._alive(g):
+                log.info("[work] %s 处于终态 %s, 清掉以便重建", user_id, g.get("Status"))
+            await self._delete(g)
+        if keep is None:
             return None
-        status = g.get("Status", "")
-        if status not in _ECI_RUNNING and status not in _ECI_COMING_UP:
-            # 终态 (Succeeded/Failed/...) 的实例还占着名字, 必须先删掉再重建,
-            # 否则 CreateContainerGroup 会一直撞名。
-            log.info("[work] %s 处于终态 %s, 清掉以便重建", user_id, status)
-            await self.destroy(user_id)
-            return None
+        status = keep.get("Status", "")
         if status in _ECI_COMING_UP:
-            self._report_stuck_mount(user_id, g)
+            self._report_stuck_mount(user_id, keep)
         else:
             self._mount_reported.discard(user_id)
-        containers = g.get("Containers") or [{}]
+        containers = keep.get("Containers") or [{}]
         return WorkInfo(
             running=status in _ECI_RUNNING,
-            boot_fp=self._tags_of(g).get(_TAG_BOOTCFG, ""),
+            boot_fp=self._tags_of(keep).get(_TAG_BOOTCFG, ""),
             image_id=containers[0].get("Image", ""),
-            host=g.get("IntranetIp", ""),
+            host=keep.get("IntranetIp", ""),
             state=status,
         )
 
@@ -451,10 +493,10 @@ class EciBackend(Backend):
         await self.destroy(user_id)
 
     async def destroy(self, user_id: str) -> None:
-        g = await self._find(user_id)
-        if g is None:
-            return
-        await self._call("DeleteContainerGroup", {"ContainerGroupId": g["ContainerGroupId"]})
+        # 删**全部**同名实例, 不是第一个: 名字不唯一 (见 _find_all), 少删一台
+        # 就留下一台按秒计费、没人看得见、也不会再被回收的实例。
+        for g in await self._find_all(user_id):
+            await self._delete(g)
 
     def offline_workspace_dir(self, user_id: str) -> pathlib.Path | None:
         """NAS 上该用户的 workspace 子目录, 前提是应用机把同一个 NAS 挂了起来。
@@ -502,7 +544,15 @@ class EciBackend(Backend):
                 seen,
                 total,
             )
-        return users
+        # 按人去重。同名重复实例 (见 _find_all) 会让调用方把同一个人遍历两遍 ——
+        # 计量那边一分钟就扣两分钟机时。回收靠 inspect 收敛, 这里只保证不多扣钱。
+        uniq = list(dict.fromkeys(users))
+        if len(uniq) != len(users):
+            log.error(
+                "[work] 运行中实例比人多 %d 台 (有人被建重了), 已按人去重以免重复扣机时",
+                len(users) - len(uniq),
+            )
+        return uniq
 
 
 def make_backend() -> Backend:
