@@ -169,55 +169,25 @@ before starting it.
 ### From source — Docker Compose
 
 ```bash
-git clone https://github.com/AgentsDanceAI/deepseek-harness-cloud.git
-cd deepseek-harness-cloud
+git clone https://github.com/AgentsDanceAI/deepseek-harness-cloud.git && cd deepseek-harness-cloud
 bash scripts/quickstart.sh --domain localhost --admin-email you@example.com
 ```
 
-The script creates `deploy/selfhost/.env`, generates `AUTH_SECRET`, prompts for
-the model upstream, starts the canonical Compose stack, and checks readiness.
-Open <http://localhost:8787>. Development mode prints sign-in codes to server logs;
-never use it on a public network.
+The script writes `deploy/selfhost/.env` with a generated `AUTH_SECRET`, asks
+for your model upstream, starts the stack, and waits for readiness — then open
+<http://localhost:8787>. Development mode prints sign-in codes to server logs;
+never use it on a public network. Manual Compose steps: [docs/deploy.md](docs/deploy.md).
 
-Manual Compose validation and start:
-
-```bash
-cp deploy/selfhost/.env.example deploy/selfhost/.env
-chmod 600 deploy/selfhost/.env
-# For local trial: DOMAIN=localhost, SITE_SCHEME=http, DHC_DEV=1,
-# PUBLIC_BASE=http://localhost:8787, BIND_ADDRESS=127.0.0.1, HTTP_PORT=8787.
-# Also set AUTH_SECRET, upstream, and admin.
-docker compose --env-file deploy/selfhost/.env \
-  -f deploy/selfhost/docker-compose.yml \
-  -f deploy/selfhost/compose.build.yml config --quiet
-docker compose --env-file deploy/selfhost/.env \
-  -f deploy/selfhost/docker-compose.yml \
-  -f deploy/selfhost/compose.build.yml up -d --build
-curl --fail --show-error http://localhost:8787/readyz
-```
-
-### From source — single container
+### Single container — prebuilt image
 
 ```bash
-docker build --tag dsh-cloud-server:local --file server/Dockerfile .
-docker volume create dsh-cloud-data
-mkdir -p .dsh-cloud
-umask 077
-printf 'AUTH_SECRET=%s\nDHC_DEV=1\nPUBLIC_BASE=http://127.0.0.1:8081\nPRICING_FILE=pricing.cny.json\n' \
-  "$(openssl rand -hex 32)" > .dsh-cloud/docker.env
-docker run --rm --name dsh-cloud \
-  --env-file .dsh-cloud/docker.env \
-  --publish 127.0.0.1:8081:8100 \
-  --mount type=volume,src=dsh-cloud-data,dst=/app/data \
-  dsh-cloud-server:local
+(umask 077; mkdir -p .dsh-cloud; printf 'AUTH_SECRET=%s\nDHC_DEV=1\nPUBLIC_BASE=http://127.0.0.1:8081\n' "$(openssl rand -hex 32)" > .dsh-cloud/docker.env)
+docker run --rm --name dsh-cloud --env-file .dsh-cloud/docker.env --publish 127.0.0.1:8081:8100 --mount type=volume,src=dsh-cloud-data,dst=/app/data ghcr.io/agentsdanceai/dsh-cloud-server:0.2.0
 ```
 
-In another terminal, check `http://127.0.0.1:8081/readyz`. Add your upstream key
-to `.dsh-cloud/docker.env` before model calls. The single container does not
-terminate TLS; keep the loopback bind and use a reviewed reverse proxy for
-network access.
-
-<!-- distribution-install:end -->
+Check <http://127.0.0.1:8081/readyz>, then add your upstream key to
+`.dsh-cloud/docker.env` before model calls. No TLS in this mode — keep the
+loopback bind. Building the image from source: [docs/deploy.md](docs/deploy.md).
 
 The full deployment guide covers configuration, the versioned GHCR path,
 backups, upgrades, rollback, scaling, and troubleshooting:
