@@ -53,9 +53,18 @@ class FakeEci:
         return [p for a, p in self.calls if a == action]
 
 
-def _group(uid="u_abc", status="Running", ip="172.29.0.5", fp="deadbeef", image="ghcr.io/x/dsh:rc8"):
+def _group(
+    uid="u_abc",
+    status="Running",
+    ip="172.29.0.5",
+    fp="deadbeef",
+    image="ghcr.io/x/dsh:rc8",
+    gid="eci-1",
+    created="2026-08-24T05:24:15Z",
+):
     return {
-        "ContainerGroupId": "eci-1",
+        "ContainerGroupId": gid,
+        "CreationTime": created,
         "ContainerGroupName": cname(uid),
         "Status": status,
         "IntranetIp": ip,
@@ -359,3 +368,77 @@ def test_offline_dir_is_none_when_the_user_has_nothing_yet(eci, monkeypatch, tmp
     b, _ = eci
     monkeypatch.setattr(config, "WORK_NAS_LOCAL_MOUNT", str(tmp_path))
     assert b.offline_workspace_dir("u_neverran") is None
+
+
+# --- 同名重复实例 ------------------------------------------------------------
+# 2026-08-24 05:24:15/16 真的建出过两台同名且都 Running 的实例。ECI 不保证
+# ContainerGroupName 唯一, 而这里每一条错法都只表现为账单变大, 不会报错。
+
+
+def _dupes(uid="u_abc"):
+    """线上那次的形状: 同名、同 boot_fp、创建时间差一秒、都在跑。"""
+    return [
+        _group(uid=uid, gid="eci-new", created="2026-08-24T05:24:16Z", ip="172.29.181.245"),
+        _group(uid=uid, gid="eci-old", created="2026-08-24T05:24:15Z", ip="172.29.181.244"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_duplicated_instance_is_metered_once_not_twice(eci):
+    """计量遍历的是这个列表, 同一个人出现两次就等于一分钟扣两分钟机时。"""
+    b, fake = eci
+    fake.groups = _dupes()
+    assert await b.running_users() == ["u_abc"]
+
+
+@pytest.mark.asyncio
+async def test_inspect_deletes_the_extra_instance_and_keeps_one(eci, caplog):
+    """多出来的那台按秒烧钱、各占一个 EIP, 而用户只看得到一台。"""
+    b, fake = eci
+    fake.groups = _dupes()
+    with caplog.at_level("ERROR"):
+        info = await b.inspect("u_abc")
+    assert fake.deleted == ["eci-old"], f"没把多余的实例删掉: deleted={fake.deleted}"
+    assert info is not None and info.host == "172.29.181.245"
+    assert "重复计费" in caplog.text, "重复计费必须喊出来, 否则只有账单知道"
+
+
+@pytest.mark.asyncio
+async def test_which_duplicate_survives_does_not_depend_on_listing_order(eci):
+    """并发自愈必须收敛到同一个选择, 否则两边各删一台就把两台都删了。"""
+    b, fake = eci
+    fake.groups = list(reversed(_dupes()))
+    info = await b.inspect("u_abc")
+    assert fake.deleted == ["eci-old"]
+    assert info is not None and info.host == "172.29.181.245"
+
+
+@pytest.mark.asyncio
+async def test_a_terminal_duplicate_does_not_take_the_running_one_with_it(eci):
+    """ "终态实例占着名字要删掉"不能顺手把还在跑的那台删了。"""
+    b, fake = eci
+    fake.groups = [
+        _group(gid="eci-dead", status="Succeeded", created="2026-08-24T05:24:16Z"),
+        _group(gid="eci-live", status="Running", created="2026-08-24T05:24:15Z", ip="172.29.0.9"),
+    ]
+    info = await b.inspect("u_abc")
+    assert fake.deleted == ["eci-dead"]
+    assert info is not None and info.running and info.host == "172.29.0.9"
+
+
+@pytest.mark.asyncio
+async def test_destroy_removes_every_instance_with_that_name(eci):
+    """只删第一个, 剩下那台就永远按秒计费 —— 没人看得见, 也不会再被回收。"""
+    b, fake = eci
+    fake.groups = _dupes()
+    await b.destroy("u_abc")
+    assert sorted(fake.deleted) == ["eci-new", "eci-old"]
+    assert fake.groups == []
+
+
+@pytest.mark.asyncio
+async def test_release_also_removes_every_instance_with_that_name(eci):
+    b, fake = eci
+    fake.groups = _dupes()
+    await b.release("u_abc")
+    assert sorted(fake.deleted) == ["eci-new", "eci-old"]

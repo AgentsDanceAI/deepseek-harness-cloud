@@ -1126,7 +1126,9 @@ def test_the_workspace_host_is_exempt_from_our_csp(monkeypatch):
     """
     monkeypatch.setattr(config, "WORK_DOMAIN", "work.dshcloud.online")
     from fastapi.testclient import TestClient
+
     from app.main import create_app
+
     c = TestClient(create_app())
 
     main_site = c.get("/", headers={"host": "dshcloud.online"})
@@ -1134,5 +1136,62 @@ def test_the_workspace_host_is_exempt_from_our_csp(monkeypatch):
 
     r = c.get("/work/starting", headers={"host": "work.dshcloud.online"})
     assert r.status_code == 200
-    assert "content-security-policy" not in r.headers, \
-        "work 域带了 CSP —— dsh 会启动即死, 整页白屏"
+    assert "content-security-policy" not in r.headers, "work 域带了 CSP —— dsh 会启动即死, 整页白屏"
+
+
+# --- 冷启动时的请求扇出 ------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_a_burst_of_cold_requests_creates_exactly_one_instance(monkeypatch):
+    """Caddy 的 forward_auth 会为页面上每个资源问一次 /api/work/route。
+
+    冷启动时 _last_seen 是空的, 30 秒快路径拦不住, 于是整个扇出一起落进
+    "没有实例 -> 建一台"。ECI 不保证同名唯一, 所以真的会建出好几台: 2026-08-24
+    05:24:15/16 各一台, 都 Running、各自动创建一个 EIP、按秒双份计费, 而用户只
+    看得到一台。这里把并发直接跑出来 —— 少一把锁, created 就 > 1。
+    """
+    state = {"created": 0, "exists": False}
+
+    async def fake_inspect(_uid):
+        await asyncio.sleep(0)  # 让另一个协程有机会插进来, 正如真实的 API 往返
+        if not state["exists"]:
+            return None
+        return workbackend.WorkInfo(
+            running=True, boot_fp="fp", image_id="img", host="172.29.0.5", state="Running"
+        )
+
+    async def fake_create(_user):
+        await asyncio.sleep(0)
+        state["created"] += 1
+        state["exists"] = True
+
+    async def fake_start(_uid):
+        await asyncio.sleep(0)
+
+    async def no_running():
+        await asyncio.sleep(0)
+        return []
+
+    async def not_stale(_info):
+        return False
+
+    monkeypatch.setattr(workspace, "_inspect", fake_inspect)
+    monkeypatch.setattr(workspace, "_create", fake_create)
+    monkeypatch.setattr(workspace, "_start", fake_start)
+    monkeypatch.setattr(workspace, "_running_workspaces", no_running)
+    monkeypatch.setattr(workspace, "_boot_is_stale", lambda _info: False)
+    monkeypatch.setattr(workspace, "_image_is_stale", not_stale)
+    monkeypatch.setattr(workspace, "_capacity_reason", lambda: "")
+    monkeypatch.setattr(workspace, "_ready", lambda _uid: _true())
+    monkeypatch.setattr(config, "WORK_MAX_CONCURRENT", 10)
+    workspace._ensure_locks.pop("u_burst", None)
+    workspace._starting.pop("u_burst", None)
+
+    user = {"id": "u_burst"}
+    await asyncio.gather(*[workspace.ensure_workspace(user) for _ in range(6)])
+    assert state["created"] == 1, f"一次冷启动建了 {state['created']} 台实例 —— 每台都按秒计费并各占一个 EIP"
+
+
+async def _true():
+    return True

@@ -35,8 +35,7 @@ class SecurityHeaders:
                         req_host = v.decode("latin-1").split(":")[0].lower()
                         break
                 on_work = bool(self.work_host) and req_host == self.work_host
-                if "text/html" in content_type and not path.startswith("/preview/") \
-                        and not on_work:
+                if "text/html" in content_type and not path.startswith("/preview/") and not on_work:
                     headers.setdefault(
                         "content-security-policy",
                         "default-src 'self'; base-uri 'self'; frame-ancestors 'none'; "

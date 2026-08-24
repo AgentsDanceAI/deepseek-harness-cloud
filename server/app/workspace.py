@@ -329,7 +329,32 @@ async def _image_is_stale(info: workbackend.WorkInfo) -> bool:
     return bool(want) and bool(info.image_id) and want != info.image_id
 
 
+_ensure_locks: dict[str, asyncio.Lock] = {}
+
+
+def _ensure_lock(uid: str) -> asyncio.Lock:
+    """每个用户一把锁, 串行化"看一眼再决定建不建"这一段。
+
+    没有它, 几乎同时到达的请求会各自看到"没有实例"然后各建一台。这不是理论:
+    Caddy 的 forward_auth 会为页面上每个资源问一次 /api/work/route, 冷启动时
+    _last_seen 是空的, 30 秒快路径拦不住, 于是整个扇出一起落进 _create。
+    2026-08-24 05:24:15/16 就这样建出两台同名实例, 两台都 Running、各占一个
+    EIP、按秒双份计费, 而用户只看得到一台 (ECI 不保证名字唯一, 见
+    workbackend._find_all)。
+    单进程单事件循环, asyncio.Lock 够用; 换成多 worker 时这里要改成数据库锁。
+    """
+    lock = _ensure_locks.get(uid)
+    if lock is None:
+        lock = _ensure_locks[uid] = asyncio.Lock()
+    return lock
+
+
 async def ensure_workspace(user: dict) -> str:
+    async with _ensure_lock(user["id"]):
+        return await _ensure_workspace(user)
+
+
+async def _ensure_workspace(user: dict) -> str:
     """Idempotent create+start; returns 'running' | 'starting'. Raises on
     hard failures (cap reached, engine down)."""
     uid = user["id"]
