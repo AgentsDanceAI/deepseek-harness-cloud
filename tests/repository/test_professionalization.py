@@ -89,7 +89,9 @@ def test_repository_has_editor_and_dependency_update_policy():
 
 
 def test_manual_local_compose_docs_use_the_published_port_as_public_base():
-    for path in ("README.md", "README.zh-CN.md", "docs/deploy.md"):
+    # 2026-08-23 起手动 Compose 步骤只住 docs/deploy.md; README 保留两行式
+    # quickstart, 不再携带 PUBLIC_BASE 配置块。
+    for path in ("docs/deploy.md",):
         text = (ROOT / path).read_text(encoding="utf-8")
         assert "PUBLIC_BASE=http://localhost:8787" in text, path
 
