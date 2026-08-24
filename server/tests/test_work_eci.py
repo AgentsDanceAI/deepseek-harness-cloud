@@ -47,6 +47,8 @@ class FakeEci:
             self.deleted.append(p["ContainerGroupId"])
             self.groups = [g for g in self.groups if g["ContainerGroupId"] != p["ContainerGroupId"]]
             return {}
+        if action == "CreateContainerGroup":
+            return {"ContainerGroupId": "eci-created"}
         return {}
 
     def params_of(self, action):
@@ -442,3 +444,31 @@ async def test_release_also_removes_every_instance_with_that_name(eci):
     fake.groups = _dupes()
     await b.release("u_abc")
     assert sorted(fake.deleted) == ["eci-new", "eci-old"]
+
+
+# --- 自有的实例台账 ----------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_creating_an_instance_is_logged_with_who_it_was_for(eci, caplog):
+    """每台实例自动创建一个 EIP, 所以这行日志就是"谁在什么时候占了一个 EIP"的
+    唯一自有记录。
+
+    没有它, "最近这些 EIP 都是谁申请的"只能去翻操作审计或账单 —— 两个接口都要
+    额外的 RAM 权限, 而且都只会显示同一个子账号在调, 落不到具体用户身上。
+    """
+    b, _fake = eci
+    with caplog.at_level("INFO", logger="dhc.work"):
+        await b.create("u_abc", boot="x", env={}, boot_fp="fp")
+    assert "eci-created" in caplog.text
+    assert "u_abc" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_deleting_an_instance_is_logged_too(eci, caplog):
+    """建和删要成对, 否则日志只能看出占了多少个 EIP, 看不出还了没有。"""
+    b, _fake = eci
+    _fake.groups = [_group()]
+    with caplog.at_level("INFO", logger="dhc.work"):
+        await b.release("u_abc")
+    assert "eci-1" in caplog.text
