@@ -379,6 +379,12 @@ class EciBackend(Backend):
     async def _delete(self, group: dict) -> None:
         try:
             await self._call("DeleteContainerGroup", {"ContainerGroupId": group["ContainerGroupId"]})
+            # 与"建实例"配对: 一台实例的生死就是一个 EIP 的申请与释放。
+            log.info(
+                "[work] 删实例 %s (%s), 随它释放一个 EIP",
+                group.get("ContainerGroupId"),
+                group.get("Status"),
+            )
         except Exception as e:  # noqa: BLE001
             # 并发自愈时另一边可能已经删掉了 —— 那正是想要的结果, 不是故障。
             # 但真删不掉的实例会一直计费, 所以还是要留下痕迹。
@@ -482,7 +488,18 @@ class EciBackend(Backend):
             p[f"Container.1.EnvironmentVar.{i}.Key"] = k
             p[f"Container.1.EnvironmentVar.{i}.Value"] = v
         p.update(self._volume_params(user_id))
-        await self._call("CreateContainerGroup", p)
+        body = await self._call("CreateContainerGroup", p)
+        # 每台实例都自动创建一个 EIP, 所以这一行就是"谁在什么时候占了一个 EIP"的
+        # 唯一自有记录。没有它, 想回答"最近这些 EIP 都是谁申请的"只能去翻操作审计
+        # 或账单 —— 而那两个接口都要额外的 RAM 权限, 而且只会显示同一个子账号在调,
+        # 落不到具体用户身上。
+        log.info(
+            "[work] 建实例 %s user=%s cpu=%s mem=%sGiB (自动创建 EIP)",
+            body.get("ContainerGroupId", "?"),
+            user_id,
+            p["Cpu"],
+            p["Memory"],
+        )
 
     async def start(self, user_id: str) -> None:
         """ECI 上没有这个动作 —— 实例一创建就在起。inspect 报 running=False 时
