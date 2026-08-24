@@ -144,51 +144,24 @@ dsh-cloud start --mode trial --wait
 ### 从源码 — Docker Compose
 
 ```bash
-git clone https://github.com/AgentsDanceAI/deepseek-harness-cloud.git
-cd deepseek-harness-cloud
+git clone https://github.com/AgentsDanceAI/deepseek-harness-cloud.git && cd deepseek-harness-cloud
 bash scripts/quickstart.sh --domain localhost --admin-email you@example.com
 ```
 
-脚本会创建 `deploy/selfhost/.env`、生成 `AUTH_SECRET`、询问模型上游、启动标准
-Compose 栈并检查就绪状态。随后打开 <http://localhost:8787>。开发模式会把登录验证码
-写入服务端日志，禁止在公网使用。
+脚本会生成带随机 `AUTH_SECRET` 的 `deploy/selfhost/.env`、询问模型上游、启动
+整栈并等待就绪——然后打开 <http://localhost:8787>。开发模式会把登录码打到服务
+端日志，绝不要在公网使用。手动 Compose 步骤见[部署文档](docs/deploy.zh-CN.md)。
 
-手工验证与启动：
-
-```bash
-cp deploy/selfhost/.env.example deploy/selfhost/.env
-chmod 600 deploy/selfhost/.env
-# 本地试用：DOMAIN=localhost、SITE_SCHEME=http、DHC_DEV=1、
-# PUBLIC_BASE=http://localhost:8787、BIND_ADDRESS=127.0.0.1、HTTP_PORT=8787；
-# 另设置 AUTH_SECRET、上游和管理员。
-docker compose --env-file deploy/selfhost/.env \
-  -f deploy/selfhost/docker-compose.yml \
-  -f deploy/selfhost/compose.build.yml config --quiet
-docker compose --env-file deploy/selfhost/.env \
-  -f deploy/selfhost/docker-compose.yml \
-  -f deploy/selfhost/compose.build.yml up -d --build
-curl --fail --show-error http://localhost:8787/readyz
-```
-
-### 从源码 — 单容器 Docker
+### 单容器 — 预构建镜像
 
 ```bash
-docker build --tag dsh-cloud-server:local --file server/Dockerfile .
-docker volume create dsh-cloud-data
-mkdir -p .dsh-cloud
-umask 077
-printf 'AUTH_SECRET=%s\nDHC_DEV=1\nPUBLIC_BASE=http://127.0.0.1:8081\nPRICING_FILE=pricing.cny.json\n' \
-  "$(openssl rand -hex 32)" > .dsh-cloud/docker.env
-docker run --rm --name dsh-cloud \
-  --env-file .dsh-cloud/docker.env \
-  --publish 127.0.0.1:8081:8100 \
-  --mount type=volume,src=dsh-cloud-data,dst=/app/data \
-  dsh-cloud-server:local
+(umask 077; mkdir -p .dsh-cloud; printf 'AUTH_SECRET=%s\nDHC_DEV=1\nPUBLIC_BASE=http://127.0.0.1:8081\nPRICING_FILE=pricing.cny.json\n' "$(openssl rand -hex 32)" > .dsh-cloud/docker.env)
+docker run --rm --name dsh-cloud --env-file .dsh-cloud/docker.env --publish 127.0.0.1:8081:8100 --mount type=volume,src=dsh-cloud-data,dst=/app/data ghcr.io/agentsdanceai/dsh-cloud-server:0.2.0
 ```
 
-在另一终端检查 `http://127.0.0.1:8081/readyz`。调用模型前，把上游密钥加入
-`.dsh-cloud/docker.env`。单容器不负责 TLS；对外访问时应保留回环绑定，并使用
-经过审核的反向代理。
+检查 <http://127.0.0.1:8081/readyz>，调用模型前把上游密钥加入
+`.dsh-cloud/docker.env`。单容器不负责 TLS，保持回环绑定。从源码构建镜像见
+[部署文档](docs/deploy.zh-CN.md)。
 
 ## 架构概览
 
