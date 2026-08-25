@@ -47,6 +47,9 @@ def apply_answers(pairs: list[tuple[str, str]], answers: dict) -> list[tuple[str
     if answers.get("searchKey"):
         put("SEARCH_PROVIDER", "zhipu")
         put("ZHIPU_SEARCH_API_KEY", answers["searchKey"])
+    for key, value in (answers.get("identity") or {}).items():
+        if value:
+            put(key, value)
     return merged
 
 
@@ -97,7 +100,34 @@ def _secret(prompt: str) -> str:
         return ""
 
 
-def prompt_answers(*, version: str, out=sys.stdout) -> dict:
+def _prompt_identity(out) -> dict:
+    """自部署的硬性要求: 没有 SMTP 或 OAuth 就没人能注册第一个账号, start 会直接
+    拒绝运行。在这里问, 才是引导与一堵墙的区别。试用模式不问 —— 开发模式把
+    验证码打到日志里。"""
+    out.write("\n  登录方式（自部署必须配一种，否则没人能注册第一个账号）\n")
+    out.write("    1) SMTP 邮件验证码\n")
+    out.write("    2) GitHub OAuth\n")
+    out.write("    3) Google OAuth\n")
+    out.flush()
+    choice = _ask("  选择 [1]: ")
+    if choice in {"2", "3"}:
+        vendor, name = ("GITHUB", "GitHub") if choice == "2" else ("GOOGLE", "Google")
+        client_id = _ask(f"  {name} Client ID: ")
+        secret = _secret(f"  {name} Client Secret（不回显）: ")
+        return {f"{vendor}_LOGIN_CLIENT_ID": client_id, f"{vendor}_LOGIN_CLIENT_SECRET": secret}
+    host = _ask("  SMTP 主机（如 smtp.example.com）: ")
+    user = _ask("  SMTP 用户名: ")
+    password = _secret("  SMTP 密码（不回显）: ")
+    sender = _ask(f"  发件地址 [{user}]: ")
+    return {
+        "MAIL_SMTP_HOST": host,
+        "MAIL_SMTP_USER": user,
+        "MAIL_SMTP_PASS": password,
+        "MAIL_FROM": sender or user,
+    }
+
+
+def prompt_answers(*, version: str, mode: str = "trial", out=sys.stdout) -> dict:
     """Run the three questions. Returns answers for apply_answers()."""
     out.write(f"\n  DSH Cloud {version} · 自部署引导\n")
     out.write("  按回车用默认值，任何一项都可以稍后在 .env 里改。\n\n")
@@ -119,6 +149,13 @@ def prompt_answers(*, version: str, out=sys.stdout) -> dict:
     out.flush()
     search_key = _secret("  搜索 API Key: ")
 
+    identity = _prompt_identity(out) if mode == "selfhost" else {}
+
     out.write("\n")
     out.flush()
-    return {"upstreamBase": upstream_base, "upstreamKey": upstream_key, "searchKey": search_key}
+    return {
+        "upstreamBase": upstream_base,
+        "upstreamKey": upstream_key,
+        "searchKey": search_key,
+        "identity": identity,
+    }

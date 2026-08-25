@@ -36,6 +36,9 @@ export function applyAnswers(lines, answers = {}) {
     set('SEARCH_PROVIDER', 'zhipu')
     set('ZHIPU_SEARCH_API_KEY', answers.searchKey)
   }
+  for (const [key, value] of Object.entries(answers.identity ?? {})) {
+    if (value) set(key, value)
+  }
   return lines
 }
 
@@ -146,8 +149,37 @@ export function createReader(input, output) {
   }
 }
 
-/** Run the three questions. Returns answers for applyAnswers(). */
-export async function promptAnswers(io, { version }) {
+/** Self-host has a hard requirement: without SMTP or OAuth nobody can ever
+ * register the first account, and `start` refuses to run. Asking here is the
+ * difference between a guided setup and the wall the CLI used to throw. Trial
+ * runs skip this entirely — dev mode prints sign-in codes to the log. */
+async function promptIdentity(reader, output) {
+  output.write('\n  登录方式（自部署必须配一种，否则没人能注册第一个账号）\n')
+  output.write('    1) SMTP 邮件验证码\n')
+  output.write('    2) GitHub OAuth\n')
+  output.write('    3) Google OAuth\n')
+  const choice = await reader.ask('  选择 [1]: ')
+  if (choice === '2' || choice === '3') {
+    const vendor = choice === '2' ? 'GITHUB' : 'GOOGLE'
+    const name = choice === '2' ? 'GitHub' : 'Google'
+    const id = await reader.ask(`  ${name} Client ID: `)
+    const secret = await reader.secret(`  ${name} Client Secret（不回显）: `)
+    return { [`${vendor}_LOGIN_CLIENT_ID`]: id, [`${vendor}_LOGIN_CLIENT_SECRET`]: secret }
+  }
+  const host = await reader.ask('  SMTP 主机（如 smtp.example.com）: ')
+  const user = await reader.ask('  SMTP 用户名: ')
+  const pass = await reader.secret('  SMTP 密码（不回显）: ')
+  const from = await reader.ask(`  发件地址 [${user}]: `)
+  return {
+    MAIL_SMTP_HOST: host,
+    MAIL_SMTP_USER: user,
+    MAIL_SMTP_PASS: pass,
+    MAIL_FROM: from || user,
+  }
+}
+
+/** Run the questions. Returns answers for applyAnswers(). */
+export async function promptAnswers(io, { version, mode = 'trial' }) {
   const { output } = io
   const reader = createReader(io.input, output)
   try {
@@ -169,8 +201,10 @@ export async function promptAnswers(io, { version }) {
     output.write('\n  联网搜索（可选，智谱 open.bigmodel.cn；回车跳过）\n')
     const searchKey = await reader.secret('  搜索 API Key: ')
 
+    const identity = mode === 'selfhost' ? await promptIdentity(reader, output) : {}
+
     output.write('\n')
-    return { upstreamBase, upstreamKey, searchKey }
+    return { upstreamBase, upstreamKey, searchKey, identity }
   } finally {
     reader.close()
   }

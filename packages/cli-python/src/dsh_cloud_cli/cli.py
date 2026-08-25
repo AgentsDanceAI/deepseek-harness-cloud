@@ -321,7 +321,7 @@ def execute(parsed: dict) -> dict:
     # 只有全新部署才问; 已初始化的目录再问一遍等于诱导用户覆盖自己的配置。
     answers: dict = {}
     if should_run_wizard(parsed, is_tty=sys.stdin.isatty() and sys.stdout.isatty(), fresh_init=fresh_init):
-        answers = prompt_answers(version=manifest["version"])
+        answers = prompt_answers(version=manifest["version"], mode=str(parsed["options"].get("mode", "trial")))
     if parsed["command"] == "init":
         if parsed["options"].get("dryRun"):
             return {"json": value}

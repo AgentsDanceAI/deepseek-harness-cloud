@@ -301,7 +301,8 @@ async function publicIdentityConfigured(target) {
 async function collectAnswers(parsed, manifest, freshInit) {
   const isTTY = Boolean(process.stdin.isTTY && process.stdout.isTTY)
   if (!shouldRunWizard(parsed, { isTTY, freshInit })) return {}
-  return promptAnswers({ input: process.stdin, output: process.stdout }, { version: manifest.version })
+  const mode = parsed.options.mode ?? 'trial'
+  return promptAnswers({ input: process.stdin, output: process.stdout }, { version: manifest.version, mode })
 }
 
 /** 上游密钥到底填了没 —— 决定收尾面板要不要提醒聊天会 503。 */

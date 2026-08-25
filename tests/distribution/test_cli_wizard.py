@@ -81,3 +81,42 @@ def test_eof_mid_question_falls_back_to_defaults(monkeypatch):
     result = wizard.prompt_answers(version="0.2.0")
     assert result["upstreamBase"] == "https://api.deepseek.com/v1"
     assert result["upstreamKey"] == ""
+
+
+def _answers(monkeypatch, plain, secrets):
+    plain_it, secret_it = iter(plain), iter(secrets)
+    monkeypatch.setattr("builtins.input", lambda prompt="": next(plain_it))
+    monkeypatch.setattr(wizard.getpass, "getpass", lambda prompt="": next(secret_it))
+
+
+def test_trial_mode_never_asks_about_login(monkeypatch):
+    _answers(monkeypatch, [""], ["", ""])
+    result = wizard.prompt_answers(version="0.2.0")
+    assert result["identity"] == {}, "试用模式验证码走日志, 问登录纯属噪音"
+
+
+def test_selfhost_collects_smtp_so_the_first_account_can_exist(monkeypatch, capsys):
+    # 自部署没有 SMTP/OAuth 就没人能注册, start 会硬拒 —— 引导必须问到
+    _answers(monkeypatch, ["", "1", "smtp.example.com", "bot@example.com", ""], ["", "", "pw"])
+    identity = wizard.prompt_answers(version="0.2.0", mode="selfhost")["identity"]
+    assert identity["MAIL_SMTP_HOST"] == "smtp.example.com"
+    assert identity["MAIL_SMTP_PASS"] == "pw"
+    assert identity["MAIL_FROM"] == "bot@example.com", "发件地址留空时回落到用户名"
+    assert "pw" not in capsys.readouterr().out, "SMTP 密码不能回显"
+
+
+def test_selfhost_can_pick_oauth_instead(monkeypatch):
+    _answers(monkeypatch, ["", "2", "client-id"], ["", "", "client-secret"])
+    identity = wizard.prompt_answers(version="0.2.0", mode="selfhost")["identity"]
+    assert identity["GITHUB_LOGIN_CLIENT_ID"] == "client-id"
+    assert identity["GITHUB_LOGIN_CLIENT_SECRET"] == "client-secret"
+    assert "MAIL_SMTP_HOST" not in identity
+
+
+def test_identity_answers_land_in_the_env():
+    out = wizard.apply_answers(
+        [("MAIL_SMTP_HOST", ""), ("MAIL_FROM", "")],
+        {"identity": {"MAIL_SMTP_HOST": "smtp.example.com", "MAIL_FROM": "bot@example.com"}},
+    )
+    assert dict(out)["MAIL_SMTP_HOST"] == "smtp.example.com"
+    assert [k for k, _ in out].count("MAIL_SMTP_HOST") == 1
