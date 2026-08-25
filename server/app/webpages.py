@@ -370,7 +370,10 @@ def login_page(request: Request, next: str = "/console"):
         from urllib.parse import urlencode
 
         return RedirectResponse("/login?" + urlencode({"next": safe_next}), status_code=303)
-    return _render(request, "login.html", "login")
+    # 开发模式且没配 SMTP 时, 验证码只打到服务端日志 —— 页面必须说出来,
+    # 否则自部署用户在登录页上永远等不到那封邮件 (首次运行必踩)。
+    dev_mail_to_logs = bool(config.DEV_MODE and not config.MAIL_SMTP_HOST)
+    return _render(request, "login.html", "login", dev_mail_to_logs=dev_mail_to_logs)
 
 
 @router.get("/activate")
