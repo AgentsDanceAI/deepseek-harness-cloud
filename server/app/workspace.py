@@ -76,6 +76,11 @@ _starting: dict[str, float] = {}
 # here too, so resuming a container whose last agent call is ancient gets a full
 # grace window instead of being reaped before the user can type
 _started_at: dict[str, float] = {}
+# 真人在场的时刻 —— 由工作台外壳在**发生了真实交互**之后上报 (见
+# /api/work/active)。刻意不等同于 _last_seen: 后者是浏览器还在轮询, 一个没人
+# 的标签页照样刷新它; 而"有人正在用"必须是键盘、指针、滚轮这类动作才算。
+# 没有条目 = 这个客户端还没上报过 (老缓存或脚本没跑起来), 那时回落到旧口径。
+_user_active: dict[str, float] = {}
 
 
 def _work_url(path: str = "/") -> str:
@@ -1101,6 +1106,21 @@ async def work_status(request: Request):
     return out
 
 
+@router.post("/api/work/active")
+async def work_active(request: Request):
+    """“有真人正在用这台工作台。”
+
+    工作台外壳在发生真实交互 (按键、指针、滚轮) 之后最多每分钟报一次。**只有
+    这一条路径**能刷新在场时刻 —— 普通的轮询和资源请求不行, 否则一个开着没人
+    的标签页就能永远续租, 而机时是按容器存在时间计费的, 等于替用户烧额度。
+
+    不 ensure_workspace: 这只是续租, 不该把一台已经回收的工作台重新拉起来。
+    """
+    user = resolve_user(request)
+    _user_active[user["id"]] = time.time()
+    return {"ok": True}
+
+
 @router.post("/api/work/stop")
 async def work_stop(request: Request):
     user = resolve_user(request)
@@ -1108,6 +1128,7 @@ async def work_stop(request: Request):
     _last_seen.pop(user["id"], None)
     _starting.pop(user["id"], None)
     _started_at.pop(user["id"], None)
+    _user_active.pop(user["id"], None)
     return {"ok": True}
 
 
@@ -1292,24 +1313,38 @@ async def reaper_tick(now: float) -> None:
         )
         work_access.consume_minute(uid)
         last = _last_seen.setdefault(uid, now)  # re-seed after restart
-        # Two stop rules, because idle minutes are now free and RAM is not:
-        #   - the user left (no browser traffic) — the original rule;
-        #   - the tab was abandoned open with the agent doing nothing for a
-        #     longer window (capacity backstop). Volumes persist, so a stopped
-        #     workspace resumes in seconds on the next message.
-        # The backstop measures from the later of "agent worked" and "container
-        # started": resuming a workspace whose last agent call is older than the
-        # backstop must not be reaped before the user can type into it.
         started = _started_at.setdefault(uid, now)  # re-seed after restart
-        gone = now - last > config.WORK_IDLE_STOP_MIN * 60
-        agent_gone = now - max(agent_last_active(uid), started) > config.WORK_AGENT_IDLE_STOP_MIN * 60
+        # 口径: **打开一次, 持续做事, 只关一次。**
+        #
+        # 回收只在"没人在 **且** 没活儿在跑"时发生 —— 两个条件都要成立:
+        #
+        #   away  没人在。在场只认真实交互 (/api/work/active), 不认浏览器轮询:
+        #         轮询在没人的标签页上照样发生, 拿它当在场, 一个忘了关的页面
+        #         就能整夜续租, 而机时按容器存在时间计费 —— 那是在替用户烧额度。
+        #   quiet 没活儿在跑。智能体的长任务必须能在关掉标签页之后继续 (它可能
+        #         正跑一小时的活), 所以网关调用单独顶着一个窗口。
+        #
+        # 关掉标签页之后要收得快, 但不能靠 pagehide/sendBeacon —— iOS 切个应用
+        # 也发, 硬杀则一条都不发。轮询停了本身就是可靠信号: 页面没了, 就没有
+        # 请求经过 forward_auth。所以标签页在时给足 WORK_IDLE_STOP_MIN, 一旦
+        # 连轮询都停了, 在场窗口缩到 WORK_TAB_GONE_MIN, 省下的是用户的机时。
+        #
+        # 没上报过在场的客户端 (老缓存、脚本没跑起来) 回落到 started, 于是行为
+        # 与加这条之前完全一致 —— 由 quiet 单独决定, 绝不会因为"没收到心跳"
+        # 而把正在用的人踢掉。
+        tab_gone = now - last > config.WORK_TAB_GONE_MIN * 60
+        idle_min = config.WORK_TAB_GONE_MIN if tab_gone else config.WORK_IDLE_STOP_MIN
+        present = max(_user_active.get(uid, 0.0), started)
+        away = now - present > idle_min * 60
+        quiet = now - max(agent_last_active(uid), started) > config.WORK_AGENT_IDLE_STOP_MIN * 60
         broke = credits.balance(uid) <= -config.OVERDRAFT_LIMIT_CREDITS
-        if gone or agent_gone or broke:
-            reason = "user idle" if gone else "agent idle" if agent_gone else "credits exhausted"
+        if (away and quiet) or broke:
+            reason = "credits exhausted" if broke else ("tab closed" if tab_gone else "idle")
             log.info("stopping workspace %s (%s)", uid, reason)
             await _stop(uid)
             _last_seen.pop(uid, None)
             _started_at.pop(uid, None)
+            _user_active.pop(uid, None)
 
 
 async def billing_reaper_loop() -> None:

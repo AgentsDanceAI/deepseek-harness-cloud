@@ -37,7 +37,7 @@ Built on the open-source project DeepSeek Harness (MIT License), the Service pro
 
 ## 4. Credits, Machine Hours, and Billing
 
-4.1 **Two separate quotas.** Credits measure model calls (counted by token), and machine hours measure the **running time** of the cloud workspace — every minute the workspace is running counts, whether or not the agent is executing a task. Your workspace runs continuously from when you open it until you close it. If you leave it idle for about 10 minutes, it will be reclaimed to save costs. The two are not convertible into each other and do not draw on each other.
+4.1 **Two separate quotas.** Credits measure model calls (counted by token), and machine hours measure the **running time** of the cloud workspace — it runs continuously from when you open it until you close it, and every minute counts, whether or not the agent is executing a task. It is reclaimed only when **nobody is using it and no task is running**: about 10 minutes without interaction while the page is open, or about 3 minutes after the page is closed, provided the agent is not executing a task. Your files are kept; the workspace restarts on your next visit. The two are not convertible into each other and do not draw on each other.
 
 4.2 **How credits are deducted.** Each model has a published multiplier, with Claude Sonnet as the 1.00x baseline; 1.00x means a deduction of 1,000 credits per 1 million tokens. The full multiplier table is published in real time at https://dshcloud.online/pricing . When a multiplier changes because of an upstream price adjustment, we will update that page before the change takes effect.
 
