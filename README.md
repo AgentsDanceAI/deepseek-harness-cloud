@@ -142,8 +142,13 @@ npm install --global @agentsdanceai/dsh-cloud@0.2.0
 dsh-cloud start --mode trial --wait
 ```
 
-The stack boots with an empty upstream key. Before chatting, set
-`UPSTREAM_API_KEY` in `./dsh-cloud/.env` and run the same command again.
+A fresh run walks you through three questions — your OpenAI-compatible
+endpoint, its API key (read with echo off, never from argv), and an optional
+search key — then writes `./dsh-cloud/.env`, starts the stack, and prints where
+to sign in. Everything asked can be changed later in that file.
+
+Add `--yes` (or pipe the output anywhere) to skip the prompts and take the
+defaults, which is what CI does.
 
 
 ### One command — uv/uvx

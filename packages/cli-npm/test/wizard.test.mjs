@@ -1,0 +1,112 @@
+import test from 'node:test'
+import assert from 'node:assert/strict'
+import { EventEmitter } from 'node:events'
+import { applyAnswers, nextSteps, promptAnswers, shouldRunWizard } from '../src/wizard.mjs'
+
+const parsed = (command, options = {}) => ({ command, options, positionals: [] })
+
+test('wizard runs only for a fresh interactive start or init', () => {
+  assert.equal(shouldRunWizard(parsed('start'), { isTTY: true, freshInit: true }), true)
+  assert.equal(shouldRunWizard(parsed('init'), { isTTY: true, freshInit: true }), true)
+  // 已初始化的目录不能再问 —— 那等于诱导用户覆盖自己的配置
+  assert.equal(shouldRunWizard(parsed('start'), { isTTY: true, freshInit: false }), false)
+  assert.equal(shouldRunWizard(parsed('up'), { isTTY: true, freshInit: true }), false)
+})
+
+test('automation never blocks on a hidden prompt', () => {
+  const ctx = { isTTY: true, freshInit: true }
+  for (const options of [{ json: true }, { dryRun: true }, { yes: true }]) {
+    assert.equal(shouldRunWizard(parsed('start', options), ctx), false)
+  }
+  // 管道 / CI 里没有 TTY
+  assert.equal(shouldRunWizard(parsed('start'), { isTTY: false, freshInit: true }), false)
+})
+
+test('answers replace the generated placeholders in place', () => {
+  const lines = ['DOMAIN=localhost', 'UPSTREAM_BASE_URL=https://api.deepseek.com/v1', 'UPSTREAM_API_KEY=', 'SEARCH_PROVIDER=zhipu', 'ZHIPU_SEARCH_API_KEY=', '']
+  const out = applyAnswers(lines, { upstreamBase: 'https://gw.example.com/v1', upstreamKey: 'sk-x', searchKey: 'zp-y' })
+  assert.ok(out.includes('UPSTREAM_BASE_URL=https://gw.example.com/v1'))
+  assert.ok(out.includes('UPSTREAM_API_KEY=sk-x'))
+  assert.ok(out.includes('ZHIPU_SEARCH_API_KEY=zp-y'))
+  assert.equal(out.filter((l) => l.startsWith('UPSTREAM_API_KEY=')).length, 1, '不能重复追加同名键')
+  assert.ok(out.includes('DOMAIN=localhost'), '无关行原样保留')
+})
+
+test('skipped answers leave the placeholders untouched', () => {
+  const lines = ['UPSTREAM_BASE_URL=https://api.deepseek.com/v1', 'UPSTREAM_API_KEY=']
+  assert.deepEqual(applyAnswers([...lines], {}), lines)
+  assert.deepEqual(applyAnswers([...lines], { upstreamKey: '' }), lines)
+})
+
+test('closing panel tells the user where the sign-in code went', () => {
+  const panel = nextSteps({ url: 'http://localhost:8787', directory: '/x/dsh-cloud', hasUpstreamKey: true })
+  assert.ok(panel.includes('http://localhost:8787'))
+  // 2026-08-25 验收: 验证码走日志而页面不说, 用户首次登录必卡 —— 收尾面板必须点破
+  assert.ok(panel.includes('dev-mail'))
+  assert.ok(!panel.includes('503'), '配好了就不该再警告 503')
+})
+
+test('closing panel warns when chat would answer 503', () => {
+  const panel = nextSteps({ url: 'http://localhost:8787', directory: '/x/dsh-cloud', hasUpstreamKey: false })
+  assert.ok(panel.includes('503') && panel.includes('UPSTREAM_API_KEY'))
+})
+
+/** 假 TTY。`atOnce` 把所有行挤进一个 chunk —— 管道输入就长这样,
+ *  2026-08-25 真 PTY 实测正是这里把后续问题全吞了。 */
+function fakeIo(script, { atOnce = false } = {}) {
+  const input = new EventEmitter()
+  input.isTTY = true
+  input.setRawMode = () => {}
+  input.setEncoding = () => {}
+  input.resume = () => {}
+  input.pause = () => {}
+  const written = []
+  const output = { write: (text) => written.push(text) }
+  queueMicrotask(async () => {
+    if (atOnce) {
+      input.emit('data', script.map((line) => `${line}\n`).join(''))
+      return
+    }
+    for (const line of script) {
+      await new Promise((r) => setTimeout(r, 1))
+      input.emit('data', `${line}\r`)
+    }
+  })
+  return { io: { input, output }, written }
+}
+
+test('a single chunk carrying every line still answers each question', async () => {
+  const { io } = fakeIo(['2', 'https://gw.example.com/v1', 'sk-piped', ''], { atOnce: true })
+  const answers = await promptAnswers(io, { version: '0.2.0' })
+  assert.equal(answers.upstreamBase, 'https://gw.example.com/v1')
+  assert.equal(answers.upstreamKey, 'sk-piped')
+  assert.equal(answers.searchKey, '')
+})
+
+test('prompts collect a custom endpoint and never echo the key', async () => {
+  const { io, written } = fakeIo(['2', 'https://gw.example.com/v1/', 'sk-secret', ''])
+  const answers = await promptAnswers(io, { version: '0.2.0' })
+  assert.equal(answers.upstreamBase, 'https://gw.example.com/v1', '尾部斜杠要规范化')
+  assert.equal(answers.upstreamKey, 'sk-secret')
+  assert.equal(answers.searchKey, '')
+  const screen = written.join('')
+  assert.ok(!screen.includes('sk-secret'), '密钥绝不能出现在屏幕上')
+})
+
+test('pressing enter through everything picks the documented defaults', async () => {
+  const { io } = fakeIo(['', '', ''])
+  const answers = await promptAnswers(io, { version: '0.2.0' })
+  assert.equal(answers.upstreamBase, 'https://api.deepseek.com/v1')
+  assert.equal(answers.upstreamKey, '')
+})
+
+test('stdin closing mid-question falls back to defaults instead of hanging', async () => {
+  // Ctrl-D 或 `start < /dev/null`: 2026-08-25 实测原实现会永久挂在问号后面。
+  const input = new EventEmitter()
+  Object.assign(input, { isTTY: true, setRawMode() {}, setEncoding() {}, resume() {}, pause() {} })
+  const io = { input, output: { write() {} } }
+  queueMicrotask(() => input.emit('end'))
+  const answers = await promptAnswers(io, { version: '0.2.0' })
+  assert.equal(answers.upstreamBase, 'https://api.deepseek.com/v1')
+  assert.equal(answers.upstreamKey, '')
+})

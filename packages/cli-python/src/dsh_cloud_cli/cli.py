@@ -5,8 +5,11 @@ import os
 import re
 import secrets
 import shutil
+import re
 import subprocess
 import sys
+
+from .wizard import apply_answers, next_steps, prompt_answers, should_run_wizard
 from pathlib import Path
 
 
@@ -173,7 +176,7 @@ def template_roots() -> tuple[Path, Path]:
     return root / "deploy/selfhost", root / "server/config"
 
 
-def generated_env(parsed: dict, manifest: dict) -> str:
+def generated_env(parsed: dict, manifest: dict, answers: dict | None = None) -> str:
     options = parsed["options"]
     mode = str(options.get("mode", "trial"))
     trial = mode == "trial"
@@ -184,12 +187,17 @@ def generated_env(parsed: dict, manifest: dict) -> str:
     values = [
         ("COMPOSE_PROJECT_NAME", str(options.get("projectName", "dsh-selfhost"))),
         ("DOMAIN", domain), ("SITE_SCHEME", "http" if trial else "https"),
-        ("PUBLIC_BASE", public_base), ("BIND_ADDRESS", "127.0.0.1" if trial else "0.0.0.0"),
+        # 键序与 src/wizard.mjs 的那份保持一致 —— 两个安装器的 .env 逐字节相同,
+        # 由 tests/distribution 的 parity 用例钉着。
+        ("PUBLIC_BASE", public_base),
         ("DSH_SITE", TRIAL_CADDY_SITE if trial else f"https://{domain}"),
+        ("BIND_ADDRESS", "127.0.0.1" if trial else "0.0.0.0"),
         ("HTTP_PORT", "8787" if trial else "80"), ("HTTPS_PORT", "8443" if trial else "443"),
         ("DHC_DEV", "1" if trial else "0"), ("DHC_CONFIG_DIR", "./config"),
         ("PRICING_FILE", "pricing.cny.json"), ("AUTH_SECRET_FILE", "/run/secrets/auth_secret"),
         ("UPSTREAM_BASE_URL", "https://api.deepseek.com/v1"), ("UPSTREAM_API_KEY", ""),
+        # 联网搜索: 留空则 web_search 不可用。zhipu 走 open.bigmodel.cn。
+        ("SEARCH_PROVIDER", "zhipu"), ("ZHIPU_SEARCH_API_KEY", ""),
         ("ADMIN_EMAILS", str(options.get("adminEmail", ""))),
         ("MAIL_SMTP_HOST", ""), ("MAIL_SMTP_USER", ""), ("MAIL_SMTP_PASS", ""), ("MAIL_FROM", ""),
         ("GOOGLE_LOGIN_CLIENT_ID", ""), ("GOOGLE_LOGIN_CLIENT_SECRET", ""),
@@ -200,10 +208,11 @@ def generated_env(parsed: dict, manifest: dict) -> str:
         ("SOCKET_PROXY_IMAGE", manifest["baseImages"]["socketProxy"]),
         ("WORK_IMAGE", manifest["images"]["workspace"]),
     ]
+    values = apply_answers(values, answers or {})
     return "".join(f"{key}={value}\n" for key, value in values)
 
 
-def initialize(parsed: dict, manifest: dict, deployment_plan: dict | None = None) -> Path:
+def initialize(parsed: dict, manifest: dict, deployment_plan: dict | None = None, answers: dict | None = None) -> Path:
     deployment_plan = deployment_plan or plan(parsed, manifest)
     target = target_of(parsed)
     if target.exists():
@@ -226,7 +235,7 @@ def initialize(parsed: dict, manifest: dict, deployment_plan: dict | None = None
     shutil.copytree(config, target / "config")
     secret = os.environ.get("DSH_CLOUD_TEST_RANDOM_HEX", secrets.token_hex(32))
     atomic_write(target / "secrets/auth_secret", f"{secret}\n", 0o600)
-    atomic_write(target / ".env", generated_env(parsed, manifest), 0o600)
+    atomic_write(target / ".env", generated_env(parsed, manifest, answers), 0o600)
     atomic_write(target / ".gitignore", ".env\nsecrets/\n.dsh-cloud/lock\n")
     state = {
         "schemaVersion": 1, "version": manifest["version"], "stackSchema": manifest["stackSchema"],
@@ -307,14 +316,19 @@ def execute(parsed: dict) -> dict:
     if parsed.get("special") == "version":
         return {"text": manifest["version"] + "\n"}
     value = plan(parsed, manifest)
+    state = Path(value["directory"]) / ".dsh-cloud/state.json"
+    fresh_init = not state.is_file()
+    # 只有全新部署才问; 已初始化的目录再问一遍等于诱导用户覆盖自己的配置。
+    answers: dict = {}
+    if should_run_wizard(parsed, is_tty=sys.stdin.isatty() and sys.stdout.isatty(), fresh_init=fresh_init):
+        answers = prompt_answers(version=manifest["version"])
     if parsed["command"] == "init":
         if parsed["options"].get("dryRun"):
             return {"json": value}
-        initialize(parsed, manifest, value)
+        initialize(parsed, manifest, value, answers)
         return {"json": {**value, "initialized": True}}
-    state = Path(value["directory"]) / ".dsh-cloud/state.json"
-    if parsed["command"] == "start" and not state.is_file() and not parsed["options"].get("dryRun"):
-        initialize(parsed, manifest, value)
+    if parsed["command"] == "start" and fresh_init and not parsed["options"].get("dryRun"):
+        initialize(parsed, manifest, value, answers)
     if state.is_file():
         restore_deployment(value, state, parsed)
     if parsed["options"].get("dryRun"):
@@ -347,7 +361,14 @@ def execute(parsed: dict) -> dict:
         if result.stderr.strip():
             response["composeError"] = result.stderr.strip()
         return {"json": response}
-    return {"text": value["url"] + "\n" if parsed["command"] in {"start", "up"} else ""}
+    if parsed["command"] not in {"start", "up"}:
+        return {"text": ""}
+    # 人在终端前就给完整指引; 管道/CI 里保持裸 URL, 免得打断既有脚本的解析。
+    if not sys.stdout.isatty():
+        return {"text": value["url"] + "\n"}
+    env_text = (Path(value["directory"]) / ".env").read_text(encoding="utf-8")
+    has_key = bool(re.search(r"^UPSTREAM_API_KEY=.+$", env_text, re.MULTILINE))
+    return {"text": next_steps(url=value["url"], directory=value["directory"], has_upstream_key=has_key)}
 
 
 def main(argv: list[str] | None = None) -> int:

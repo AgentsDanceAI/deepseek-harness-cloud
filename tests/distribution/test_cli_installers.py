@@ -395,3 +395,21 @@ def test_node_and_python_reject_unsafe_selfhost_env_values_before_writing(tmp_pa
             result = runner(*arguments)
             assert result.returncode == 2
             assert not target.exists()
+
+
+def test_node_and_python_write_byte_identical_env(tmp_path: Path):
+    """两个安装器宣称同一套栈契约, .env 就必须一模一样。
+
+    2026-08-25 给两边都加了首次运行引导与搜索配置位 —— 同时改两处正是漂移最
+    容易发生的时刻, 这条把它钉死: 少改一边、键序不同、值不同, 都会红。
+    """
+    envs = {}
+    for name, runner in (("node", run_node), ("python", run_python)):
+        target = tmp_path / name
+        result = runner("init", str(target), "--mode", "trial", "--yes", "--json")
+        assert result.returncode == 0, result.stderr
+        envs[name] = (target / ".env").read_text(encoding="utf-8")
+    assert envs["node"] == envs["python"]
+    # 搜索是"自带 API"叙事的一部分, 配置位必须露出来而不是只活在源码里
+    assert "SEARCH_PROVIDER=zhipu" in envs["node"]
+    assert "ZHIPU_SEARCH_API_KEY=" in envs["node"]
