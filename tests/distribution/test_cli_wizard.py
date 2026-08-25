@@ -52,6 +52,8 @@ def test_closing_panel_tells_the_user_where_the_sign_in_code_went():
     # 2026-08-25 验收: 验证码走日志而页面不说, 用户首次登录必卡
     assert "dev-mail" in panel
     assert "503" not in panel
+    # 装完就走的人从没打开过仓库页, 也就从没被邀请过 —— 给链接, 不代他点
+    assert "star" in panel and "github.com/AgentsDanceAI/deepseek-harness-cloud" in panel
 
 
 def test_closing_panel_warns_when_chat_would_answer_503():

@@ -13,6 +13,7 @@
  */
 
 const DEEPSEEK_BASE = 'https://api.deepseek.com/v1'
+const REPOSITORY = 'https://github.com/AgentsDanceAI/deepseek-harness-cloud'
 
 /** Should the interactive wizard run for this invocation? */
 export function shouldRunWizard(parsed, { isTTY, freshInit }) {
@@ -60,6 +61,10 @@ export function nextSteps({ url, directory, hasUpstreamKey }) {
   lines.push(
     `  配置    ${directory}/.env（改完 dsh-cloud up 生效）`,
     '  停止    dsh-cloud down（数据保留）',
+    '',
+    // 装完就走的人从没打开过仓库页 —— 14 天里 82 个克隆者对 3 个 star, 差距
+    // 全在"没被邀请过"。给个链接让他自己点, 绝不代他操作账号。
+    `  觉得有用就给个 star：${REPOSITORY}`,
     '',
   )
   return lines.join('\n')

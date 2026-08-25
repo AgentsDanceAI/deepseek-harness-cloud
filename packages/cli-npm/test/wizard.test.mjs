@@ -44,6 +44,8 @@ test('closing panel tells the user where the sign-in code went', () => {
   // 2026-08-25 验收: 验证码走日志而页面不说, 用户首次登录必卡 —— 收尾面板必须点破
   assert.ok(panel.includes('dev-mail'))
   assert.ok(!panel.includes('503'), '配好了就不该再警告 503')
+  // 装完就走的人从没打开过仓库页, 也就从没被邀请过 —— 给链接, 不代他点
+  assert.ok(panel.includes('star') && panel.includes('github.com/AgentsDanceAI/deepseek-harness-cloud'))
 })
 
 test('closing panel warns when chat would answer 503', () => {

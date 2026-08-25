@@ -16,6 +16,7 @@ import getpass
 import sys
 
 DEEPSEEK_BASE = "https://api.deepseek.com/v1"
+REPOSITORY = "https://github.com/AgentsDanceAI/deepseek-harness-cloud"
 
 
 def should_run_wizard(parsed: dict, *, is_tty: bool, fresh_init: bool) -> bool:
@@ -70,6 +71,10 @@ def next_steps(*, url: str, directory: str, has_upstream_key: bool) -> str:
     lines += [
         f"  配置    {directory}/.env（改完 dsh-cloud up 生效）",
         "  停止    dsh-cloud down（数据保留）",
+        "",
+        # 装完就走的人从没打开过仓库页 —— 14 天里 82 个克隆者对 3 个 star, 差距
+        # 全在"没被邀请过"。给个链接让他自己点, 绝不代他操作账号。
+        f"  觉得有用就给个 star：{REPOSITORY}",
         "",
     ]
     return "\n".join(lines)
