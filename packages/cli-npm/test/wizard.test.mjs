@@ -112,3 +112,35 @@ test('stdin closing mid-question falls back to defaults instead of hanging', asy
   assert.equal(answers.upstreamBase, 'https://api.deepseek.com/v1')
   assert.equal(answers.upstreamKey, '')
 })
+
+test('trial mode never asks about login', async () => {
+  const { io } = fakeIo(['', '', ''], { atOnce: true })
+  const answers = await promptAnswers(io, { version: '0.2.0' })
+  assert.deepEqual(answers.identity, {}, '试用模式验证码走日志, 问登录纯属噪音')
+})
+
+test('selfhost collects SMTP so the first account can exist', async () => {
+  // 自部署没有 SMTP/OAuth 就没人能注册, start 会硬拒 —— 引导必须问到
+  const { io, written } = fakeIo(['', '', '', '1', 'smtp.example.com', 'bot@example.com', 'pw', ''], { atOnce: true })
+  const { identity } = await promptAnswers(io, { version: '0.2.0', mode: 'selfhost' })
+  assert.equal(identity.MAIL_SMTP_HOST, 'smtp.example.com')
+  assert.equal(identity.MAIL_SMTP_PASS, 'pw')
+  assert.equal(identity.MAIL_FROM, 'bot@example.com', '发件地址留空时回落到用户名')
+  assert.ok(!written.join('').includes('pw'), 'SMTP 密码不能回显')
+})
+
+test('selfhost can pick OAuth instead', async () => {
+  const { io } = fakeIo(['', '', '', '2', 'client-id', 'client-secret'], { atOnce: true })
+  const { identity } = await promptAnswers(io, { version: '0.2.0', mode: 'selfhost' })
+  assert.equal(identity.GITHUB_LOGIN_CLIENT_ID, 'client-id')
+  assert.equal(identity.GITHUB_LOGIN_CLIENT_SECRET, 'client-secret')
+  assert.equal(identity.MAIL_SMTP_HOST, undefined)
+})
+
+test('identity answers land in the env', () => {
+  const out = applyAnswers(['MAIL_SMTP_HOST=', 'MAIL_FROM='], {
+    identity: { MAIL_SMTP_HOST: 'smtp.example.com', MAIL_FROM: 'bot@example.com' },
+  })
+  assert.ok(out.includes('MAIL_SMTP_HOST=smtp.example.com'))
+  assert.equal(out.filter((l) => l.startsWith('MAIL_SMTP_HOST=')).length, 1)
+})
