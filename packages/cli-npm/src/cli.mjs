@@ -353,5 +353,5 @@ export async function execute(parsed) {
   // 人在终端前就给完整指引; 管道/CI 里保持裸 URL, 免得打断既有脚本的解析。
   if (!process.stdout.isTTY) return { text: `${value.url}\n` }
   const hasUpstreamKey = await upstreamKeyConfigured(value.directory)
-  return { text: nextSteps({ url: value.url, directory: value.directory, hasUpstreamKey }) }
+  return { text: nextSteps({ url: value.url, directory: value.directory, hasUpstreamKey, projectName: value.projectName }) }
 }

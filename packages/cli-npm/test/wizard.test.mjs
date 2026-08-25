@@ -43,6 +43,9 @@ test('closing panel tells the user where the sign-in code went', () => {
   assert.ok(panel.includes('http://localhost:8787'))
   // 2026-08-25 验收: 验证码走日志而页面不说, 用户首次登录必卡 —— 收尾面板必须点破
   assert.ok(panel.includes('dev-mail'))
+  // 命令必须从任何目录都能粘: 不依赖 CLI 在 PATH 上, 也不依赖 cwd
+  assert.ok(panel.includes('docker logs'), '取码要用 docker, 不能用 dsh-cloud logs')
+  assert.ok(panel.includes('--dir /x/dsh-cloud'), 'up/down 必须显式带 --dir')
   assert.ok(!panel.includes('503'), '配好了就不该再警告 503')
   // 装完就走的人从没打开过仓库页, 也就从没被邀请过 —— 给链接, 不代他点
   assert.ok(panel.includes('star') && panel.includes('github.com/AgentsDanceAI/deepseek-harness-cloud'))

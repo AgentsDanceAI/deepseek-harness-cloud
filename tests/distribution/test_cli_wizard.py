@@ -51,6 +51,9 @@ def test_closing_panel_tells_the_user_where_the_sign_in_code_went():
     assert "http://localhost:8787" in panel
     # 2026-08-25 验收: 验证码走日志而页面不说, 用户首次登录必卡
     assert "dev-mail" in panel
+    # 命令必须从任何目录都能粘: 不依赖 CLI 在 PATH 上, 也不依赖 cwd
+    assert "docker logs" in panel, "取码要用 docker, 不能用 dsh-cloud logs"
+    assert "--dir /x" in panel, "up/down 必须显式带 --dir"
     assert "503" not in panel
     # 装完就走的人从没打开过仓库页, 也就从没被邀请过 —— 给链接, 不代他点
     assert "star" in panel and "github.com/AgentsDanceAI/deepseek-harness-cloud" in panel

@@ -368,7 +368,8 @@ def execute(parsed: dict) -> dict:
         return {"text": value["url"] + "\n"}
     env_text = (Path(value["directory"]) / ".env").read_text(encoding="utf-8")
     has_key = bool(re.search(r"^UPSTREAM_API_KEY=.+$", env_text, re.MULTILINE))
-    return {"text": next_steps(url=value["url"], directory=value["directory"], has_upstream_key=has_key)}
+    return {"text": next_steps(url=value["url"], directory=value["directory"],
+                               has_upstream_key=has_key, project_name=value["projectName"])}
 
 
 def main(argv: list[str] | None = None) -> int:
