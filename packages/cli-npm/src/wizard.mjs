@@ -15,6 +15,20 @@
 const DEEPSEEK_BASE = 'https://api.deepseek.com/v1'
 const REPOSITORY = 'https://github.com/AgentsDanceAI/deepseek-harness-cloud'
 
+/** How to spell "run me again" for the way this process was actually started.
+ *
+ * Printing a bare `dsh-cloud …` is wrong for almost everyone: `npx` leaves
+ * nothing on PATH, and running from a checkout never put it there either. So
+ * resolve it from facts — is the name really on PATH, and what did argv say —
+ * rather than assuming the happy `npm install -g` case. Pure: the caller
+ * supplies both facts so this is testable without touching the filesystem.
+ */
+export function commandPrefix({ onPath, entry = '' }) {
+  if (onPath) return 'dsh-cloud'
+  if (entry.includes('/_npx/') || entry.includes('\\_npx\\')) return 'npx --yes @agentsdanceai/dsh-cloud'
+  return entry ? `node ${entry}` : 'dsh-cloud'
+}
+
 /** Should the interactive wizard run for this invocation? */
 export function shouldRunWizard(parsed, { isTTY, freshInit }) {
   if (!freshInit || !isTTY) return false
@@ -43,7 +57,7 @@ export function applyAnswers(lines, answers = {}) {
 }
 
 /** The closing panel. Pure so its content is testable. */
-export function nextSteps({ url, directory, hasUpstreamKey, projectName = 'dsh-selfhost' }) {
+export function nextSteps({ url, directory, hasUpstreamKey, projectName = 'dsh-selfhost', prefix = 'dsh-cloud' }) {
   // 命令必须从任何目录粘过去都能跑。取日志用 docker 而不是 `dsh-cloud logs`:
   // 后者既要求 CLI 在 PATH 上 (npx 用完就没了), 又依赖当前目录是部署目录的
   // 上一级 —— 两个前提对刚装完的人都不成立。up/down 显式带 --dir 同理。
@@ -66,8 +80,8 @@ export function nextSteps({ url, directory, hasUpstreamKey, projectName = 'dsh-s
   }
   lines.push(
     `  配置    ${directory}/.env`,
-    `  重启    dsh-cloud up --dir ${directory}`,
-    `  停止    dsh-cloud down --dir ${directory}（数据保留）`,
+    `  重启    ${prefix} up --dir ${directory}`,
+    `  停止    ${prefix} down --dir ${directory}（数据保留）`,
     '',
     // 装完就走的人从没打开过仓库页 —— 14 天里 82 个克隆者对 3 个 star, 差距
     // 全在"没被邀请过"。给个链接让他自己点, 绝不代他操作账号。

@@ -19,6 +19,20 @@ DEEPSEEK_BASE = "https://api.deepseek.com/v1"
 REPOSITORY = "https://github.com/AgentsDanceAI/deepseek-harness-cloud"
 
 
+def command_prefix(*, on_path: bool, entry: str = "") -> str:
+    """怎么拼出"再跑我一次" —— 按这个进程实际是怎么被启动的来。
+
+    直接印 `dsh-cloud …` 对绝大多数人都是错的: uvx 用完什么都不留在 PATH 上,
+    从源码跑更不会。所以按事实推断 (名字真在 PATH 上吗 / argv 长什么样), 而不是
+    假设大家都 `uv tool install` 过。纯函数, 两个事实由调用方给, 便于测试。
+    """
+    if on_path:
+        return "dsh-cloud"
+    if "/uv/" in entry or "\\uv\\" in entry or "uvx" in entry:
+        return "uvx dsh-cloud"
+    return f"{sys.executable} -m dsh_cloud_cli"
+
+
 def should_run_wizard(parsed: dict, *, is_tty: bool, fresh_init: bool) -> bool:
     """Only a brand-new deployment driven by a human gets asked."""
     if not fresh_init or not is_tty:
@@ -54,7 +68,7 @@ def apply_answers(pairs: list[tuple[str, str]], answers: dict) -> list[tuple[str
 
 
 def next_steps(*, url: str, directory: str, has_upstream_key: bool,
-               project_name: str = "dsh-selfhost") -> str:
+               project_name: str = "dsh-selfhost", prefix: str = "dsh-cloud") -> str:
     """The closing panel. Pure so its content is testable.
 
     命令必须从任何目录粘过去都能跑: 取日志用 docker 而不是 `dsh-cloud logs`,
@@ -79,8 +93,8 @@ def next_steps(*, url: str, directory: str, has_upstream_key: bool,
         ]
     lines += [
         f"  配置    {directory}/.env",
-        f"  重启    dsh-cloud up --dir {directory}",
-        f"  停止    dsh-cloud down --dir {directory}（数据保留）",
+        f"  重启    {prefix} up --dir {directory}",
+        f"  停止    {prefix} down --dir {directory}（数据保留）",
         "",
         # 装完就走的人从没打开过仓库页 —— 14 天里 82 个克隆者对 3 个 star, 差距
         # 全在"没被邀请过"。给个链接让他自己点, 绝不代他操作账号。

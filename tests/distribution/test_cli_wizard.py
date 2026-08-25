@@ -123,3 +123,18 @@ def test_identity_answers_land_in_the_env():
     )
     assert dict(out)["MAIL_SMTP_HOST"] == "smtp.example.com"
     assert [k for k, _ in out].count("MAIL_SMTP_HOST") == 1
+
+
+def test_printed_command_matches_how_the_process_was_started():
+    # 装了才用裸名字
+    assert wizard.command_prefix(on_path=True, entry="/usr/local/bin/dsh-cloud") == "dsh-cloud"
+    # uvx 用完 PATH 上什么都没有
+    assert wizard.command_prefix(on_path=False, entry="/Users/x/.cache/uv/archive/bin/dsh-cloud") == "uvx dsh-cloud"
+    # 从源码跑: 印出那条真的能用的调用
+    assert wizard.command_prefix(on_path=False, entry="/repo/src/dsh_cloud_cli/__main__.py").endswith("-m dsh_cloud_cli")
+
+
+def test_panel_uses_the_resolved_prefix_everywhere():
+    panel = wizard.next_steps(url="u", directory="/x", has_upstream_key=True, prefix="uvx dsh-cloud")
+    assert "uvx dsh-cloud up --dir /x" in panel
+    assert "uvx dsh-cloud down --dir /x" in panel

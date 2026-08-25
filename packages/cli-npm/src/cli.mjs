@@ -1,10 +1,11 @@
 import { randomBytes } from 'node:crypto'
-import { constants } from 'node:fs'
+import { accessSync, constants } from 'node:fs'
 import { access, chmod, copyFile, cp, mkdir, readFile, readdir, rename, stat, writeFile } from 'node:fs/promises'
+import * as pathModule from 'node:path'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawn } from 'node:child_process'
-import { applyAnswers, nextSteps, promptAnswers, shouldRunWizard } from './wizard.mjs'
+import { applyAnswers, commandPrefix, nextSteps, promptAnswers, shouldRunWizard } from './wizard.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const packageRoot = resolve(here, '..')
@@ -305,6 +306,22 @@ async function collectAnswers(parsed, manifest, freshInit) {
   return promptAnswers({ input: process.stdin, output: process.stdout }, { version: manifest.version, mode })
 }
 
+/** `dsh-cloud` 真的在 PATH 上吗 —— 决定面板该印哪种调用形式。
+ *  只查文件系统, 不起子进程。 */
+function binOnPath(name) {
+  const { delimiter, join } = pathModule
+  for (const dir of (process.env.PATH ?? '').split(delimiter)) {
+    if (!dir) continue
+    try {
+      accessSync(join(dir, name), constants.X_OK)
+      return true
+    } catch {
+      // 这一段 PATH 里没有, 继续找
+    }
+  }
+  return false
+}
+
 /** 上游密钥到底填了没 —— 决定收尾面板要不要提醒聊天会 503。 */
 async function upstreamKeyConfigured(directory) {
   try {
@@ -353,5 +370,6 @@ export async function execute(parsed) {
   // 人在终端前就给完整指引; 管道/CI 里保持裸 URL, 免得打断既有脚本的解析。
   if (!process.stdout.isTTY) return { text: `${value.url}\n` }
   const hasUpstreamKey = await upstreamKeyConfigured(value.directory)
-  return { text: nextSteps({ url: value.url, directory: value.directory, hasUpstreamKey, projectName: value.projectName }) }
+  const prefix = commandPrefix({ onPath: binOnPath('dsh-cloud'), entry: process.argv[1] ?? '' })
+  return { text: nextSteps({ url: value.url, directory: value.directory, hasUpstreamKey, projectName: value.projectName, prefix }) }
 }
