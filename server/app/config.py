@@ -209,13 +209,24 @@ PREVIEW_DOMAIN = _env("PREVIEW_DOMAIN", "")
 # /api/work/route forever, so wall-clock billing charged people for nothing).
 WORK_CREDITS_PER_MIN = _env_int("WORK_CREDITS_PER_MIN", 2)
 # Host path where the per-user workspace volumes live, mounted read-only. The
-# workspace stops after 15 idle minutes but its volume outlives it, so this is
-# what lets 個人成品 keep showing a user's files instead of an empty page for
-# the 23 hours a day the container is asleep. Empty disables the offline view.
+# workspace is reclaimed once nobody is using it, but its volume outlives it, so
+# this is what lets 個人成品 keep showing a user's files instead of an empty page
+# for the hours the container is not running. Empty disables the offline view.
 WORK_VOLUME_ROOT = _env("WORK_VOLUME_ROOT", "")
-WORK_IDLE_STOP_MIN = _env_int("WORK_IDLE_STOP_MIN", 15)  # no browser traffic -> stop
-# Capacity backstop: idle minutes are free, RAM is not. A tab left open with the
-# agent doing nothing this long is stopped too (volumes persist, resume is fast).
+
+# --- 什么时候回收一台工作台 (workspace.reaper_tick) --------------------------
+# 口径是"打开一次, 持续做事, 只关一次": 只有**没人在且没活儿在跑**才回收。
+# 三个窗口各管一件事, 谁都不单独构成回收理由。
+#
+# 标签页还开着 (轮询还在) 时, 允许真人这么久不动一下 —— 读一段长回答、去倒杯
+# 水都不该被踢掉。在场只认真实交互, 所以这个窗口可以给得宽松。
+WORK_IDLE_STOP_MIN = _env_int("WORK_IDLE_STOP_MIN", 15)
+# 连轮询都停了 = 页面已经关掉/被冻结。这时在场窗口缩到这么短, 省下的是用户的
+# 机时 (按容器存在时间计费, 关了还留着就是白烧)。别缩到 1 分钟以内: 手机切个
+# 应用、隧道抖一下都会短暂断掉轮询, 回来时不该是一次冷启动。
+WORK_TAB_GONE_MIN = _env_int("WORK_TAB_GONE_MIN", 3)
+# 智能体最后一次调网关之后再等这么久。长任务必须能在关掉标签页之后接着跑完,
+# 所以这一条单独顶着, 与"有没有人在"无关。
 WORK_AGENT_IDLE_STOP_MIN = _env_int("WORK_AGENT_IDLE_STOP_MIN", 30)
 
 # --- cloud workspace paywall ------------------------------------------------

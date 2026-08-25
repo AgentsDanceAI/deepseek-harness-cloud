@@ -168,6 +168,36 @@
       .catch(function () {});
   }
 
+  /* ------------------------------------------------------------------ 在场 */
+
+  /* 告诉服务端"真人正在用这台工作台"。
+   *
+   * 只有真实动作才算, 而且**只在动过之后**才发 —— 定时无条件上报等于把"标签页
+   * 开着"当成"有人在", 那正是要避免的: 忘了关的页面会整夜续租, 而机时按容器
+   * 存在时间计费, 烧的是用户自己的额度。
+   *
+   * 页面在后台时不发。回到前台算一次动作 —— 人回来了。
+   *
+   * 关页面时不做任何事: pagehide 在 iOS 上切个应用也会触发, 硬杀则一条都发不
+   * 出, 两头都不可靠。服务端改用"轮询停了"来判定页面已经关掉。
+   */
+  function watchPresence() {
+    var touched = false;
+    function touch() { touched = true; }
+    ['keydown', 'pointerdown', 'wheel', 'touchstart', 'mousemove'].forEach(function (t) {
+      document.addEventListener(t, touch, { capture: true, passive: true });
+    });
+    document.addEventListener('visibilitychange', function () {
+      if (!document.hidden) touch();
+    });
+    setInterval(function () {
+      if (!touched || document.hidden) return;
+      touched = false;
+      fetch(SITE + '/api/work/active', { method: 'POST', credentials: 'include' })
+        .catch(function () {});
+    }, 60000);
+  }
+
   /* ----------------------------------------------------------- task handoff */
 
   function pendingTask() {
@@ -225,6 +255,7 @@
     buildChrome();
     // 捕获阶段绑定: 抽屉里的项自己会 stopPropagation, 冒泡阶段收不到遮罩那一下。
     watchSidebar();
+    watchPresence();
     // dsh boots asynchronously; poll briefly for its composer, then give up
     // quietly (the text stays in the box for the person to send themselves).
     var tries = 0;

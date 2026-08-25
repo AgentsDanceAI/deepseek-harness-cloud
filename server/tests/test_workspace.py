@@ -224,27 +224,122 @@ def test_meters_every_minute_the_workspace_runs(fake):
 
 
 def test_idle_workspaces_are_reclaimed_within_the_stated_window(fake, monkeypatch):
-    """计量口径改了之后, 早回收既省我们的钱也省用户的额度。
+    """条款写着"约 10 分钟未操作后自动回收" —— 这条钉住那个承诺。
 
-    条款里写着"闲置约 10 分钟后自动回收" —— 这条钉住那个承诺。
+    场景是标签页开着但没人动它: 轮询照常, 交互没有, 智能体也没活儿。
     """
+    monkeypatch.setattr(config, "WORK_IDLE_STOP_MIN", 10)
     monkeypatch.setattr(config, "WORK_AGENT_IDLE_STOP_MIN", 10)
     c, uid = _user("idle10@test.local")
     c.get("/api/work/route")
     c.get("/api/work/route")
 
     now = time.time()
-    workspace._last_seen[uid] = now  # 页面还开着
+    workspace._last_seen[uid] = now  # 页面还开着, 轮询没停
     _mark_agent_active(uid, ago_s=9 * 60)
     workspace._started_at[uid] = now - 9 * 60
+    workspace._user_active[uid] = now - 9 * 60  # 最后一次真人动作
     stops = fake.stops
     asyncio.run(workspace.reaper_tick(now))
     assert fake.stops == stops, "9 分钟就回收了 —— 比承诺的还早"
 
     _mark_agent_active(uid, ago_s=11 * 60)
     workspace._started_at[uid] = now - 11 * 60
+    workspace._user_active[uid] = now - 11 * 60
     asyncio.run(workspace.reaper_tick(now))
     assert fake.stops == stops + 1, "过了 10 分钟仍未回收 —— 闲置容器会一直计费"
+
+
+def test_a_person_using_it_is_never_reaped(fake, monkeypatch):
+    """**这条就是用户报的毛病。**
+
+    开着工作台看长回答、翻文件、自己敲代码 —— 一个小时没让智能体调过网关, 也
+    绝不该被回收。旧规则只认"智能体调过网关", 于是读十分钟东西就被踢下线, 回来
+    还要等一次冷启动 (顺带弹一个新 EIP, 给站主发一条短信)。
+    """
+    monkeypatch.setattr(config, "WORK_IDLE_STOP_MIN", 10)
+    monkeypatch.setattr(config, "WORK_AGENT_IDLE_STOP_MIN", 10)
+    c, uid = _user("using@test.local")
+    c.get("/api/work/route")
+    c.get("/api/work/route")
+
+    now = time.time()
+    workspace._started_at[uid] = now - 60 * 60  # 开了一小时
+    _mark_agent_active(uid, ago_s=60 * 60)      # 智能体一小时没动
+    workspace._last_seen[uid] = now             # 页面开着
+    workspace._user_active[uid] = now - 30      # 半分钟前还在动
+    stops = fake.stops
+    asyncio.run(workspace.reaper_tick(now))
+    assert fake.stops == stops, "人正在用却被回收了 —— 正是这次要修的毛病"
+
+
+def test_presence_is_not_inferred_from_browser_polling(fake, monkeypatch):
+    """轮询 ≠ 有人在。
+
+    忘了关的标签页会一直轮询。要是拿它当在场, 工作台整夜不回收, 而机时按容器
+    存在时间计费 —— 烧的是用户自己的额度。
+    """
+    monkeypatch.setattr(config, "WORK_IDLE_STOP_MIN", 10)
+    monkeypatch.setattr(config, "WORK_AGENT_IDLE_STOP_MIN", 10)
+    c, uid = _user("polling@test.local")
+    c.get("/api/work/route")
+    c.get("/api/work/route")
+
+    now = time.time()
+    workspace._started_at[uid] = now - 40 * 60
+    _mark_agent_active(uid, ago_s=40 * 60)
+    workspace._user_active[uid] = now - 40 * 60  # 40 分钟没人动过
+    stops = fake.stops
+    for _ in range(3):  # 轮询照常进行
+        workspace._last_seen[uid] = now
+        asyncio.run(workspace.reaper_tick(now))
+    assert fake.stops == stops + 1, "只靠轮询就续住了 —— 空标签页会整夜烧机时"
+
+
+def test_closed_tab_is_reaped_quickly(fake, monkeypatch):
+    """关掉页面之后每多留一分钟, 扣的都是用户的机时。
+
+    判定不用 pagehide/sendBeacon (iOS 切个应用也发, 硬杀则一条都不发), 而是
+    "轮询停了" —— 页面没了就没有请求经过 forward_auth。
+    """
+    monkeypatch.setattr(config, "WORK_TAB_GONE_MIN", 3)
+    monkeypatch.setattr(config, "WORK_IDLE_STOP_MIN", 10)
+    monkeypatch.setattr(config, "WORK_AGENT_IDLE_STOP_MIN", 10)
+    c, uid = _user("closed@test.local")
+    c.get("/api/work/route")
+    c.get("/api/work/route")
+
+    now = time.time()
+    workspace._started_at[uid] = now - 30 * 60
+    _mark_agent_active(uid, ago_s=30 * 60)      # 没活儿在跑
+    workspace._user_active[uid] = now - 2 * 60  # 两分钟前还在用
+    workspace._last_seen[uid] = now - 2 * 60    # 轮询停了两分钟
+    stops = fake.stops
+    asyncio.run(workspace.reaper_tick(now))
+    assert fake.stops == stops, "刚断 2 分钟就回收 —— 手机切个应用回来就得冷启动"
+
+    workspace._last_seen[uid] = now - 4 * 60
+    workspace._user_active[uid] = now - 4 * 60
+    asyncio.run(workspace.reaper_tick(now))
+    assert fake.stops == stops + 1, "页面早关了还留着 —— 白扣用户机时"
+
+
+def test_closed_tab_with_a_running_agent_is_kept(fake, monkeypatch):
+    """长任务必须能在关掉标签页之后跑完 —— 这是云工作台的意义所在。"""
+    monkeypatch.setattr(config, "WORK_TAB_GONE_MIN", 3)
+    monkeypatch.setattr(config, "WORK_AGENT_IDLE_STOP_MIN", 10)
+    c, uid = _user("longtask@test.local")
+    c.get("/api/work/route")
+    c.get("/api/work/route")
+
+    now = time.time()
+    workspace._started_at[uid] = now - 30 * 60
+    workspace._last_seen[uid] = now - 20 * 60    # 页面早关了
+    workspace._user_active[uid] = now - 20 * 60
+    _mark_agent_active(uid, ago_s=30)            # 但智能体 30 秒前刚调过网关
+    stops = fake.stops
+    asyncio.run(workspace.reaper_tick(now))
+    assert fake.stops == stops, "把正在跑的长任务杀了"
 
 
 def test_agent_last_active_ignores_browser_polling(fake):
@@ -294,15 +389,58 @@ def test_resumed_workspace_gets_a_grace_window(fake, monkeypatch):
     assert fake.stops == stops_before + 1
 
 
-def test_user_gone_still_reaps(fake, monkeypatch):
-    c, uid = _user("gone@test.local")
+def test_a_client_that_never_reports_presence_keeps_the_old_behaviour(fake, monkeypatch):
+    """脚本没跑起来 (老缓存、CSP 挡了、报错) 就收不到在场上报。
+
+    那时必须回落到加这条之前的口径 —— 由"智能体安静了多久"单独决定。绝不能因
+    为"没收到心跳"就把正在用的人踢掉, 也不能反过来永远不收。
+    """
+    monkeypatch.setattr(config, "WORK_IDLE_STOP_MIN", 10)
+    monkeypatch.setattr(config, "WORK_AGENT_IDLE_STOP_MIN", 10)
+    c, uid = _user("noscript@test.local")
     c.get("/api/work/route")
     c.get("/api/work/route")
-    _mark_agent_active(uid, ago_s=10)
-    workspace._last_seen[uid] = time.time() - (config.WORK_IDLE_STOP_MIN + 1) * 60
-    stops_before = fake.stops
-    asyncio.run(workspace.reaper_tick(time.time()))
-    assert fake.stops == stops_before + 1
+    workspace._user_active.pop(uid, None)  # 从来没上报过
+
+    now = time.time()
+    workspace._last_seen[uid] = now        # 页面开着, 轮询正常
+    workspace._started_at[uid] = now - 5 * 60
+    _mark_agent_active(uid, ago_s=5 * 60)
+    stops = fake.stops
+    asyncio.run(workspace.reaper_tick(now))
+    assert fake.stops == stops, "智能体才安静 5 分钟就收了"
+
+    workspace._started_at[uid] = now - 11 * 60
+    _mark_agent_active(uid, ago_s=11 * 60)
+    asyncio.run(workspace.reaper_tick(now))
+    assert fake.stops == stops + 1, "收不到心跳就永远不回收 —— 会一直计费"
+
+
+def test_active_endpoint_stamps_presence(fake):
+    """在场只能由这条路径写入 —— 普通轮询不行。"""
+    c, uid = _user("active@test.local")
+    c.get("/api/work/route")
+    c.get("/api/work/route")
+    workspace._user_active.pop(uid, None)
+
+    for _ in range(3):  # 轮询: 不算在场
+        c.get("/api/work/route")
+    assert uid not in workspace._user_active, "轮询把自己算成了真人在场"
+
+    r = c.post("/api/work/active")
+    assert r.status_code == 200 and r.json()["ok"] is True
+    assert time.time() - workspace._user_active[uid] < 5
+
+
+def test_active_endpoint_does_not_resurrect_a_reaped_workspace(fake):
+    """续租不该把已经回收的工作台重新拉起来 —— 那是一次冷启动加一个新 EIP。"""
+    c, uid = _user("nores@test.local")
+    c.get("/api/work/route")
+    c.get("/api/work/route")
+    creates = fake.creates
+    c.post("/api/work/stop")
+    c.post("/api/work/active")
+    assert fake.creates == creates, "心跳把容器又拉起来了"
 
 
 def test_stop_endpoint(fake):
