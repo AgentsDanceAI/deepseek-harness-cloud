@@ -373,3 +373,19 @@ def test_switchers_do_not_reset_each_other(client):
     body = client.get("/pricing?lang=en&cur=CNY").text
     assert "cur=CNY" in body and "lang=zh" in body  # language link keeps cur
     assert "lang=en" in body and "cur=EUR" in body  # currency links keep lang
+
+
+def test_login_page_tells_selfhosters_where_the_dev_code_goes(client, monkeypatch):
+    """开发模式 + 没配 SMTP 时验证码只打到服务端日志, 登录页必须说出来。
+
+    2026-08-25 验收实测: 自部署用户点"获取验证码"后页面毫无反馈, 邮件永远不来
+    (它在 docker logs 里), 首次登录直接卡死 —— 这是那次的回归钉。
+    """
+    from app import config
+
+    body = client.get("/login").text
+    assert "验证码打印在服务端日志里" in body
+
+    # 配了 SMTP 就是真发信, 提示必须消失, 免得线上吓到用户。
+    monkeypatch.setattr(config, "MAIL_SMTP_HOST", "smtp.example.com")
+    assert "验证码打印在服务端日志里" not in client.get("/login").text

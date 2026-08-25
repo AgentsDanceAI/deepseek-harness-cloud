@@ -74,6 +74,7 @@
           <p class="form-error" id="code-error" hidden></p>
           <button class="btn btn-primary btn-block" type="submit">{{ t("login.submit_code") }}</button>
           <p class="muted small">{{ t("login.code_note") }}</p>
+          {% if dev_mail_to_logs %}<p class="muted small">{{ t("login.dev_mail_hint") }}</p>{% endif %}
         </form>
 
         <form id="form-pw" class="tab-panel" hidden autocomplete="on">
