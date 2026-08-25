@@ -265,9 +265,9 @@ def test_a_person_using_it_is_never_reaped(fake, monkeypatch):
 
     now = time.time()
     workspace._started_at[uid] = now - 60 * 60  # 开了一小时
-    _mark_agent_active(uid, ago_s=60 * 60)      # 智能体一小时没动
-    workspace._last_seen[uid] = now             # 页面开着
-    workspace._user_active[uid] = now - 30      # 半分钟前还在动
+    _mark_agent_active(uid, ago_s=60 * 60)  # 智能体一小时没动
+    workspace._last_seen[uid] = now  # 页面开着
+    workspace._user_active[uid] = now - 30  # 半分钟前还在动
     stops = fake.stops
     asyncio.run(workspace.reaper_tick(now))
     assert fake.stops == stops, "人正在用却被回收了 —— 正是这次要修的毛病"
@@ -311,9 +311,9 @@ def test_closed_tab_is_reaped_quickly(fake, monkeypatch):
 
     now = time.time()
     workspace._started_at[uid] = now - 30 * 60
-    _mark_agent_active(uid, ago_s=30 * 60)      # 没活儿在跑
+    _mark_agent_active(uid, ago_s=30 * 60)  # 没活儿在跑
     workspace._user_active[uid] = now - 2 * 60  # 两分钟前还在用
-    workspace._last_seen[uid] = now - 2 * 60    # 轮询停了两分钟
+    workspace._last_seen[uid] = now - 2 * 60  # 轮询停了两分钟
     stops = fake.stops
     asyncio.run(workspace.reaper_tick(now))
     assert fake.stops == stops, "刚断 2 分钟就回收 —— 手机切个应用回来就得冷启动"
@@ -334,9 +334,9 @@ def test_closed_tab_with_a_running_agent_is_kept(fake, monkeypatch):
 
     now = time.time()
     workspace._started_at[uid] = now - 30 * 60
-    workspace._last_seen[uid] = now - 20 * 60    # 页面早关了
+    workspace._last_seen[uid] = now - 20 * 60  # 页面早关了
     workspace._user_active[uid] = now - 20 * 60
-    _mark_agent_active(uid, ago_s=30)            # 但智能体 30 秒前刚调过网关
+    _mark_agent_active(uid, ago_s=30)  # 但智能体 30 秒前刚调过网关
     stops = fake.stops
     asyncio.run(workspace.reaper_tick(now))
     assert fake.stops == stops, "把正在跑的长任务杀了"
@@ -403,7 +403,7 @@ def test_a_client_that_never_reports_presence_keeps_the_old_behaviour(fake, monk
     workspace._user_active.pop(uid, None)  # 从来没上报过
 
     now = time.time()
-    workspace._last_seen[uid] = now        # 页面开着, 轮询正常
+    workspace._last_seen[uid] = now  # 页面开着, 轮询正常
     workspace._started_at[uid] = now - 5 * 60
     _mark_agent_active(uid, ago_s=5 * 60)
     stops = fake.stops
