@@ -39,6 +39,10 @@ jobs:
         run: |
           npm ci --no-audit --no-fund
           npm test
+      # 这套一直存在却从没进过 CI —— 首次运行引导的用例住在这里。
+      - name: cli-npm tests
+        working-directory: packages/cli-npm
+        run: npm test
 
   desktop:
     runs-on: ubuntu-latest

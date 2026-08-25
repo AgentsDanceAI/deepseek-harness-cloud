@@ -4,6 +4,7 @@ import { access, chmod, copyFile, cp, mkdir, readFile, readdir, rename, stat, wr
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawn } from 'node:child_process'
+import { applyAnswers, nextSteps, promptAnswers, shouldRunWizard } from './wizard.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const packageRoot = resolve(here, '..')
@@ -140,13 +141,13 @@ function plan(parsed, manifest) {
   }
 }
 
-function generatedEnv(parsed, manifest, authFile) {
+function generatedEnv(parsed, manifest, authFile, answers = {}) {
   const mode = parsed.options.mode ?? 'trial'
   const trial = mode === 'trial'
   if (!trial && (!parsed.options.domain || !parsed.options.adminEmail)) throw new CliError('--domain and --admin-email are required in selfhost mode')
   const domain = trial ? 'localhost' : parsed.options.domain
   const publicBase = trial ? TRIAL_PUBLIC_BASE : `https://${domain}`
-  return [
+  const lines = [
     `COMPOSE_PROJECT_NAME=${parsed.options.projectName ?? 'dsh-selfhost'}`,
     `DOMAIN=${domain}`,
     `SITE_SCHEME=${trial ? 'http' : 'https'}`,
@@ -161,6 +162,10 @@ function generatedEnv(parsed, manifest, authFile) {
     `AUTH_SECRET_FILE=${authFile}`,
     'UPSTREAM_BASE_URL=https://api.deepseek.com/v1',
     'UPSTREAM_API_KEY=',
+    // 联网搜索: 留空则 web_search 不可用。zhipu 走 open.bigmodel.cn,
+    // upstream 则原样转发给上游的 Anthropic 端点。
+    'SEARCH_PROVIDER=zhipu',
+    'ZHIPU_SEARCH_API_KEY=',
     `ADMIN_EMAILS=${parsed.options.adminEmail ?? ''}`,
     'MAIL_SMTP_HOST=',
     'MAIL_SMTP_USER=',
@@ -176,7 +181,8 @@ function generatedEnv(parsed, manifest, authFile) {
     `SOCKET_PROXY_IMAGE=${manifest.baseImages.socketProxy}`,
     `WORK_IMAGE=${manifest.images.workspace}`,
     '',
-  ].join('\n')
+  ]
+  return applyAnswers(lines, answers).join('\n')
 }
 
 async function templateRoots() {
@@ -185,7 +191,7 @@ async function templateRoots() {
   return { template: join(repositoryRoot, 'deploy/selfhost'), config: join(repositoryRoot, 'server/config') }
 }
 
-async function initialize(parsed, manifest, deploymentPlan = plan(parsed, manifest)) {
+async function initialize(parsed, manifest, deploymentPlan = plan(parsed, manifest), answers = {}) {
   const target = targetOf(parsed)
   if (await exists(target)) {
     const entries = await readdir(target)
@@ -206,7 +212,7 @@ async function initialize(parsed, manifest, deploymentPlan = plan(parsed, manife
   await cp(roots.config, join(target, 'config'), { recursive: true })
   const secret = process.env.DSH_CLOUD_TEST_RANDOM_HEX ?? randomBytes(32).toString('hex')
   await atomicWrite(join(target, 'secrets/auth_secret'), `${secret}\n`, 0o600)
-  await atomicWrite(join(target, '.env'), generatedEnv(parsed, manifest, '/run/secrets/auth_secret'), 0o600)
+  await atomicWrite(join(target, '.env'), generatedEnv(parsed, manifest, '/run/secrets/auth_secret', answers), 0o600)
   await atomicWrite(join(target, '.gitignore'), '.env\nsecrets/\n.dsh-cloud/lock\n', 0o644)
   await atomicWrite(join(target, '.dsh-cloud/state.json'), `${JSON.stringify({
     schemaVersion: 1,
@@ -292,19 +298,38 @@ async function publicIdentityConfigured(target) {
   )
 }
 
+async function collectAnswers(parsed, manifest, freshInit) {
+  const isTTY = Boolean(process.stdin.isTTY && process.stdout.isTTY)
+  if (!shouldRunWizard(parsed, { isTTY, freshInit })) return {}
+  return promptAnswers({ input: process.stdin, output: process.stdout }, { version: manifest.version })
+}
+
+/** 上游密钥到底填了没 —— 决定收尾面板要不要提醒聊天会 503。 */
+async function upstreamKeyConfigured(directory) {
+  try {
+    const text = await readFile(join(directory, '.env'), 'utf8')
+    return /^UPSTREAM_API_KEY=.+$/m.test(text)
+  } catch {
+    return false
+  }
+}
+
 export async function execute(parsed) {
   const manifest = await loadManifest()
   if (parsed.special === 'help') return { text: HELP }
   if (parsed.special === 'version') return { text: `${manifest.version}\n` }
   const value = plan(parsed, manifest)
+  const statePath = join(value.directory, '.dsh-cloud/state.json')
+  const freshInit = !(await exists(statePath))
+  // 只有全新部署才问; 已初始化的目录再问一遍等于诱导用户覆盖自己的配置。
+  const answers = await collectAnswers(parsed, manifest, freshInit)
   if (parsed.command === 'init') {
     if (parsed.options.dryRun) return { json: value }
-    await initialize(parsed, manifest, value)
+    await initialize(parsed, manifest, value, answers)
     return { json: { ...value, initialized: true } }
   }
-  const statePath = join(value.directory, '.dsh-cloud/state.json')
-  if (parsed.command === 'start' && !(await exists(statePath)) && !parsed.options.dryRun) {
-    await initialize(parsed, manifest, value)
+  if (parsed.command === 'start' && freshInit && !parsed.options.dryRun) {
+    await initialize(parsed, manifest, value, answers)
   }
   if (await exists(statePath)) await restoreDeployment(value, statePath, parsed)
   if (parsed.options.dryRun) return { json: value }
@@ -323,5 +348,9 @@ export async function execute(parsed) {
     if (child.stderr.trim()) response.composeError = child.stderr.trim()
     return { json: response }
   }
-  return { text: parsed.command === 'start' || parsed.command === 'up' ? `${value.url}\n` : '' }
+  if (parsed.command !== 'start' && parsed.command !== 'up') return { text: '' }
+  // 人在终端前就给完整指引; 管道/CI 里保持裸 URL, 免得打断既有脚本的解析。
+  if (!process.stdout.isTTY) return { text: `${value.url}\n` }
+  const hasUpstreamKey = await upstreamKeyConfigured(value.directory)
+  return { text: nextSteps({ url: value.url, directory: value.directory, hasUpstreamKey }) }
 }
