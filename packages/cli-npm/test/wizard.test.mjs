@@ -164,3 +164,21 @@ test('panel uses the resolved prefix everywhere', () => {
   assert.ok(panel.includes('npx --yes @agentsdanceai/dsh-cloud up --dir /x'))
   assert.ok(panel.includes('npx --yes @agentsdanceai/dsh-cloud down --dir /x'))
 })
+
+test('selfhost panel names the DNS record the workspace needs', () => {
+  // 工作台按 host 路由, 这条记录不加它开着也打不开 —— 装完必须点名
+  const panel = nextSteps({ url: 'https://dsh.example.com', directory: '/x', hasUpstreamKey: true, workDomain: 'work.dsh.example.com' })
+  assert.ok(panel.includes('work.dsh.example.com') && panel.includes('DNS'))
+})
+
+test('trial panel says nothing about DNS', () => {
+  const panel = nextSteps({ url: 'http://localhost:8787', directory: '/x', hasUpstreamKey: true })
+  assert.ok(!panel.includes('DNS'), '试用模式没有工作台, 提 DNS 是噪音')
+})
+
+test('selfhost does not tell you to fish the code out of the log', () => {
+  // 自部署配了 SMTP, 验证码真发邮件 —— 那时再说"去日志里捞"就是错的
+  const panel = nextSteps({ url: 'https://x', directory: '/d', hasUpstreamKey: true, devMail: false })
+  assert.ok(!panel.includes('docker logs') || !panel.includes('dev-mail'))
+  assert.ok(panel.includes('你配置的邮件服务器'))
+})

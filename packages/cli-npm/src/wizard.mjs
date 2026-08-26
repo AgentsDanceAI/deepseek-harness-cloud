@@ -57,7 +57,7 @@ export function applyAnswers(lines, answers = {}) {
 }
 
 /** The closing panel. Pure so its content is testable. */
-export function nextSteps({ url, directory, hasUpstreamKey, projectName = 'dsh-selfhost', prefix = 'dsh-cloud' }) {
+export function nextSteps({ url, directory, hasUpstreamKey, projectName = 'dsh-selfhost', prefix = 'dsh-cloud', workDomain = '', devMail = true }) {
   // 命令必须从任何目录粘过去都能跑。取日志用 docker 而不是 `dsh-cloud logs`:
   // 后者既要求 CLI 在 PATH 上 (npx 用完就没了), 又依赖当前目录是部署目录的
   // 上一级 —— 两个前提对刚装完的人都不成立。up/down 显式带 --dir 同理。
@@ -66,15 +66,28 @@ export function nextSteps({ url, directory, hasUpstreamKey, projectName = 'dsh-s
     '  云工作台已就绪',
     '',
     `  打开    ${url}`,
-    '  登录    用任意邮箱收验证码即可注册；试用模式没有配邮件服务器，',
-    '          验证码打印在服务端日志里：',
-    `            docker logs ${projectName}-dhc-server-1 2>&1 | grep -A1 dev-mail`,
+    // 自部署配了 SMTP, 验证码是真发邮件的 —— 那时再说"去日志里捞"就是错的。
+    ...devMail
+      ? [
+          '  登录    用任意邮箱收验证码即可注册；本部署没有配邮件服务器，',
+          '          验证码打印在服务端日志里：',
+          `            docker logs ${projectName}-dhc-server-1 2>&1 | grep -A1 dev-mail`,
+        ]
+      : ['  登录    用任意邮箱收验证码即可注册，验证码走你配置的邮件服务器。'],
     '',
   ]
   if (!hasUpstreamKey) {
     lines.push(
       '  注意    还没有配模型上游，聊天会返回 503。把 UPSTREAM_API_KEY 填进',
       `          ${directory}/.env 后执行 dsh-cloud up 生效。`,
+      '',
+    )
+  }
+  if (workDomain) {
+    // 工作台按 host 路由, 这条 DNS 记录不加的话它开着也访问不到 —— 装完必须
+    // 说, 否则用户只会看到一个打不开的地址而无从判断缺了什么。
+    lines.push(
+      `  还差一步  给 ${workDomain} 加一条指向本机的 DNS 记录（云工作台按域名路由）`,
       '',
     )
   }

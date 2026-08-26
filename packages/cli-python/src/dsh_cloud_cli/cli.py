@@ -206,6 +206,13 @@ def generated_env(parsed: dict, manifest: dict, answers: dict | None = None) -> 
         ("DHC_SERVER_IMAGE", manifest["images"]["server"]),
         ("CADDY_IMAGE", manifest["baseImages"]["caddy"]),
         ("POSTGRES_IMAGE", manifest["baseImages"]["postgres"]),
+        # 云工作台。自部署给了域名就默认开 —— 那是招牌功能, 装完没有它等于交付了
+        # 半个东西。还差一条 DNS 记录 (work.<域名> 指向本机), 装完面板会说。试用
+        # 模式必定关: localhost 与 work.localhost 是不同 host, 会话 cookie 过不去。
+        ("WORK_ENABLED", "0" if trial else "1"),
+        ("WORK_DOMAIN", "" if trial else f"work.{domain}"),
+        ("COOKIE_DOMAIN", "" if trial else f".{domain}"),
+        ("COMPOSE_PROFILES", "" if trial else "work"),
         ("SOCKET_PROXY_IMAGE", manifest["baseImages"]["socketProxy"]),
         ("WORK_IMAGE", manifest["images"]["workspace"]),
     ]
@@ -372,7 +379,10 @@ def execute(parsed: dict) -> dict:
     prefix = command_prefix(on_path=bool(shutil.which("dsh-cloud")), entry=sys.argv[0])
     return {"text": next_steps(url=value["url"], directory=value["directory"],
                                has_upstream_key=has_key, project_name=value["projectName"],
-                               prefix=prefix)}
+                               prefix=prefix,
+                               work_domain=(f"work.{parsed['options'].get('domain')}"
+                                            if value["mode"] == "selfhost" else ""),
+                               dev_mail=value["mode"] != "selfhost")}
 
 
 def main(argv: list[str] | None = None) -> int:
