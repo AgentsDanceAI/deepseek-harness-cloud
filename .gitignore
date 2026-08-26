@@ -24,3 +24,6 @@ desktop/.cache-electron/
 
 # stray build cache from a desktop build run
 .gradle-cache/
+
+# macOS 目录元数据, 从来不该进仓库
+.DS_Store
