@@ -125,6 +125,34 @@ def next_steps(*, url: str, directory: str, has_upstream_key: bool,
     return "\n".join(lines)
 
 
+def init_summary(*, directory: str, prefix: str = "dsh-cloud", mode: str = "trial",
+                 work_domain: str = "") -> str:
+    """``init`` 的收尾摘要。
+
+    init 只写配置、不起容器, 所以不能用 next_steps (那张面板说的是"已就绪")。
+    它原本无论如何都吐一整坨 JSON —— 那是给脚本解析的, 而人在终端前只想知道
+    "写到哪了、下一步敲什么"。带 --json 或非 TTY 时仍然只吐 JSON。
+    """
+    lines = [
+        "",
+        "  配置已写入，容器还没起",
+        "",
+        f"  目录    {directory}",
+        f"  启动    {prefix} up --dir {directory}",
+        "",
+    ]
+    if mode == "selfhost":
+        lines += [
+            "  这是对外服务的配置：绑 0.0.0.0、占用 80/443、申请真证书，",
+            "  请在目标服务器上启动，而不是本机。",
+            "",
+        ]
+        if work_domain:
+            lines += [f"  别忘了给 {work_domain} 加一条指向该服务器的 DNS 记录（云工作台按域名路由）", ""]
+    lines += [f"  启动前可以先过一遍 {directory}/.env", ""]
+    return "\n".join(lines)
+
+
 def _ask(prompt: str) -> str:
     """Read one line; EOF (Ctrl-D, or `start < /dev/null`) means "take the default"."""
     try:

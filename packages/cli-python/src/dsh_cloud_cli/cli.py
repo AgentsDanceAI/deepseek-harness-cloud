@@ -10,7 +10,8 @@ import shutil
 import subprocess
 import sys
 
-from .wizard import apply_answers, command_prefix, next_steps, prompt_answers, should_run_wizard
+from .wizard import (apply_answers, command_prefix, init_summary, next_steps,
+                     prompt_answers, should_run_wizard)
 from pathlib import Path
 
 
@@ -334,7 +335,15 @@ def execute(parsed: dict) -> dict:
         if parsed["options"].get("dryRun"):
             return {"json": value}
         initialize(parsed, manifest, value, answers)
-        return {"json": {**value, "initialized": True}}
+        # 人在终端前看的是"写到哪了、下一步敲什么"; 脚本要的才是那坨 JSON。
+        if parsed["options"].get("json") or not sys.stdout.isatty():
+            return {"json": {**value, "initialized": True}}
+        return {"text": init_summary(
+            directory=value["directory"],
+            prefix=command_prefix(resolved=shutil.which("dsh-cloud") or "", entry=sys.argv[0]),
+            mode=value["mode"],
+            work_domain=(f"work.{parsed['options'].get('domain')}"
+                         if value["mode"] == "selfhost" else ""))}
     if parsed["command"] == "start" and fresh_init and not parsed["options"].get("dryRun"):
         initialize(parsed, manifest, value, answers)
     if state.is_file():
