@@ -185,3 +185,18 @@ def test_selfhost_does_not_tell_you_to_fish_the_code_out_of_the_log():
     panel = wizard.next_steps(url="https://x", directory="/d", has_upstream_key=True, dev_mail=False)
     assert "dev-mail" not in panel
     assert "你配置的邮件服务器" in panel
+
+
+def test_init_summary_says_what_init_actually_did():
+    # init 只写配置不起容器 —— 不能沿用"已就绪"那张面板
+    panel = wizard.init_summary(directory="/x", prefix="uvx dsh-cloud")
+    assert "容器还没起" in panel
+    assert "uvx dsh-cloud up --dir /x" in panel
+    assert "已就绪" not in panel
+
+
+def test_selfhost_init_summary_warns_it_is_not_for_this_machine():
+    panel = wizard.init_summary(directory="/x", mode="selfhost", work_domain="work.a.com")
+    assert "80/443" in panel and "目标服务器" in panel
+    assert "work.a.com" in panel and "DNS" in panel
+    assert "80/443" not in wizard.init_summary(directory="/x")

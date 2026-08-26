@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { EventEmitter } from 'node:events'
-import { applyAnswers, commandPrefix, nextSteps, promptAnswers, shouldRunWizard } from '../src/wizard.mjs'
+import { applyAnswers, commandPrefix, initSummary, nextSteps, promptAnswers, shouldRunWizard } from '../src/wizard.mjs'
 
 const parsed = (command, options = {}) => ({ command, options, positionals: [] })
 
@@ -185,4 +185,20 @@ test('selfhost does not tell you to fish the code out of the log', () => {
   const panel = nextSteps({ url: 'https://x', directory: '/d', hasUpstreamKey: true, devMail: false })
   assert.ok(!panel.includes('docker logs') || !panel.includes('dev-mail'))
   assert.ok(panel.includes('你配置的邮件服务器'))
+})
+
+test('init summary says what init actually did, not what start does', () => {
+  // init 只写配置不起容器 —— 不能沿用"已就绪"那张面板
+  const panel = initSummary({ directory: '/x', prefix: 'npx --yes @agentsdanceai/dsh-cloud' })
+  assert.ok(panel.includes('容器还没起'))
+  assert.ok(panel.includes('npx --yes @agentsdanceai/dsh-cloud up --dir /x'))
+  assert.ok(!panel.includes('已就绪'))
+})
+
+test('selfhost init warns it is not meant for this machine', () => {
+  const panel = initSummary({ directory: '/x', mode: 'selfhost', workDomain: 'work.a.com' })
+  assert.ok(panel.includes('80/443') && panel.includes('目标服务器'))
+  assert.ok(panel.includes('work.a.com') && panel.includes('DNS'))
+  // trial 不该有这些
+  assert.ok(!initSummary({ directory: '/x' }).includes('80/443'))
 })

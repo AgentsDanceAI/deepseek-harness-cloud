@@ -5,7 +5,7 @@ import * as pathModule from 'node:path'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawn } from 'node:child_process'
-import { applyAnswers, commandPrefix, nextSteps, promptAnswers, shouldRunWizard } from './wizard.mjs'
+import { applyAnswers, commandPrefix, initSummary, nextSteps, promptAnswers, shouldRunWizard } from './wizard.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const packageRoot = resolve(here, '..')
@@ -353,7 +353,16 @@ export async function execute(parsed) {
   if (parsed.command === 'init') {
     if (parsed.options.dryRun) return { json: value }
     await initialize(parsed, manifest, value, answers)
-    return { json: { ...value, initialized: true } }
+    // 人在终端前看的是"写到哪了、下一步敲什么"; 脚本要的才是那坨 JSON。
+    if (parsed.options.json || !process.stdout.isTTY) return { json: { ...value, initialized: true } }
+    return {
+      text: initSummary({
+        directory: value.directory,
+        prefix: commandPrefix({ resolved: resolveOnPath('dsh-cloud'), entry: process.argv[1] ?? '' }),
+        mode: value.mode,
+        workDomain: value.mode === 'selfhost' ? `work.${parsed.options.domain}` : '',
+      }),
+    }
   }
   if (parsed.command === 'start' && freshInit && !parsed.options.dryRun) {
     await initialize(parsed, manifest, value, answers)
