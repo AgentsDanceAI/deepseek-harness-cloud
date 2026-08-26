@@ -138,3 +138,48 @@ def test_panel_uses_the_resolved_prefix_everywhere():
     panel = wizard.next_steps(url="u", directory="/x", has_upstream_key=True, prefix="uvx dsh-cloud")
     assert "uvx dsh-cloud up --dir /x" in panel
     assert "uvx dsh-cloud down --dir /x" in panel
+
+
+def test_selfhost_panel_names_the_dns_record_the_workspace_needs():
+    # 工作台按 host 路由, 这条记录不加它开着也打不开 —— 装完必须点名
+    panel = wizard.next_steps(url="https://dsh.example.com", directory="/x",
+                              has_upstream_key=True, work_domain="work.dsh.example.com")
+    assert "work.dsh.example.com" in panel and "DNS" in panel
+
+
+def test_trial_panel_says_nothing_about_dns():
+    panel = wizard.next_steps(url="http://localhost:8787", directory="/x", has_upstream_key=True)
+    assert "DNS" not in panel, "试用模式没有工作台, 提 DNS 是噪音"
+
+
+def test_selfhost_env_turns_the_workspace_on_trial_leaves_it_off(tmp_path):
+    """自部署有域名就默认开工作台; 试用模式必定关 (cookie 过不去 work.localhost)。"""
+    import json as _json
+    import subprocess as _sp
+    import sys as _sys
+
+    def env_of(*args):
+        target = tmp_path / args[0]
+        _sp.run([_sys.executable, "-m", "dsh_cloud_cli", "init", str(target), "--yes", "--json", *args[1:]],
+                cwd=ROOT, env={**__import__("os").environ,
+                               "PYTHONPATH": str(ROOT / "packages/cli-python/src")},
+                check=True, capture_output=True)
+        return dict(line.split("=", 1) for line in
+                    (target / ".env").read_text(encoding="utf-8").splitlines() if "=" in line)
+
+    selfhost = env_of("s", "--mode", "selfhost", "--domain", "dsh.example.com", "--admin-email", "me@x.com")
+    assert selfhost["WORK_ENABLED"] == "1"
+    assert selfhost["WORK_DOMAIN"] == "work.dsh.example.com"
+    assert selfhost["COOKIE_DOMAIN"] == ".dsh.example.com", "少了前导点会话带不到子域, 表现为无限跳登录页"
+    assert selfhost["COMPOSE_PROFILES"] == "work"
+
+    trial = env_of("t", "--mode", "trial")
+    assert trial["WORK_ENABLED"] == "0"
+    assert trial["COMPOSE_PROFILES"] == "", "试用模式不该启动 socket 代理"
+
+
+def test_selfhost_does_not_tell_you_to_fish_the_code_out_of_the_log():
+    # 自部署配了 SMTP, 验证码真发邮件 —— 那时再说"去日志里捞"就是错的
+    panel = wizard.next_steps(url="https://x", directory="/d", has_upstream_key=True, dev_mail=False)
+    assert "dev-mail" not in panel
+    assert "你配置的邮件服务器" in panel

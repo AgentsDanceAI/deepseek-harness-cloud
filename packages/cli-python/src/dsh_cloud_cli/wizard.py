@@ -68,7 +68,8 @@ def apply_answers(pairs: list[tuple[str, str]], answers: dict) -> list[tuple[str
 
 
 def next_steps(*, url: str, directory: str, has_upstream_key: bool,
-               project_name: str = "dsh-selfhost", prefix: str = "dsh-cloud") -> str:
+               project_name: str = "dsh-selfhost", prefix: str = "dsh-cloud",
+               work_domain: str = "", dev_mail: bool = True) -> str:
     """The closing panel. Pure so its content is testable.
 
     命令必须从任何目录粘过去都能跑: 取日志用 docker 而不是 `dsh-cloud logs`,
@@ -80,15 +81,29 @@ def next_steps(*, url: str, directory: str, has_upstream_key: bool,
         "  云工作台已就绪",
         "",
         f"  打开    {url}",
-        "  登录    用任意邮箱收验证码即可注册；试用模式没有配邮件服务器，",
-        "          验证码打印在服务端日志里：",
-        f"            docker logs {project_name}-dhc-server-1 2>&1 | grep -A1 dev-mail",
+    ]
+    # 自部署配了 SMTP, 验证码是真发邮件的 —— 那时再说"去日志里捞"就是错的。
+    if dev_mail:
+        lines += [
+            "  登录    用任意邮箱收验证码即可注册；本部署没有配邮件服务器，",
+            "          验证码打印在服务端日志里：",
+            f"            docker logs {project_name}-dhc-server-1 2>&1 | grep -A1 dev-mail",
+        ]
+    else:
+        lines += ["  登录    用任意邮箱收验证码即可注册，验证码走你配置的邮件服务器。"]
+    lines += [
         "",
     ]
     if not has_upstream_key:
         lines += [
             "  注意    还没有配模型上游，聊天会返回 503。把 UPSTREAM_API_KEY 填进",
             f"          {directory}/.env 后执行 dsh-cloud up 生效。",
+            "",
+        ]
+    if work_domain:
+        # 工作台按 host 路由, 这条 DNS 记录不加的话它开着也访问不到。
+        lines += [
+            f"  还差一步  给 {work_domain} 加一条指向本机的 DNS 记录（云工作台按域名路由）",
             "",
         ]
     lines += [

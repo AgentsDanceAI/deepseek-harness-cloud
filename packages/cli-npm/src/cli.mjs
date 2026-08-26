@@ -179,6 +179,14 @@ function generatedEnv(parsed, manifest, authFile, answers = {}) {
     `DHC_SERVER_IMAGE=${manifest.images.server}`,
     `CADDY_IMAGE=${manifest.baseImages.caddy}`,
     `POSTGRES_IMAGE=${manifest.baseImages.postgres}`,
+    // 云工作台。自部署给了域名, 就默认开着 —— 那是这个产品的招牌功能, 装完
+    // 却没有它等于交付了半个东西。要跑起来还差一条 DNS 记录 (work.<域名> 指向
+    // 本机), 装完的面板会说。试用模式必定关: localhost 与 work.localhost 是不同
+    // host, 会话 cookie 过不去, 开了只会得到无限跳登录页。
+    `WORK_ENABLED=${trial ? '0' : '1'}`,
+    `WORK_DOMAIN=${trial ? '' : `work.${domain}`}`,
+    `COOKIE_DOMAIN=${trial ? '' : `.${domain}`}`,
+    `COMPOSE_PROFILES=${trial ? '' : 'work'}`,
     `SOCKET_PROXY_IMAGE=${manifest.baseImages.socketProxy}`,
     `WORK_IMAGE=${manifest.images.workspace}`,
     '',
@@ -371,5 +379,5 @@ export async function execute(parsed) {
   if (!process.stdout.isTTY) return { text: `${value.url}\n` }
   const hasUpstreamKey = await upstreamKeyConfigured(value.directory)
   const prefix = commandPrefix({ onPath: binOnPath('dsh-cloud'), entry: process.argv[1] ?? '' })
-  return { text: nextSteps({ url: value.url, directory: value.directory, hasUpstreamKey, projectName: value.projectName, prefix }) }
+  return { text: nextSteps({ url: value.url, directory: value.directory, hasUpstreamKey, projectName: value.projectName, prefix, workDomain: value.mode === 'selfhost' ? `work.${parsed.options.domain}` : '', devMail: value.mode !== 'selfhost' }) }
 }
