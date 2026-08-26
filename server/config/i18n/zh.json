@@ -144,6 +144,8 @@
   "download.rebuild_notice_b": "，功能一致，手机也能用。",
   "download.rebuild_notice_link": "浏览器版云工作台",
   "download.rebuilding": "重新构建中",
+  "download.selfhost_howto": "启用云工作台需要一个独立域名与 docker socket 代理，见部署文档；桌面端可从源码自行构建。",
+  "download.selfhost_notice": "本部署没有配置桌面安装包下载地址，云工作台也未启用——这两项都属于运营方自行配置的部分。",
   "download.sub": "安装后在应用内登录，浏览器授权设备，即可开始使用。",
   "download.tip_mac_a": "：首次打开若提示\"无法验证开发者\"，请在应用图标上",
   "download.tip_mac_action": "右键 → 打开",

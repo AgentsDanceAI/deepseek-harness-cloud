@@ -118,6 +118,9 @@
       {{ t("home.two.lede") }}
     </p>
     <div class="grid grid-2" style="margin-top:28px">
+      {# 云工作台没开的部署 (自部署默认) 不摆这张卡: 它整张都在讲一个本实例
+         并不提供的能力, 按钮还会把人送进 /work → /download 的死循环。 #}
+      {% if work_enabled %}
       <div class="card feature">
         <span class="eyebrow">{{ t("home.two.cloud_eyebrow") }}</span>
         <h3>{{ t("home.two.cloud_title") }}</h3>
@@ -126,6 +129,7 @@
         </p>
         <a class="btn btn-primary" href="/work" style="margin-top:14px">{{ t("home.two.cloud_cta") }}</a>
       </div>
+      {% endif %}
       <div class="card feature">
         <span class="eyebrow">{{ t("home.two.desktop_eyebrow") }}</span>
         <h3>{{ t("home.two.desktop_title") }}</h3>
