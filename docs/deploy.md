@@ -16,7 +16,7 @@ steps are intentionally neutral self-host instructions.
 | npm/npx or uv/uvx CLI | Guided configuration and lifecycle commands | Generates and operates the same versioned stack |
 | Source development | Contributors changing server behavior | Development mode; never expose publicly |
 
-Release `0.2.1` coordinates packages and images through `release/release.json`.
+Release `0.2.2` coordinates packages and images through `release/release.json`.
 Use exact package versions or image digests in automation. Source builds remain
 available for development and independent verification.
 
@@ -103,18 +103,18 @@ without applying explicit flags.
 
 ## Versioned CLI paths
 
-After version `0.2.1` has been published, the one-shot npm path is:
+After version `0.2.2` has been published, the one-shot npm path is:
 
 ```bash
-npx --yes @agentsdanceai/dsh-cloud@0.2.1 init --mode trial
-npx --yes @agentsdanceai/dsh-cloud@0.2.1 doctor
-npx --yes @agentsdanceai/dsh-cloud@0.2.1 up --wait
+npx --yes @agentsdanceai/dsh-cloud@0.2.2 init --mode trial
+npx --yes @agentsdanceai/dsh-cloud@0.2.2 doctor
+npx --yes @agentsdanceai/dsh-cloud@0.2.2 up --wait
 ```
 
 The installed npm equivalent is:
 
 ```bash
-npm install --global @agentsdanceai/dsh-cloud@0.2.1
+npm install --global @agentsdanceai/dsh-cloud@0.2.2
 dsh-cloud init --mode trial
 dsh-cloud doctor
 dsh-cloud up --wait
@@ -123,15 +123,15 @@ dsh-cloud up --wait
 The isolated Python path is:
 
 ```bash
-uvx dsh-cloud==0.2.1 init --mode trial
-uvx dsh-cloud==0.2.1 doctor
-uvx dsh-cloud==0.2.1 up --wait
+uvx dsh-cloud==0.2.2 init --mode trial
+uvx dsh-cloud==0.2.2 doctor
+uvx dsh-cloud==0.2.2 up --wait
 ```
 
 The installed `uv` equivalent is:
 
 ```bash
-uv tool install dsh-cloud==0.2.1
+uv tool install dsh-cloud==0.2.2
 dsh-cloud init --mode trial
 dsh-cloud doctor
 dsh-cloud up --wait
@@ -146,7 +146,7 @@ provider, storage, and workspace settings.
 After the image exists in GHCR, the versioned image name is:
 
 ```text
-ghcr.io/agentsdanceai/dsh-cloud-server:0.2.1
+ghcr.io/agentsdanceai/dsh-cloud-server:0.2.2
 ```
 
 A version tag can be moved by a registry administrator. For immutable
@@ -166,7 +166,7 @@ docker run --detach --name dsh-cloud \
   --env-file .dsh-cloud/docker.env \
   --mount source=dsh-cloud-data,target=/app/data \
   --publish 127.0.0.1:8081:8100 \
-  ghcr.io/agentsdanceai/dsh-cloud-server:0.2.1
+  ghcr.io/agentsdanceai/dsh-cloud-server:0.2.2
 curl --fail --show-error http://127.0.0.1:8081/readyz
 ```
 
