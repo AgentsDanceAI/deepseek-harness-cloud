@@ -127,11 +127,13 @@ def test_identity_answers_land_in_the_env():
 
 def test_printed_command_matches_how_the_process_was_started():
     # 装了才用裸名字
-    assert wizard.command_prefix(on_path=True, entry="/usr/local/bin/dsh-cloud") == "dsh-cloud"
+    assert wizard.command_prefix(resolved="/usr/local/bin/dsh-cloud") == "dsh-cloud"
     # uvx 用完 PATH 上什么都没有
-    assert wizard.command_prefix(on_path=False, entry="/Users/x/.cache/uv/archive/bin/dsh-cloud") == "uvx dsh-cloud"
+    assert wizard.command_prefix(entry="/Users/x/.cache/uv/archive/bin/dsh-cloud") == "uvx dsh-cloud"
+    # 运行期间它确实在 PATH 上, 但那份住在 uv 缓存里, 进程一退就没了
+    assert wizard.command_prefix(resolved="/Users/x/.cache/uv/archive/bin/dsh-cloud") == "uvx dsh-cloud"
     # 从源码跑: 印出那条真的能用的调用
-    assert wizard.command_prefix(on_path=False, entry="/repo/src/dsh_cloud_cli/__main__.py").endswith("-m dsh_cloud_cli")
+    assert wizard.command_prefix(entry="/repo/src/dsh_cloud_cli/__main__.py").endswith("-m dsh_cloud_cli")
 
 
 def test_panel_uses_the_resolved_prefix_everywhere():

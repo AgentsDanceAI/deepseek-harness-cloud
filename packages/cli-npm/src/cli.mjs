@@ -314,20 +314,21 @@ async function collectAnswers(parsed, manifest, freshInit) {
   return promptAnswers({ input: process.stdin, output: process.stdout }, { version: manifest.version, mode })
 }
 
-/** `dsh-cloud` 真的在 PATH 上吗 —— 决定面板该印哪种调用形式。
- *  只查文件系统, 不起子进程。 */
-function binOnPath(name) {
+/** `dsh-cloud` 在 PATH 上的哪个位置 —— 决定面板该印哪种调用形式。
+ *  只查文件系统, 不起子进程; 找不到返回空串。 */
+function resolveOnPath(name) {
   const { delimiter, join } = pathModule
   for (const dir of (process.env.PATH ?? '').split(delimiter)) {
     if (!dir) continue
+    const candidate = join(dir, name)
     try {
-      accessSync(join(dir, name), constants.X_OK)
-      return true
+      accessSync(candidate, constants.X_OK)
+      return candidate
     } catch {
       // 这一段 PATH 里没有, 继续找
     }
   }
-  return false
+  return ''
 }
 
 /** 上游密钥到底填了没 —— 决定收尾面板要不要提醒聊天会 503。 */
@@ -378,6 +379,6 @@ export async function execute(parsed) {
   // 人在终端前就给完整指引; 管道/CI 里保持裸 URL, 免得打断既有脚本的解析。
   if (!process.stdout.isTTY) return { text: `${value.url}\n` }
   const hasUpstreamKey = await upstreamKeyConfigured(value.directory)
-  const prefix = commandPrefix({ onPath: binOnPath('dsh-cloud'), entry: process.argv[1] ?? '' })
+  const prefix = commandPrefix({ resolved: resolveOnPath('dsh-cloud'), entry: process.argv[1] ?? '' })
   return { text: nextSteps({ url: value.url, directory: value.directory, hasUpstreamKey, projectName: value.projectName, prefix, workDomain: value.mode === 'selfhost' ? `work.${parsed.options.domain}` : '', devMail: value.mode !== 'selfhost' }) }
 }

@@ -19,16 +19,22 @@ DEEPSEEK_BASE = "https://api.deepseek.com/v1"
 REPOSITORY = "https://github.com/AgentsDanceAI/deepseek-harness-cloud"
 
 
-def command_prefix(*, on_path: bool, entry: str = "") -> str:
+def command_prefix(*, resolved: str = "", entry: str = "") -> str:
     """怎么拼出"再跑我一次" —— 按这个进程实际是怎么被启动的来。
 
     直接印 `dsh-cloud …` 对绝大多数人都是错的: uvx 用完什么都不留在 PATH 上,
     从源码跑更不会。所以按事实推断 (名字真在 PATH 上吗 / argv 长什么样), 而不是
     假设大家都 `uv tool install` 过。纯函数, 两个事实由调用方给, 便于测试。
     """
-    if on_path:
+    # uvx 在**运行期间**把自己的 bin 挂上 PATH, 进程一退就没了 —— 落在 uv 缓存里
+    # 的那份不算"装过"。Node 侧 2026-08-26 实测被这个坑到: 面板印了裸 dsh-cloud,
+    # 照着敲得到 command not found。
+    def _ephemeral(path: str) -> bool:
+        return "/uv/" in path or "\\uv\\" in path or "uvx" in path
+
+    if resolved and not _ephemeral(resolved):
         return "dsh-cloud"
-    if "/uv/" in entry or "\\uv\\" in entry or "uvx" in entry:
+    if _ephemeral(resolved) or _ephemeral(entry):
         return "uvx dsh-cloud"
     return f"{sys.executable} -m dsh_cloud_cli"
 
