@@ -2,12 +2,12 @@
 
 English | [简体中文](install.zh-CN.md)
 
-Release `0.2.2` has two equivalent, version-locked installers. Both default to
+Release `0.2.3` has two equivalent, version-locked installers. Both default to
 local trial mode, bind Caddy to `127.0.0.1:8787`, generate a random 256-bit auth
 secret in a mode-`0600` file, and invoke Docker without a shell.
 
-Release `0.2.2` uses the exact registry coordinates
-`@agentsdanceai/dsh-cloud@0.2.2` and `dsh-cloud==0.2.2`. Keep the explicit version
+Release `0.2.3` uses the exact registry coordinates
+`@agentsdanceai/dsh-cloud@0.2.3` and `dsh-cloud==0.2.3`. Keep the explicit version
 in scripts and automation.
 
 ## One-command trial
@@ -15,13 +15,13 @@ in scripts and automation.
 With npm/npx:
 
 ```bash
-npx --yes @agentsdanceai/dsh-cloud@0.2.2 start --mode trial --wait
+npx --yes @agentsdanceai/dsh-cloud@0.2.3 start --mode trial --wait
 ```
 
 With uv/uvx:
 
 ```bash
-uvx dsh-cloud==0.2.2 start --mode trial --wait
+uvx dsh-cloud==0.2.3 start --mode trial --wait
 ```
 
 Open <http://localhost:8787>. The explicit package version is the release
@@ -57,11 +57,11 @@ Public mode deliberately binds to all interfaces. Initialize it first so that
 identity credentials can be supplied without putting secrets in shell history:
 
 ```bash
-npx --yes @agentsdanceai/dsh-cloud@0.2.2 init --mode selfhost \
+npx --yes @agentsdanceai/dsh-cloud@0.2.3 init --mode selfhost \
   --domain cloud.example.com --admin-email admin@example.com
 $EDITOR dsh-cloud/.env  # configure SMTP or Google/GitHub OAuth, plus the upstream key
-npx --yes @agentsdanceai/dsh-cloud@0.2.2 doctor dsh-cloud
-npx --yes @agentsdanceai/dsh-cloud@0.2.2 up dsh-cloud --wait
+npx --yes @agentsdanceai/dsh-cloud@0.2.3 doctor dsh-cloud
+npx --yes @agentsdanceai/dsh-cloud@0.2.3 up dsh-cloud --wait
 ```
 
 The generated `.env` is mode `0600`. Public `start`/`up` refuses to launch until

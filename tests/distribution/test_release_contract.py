@@ -17,7 +17,7 @@ def test_release_source_is_complete_and_locked():
     release = json.loads((ROOT / "release/release.json").read_text(encoding="utf-8"))
     # 唯一一处写死版本号: 发版时必须有人有意识地改这一行 (闸门)。其余凡是"跟着
     # 版本走"的断言一律从这里派生 —— 否则每发一版就要手改一堆, 迟早漏掉一处。
-    assert release["version"] == "0.2.2"
+    assert release["version"] == "0.2.3"
     assert release["license"] == "LicenseRef-DSH-Cloud-Community-1.0"
     assert release["harnessRuntime"] == "0.1.0-rc.8"
     assert release["desktopRuntime"] == "0.1.0-rc.6"
