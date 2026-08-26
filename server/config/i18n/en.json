@@ -134,6 +134,8 @@
   "download.android_qr_alt": "QR code for the Android download",
   "download.h1": "Download the deepseek-harness-cloud desktop app",
   "download.help": "Trouble installing? Contact",
+  "download.hosted_cta": "Or use the official hosted DSH Cloud (desktop builds and the cloud workspace included)",
+  "download.hosted_link": "Go to dshcloud.online →",
   "download.ios_meta": "No install needed: open the cloud workspace in Safari, then Share → Add to Home Screen to use it like an app",
   "download.mac_arm64": "Download .dmg (Apple silicon)",
   "download.mac_meta": "Apple silicon (M series) and Intel · macOS 12+",

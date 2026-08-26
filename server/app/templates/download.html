@@ -15,6 +15,12 @@
       {% else %}
         {{ t("download.selfhost_notice") }}
         <br><span class="small">{{ t("download.selfhost_howto") }}</span>
+        {# 本部署给不了的东西, 官方托管版给得了 —— 明写是托管版, 让访客自己选。
+           自部署方不想挂可以把 HOSTED_SITE 置空。 #}
+        {% if hosted_site %}
+        <br><span class="small">{{ t("download.hosted_cta") }}
+          <a href="{{ hosted_site }}/download" rel="noopener" target="_blank">{{ t("download.hosted_link") }}</a></span>
+        {% endif %}
       {% endif %}
     </p>
     {% endif %}
@@ -73,6 +79,8 @@
         <p class="muted">{{ t("download.ios_meta") }}</p>
         {% if work_enabled %}
           <a class="btn btn-ghost btn-block" href="/work" rel="noopener">{{ t("download.open_workspace") }}</a>
+        {% elif hosted_site %}
+          <a class="btn btn-ghost btn-block" href="{{ hosted_site }}/work" rel="noopener" target="_blank">{{ t("download.hosted_link") }}</a>
         {% else %}
           <button class="btn btn-ghost btn-block" type="button" disabled>{{ t("download.rebuilding") }}</button>
         {% endif %}

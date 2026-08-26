@@ -170,6 +170,11 @@ WECHAT_PAY_APPID = _env("WECHAT_PAY_APPID")
 # --- cloud workspaces (dshwork: per-user dsh containers, phone-usable) ------
 WORK_ENABLED = _env_bool("WORK_ENABLED", False)
 WORK_DOMAIN = _env("WORK_DOMAIN", "")  # dsh UI host; empty = workspace off (self-host safe default)
+
+# 本部署缺的能力 (没配桌面安装包 / 没开云工作台), 页面挂出官方托管版作为去处。
+# 这是有意的引流, 也是对访客有用的信息 —— 但必须**明说那是托管版**, 而且自部署
+# 方可以整条关掉 (置空)。绝不做成"点了以为是自己的服务、其实到了别人那里"。
+HOSTED_SITE = _env("HOSTED_SITE", "https://dshcloud.online").rstrip("/")
 WORK_IMAGE = _env("WORK_IMAGE", "dsh-local:rc8")
 WORK_NETWORK = _env("WORK_NETWORK", "dshwork-net")
 DOCKER_PROXY_URL = _env("DOCKER_PROXY_URL", "http://dhc-docker-proxy:2375")

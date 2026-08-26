@@ -411,3 +411,27 @@ def test_selfhost_without_workspace_has_no_dead_ends(client, monkeypatch):
     # 开着的时候一切照旧
     monkeypatch.setattr(config, "WORK_ENABLED", True)
     assert 'href="/work"' in client.get("/download").text
+
+
+def test_selfhost_offers_the_hosted_service_as_a_labelled_alternative(client, monkeypatch):
+    """本部署给不了的能力, 挂官方托管版入口 —— 这是有意的引流。
+
+    两条性质必须成立, 否则引流会反噬:
+      · 链接明写"官方托管版", 不能让人以为点的是自己这台服务;
+      · 托管版自己的站点不能给自己挂一个指向自己的按钮。
+    """
+    from app import config
+
+    monkeypatch.setattr(config, "WORK_ENABLED", False)
+    body = client.get("/download").text
+    assert "https://dshcloud.online/work" in body
+    assert "官方托管版" in body, "必须标明那是托管版, 不能装成本地功能"
+
+    # 托管版自己: hosted_site 与 PUBLIC_BASE 同源时不挂
+    monkeypatch.setattr(config, "PUBLIC_BASE", "https://dshcloud.online")
+    assert "dshcloud.online/work" not in client.get("/download").text
+
+    # 自部署方想彻底关掉引流: 置空即可
+    monkeypatch.setattr(config, "PUBLIC_BASE", "http://localhost:8787")
+    monkeypatch.setattr(config, "HOSTED_SITE", "")
+    assert "dshcloud.online" not in client.get("/download").text

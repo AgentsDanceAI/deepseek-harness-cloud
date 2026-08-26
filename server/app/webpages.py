@@ -78,6 +78,11 @@ def _ctx(request: Request, page: str, **extra) -> dict:
         # socket 代理), 那时再劝人"去用云工作台"就是把他送去 /work, 而
         # /work 又跳回 /download, 绕成死循环。
         "work_enabled": config.WORK_ENABLED,
+        # 只在"本部署不是托管版自己"时才显示托管版入口, 否则线上会给自己
+        # 挂一个指向自己的按钮。
+        "hosted_site": config.HOSTED_SITE
+        if config.HOSTED_SITE not in ("", config.PUBLIC_BASE.rstrip("/"))
+        else "",
         "work_credits_per_min": config.WORK_CREDITS_PER_MIN,
         "work_idle_stop_min": config.WORK_IDLE_STOP_MIN,
         "work_free_minutes": config.WORK_FREE_MINUTES,
