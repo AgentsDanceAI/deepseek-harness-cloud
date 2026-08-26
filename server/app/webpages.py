@@ -74,10 +74,9 @@ def _ctx(request: Request, page: str, **extra) -> dict:
         "has_win_x64": bool(download_url("win-x64")),
         "has_win_arm64": bool(download_url("win-arm64")),
         "has_android": bool(download_url("android")),
-        # 云工作台是否开着 —— 下载页据此决定说什么: 自部署默认不开
-        # (需要独立域名 + docker socket 代理), 那时再劝人"去用云工作台"
-        # 就是把他送回 /work, 而 /work 又跳回这里, 绕成死循环。
-        "work_enabled": bool(config.WORK_ENABLED),
+        # 页面据此决定说什么: 自部署默认不开云工作台 (要独立域名 + docker
+        # socket 代理), 那时再劝人"去用云工作台"就是把他送去 /work, 而
+        # /work 又跳回 /download, 绕成死循环。
         "work_enabled": config.WORK_ENABLED,
         "work_credits_per_min": config.WORK_CREDITS_PER_MIN,
         "work_idle_stop_min": config.WORK_IDLE_STOP_MIN,
