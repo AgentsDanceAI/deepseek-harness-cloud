@@ -181,6 +181,7 @@
   "home.chip.game": "做个小游戏",
   "home.chip.research": "联网调研",
   "home.chip.site": "搭个网站",
+  "home.composer_hint_hosted": "回车发送，将在官方托管版 DSH Cloud 执行",
   "home.composer_hint_in": "回车发送，将在云工作台执行",
   "home.composer_hint_out": "回车继续，登录后立即开始",
   "home.composer_placeholder": "描述一个任务，或直接提问……",

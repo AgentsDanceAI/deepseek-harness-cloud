@@ -435,3 +435,26 @@ def test_selfhost_offers_the_hosted_service_as_a_labelled_alternative(client, mo
     monkeypatch.setattr(config, "PUBLIC_BASE", "http://localhost:8787")
     monkeypatch.setattr(config, "HOSTED_SITE", "")
     assert "dshcloud.online" not in client.get("/download").text
+
+
+def test_hero_composer_never_leads_into_the_dead_end(client, monkeypatch):
+    """首页那个输入框是最显眼的入口, 不能把人送进 /work → /download 的死胡同。
+
+    2026-08-25 老板看着自部署首页问"点云端体验去哪" —— 一查, 导航按钮和云工作台
+    卡片确实已经按开关隐藏了, 但输入框 (回车即执行) 还硬指着本站 /work。
+    """
+    from app import config
+
+    monkeypatch.setattr(config, "WORK_ENABLED", False)
+    body = client.get("/").text
+    assert 'data-target="https://dshcloud.online"' in body, "该把任务送去托管版"
+    assert "官方托管版" in body, "必须说清任务会在托管版执行, 不能让人以为跑在本机"
+
+    # 没有托管版可去时, 输入框本身就不该出现 —— 没有任何地方能执行任务
+    monkeypatch.setattr(config, "HOSTED_SITE", "")
+    assert "hero-composer" not in client.get("/").text
+
+    # 本地工作台开着: 一切照旧, 走本站
+    monkeypatch.setattr(config, "WORK_ENABLED", True)
+    body = client.get("/").text
+    assert 'data-target=""' in body and "hero-composer" in body

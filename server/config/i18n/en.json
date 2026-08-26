@@ -181,6 +181,7 @@
   "home.chip.game": "Build a game",
   "home.chip.research": "Research online",
   "home.chip.site": "Build a site",
+  "home.composer_hint_hosted": "Press Enter to run it on the official hosted DSH Cloud",
   "home.composer_hint_in": "Press Enter to run it in the cloud workspace",
   "home.composer_hint_out": "Press Enter to continue — it starts right after you sign in",
   "home.composer_placeholder": "Describe a task, or just ask something…",
