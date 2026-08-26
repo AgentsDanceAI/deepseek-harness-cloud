@@ -144,6 +144,8 @@
   "download.rebuild_notice_b": " — it has the same features and works on a phone.",
   "download.rebuild_notice_link": "browser-based cloud workspace",
   "download.rebuilding": "Rebuilding",
+  "download.selfhost_howto": "Enabling the workspace needs its own hostname and the docker socket proxy (see the deployment guide); desktop builds can be produced from source.",
+  "download.selfhost_notice": "This deployment has no desktop installer URLs configured, and the cloud workspace is off — both are things an operator turns on.",
   "download.sub": "Install it, sign in from inside the app, authorise the device in your browser, and you are ready to work.",
   "download.tip_mac_a": ": if the first launch says the developer cannot be verified, use ",
   "download.tip_mac_action": "Right-click → Open",

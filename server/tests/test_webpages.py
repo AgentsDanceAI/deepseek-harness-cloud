@@ -389,3 +389,25 @@ def test_login_page_tells_selfhosters_where_the_dev_code_goes(client, monkeypatc
     # 配了 SMTP 就是真发信, 提示必须消失, 免得线上吓到用户。
     monkeypatch.setattr(config, "MAIL_SMTP_HOST", "smtp.example.com")
     assert "验证码打印在服务端日志里" not in client.get("/login").text
+
+
+def test_selfhost_without_workspace_has_no_dead_ends(client, monkeypatch):
+    """工作台关着时, 页面不能再把人指向 /work —— 那会 302 回 /download, 绕成死循环。
+
+    2026-08-25 老板本地部署实测: 点"云端体验"落到 /download, 页面写着"正在重新
+    构建，这段时间可以直接用浏览器版云工作台"并给出 /work 链接, 而 /work 又跳回
+    /download; iPhone 卡片的"打开云工作台"同样。整个产品看着像个前端空壳。
+    """
+    from app import config
+
+    monkeypatch.setattr(config, "WORK_ENABLED", False)
+    for path in ("/", "/download"):
+        body = client.get(path).text
+        assert 'href="/work"' not in body, f"{path} 在工作台关闭时仍指向 /work"
+    # 而且不能再谎称"正在重新构建" —— 自部署只是没配下载地址
+    download = client.get("/download").text
+    assert "云工作台也未启用" in download
+
+    # 开着的时候一切照旧
+    monkeypatch.setattr(config, "WORK_ENABLED", True)
+    assert 'href="/work"' in client.get("/download").text

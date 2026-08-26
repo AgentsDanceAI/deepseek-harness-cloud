@@ -7,8 +7,15 @@
     <p class="muted">{{ t("download.sub") }}</p>
     {% if not has_mac_arm64 or not has_win_x64 %}
     <p class="muted" style="background:#fff7ed;border:1px solid #fed7aa;border-radius:10px;padding:12px 14px">
-      {{ t("download.rebuild_notice_a") }}
-      <a href="/work">{{ t("download.rebuild_notice_link") }}</a>{{ t("download.rebuild_notice_b") }}
+      {# 云工作台关着的时候绝不能再把人指回 /work —— 那条路会 302 回本页,
+         而"正在重新构建"对自部署也不是实话: 只是没配下载地址而已。 #}
+      {% if work_enabled %}
+        {{ t("download.rebuild_notice_a") }}
+        <a href="/work">{{ t("download.rebuild_notice_link") }}</a>{{ t("download.rebuild_notice_b") }}
+      {% else %}
+        {{ t("download.selfhost_notice") }}
+        <br><span class="small">{{ t("download.selfhost_howto") }}</span>
+      {% endif %}
     </p>
     {% endif %}
     <div class="dl-grid">
@@ -64,7 +71,11 @@
         </div>
         <h3>iPhone / iPad</h3>
         <p class="muted">{{ t("download.ios_meta") }}</p>
-        <a class="btn btn-ghost btn-block" href="/work" rel="noopener">{{ t("download.open_workspace") }}</a>
+        {% if work_enabled %}
+          <a class="btn btn-ghost btn-block" href="/work" rel="noopener">{{ t("download.open_workspace") }}</a>
+        {% else %}
+          <button class="btn btn-ghost btn-block" type="button" disabled>{{ t("download.rebuilding") }}</button>
+        {% endif %}
       </div>
     </div>
 
