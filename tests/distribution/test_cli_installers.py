@@ -12,6 +12,11 @@ from packaging.metadata import Metadata
 
 ROOT = Path(__file__).resolve().parents[2]
 NODE = ROOT / "packages/cli-npm/bin/dsh-cloud.mjs"
+
+def _release_version() -> str:
+    """当前发行版本。测试里凡是"跟着版本走"的值都从这里取, 免得发版时四处手改。"""
+    return json.loads((ROOT / "release/release.json").read_text(encoding="utf-8"))["version"]
+
 PYTHON_SRC = ROOT / "packages/cli-python/src"
 
 
@@ -33,7 +38,7 @@ def test_node_and_python_expose_help_version_and_equivalent_dry_run():
         assert "start" in help_result.stdout and "--dry-run" in help_result.stdout
         version_result = runner("--version")
         assert version_result.returncode == 0, version_result.stderr
-        assert version_result.stdout.strip() == "0.2.0"
+        assert version_result.stdout.strip() == _release_version()
         dry_run = runner("start", "--dry-run", "--json")
         assert dry_run.returncode == 0, dry_run.stderr
         value = json.loads(dry_run.stdout)
@@ -67,7 +72,7 @@ def test_node_and_python_init_generate_safe_secret_free_stacks(tmp_path: Path):
             "GITHUB_LOGIN_CLIENT_SECRET=",
         ):
             assert identity_setting in env_text
-        assert "WORK_IMAGE=ghcr.io/agentsdanceai/dsh-cloud-workspace:0.2.0" in env_text
+        assert f"WORK_IMAGE=ghcr.io/agentsdanceai/dsh-cloud-workspace:{_release_version()}" in env_text
         assert (target / "docker-compose.yml").is_file()
         for config_path in (
             "config/models.json",
@@ -226,8 +231,8 @@ def test_python_release_artifacts_are_reproducible_and_publishable(tmp_path: Pat
 
 def test_install_documentation_distinguishes_source_and_registry_commands():
     text = (ROOT / "docs/install.md").read_text(encoding="utf-8")
-    assert "@agentsdanceai/dsh-cloud@0.2.0" in text
-    assert "dsh-cloud==0.2.0" in text
+    assert f"@agentsdanceai/dsh-cloud@{_release_version()}" in text
+    assert f"dsh-cloud=={_release_version()}" in text
     assert "npm --prefix packages/cli-npm" in text
     assert "uv run --project packages/cli-python" in text
     assert "npm pack dist/packages/npm --dry-run --json" in text
@@ -252,7 +257,7 @@ def test_documented_uv_run_source_entrypoint_is_executable(tmp_path: Path):
         capture_output=True,
     )
     assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == "0.2.0"
+    assert result.stdout.strip() == _release_version()
 
 
 def test_node_and_python_refuse_reinit_without_mutating_existing_install(tmp_path: Path):

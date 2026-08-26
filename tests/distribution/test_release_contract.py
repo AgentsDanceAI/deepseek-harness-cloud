@@ -7,10 +7,17 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 DIGEST = re.compile(r"^[^@\s]+@sha256:[0-9a-f]{64}$")
 
+def _release_version() -> str:
+    """当前发行版本。测试里凡是"跟着版本走"的值都从这里取, 免得发版时四处手改。"""
+    return json.loads((ROOT / "release/release.json").read_text(encoding="utf-8"))["version"]
+
+
 
 def test_release_source_is_complete_and_locked():
     release = json.loads((ROOT / "release/release.json").read_text(encoding="utf-8"))
-    assert release["version"] == "0.2.0"
+    # 唯一一处写死版本号: 发版时必须有人有意识地改这一行 (闸门)。其余凡是"跟着
+    # 版本走"的断言一律从这里派生 —— 否则每发一版就要手改一堆, 迟早漏掉一处。
+    assert release["version"] == "0.2.1"
     assert release["license"] == "LicenseRef-DSH-Cloud-Community-1.0"
     assert release["harnessRuntime"] == "0.1.0-rc.8"
     assert release["desktopRuntime"] == "0.1.0-rc.6"
@@ -20,9 +27,10 @@ def test_release_source_is_complete_and_locked():
     assert "socketProxy" in release["baseImages"]
     for ref in release["baseImages"].values():
         assert DIGEST.fullmatch(ref), ref
+    version = release["version"]
     assert release["productImages"] == {
-        "server": "ghcr.io/agentsdanceai/dsh-cloud-server:0.2.0",
-        "workspace": "ghcr.io/agentsdanceai/dsh-cloud-workspace:0.2.0",
+        "server": f"ghcr.io/agentsdanceai/dsh-cloud-server:{version}",
+        "workspace": f"ghcr.io/agentsdanceai/dsh-cloud-workspace:{version}",
     }
 
     package_schema = json.loads(
@@ -69,7 +77,8 @@ def test_release_sbom_is_valid_spdx_and_uses_the_active_license(tmp_path: Path):
         cwd=ROOT,
         check=True,
     )
-    output = tmp_path / "dsh-cloud-0.2.0.spdx.json"
+    version = _release_version()
+    output = tmp_path / f"dsh-cloud-{version}.spdx.json"
     subprocess.run(
         ["node", "scripts/release/generate-sbom.mjs", str(stage), str(output)],
         cwd=ROOT,
@@ -77,7 +86,7 @@ def test_release_sbom_is_valid_spdx_and_uses_the_active_license(tmp_path: Path):
     )
     sbom = json.loads(output.read_text(encoding="utf-8"))
     assert sbom["spdxVersion"] == "SPDX-2.3"
-    assert sbom["documentNamespace"].endswith("/0.2.0")
+    assert sbom["documentNamespace"].endswith(f"/{version}")
     packages = {package["name"]: package for package in sbom["packages"]}
     assert set(packages) == {"@agentsdanceai/dsh-cloud", "dsh-cloud"}
     assert all(
