@@ -11,7 +11,7 @@
 [![License: DSH Cloud Community 1.0](https://img.shields.io/badge/license-DSH%20Cloud%20Community%201.0-4c6ef5.svg)](LICENSE)
 [![Security policy](https://img.shields.io/badge/security-private%20reporting-2f9e44.svg)](SECURITY.zh-CN.md)
 
-发行版本：[`0.2.0`](release/release.json)
+发行版本：[`0.2.1`](release/release.json)
 
 [English](README.md) · [架构](docs/architecture.zh-CN.md) ·
 [自部署](docs/deploy.zh-CN.md) · [版本边界](docs/editions.zh-CN.md) ·
@@ -111,14 +111,14 @@ npx --yes dsh-plugin-cloud setup
 
 ## 快速开始
 
-以下命令均固定使用 `0.2.0`；自动化环境也应固定精确版本。
+以下命令均固定使用 `0.2.1`；自动化环境也应固定精确版本。
 
 ### 一条命令 — npm/npx
 
 ```bash
-npx --yes @agentsdanceai/dsh-cloud@0.2.0 start --mode trial --wait
+npx --yes @agentsdanceai/dsh-cloud@0.2.1 start --mode trial --wait
 
-npm install --global @agentsdanceai/dsh-cloud@0.2.0
+npm install --global @agentsdanceai/dsh-cloud@0.2.1
 dsh-cloud start --mode trial --wait
 ```
 
@@ -132,9 +132,9 @@ dsh-cloud start --mode trial --wait
 ### 一条命令 — uv/uvx
 
 ```bash
-uvx dsh-cloud==0.2.0 start --mode trial --wait
+uvx dsh-cloud==0.2.1 start --mode trial --wait
 
-uv tool install dsh-cloud==0.2.0
+uv tool install dsh-cloud==0.2.1
 dsh-cloud start --mode trial --wait
 ```
 
@@ -159,7 +159,7 @@ bash scripts/quickstart.sh --domain localhost --admin-email you@example.com
 
 ```bash
 (umask 077; mkdir -p .dsh-cloud; printf 'AUTH_SECRET=%s\nDHC_DEV=1\nPUBLIC_BASE=http://127.0.0.1:8081\nPRICING_FILE=pricing.cny.json\n' "$(openssl rand -hex 32)" > .dsh-cloud/docker.env)
-docker run --rm --name dsh-cloud --env-file .dsh-cloud/docker.env --publish 127.0.0.1:8081:8100 --mount type=volume,src=dsh-cloud-data,dst=/app/data ghcr.io/agentsdanceai/dsh-cloud-server:0.2.0
+docker run --rm --name dsh-cloud --env-file .dsh-cloud/docker.env --publish 127.0.0.1:8081:8100 --mount type=volume,src=dsh-cloud-data,dst=/app/data ghcr.io/agentsdanceai/dsh-cloud-server:0.2.1
 ```
 
 检查 <http://127.0.0.1:8081/readyz>，调用模型前把上游密钥加入
