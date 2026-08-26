@@ -13,18 +13,21 @@ def parsed(command, **options):
     return {"command": command, "options": options, "positionals": []}
 
 
-def test_wizard_runs_only_for_a_fresh_interactive_start_or_init():
-    assert wizard.should_run_wizard(parsed("start"), is_tty=True, fresh_init=True)
-    assert wizard.should_run_wizard(parsed("init"), is_tty=True, fresh_init=True)
+def test_only_selfhost_gets_asked_anything():
+    assert wizard.should_run_wizard(parsed("start", mode="selfhost"), is_tty=True, fresh_init=True)
+    assert wizard.should_run_wizard(parsed("init", mode="selfhost"), is_tty=True, fresh_init=True)
+    # 试用模式一句不问: 一行装完就该看到东西, 而看的东西都指向官方站点
+    assert not wizard.should_run_wizard(parsed("start"), is_tty=True, fresh_init=True)
     # 已初始化的目录不能再问 —— 那等于诱导用户覆盖自己的配置
-    assert not wizard.should_run_wizard(parsed("start"), is_tty=True, fresh_init=False)
-    assert not wizard.should_run_wizard(parsed("up"), is_tty=True, fresh_init=True)
+    assert not wizard.should_run_wizard(parsed("start", mode="selfhost"), is_tty=True, fresh_init=False)
+    assert not wizard.should_run_wizard(parsed("up", mode="selfhost"), is_tty=True, fresh_init=True)
 
 
 def test_automation_never_blocks_on_a_hidden_prompt():
     for options in ({"json": True}, {"dryRun": True}, {"yes": True}):
-        assert not wizard.should_run_wizard(parsed("start", **options), is_tty=True, fresh_init=True)
-    assert not wizard.should_run_wizard(parsed("start"), is_tty=False, fresh_init=True)
+        assert not wizard.should_run_wizard(parsed("start", mode="selfhost", **options),
+                                            is_tty=True, fresh_init=True)
+    assert not wizard.should_run_wizard(parsed("start", mode="selfhost"), is_tty=False, fresh_init=True)
 
 
 def test_answers_replace_placeholders_in_place():
@@ -61,7 +64,8 @@ def test_closing_panel_tells_the_user_where_the_sign_in_code_went():
 
 def test_closing_panel_warns_when_chat_would_answer_503():
     panel = wizard.next_steps(url="http://localhost:8787", directory="/x", has_upstream_key=False)
-    assert "503" in panel and "UPSTREAM_API_KEY" in panel
+    assert "想在本机跑模型" in panel and "UPSTREAM_API_KEY" in panel
+    assert "503" not in panel, "没配上游是试用模式的正常状态, 不该报警"
 
 
 def test_prompts_collect_a_custom_endpoint(monkeypatch, capsys):

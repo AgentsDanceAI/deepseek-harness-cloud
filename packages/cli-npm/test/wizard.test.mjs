@@ -5,21 +5,24 @@ import { applyAnswers, commandPrefix, initSummary, nextSteps, promptAnswers, sho
 
 const parsed = (command, options = {}) => ({ command, options, positionals: [] })
 
-test('wizard runs only for a fresh interactive start or init', () => {
-  assert.equal(shouldRunWizard(parsed('start'), { isTTY: true, freshInit: true }), true)
-  assert.equal(shouldRunWizard(parsed('init'), { isTTY: true, freshInit: true }), true)
+test('only selfhost gets asked anything', () => {
+  const self = { mode: 'selfhost' }
+  assert.equal(shouldRunWizard(parsed('start', self), { isTTY: true, freshInit: true }), true)
+  assert.equal(shouldRunWizard(parsed('init', self), { isTTY: true, freshInit: true }), true)
+  // 试用模式一句不问: 一行装完就该看到东西, 而看的东西都指向官方站点
+  assert.equal(shouldRunWizard(parsed('start'), { isTTY: true, freshInit: true }), false)
   // 已初始化的目录不能再问 —— 那等于诱导用户覆盖自己的配置
-  assert.equal(shouldRunWizard(parsed('start'), { isTTY: true, freshInit: false }), false)
-  assert.equal(shouldRunWizard(parsed('up'), { isTTY: true, freshInit: true }), false)
+  assert.equal(shouldRunWizard(parsed('start', self), { isTTY: true, freshInit: false }), false)
+  assert.equal(shouldRunWizard(parsed('up', self), { isTTY: true, freshInit: true }), false)
 })
 
 test('automation never blocks on a hidden prompt', () => {
   const ctx = { isTTY: true, freshInit: true }
   for (const options of [{ json: true }, { dryRun: true }, { yes: true }]) {
-    assert.equal(shouldRunWizard(parsed('start', options), ctx), false)
+    assert.equal(shouldRunWizard(parsed('start', { ...options, mode: 'selfhost' }), ctx), false)
   }
   // 管道 / CI 里没有 TTY
-  assert.equal(shouldRunWizard(parsed('start'), { isTTY: false, freshInit: true }), false)
+  assert.equal(shouldRunWizard(parsed('start', { mode: 'selfhost' }), { isTTY: false, freshInit: true }), false)
 })
 
 test('answers replace the generated placeholders in place', () => {
@@ -53,7 +56,8 @@ test('closing panel tells the user where the sign-in code went', () => {
 
 test('closing panel warns when chat would answer 503', () => {
   const panel = nextSteps({ url: 'http://localhost:8787', directory: '/x/dsh-cloud', hasUpstreamKey: false })
-  assert.ok(panel.includes('503') && panel.includes('UPSTREAM_API_KEY'))
+  assert.ok(panel.includes('想在本机跑模型') && panel.includes('UPSTREAM_API_KEY'))
+  assert.ok(!panel.includes('503'), '没配上游是试用模式的正常状态, 不该报警')
 })
 
 /** 假 TTY。`atOnce` 把所有行挤进一个 chunk —— 管道输入就长这样,
