@@ -46,7 +46,12 @@ def should_run_wizard(parsed: dict, *, is_tty: bool, fresh_init: bool) -> bool:
     options = parsed.get("options", {})
     if options.get("json") or options.get("dryRun") or options.get("yes"):
         return False
-    return parsed.get("command") in {"start", "init"}
+    if parsed.get("command") not in {"start", "init"}:
+        return False
+    # 试用模式一句不问: 那条命令的意义就是"一行装完看看长什么样", 而看的东西
+    # (下载、云工作台) 本来就指向官方站点, 本机根本用不到上游密钥。想在本地真
+    # 跑模型的人去改 .env。自部署才问 —— 没有 SMTP/OAuth 谁也注册不了第一个账号。
+    return str(options.get("mode", "trial")) == "selfhost"
 
 
 def apply_answers(pairs: list[tuple[str, str]], answers: dict) -> list[tuple[str, str]]:
@@ -101,9 +106,10 @@ def next_steps(*, url: str, directory: str, has_upstream_key: bool,
         "",
     ]
     if not has_upstream_key:
+        # 不再写成"注意/警告": 试用模式本来就不在本机跑模型 —— 下载与云工作台都
+        # 指向官方站点, 没有上游密钥是**正常状态**而不是出错。
         lines += [
-            "  注意    还没有配模型上游，聊天会返回 503。把 UPSTREAM_API_KEY 填进",
-            f"          {directory}/.env 后执行 dsh-cloud up 生效。",
+            f"  想在本机跑模型：把 UPSTREAM_API_KEY 填进 {directory}/.env，再执行一次上面的启动命令",
             "",
         ]
     if work_domain:

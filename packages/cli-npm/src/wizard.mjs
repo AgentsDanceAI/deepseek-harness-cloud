@@ -37,7 +37,12 @@ export function commandPrefix({ resolved = '', entry = '' }) {
 export function shouldRunWizard(parsed, { isTTY, freshInit }) {
   if (!freshInit || !isTTY) return false
   if (parsed.options.json || parsed.options.dryRun || parsed.options.yes) return false
-  return parsed.command === 'start' || parsed.command === 'init'
+  if (parsed.command !== 'start' && parsed.command !== 'init') return false
+  // 试用模式一句不问: 那条命令的意义就是"一行装完看看长什么样", 而看的东西
+  // (下载、云工作台) 本来就指向官方站点, 本机根本用不到上游密钥。想在本地真
+  // 跑模型的人去改 .env —— 配置面是那个文件, 不是一串问号。
+  // 自部署才问: 没有 SMTP/OAuth 谁也注册不了第一个账号, start 本来就会硬拒。
+  return (parsed.options.mode ?? 'trial') === 'selfhost'
 }
 
 /** Merge wizard answers into the generated .env lines. Pure. */
@@ -81,9 +86,11 @@ export function nextSteps({ url, directory, hasUpstreamKey, projectName = 'dsh-s
     '',
   ]
   if (!hasUpstreamKey) {
+    // 不再写成"注意/警告": 试用模式本来就不在本机跑模型 —— 下载与云工作台都
+    // 指向官方站点, 没有上游密钥是**正常状态**而不是出错。想在本机真跑的人
+    // 才需要这一行, 所以按"可选的下一步"来写。
     lines.push(
-      '  注意    还没有配模型上游，聊天会返回 503。把 UPSTREAM_API_KEY 填进',
-      `          ${directory}/.env 后执行 dsh-cloud up 生效。`,
+      `  想在本机跑模型：把 UPSTREAM_API_KEY 填进 ${directory}/.env，再执行一次上面的启动命令`,
       '',
     )
   }
