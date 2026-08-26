@@ -122,11 +122,13 @@ npm install --global @agentsdanceai/dsh-cloud@0.2.4
 dsh-cloud start --mode trial --wait
 ```
 
-全新部署会问三个问题——你的 OpenAI 兼容端点、它的 API Key（不回显，也绝不
-经过命令行参数）、以及可选的搜索 Key——然后写好 `./dsh-cloud/.env`、拉起整栈，
-并打印从哪里登录。问到的每一项之后都能在那个文件里改。
+**这条命令一句不问。** 它写好 `./dsh-cloud/.env`、拉起整栈、打印从哪里登录，
+一分钟左右站点就起来了。桌面端下载与云工作台都指向托管版，所以试用部署本机
+并不需要模型密钥。
 
-加 `--yes`（或把输出接到管道里）即可跳过提问直接用默认值，CI 走的就是这条。
+想在本机跑模型：把你的 OpenAI 兼容端点与密钥填进那个 `.env` 的
+`UPSTREAM_API_KEY`，再执行一次同样的命令。`--mode selfhost` 才会提问——对外
+部署没有 SMTP 或 OAuth 就注册不了第一个账号，CLI 会先把它问清楚再启动。
 
 
 ### 一条命令 — uv/uvx

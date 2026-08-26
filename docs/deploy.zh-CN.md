@@ -24,7 +24,15 @@ chmod 600 deploy/selfhost/.env
 ```
 
 至少设置域名/协议/`PUBLIC_BASE`、随机 `AUTH_SECRET`、模型上游和管理员邮箱。公网还
-必须配置 SMTP、Google OAuth 或 GitHub OAuth 中至少一种可验证的首次建号路径。
+必须配置 SMTP、Google OAuth 或 GitHub OAuth 中至少一种可验证的首次建号路径——
+没有它谁也注册不了第一个账号，`start` 会直接拒绝运行。
+
+用 `dsh-cloud init --mode selfhost --domain <域名> --admin-email <邮箱>` 时，
+CLI 会把上述这些当场问清楚并写好 `.env`，同时**默认启用云工作台**：
+`WORK_ENABLED=1`、`WORK_DOMAIN=work.<域名>`、`COOKIE_DOMAIN=.<域名>`、
+`COMPOSE_PROFILES=work`。云工作台按域名路由，所以还需要给 `work.<域名>` 加一条
+指向该服务器的 DNS 记录；`COOKIE_DOMAIN` 的前导点不能少，否则会话带不到子域，
+症状是无限跳登录页。不想启用就把这四项清空。
 
 本地试用值：`DOMAIN=localhost`、`SITE_SCHEME=http`、`DHC_DEV=1`、
 `PUBLIC_BASE=http://localhost:8787`、`BIND_ADDRESS=127.0.0.1`、
