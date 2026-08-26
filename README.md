@@ -11,7 +11,7 @@ browser workspace—without distributing an upstream model key to every client.
 [![License: DSH Cloud Community 1.0](https://img.shields.io/badge/license-DSH%20Cloud%20Community%201.0-4c6ef5.svg)](LICENSE)
 [![Security policy](https://img.shields.io/badge/security-private%20reporting-2f9e44.svg)](SECURITY.md)
 
-Release: [`0.2.2`](release/release.json)
+Release: [`0.2.3`](release/release.json)
 
 [中文](README.zh-CN.md) · [Architecture](docs/architecture.md) ·
 [Self-host](docs/deploy.md) · [Editions](docs/editions.md) ·
@@ -123,7 +123,7 @@ The gateway serves the live catalog, so this table is contract-tested against
 
 ## Quick start
 
-All commands below pin release `0.2.2`; pin exact versions in automation.
+All commands below pin release `0.2.3`; pin exact versions in automation.
 
 <!-- distribution-install:start -->
 
@@ -132,13 +132,13 @@ All commands below pin release `0.2.2`; pin exact versions in automation.
 One-shot:
 
 ```bash
-npx --yes @agentsdanceai/dsh-cloud@0.2.2 start --mode trial --wait
+npx --yes @agentsdanceai/dsh-cloud@0.2.3 start --mode trial --wait
 ```
 
 Installed:
 
 ```bash
-npm install --global @agentsdanceai/dsh-cloud@0.2.2
+npm install --global @agentsdanceai/dsh-cloud@0.2.3
 dsh-cloud start --mode trial --wait
 ```
 
@@ -156,13 +156,13 @@ defaults, which is what CI does.
 One-shot:
 
 ```bash
-uvx dsh-cloud==0.2.2 start --mode trial --wait
+uvx dsh-cloud==0.2.3 start --mode trial --wait
 ```
 
 Installed:
 
 ```bash
-uv tool install dsh-cloud==0.2.2
+uv tool install dsh-cloud==0.2.3
 dsh-cloud start --mode trial --wait
 ```
 
@@ -187,7 +187,7 @@ never use it on a public network. Manual Compose steps: [docs/deploy.md](docs/de
 
 ```bash
 (umask 077; mkdir -p .dsh-cloud; printf 'AUTH_SECRET=%s\nDHC_DEV=1\nPUBLIC_BASE=http://127.0.0.1:8081\n' "$(openssl rand -hex 32)" > .dsh-cloud/docker.env)
-docker run --rm --name dsh-cloud --env-file .dsh-cloud/docker.env --publish 127.0.0.1:8081:8100 --mount type=volume,src=dsh-cloud-data,dst=/app/data ghcr.io/agentsdanceai/dsh-cloud-server:0.2.2
+docker run --rm --name dsh-cloud --env-file .dsh-cloud/docker.env --publish 127.0.0.1:8081:8100 --mount type=volume,src=dsh-cloud-data,dst=/app/data ghcr.io/agentsdanceai/dsh-cloud-server:0.2.3
 ```
 
 Check <http://127.0.0.1:8081/readyz>, then add your upstream key to

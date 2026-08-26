@@ -46,8 +46,8 @@ curl --fail --show-error http://localhost:8787/readyz
 ## 发行镜像和 CLI
 
 ```bash
-npx --yes @agentsdanceai/dsh-cloud@0.2.2 start --mode trial --wait
-uvx dsh-cloud==0.2.2 start --mode trial --wait
+npx --yes @agentsdanceai/dsh-cloud@0.2.3 start --mode trial --wait
+uvx dsh-cloud==0.2.3 start --mode trial --wait
 ```
 
 公网模式先执行 `init --mode selfhost`，编辑生成的 `.env`，再运行 `doctor` 和
