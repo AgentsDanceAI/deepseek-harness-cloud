@@ -134,6 +134,8 @@
   "download.android_qr_alt": "Android 安装包下载二维码",
   "download.h1": "下载 deepseek-harness-cloud 桌面应用",
   "download.help": "安装遇到问题？联系",
+  "download.hosted_cta": "或直接用官方托管版 DSH Cloud（含桌面端下载与云工作台）",
+  "download.hosted_link": "前往 dshcloud.online →",
   "download.ios_meta": "无需安装：Safari 打开云工作台，「分享」→「添加到主屏幕」即可当 App 使用",
   "download.mac_arm64": "下载 .dmg（Apple 芯片）",
   "download.mac_meta": "Apple Silicon（M 系列）与 Intel · macOS 12+",
