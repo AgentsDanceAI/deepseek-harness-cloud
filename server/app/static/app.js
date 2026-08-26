@@ -226,7 +226,15 @@
         if (task) sessionStorage.setItem(TASK_KEY, task);
         else sessionStorage.removeItem(TASK_KEY);
       } catch (e) {}
-      var next = "/work" + (task ? "?task=" + encodeURIComponent(task.slice(0, 2000)) : "");
+      var suffix = "/work" + (task ? "?task=" + encodeURIComponent(task.slice(0, 2000)) : "");
+      // 本部署没开云工作台时 data-target 指向官方托管版: 直接送过去, 因为这里
+      // 的 /work 会 302 到 /download, 回车就落进死胡同。
+      var target = form.dataset.target || "";
+      if (target) {
+        window.open(target + suffix, "_blank", "noopener") || (location.href = target + suffix);
+        return;
+      }
+      var next = suffix;
       if (form.dataset.authed !== "1") {
         location.href = "/login?next=" + encodeURIComponent(next);
         return;

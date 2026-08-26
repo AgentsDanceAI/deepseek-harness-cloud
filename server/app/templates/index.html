@@ -16,16 +16,22 @@
       {{ t("home.sub") }}
     </p>
 
-    <form id="hero-composer" class="composer" data-authed="{{ '1' if user else '0' }}">
+    {% if work_enabled or hosted_site %}
+    {# 工作台关着时 (自部署默认), 这个输入框的去处是官方托管版 —— 否则回车会
+       落进 /work → /download 的死胡同, 而它是首页最显眼的元素。去处写进
+       data-target, 提示文案也跟着换, 不让人以为任务会在本机执行。 #}
+    <form id="hero-composer" class="composer" data-authed="{{ '1' if user else '0' }}"
+          data-target="{% if not work_enabled and hosted_site %}{{ hosted_site }}{% endif %}">
       <label class="sr-only" for="hero-task">{{ t("home.a11y.task_label") }}</label>
       <textarea id="hero-task" rows="2" placeholder="{{ t('home.composer_placeholder') }}"></textarea>
       <div class="composer-row">
-        <span class="composer-hint">{% if user %}{{ t("home.composer_hint_in") }}{% else %}{{ t("home.composer_hint_out") }}{% endif %}</span>
+        <span class="composer-hint">{% if not work_enabled and hosted_site %}{{ t("home.composer_hint_hosted") }}{% elif user %}{{ t("home.composer_hint_in") }}{% else %}{{ t("home.composer_hint_out") }}{% endif %}</span>
         <button type="button" class="composer-send" aria-label="{{ t('home.a11y.send') }}">
           <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5"/><path d="m5 12 7-7 7 7"/></svg>
         </button>
       </div>
     </form>
+    {% endif %}
 
     {# icons are inline SVG, not emoji: emoji fall back to tofu boxes wherever
        the platform ships no colour font, which is exactly where our users are #}
