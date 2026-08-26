@@ -24,8 +24,18 @@ With uv/uvx:
 uvx dsh-cloud==0.2.4 start --mode trial --wait
 ```
 
-Open <http://localhost:8787>. The explicit package version is the release
-contract; do not replace it with `latest`.
+This asks nothing: it writes the configuration, starts the stack, then prints
+where to open, how to fetch the sign-in code (trial mode has no mail server, so
+codes go to the server log), and the restart/stop commands. Open
+<http://localhost:8787>.
+
+Desktop downloads and the cloud workspace on that site point at the hosted
+service, so a trial deployment needs no model key of its own. To run models
+locally, put `UPSTREAM_API_KEY` into `./dsh-cloud/.env` and run the same command
+again.
+
+The explicit package version is the release contract; do not replace it with
+`latest`.
 
 ## Verify from this source checkout now
 

@@ -142,13 +142,16 @@ npm install --global @agentsdanceai/dsh-cloud@0.2.4
 dsh-cloud start --mode trial --wait
 ```
 
-A fresh run walks you through three questions — your OpenAI-compatible
-endpoint, its API key (read with echo off, never from argv), and an optional
-search key — then writes `./dsh-cloud/.env`, starts the stack, and prints where
-to sign in. Everything asked can be changed later in that file.
+This asks nothing. It writes `./dsh-cloud/.env`, starts the stack, and prints
+where to sign in — the site is up in about a minute. Desktop downloads and the
+cloud workspace point at the hosted service, so a trial deployment needs no
+model key of its own.
 
-Add `--yes` (or pipe the output anywhere) to skip the prompts and take the
-defaults, which is what CI does.
+To run models on this machine instead, put your OpenAI-compatible endpoint and
+key into `UPSTREAM_API_KEY` in that `.env` and run the same command again.
+`--mode selfhost` is the one that asks questions: a public deployment cannot
+register its first account without SMTP or OAuth, so the CLI collects that
+before it will start.
 
 
 ### One command — uv/uvx

@@ -51,7 +51,17 @@ Edit `deploy/selfhost/.env`. At minimum, review:
 - `ADMIN_EMAILS`; and
 - for public mode, either `MAIL_SMTP_HOST` (plus the credentials required by
   your SMTP provider), a complete Google OAuth client, or a complete GitHub
-  OAuth client.
+  OAuth client — without one of these nobody can register the first account and
+  `start` refuses to run.
+
+`dsh-cloud init --mode selfhost --domain <domain> --admin-email <email>` collects
+those interactively and writes the `.env` for you. It also **enables the cloud
+workspace by default**: `WORK_ENABLED=1`, `WORK_DOMAIN=work.<domain>`,
+`COOKIE_DOMAIN=.<domain>`, `COMPOSE_PROFILES=work`. The workspace is routed by
+hostname, so add a DNS record for `work.<domain>` pointing at that server; the
+leading dot in `COOKIE_DOMAIN` is required, or the session never reaches the
+subdomain and every visit bounces back to the login page. Clear those four
+settings to leave the workspace off.
 
 For a local trial, use `DOMAIN=localhost`, `SITE_SCHEME=http`, `DHC_DEV=1`,
 `PUBLIC_BASE=http://localhost:8787`, `BIND_ADDRESS=127.0.0.1`,
