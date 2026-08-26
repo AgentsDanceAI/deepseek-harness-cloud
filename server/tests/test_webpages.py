@@ -404,9 +404,11 @@ def test_selfhost_without_workspace_has_no_dead_ends(client, monkeypatch):
     for path in ("/", "/download"):
         body = client.get(path).text
         assert 'href="/work"' not in body, f"{path} 在工作台关闭时仍指向 /work"
+        # 但"云端体验"这个入口不能消失 —— 改指官方站点即可
+        assert "dshcloud.online/work" in body, f"{path} 少了云端体验入口"
     # 而且不能再谎称"正在重新构建" —— 自部署只是没配下载地址
     download = client.get("/download").text
-    assert "云工作台也未启用" in download
+    assert "本部署未配置桌面安装包" in download
 
     # 开着的时候一切照旧
     monkeypatch.setattr(config, "WORK_ENABLED", True)
@@ -424,8 +426,10 @@ def test_selfhost_offers_the_hosted_service_as_a_labelled_alternative(client, mo
 
     monkeypatch.setattr(config, "WORK_ENABLED", False)
     body = client.get("/download").text
-    assert "https://dshcloud.online/work" in body
-    assert "官方托管版" in body, "必须标明那是托管版, 不能装成本地功能"
+    # 三张卡的按钮都得真的指向官方站点, 而不是一个禁用的"重新构建中"
+    assert "https://dshcloud.online/download" in body, "macOS/Windows 按钮该直连官网"
+    assert "https://dshcloud.online/work" in body, "iPhone 卡该给云端体验入口"
+    assert "dshcloud.online" in body and "官方站点" in body, "必须标明去的是官方站点"
 
     # 托管版自己: hosted_site 与 PUBLIC_BASE 同源时不挂
     monkeypatch.setattr(config, "PUBLIC_BASE", "https://dshcloud.online")

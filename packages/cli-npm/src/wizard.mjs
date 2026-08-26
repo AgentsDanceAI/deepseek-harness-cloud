@@ -23,9 +23,13 @@ const REPOSITORY = 'https://github.com/AgentsDanceAI/deepseek-harness-cloud'
  * rather than assuming the happy `npm install -g` case. Pure: the caller
  * supplies both facts so this is testable without touching the filesystem.
  */
-export function commandPrefix({ onPath, entry = '' }) {
-  if (onPath) return 'dsh-cloud'
-  if (entry.includes('/_npx/') || entry.includes('\\_npx\\')) return 'npx --yes @agentsdanceai/dsh-cloud'
+export function commandPrefix({ resolved = '', entry = '' }) {
+  // npx 在**运行期间**把自己的 node_modules/.bin 塞进 PATH, 所以"dsh-cloud 在
+  // PATH 上"当场为真、进程一退就没了 —— 2026-08-26 实测: 面板印了裸 dsh-cloud,
+  // 老板照着敲得到 command not found。落在 npx 缓存里的那份不算数。
+  const fromNpx = (path) => path.includes('/_npx/') || path.includes('\\_npx\\')
+  if (resolved && !fromNpx(resolved)) return 'dsh-cloud'
+  if (fromNpx(resolved) || fromNpx(entry)) return 'npx --yes @agentsdanceai/dsh-cloud'
   return entry ? `node ${entry}` : 'dsh-cloud'
 }
 

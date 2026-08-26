@@ -150,12 +150,16 @@ test('identity answers land in the env', () => {
 
 test('printed command matches how the process was actually started', () => {
   // 装了才用裸名字
-  assert.equal(commandPrefix({ onPath: true, entry: '/opt/homebrew/bin/dsh-cloud' }), 'dsh-cloud')
+  assert.equal(commandPrefix({ resolved: '/opt/homebrew/bin/dsh-cloud' }), 'dsh-cloud')
   // npx 用完 PATH 上什么都没有 —— 必须印回 npx 形式
-  assert.equal(commandPrefix({ onPath: false, entry: '/Users/x/.npm/_npx/abc/node_modules/.bin/dsh-cloud' }),
+  assert.equal(commandPrefix({ entry: '/Users/x/.npm/_npx/abc/node_modules/.bin/dsh-cloud' }),
     'npx --yes @agentsdanceai/dsh-cloud')
+  // 2026-08-26 实测的那个坑: npx 运行期间 dsh-cloud 确实在 PATH 上, 但那份住在
+  // npx 缓存里, 进程一退就没了 —— 不能当成"装过"
+  assert.equal(commandPrefix({ resolved: '/Users/x/.npm/_npx/abc/node_modules/.bin/dsh-cloud',
+    entry: '/Users/x/.npm/_npx/abc/node_modules/.bin/dsh-cloud' }), 'npx --yes @agentsdanceai/dsh-cloud')
   // 从源码跑: 印出那条真的能用的 node 调用
-  assert.equal(commandPrefix({ onPath: false, entry: '/repo/packages/cli-npm/bin/dsh-cloud.mjs' }),
+  assert.equal(commandPrefix({ entry: '/repo/packages/cli-npm/bin/dsh-cloud.mjs' }),
     'node /repo/packages/cli-npm/bin/dsh-cloud.mjs')
 })
 
