@@ -71,25 +71,6 @@ def _image_catalog() -> dict:
     return _image_cache
 
 
-def offered() -> dict:
-    """给 /studio 页面用: 当前真正在售的模型 (未定价的不列)。"""
-    video = [
-        {
-            "id": m["id"],
-            "name": m.get("name") or m["id"],
-            "resolutions": sorted(r for r, v in (m.get("credits_per_second") or {}).items() if v),
-        }
-        for m in _catalog().values()
-        if any((m.get("credits_per_second") or {}).values())
-    ]
-    image = [
-        {"id": m["id"], "name": m.get("name") or m["id"]}
-        for m in _image_catalog().values()
-        if m.get("credits_per_image")
-    ]
-    return {"video": video, "image": image}
-
-
 def _error(status: int, code: str, message: str) -> JSONResponse:
     return JSONResponse({"error": {"type": code, "message": message}}, status_code=status)
 
