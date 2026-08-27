@@ -81,7 +81,12 @@ def offered() -> dict:
         {
             "id": m["id"],
             "name": m.get("name") or m["id"],
-            "resolutions": sorted(r for r, v in (m.get("credits_per_second") or {}).items() if v),
+            # 按**数值**排, 不按字典序: 字典序会把 1080p 排到 480p 前面, 而下拉
+            # 默认选中第一项 —— 那意味着谁第一次点运行都是最贵的那档。
+            "resolutions": sorted(
+                (r for r, v in (m.get("credits_per_second") or {}).items() if v),
+                key=lambda r: int("".join(c for c in r if c.isdigit()) or 0),
+            ),
         }
         for m in _catalog().values()
         if any((m.get("credits_per_second") or {}).values())

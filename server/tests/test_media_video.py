@@ -309,3 +309,17 @@ def test_image_unpriced_model_is_not_offered(monkeypatch):
     r = _gen_image(monkeypatch, _Resp(200, {"data": []}), log)
     assert r.status_code == 404
     assert log == []
+
+
+def test_resolutions_are_ordered_cheapest_first(monkeypatch):
+    """下拉默认选中第一项。字典序会把 1080p 排到 480p 前面 —— 那意味着谁第一次
+    点运行都是最贵的那档, 而他根本没做这个选择。"""
+    monkeypatch.setattr(
+        media,
+        "_prices_cache",
+        {
+            "m": {"id": "m", "name": "M", "credits_per_second": {"720p": 20, "1080p": 40, "480p": 10}},
+        },
+    )
+    monkeypatch.setattr(media, "_image_cache", {})
+    assert media.offered()["video"][0]["resolutions"] == ["480p", "720p", "1080p"]
