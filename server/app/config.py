@@ -209,7 +209,10 @@ WORK_IMAGE_REF = _env("WORK_IMAGE_REF", "")
 COMFY_IMAGE = _env("COMFY_IMAGE", "")
 COMFY_IMAGE_REF = _env("COMFY_IMAGE_REF", "")
 COMFY_DOMAIN = _env("COMFY_DOMAIN", "")
-COMFY_MEM_LIMIT_MB = _env_int("COMFY_MEM_LIMIT_MB", 1024)
+# 144 上实测 (v0.34.1, 生图+生视频各跑一遍): 不受限时峰值 902MB; 限到 1GB
+# 也能跑通, 但那是靠回收页缓存顶着, 只剩 10% 余量 —— 而实测用的是 8x8 的
+# 桩图, 真实 1024² 还要再吃一截。1536 是留了余量的下限, 不是量出来的峰值。
+COMFY_MEM_LIMIT_MB = _env_int("COMFY_MEM_LIMIT_MB", 1536)
 COMFY_CPUS = _env_float("COMFY_CPUS", 1.0)
 ECI_REGION_ID = _env("ECI_REGION_ID", "")
 ECI_ZONE_ID = _env("ECI_ZONE_ID", "")
