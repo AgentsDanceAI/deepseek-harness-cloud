@@ -1,0 +1,40 @@
+{
+  "id": "dshcloud-video-001",
+  "revision": 0,
+  "last_node_id": 1,
+  "last_link_id": 0,
+  "nodes": [
+    {
+      "id": 1,
+      "type": "DSHCloudVideo",
+      "pos": [
+        80,
+        120
+      ],
+      "size": [
+        520,
+        260
+      ],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "properties": {
+        "Node name for S&R": "DSHCloudVideo",
+        "cnr_id": "dsh_cloud"
+      },
+      "widgets_values": [
+        "一只柴犬在雪地里奔跑，慢镜头，电影感",
+        "doubao-seedance-2-0-mini-260615",
+        "480p",
+        5
+      ]
+    }
+  ],
+  "links": [],
+  "groups": [],
+  "config": {},
+  "extra": {},
+  "version": 0.4
+}

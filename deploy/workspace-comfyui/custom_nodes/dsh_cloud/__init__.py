@@ -32,6 +32,44 @@ def _request(method: str, url: str, payload: dict | None = None) -> dict:
         return json.loads(resp.read().decode())
 
 
+# --- 在售模型清单 --------------------------------------------------------------
+# 把"模型"做成下拉而不是自由文本框 —— 没人该去背
+# doubao-seedance-2-0-mini-260615 这种 id。
+#
+# INPUT_TYPES() 在 ComfyUI **启动时**被调用, 所以这里必须短超时 + 缓存: 网关慢
+# 一下就把整个工作台的启动拖住, 而用户看到的只是"一直起不来"。取不到就回落成
+# 文本框, 节点照常可用。
+_MODELS_CACHE: dict | None = None
+
+
+def _offered() -> dict:
+    global _MODELS_CACHE
+    if _MODELS_CACHE is None:
+        try:
+            _MODELS_CACHE = _request("GET", f"{BASE}/media/models")
+        except Exception:                                             # noqa: BLE001
+            _MODELS_CACHE = {}
+    return _MODELS_CACHE
+
+
+def _choices(kind: str) -> list:
+    """下拉选项。空列表会让 ComfyUI 报错, 所以取不到时返回 None 让调用方回落。"""
+    items = (_offered() or {}).get(kind) or []
+    return [m["id"] for m in items if m.get("id")] or None
+
+
+def _model_input(kind: str, fallback: str):
+    choices = _choices(kind)
+    return (choices,) if choices else ("STRING", {"default": fallback})
+
+
+def _resolution_input():
+    for m in (_offered() or {}).get("video") or []:
+        if m.get("resolutions"):
+            return (m["resolutions"],)
+    return ("STRING", {"default": "480p"})
+
+
 class DSHCloudVideo:
     """文/图生视频 —— 算力在远端, 本容器只做编排。"""
 
@@ -39,11 +77,10 @@ class DSHCloudVideo:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "prompt": ("STRING", {"multiline": True, "default": "一只猫在雪地里奔跑"}),
-                "model": ("STRING", {"default": "cogvideox-3"}),
-                "size": ("STRING", {"default": "1920x1080"}),
+                "prompt": ("STRING", {"multiline": True, "default": "一只柴犬在雪地里奔跑，慢镜头，电影感"}),
+                "model": _model_input("video", "doubao-seedance-2-0-mini-260615"),
+                "resolution": _resolution_input(),
                 "duration": ("INT", {"default": 5, "min": 1, "max": 30}),
-                "fps": ("INT", {"default": 30, "min": 1, "max": 60}),
             },
             "optional": {
                 "image_url": ("STRING", {"default": ""}),
@@ -58,9 +95,9 @@ class DSHCloudVideo:
     # 死枝跳过 —— 提交返回 200、/history 里空空如也, 极难排查。
     OUTPUT_NODE = True
 
-    def generate(self, prompt, model, size, duration, fps, image_url=""):
-        payload = {"model": model, "prompt": prompt, "size": size,
-                   "duration": duration, "fps": fps}
+    def generate(self, prompt, model, resolution, duration, image_url=""):
+        payload = {"model": model, "prompt": prompt,
+                   "resolution": resolution, "duration": duration}
         if image_url:
             payload["image_url"] = image_url
 
@@ -112,9 +149,9 @@ class DSHCloudImage:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "prompt": ("STRING", {"multiline": True, "default": "一只柴犬在雪地里奔跑"}),
-                "model": ("STRING", {"default": "gpt-image-2"}),
-                "size": ("STRING", {"default": "1024x1024"}),
+                "prompt": ("STRING", {"multiline": True, "default": "一只柴犬在雪地里奔跑，电影感，柔和光线"}),
+                "model": _model_input("image", "gpt-image-2"),
+                "size": (["1024x1024", "1536x1024", "1024x1536"],),
                 "n": ("INT", {"default": 1, "min": 1, "max": 4}),
             },
         }
