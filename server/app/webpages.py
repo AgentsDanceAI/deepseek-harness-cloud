@@ -18,7 +18,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
-from . import config, credits, media, plans
+from . import config, credits, plans
 from .accounts import try_resolve_user
 from .redirects import safe_local_path
 
@@ -417,22 +417,6 @@ def admin_page(request: Request):
     if not user.get("is_admin"):
         return RedirectResponse("/console", status_code=303)
     return _render(request, "admin.html", "admin")
-
-
-@router.get("/studio")
-def studio_page(request: Request):
-    """生图/生视频的操作台。
-
-    灰度期只放管理员 —— 与 media.py 的 _gate 同一条线, 但这里提前拦, 免得
-    非管理员看到一个自己按不动的页面。价格核准、MEDIA_ADMIN_ONLY 置 0 之后,
-    这道拦截要跟着一起放开。
-    """
-    user = try_resolve_user(request)
-    if user is None:
-        return RedirectResponse("/login?next=/studio", status_code=303)
-    if config.MEDIA_ADMIN_ONLY and not user.get("is_admin"):
-        return RedirectResponse("/console", status_code=303)
-    return _render(request, "studio.html", "studio", offered=media.offered())
 
 
 @router.get("/console/team")
