@@ -1310,10 +1310,31 @@ async def reaper_tick(now: float) -> None:
         # 而把正在用的人踢掉。
         tab_gone = now - last > config.WORK_TAB_GONE_MIN * 60
         idle_min = config.WORK_TAB_GONE_MIN if tab_gone else config.WORK_IDLE_STOP_MIN
+        # 上面两个信号都是 **dsh 专有** 的:
+        #   _user_active   由 dsh 前端调 /api/work/active 上报
+        #   agent_last_active 数的是智能体经本站网关发起的调用
+        # ComfyUI 两样都没有 —— 它不认识 /api/work/active, 也不经网关跑模型
+        # (自有节点直连 /llm/v1, 不算 agent 活动)。于是 present 退化成"容器启动
+        # 时间"、quiet 恒为真, **容器起来 WORK_IDLE_STOP_MIN 分钟后必被回收,
+        # 不管人在不在用**。2026-08-27 实测: 老板正在 ComfyUI 里操作, 101 秒后
+        # 工作台被杀, 日志只写一句 (idle)。
+        #
+        # 所以对没有上报器的产品, 用**请求流量**当在场信号 —— Caddy 的
+        # forward_auth 会为页面上每个资源、每个 WebSocket 帧打一次
+        # /api/work/route, 页面还开着就一定有流量。代价是"忘了关的标签页会续租",
+        # 但那正是 tab_gone 那套机制在管的事: 标签页真关了流量就断, 3 分钟后收掉。
+        product = products.get(product_id)
+        reports_presence = product.reports_presence if product else True
         present = max(_user_active.get(uid, 0.0), started)
+        agent = agent_last_active(uid)
+        if not reports_presence:
+            present = max(present, last)
+            agent = max(agent, last)
         away = now - present > idle_min * 60
-        quiet = now - max(agent_last_active(uid), started) > config.WORK_AGENT_IDLE_STOP_MIN * 60
-        broke = credits.balance(uid) <= -config.OVERDRAFT_LIMIT_CREDITS
+        quiet = now - max(agent, started) > config.WORK_AGENT_IDLE_STOP_MIN * 60
+        # 余额要按**人**查。uid 是工作台键 (u_xxx~comfyui), 拿它查 credits 永远
+        # 得 0 —— 于是欠费用户的 ComfyUI 工作台永远不会因欠费被回收。
+        broke = credits.balance(owner) <= -config.OVERDRAFT_LIMIT_CREDITS
         if (away and quiet) or broke:
             reason = "credits exhausted" if broke else ("tab closed" if tab_gone else "idle")
             log.info("stopping workspace %s (%s)", uid, reason)
