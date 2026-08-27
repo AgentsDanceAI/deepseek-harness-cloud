@@ -45,9 +45,28 @@ _MODELS_CACHE: dict | None = None
 def _offered() -> dict:
     global _MODELS_CACHE
     if _MODELS_CACHE is None:
+        url = f"{BASE}/media/models"
         try:
-            _MODELS_CACHE = _request("GET", f"{BASE}/media/models")
-        except Exception:                                             # noqa: BLE001
+            _MODELS_CACHE = _request("GET", url)
+            counts = {k: len(v) for k, v in (_MODELS_CACHE or {}).items()}
+            print(f"[dsh_cloud] 模型清单已加载 {counts} <- {url}", flush=True)
+        except Exception as exc:                                      # noqa: BLE001
+            # 一定要喊出来。静默回落的表现只是"下拉变成了文本框", 没有任何线索
+            # 指向真实原因 (令牌无效? 网关不可达? 灰度闸挡了?) —— 2026-08-27
+            # 我就是在这里瞎猜了很久。
+            detail = ""
+            body = getattr(exc, "read", None)
+            if callable(body):
+                try:
+                    detail = f" 报文={body()[:200]!r}"
+                except Exception:                                     # noqa: BLE001
+                    detail = ""
+            print(
+                f"[dsh_cloud] !! 取模型清单失败, 模型输入回落成文本框: "
+                f"{type(exc).__name__}: {exc}{detail}  url={url} "
+                f"token={'有' if TOKEN else '无'}",
+                flush=True,
+            )
             _MODELS_CACHE = {}
     return _MODELS_CACHE
 
