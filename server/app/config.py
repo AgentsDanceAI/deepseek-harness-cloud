@@ -209,11 +209,15 @@ WORK_IMAGE_REF = _env("WORK_IMAGE_REF", "")
 COMFY_IMAGE = _env("COMFY_IMAGE", "")
 COMFY_IMAGE_REF = _env("COMFY_IMAGE_REF", "")
 COMFY_DOMAIN = _env("COMFY_DOMAIN", "")
-# 144 上实测 (v0.34.1, 生图+生视频各跑一遍): 不受限时峰值 902MB; 限到 1GB
-# 也能跑通, 但那是靠回收页缓存顶着, 只剩 10% 余量 —— 而实测用的是 8x8 的
-# 桩图, 真实 1024² 还要再吃一截。1536 是留了余量的下限, 不是量出来的峰值。
-COMFY_MEM_LIMIT_MB = _env_int("COMFY_MEM_LIMIT_MB", 1536)
-COMFY_CPUS = _env_float("COMFY_CPUS", 1.0)
+# 规格由**冷启动**决定, 不是由内存峰值决定 (峰值实测 902MB, 1.5G 就够)。
+# 2026-08-27 在 ECI 上实测同一镜像、缓存均命中:
+#     1 核  59.1 秒  (其中 ComfyUI 自身启动 35.6 秒)
+#     2 核  31.8 秒  (ComfyUI 10.5 秒)
+#     4 核  31.7 秒  ← 与 2 核持平, 纯浪费
+# 2 核是拐点: 再加核也压不动剩下的 21 秒 —— 那是 ECI 的调度时间, 与我们无关。
+# 内存跟着 CPU 走 ECI 的规格档 (1:2), 给 4G 不是因为需要, 是因为 2 核就配这么多。
+COMFY_MEM_LIMIT_MB = _env_int("COMFY_MEM_LIMIT_MB", 4096)
+COMFY_CPUS = _env_float("COMFY_CPUS", 2.0)
 ECI_REGION_ID = _env("ECI_REGION_ID", "")
 ECI_ZONE_ID = _env("ECI_ZONE_ID", "")
 ECI_VSWITCH_ID = _env("ECI_VSWITCH_ID", "")
