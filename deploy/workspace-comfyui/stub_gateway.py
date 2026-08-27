@@ -3,6 +3,8 @@
 刻意做成异步 + 需要轮询几次才成功 —— 真实厂商 (智谱/Kling/Runway) 都是这样,
 如果节点只会同步取结果, 接真货时会当场翻车。
 """
+import base64
+import io
 import json
 import os
 import pathlib
@@ -19,6 +21,26 @@ ADVERTISE = os.environ.get("ADVERTISE_HOST", "host.docker.internal")
 # 按脚本自身定位, 不按 cwd —— 相对路径在换目录跑时会静默断掉 (实测踩过)。
 HERE = pathlib.Path(__file__).resolve().parent
 SAMPLE = HERE / "sample.mp4"
+
+
+def _png_b64() -> str:
+    """现造一张 8x8 的 PNG。不引第三方库 —— 桩只是为了证明节点能把 b64 解成
+    张量, 图里是什么无关紧要。"""
+    import struct
+    import zlib
+
+    w = h = 8
+    raw = b"".join(b"\x00" + bytes([200, 60, 60] * w) for _ in range(h))
+
+    def chunk(tag: bytes, data: bytes) -> bytes:
+        return (struct.pack(">I", len(data)) + tag + data
+                + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF))
+
+    png = (b"\x89PNG\r\n\x1a\n"
+           + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0))
+           + chunk(b"IDAT", zlib.compress(raw))
+           + chunk(b"IEND", b""))
+    return base64.b64encode(png).decode()
 
 
 def ensure_sample() -> None:
@@ -53,6 +75,17 @@ class Handler(BaseHTTPRequestHandler):
         self._send(code, json.dumps(obj).encode(), "application/json")
 
     def do_POST(self):
+        if self.path.endswith("/images/generations"):
+            length = int(self.headers.get("Content-Length", 0))
+            payload = json.loads(self.rfile.read(length) or b"{}")
+            print(f"[stub] 收到生图 model={payload.get('model')} "
+                  f"prompt={payload.get('prompt')!r}", flush=True)
+            return self._json(200, {
+                "created": 0,
+                "data": [{"url": None, "b64_json": _png_b64(), "revised_prompt": None}],
+                "usage": {"input_tokens": 8, "output_tokens": 196},
+                "credits": 15,
+            })
         if not self.path.endswith("/videos/generations"):
             return self._json(404, {"error": "not found"})
         length = int(self.headers.get("Content-Length", 0))

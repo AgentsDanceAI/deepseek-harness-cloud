@@ -36,8 +36,8 @@ for i in $(seq 1 120); do
 done
 
 echo "=== 节点注册了吗 ==="
-if curl -sf http://localhost:8188/object_info | python3 -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if "DSHCloudVideo" in d else 1)'; then
-  echo "✓ DSHCloudVideo 已注册"
+if curl -sf http://localhost:8188/object_info | python3 -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if {"DSHCloudVideo","DSHCloudImage"} <= set(d) else 1)'; then
+  echo "✓ DSHCloudVideo / DSHCloudImage 已注册"
 else
   echo "✗ 节点没加载"; docker logs "$NAME" 2>&1 | grep -i -A5 "dsh_cloud\|error" | tail -30; exit 1
 fi
@@ -86,3 +86,48 @@ docker stats --no-stream --format '  当前 {{.MemUsage}}  CPU {{.CPUPerc}}' "$N
 
 echo "=== 镜像大小 ==="
 docker images comfy-orchestrator:spike --format '  {{.Size}}'
+
+echo "=== 生图链路: DSHCloudImage -> SaveImage ==="
+# 生图节点返回 IMAGE 而非输出节点, 所以必须接一个原生输出节点才会被执行 ——
+# 这一步同时验证了它确实是个能和 ComfyUI 原生节点串起来的一等节点, 而不是
+# 只会往磁盘写文件的死胡同。
+CID2=$(python3 -c 'import uuid;print(uuid.uuid4().hex)')
+RESP2=$(curl -sf -X POST http://localhost:8188/prompt -H 'Content-Type: application/json' -d "{
+  \"client_id\": \"$CID2\",
+  \"prompt\": {
+    \"1\": {\"class_type\": \"DSHCloudImage\", \"inputs\": {
+        \"prompt\": \"一只柴犬\", \"model\": \"gpt-image-2\",
+        \"size\": \"1024x1024\", \"n\": 1}},
+    \"2\": {\"class_type\": \"SaveImage\", \"inputs\": {
+        \"images\": [\"1\", 0], \"filename_prefix\": \"dshcloud\"}}
+  }
+}")
+PID2=$(printf '%s' "$RESP2" | python3 -c 'import json,sys;print(json.load(sys.stdin).get("prompt_id",""))')
+[ -n "$PID2" ] || { echo "✗ 生图提交失败: $RESP2"; exit 1; }
+
+for i in $(seq 1 60); do
+  H2=$(curl -sf "http://localhost:8188/history/$PID2")
+  if printf '%s' "$H2" | python3 -c 'import json,sys; sys.exit(0 if json.load(sys.stdin) else 1)' 2>/dev/null; then
+    echo "$H2" | python3 -c '
+import json,sys
+d=json.load(sys.stdin)
+for _, rec in d.items():
+    st=rec.get("status",{})
+    print("  状态:", st.get("status_str"), "完成:", st.get("completed"))
+    for nid,out in rec.get("outputs",{}).items():
+        for img in out.get("images",[]):
+            print("  出图:", img.get("filename"), img.get("type"))
+    if st.get("status_str") != "success":
+        for m in st.get("messages",[])[-3:]:
+            print("  消息:", json.dumps(m, ensure_ascii=False)[:300])
+        sys.exit(1)
+'
+    break
+  fi
+  [ "$i" = 60 ] && { echo "✗ 生图执行超时"; docker logs "$NAME" 2>&1 | tail -20; exit 1; }
+  sleep 1
+done
+
+echo "=== 图片真的落地了吗 ==="
+docker exec "$NAME" sh -c 'ls -l /opt/ComfyUI/output/*.png 2>/dev/null | head -3' \
+  || { echo "✗ 没有 png"; exit 1; }
