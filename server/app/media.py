@@ -71,6 +71,29 @@ def _image_catalog() -> dict:
     return _image_cache
 
 
+def offered() -> dict:
+    """当前真正在售的媒体模型。未定价的不列 —— 露出来只会让人选了报 404。
+
+    给 ComfyUI 的自有节点用: 它在 INPUT_TYPES() 里拉这份清单, 把"模型"做成
+    下拉而不是自由文本框。用户不该需要背 doubao-seedance-2-0-mini-260615。
+    """
+    video = [
+        {
+            "id": m["id"],
+            "name": m.get("name") or m["id"],
+            "resolutions": sorted(r for r, v in (m.get("credits_per_second") or {}).items() if v),
+        }
+        for m in _catalog().values()
+        if any((m.get("credits_per_second") or {}).values())
+    ]
+    image = [
+        {"id": m["id"], "name": m.get("name") or m["id"]}
+        for m in _image_catalog().values()
+        if m.get("credits_per_image")
+    ]
+    return {"video": video, "image": image}
+
+
 def _error(status: int, code: str, message: str) -> JSONResponse:
     return JSONResponse({"error": {"type": code, "message": message}}, status_code=status)
 
@@ -394,3 +417,16 @@ async def create_image(request: Request, user: dict = Depends(resolve_user)):
     credits.spend(user["id"], amount, kind="image", model=model, request_id=request_id)
     result["credits"] = amount
     return JSONResponse(result)
+
+
+@router.get("/v1/media/models")
+async def media_models(user: dict = Depends(resolve_user)):
+    """在售的媒体模型清单。ComfyUI 节点据此把"模型"做成下拉。
+
+    走鉴权而不是公开: 灰度期这份清单本身就是未公开信息, 而节点在容器里本来就
+    带着 token。
+    """
+    gated = _gate(user)
+    if gated is not None:
+        return gated
+    return JSONResponse(offered())

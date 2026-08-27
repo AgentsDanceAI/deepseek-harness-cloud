@@ -188,8 +188,19 @@ def _comfyui_boot() -> str:
         "rm -rf /opt/ComfyUI/output /opt/ComfyUI/input\n"
         "ln -s /workspace/output /opt/ComfyUI/output\n"
         "ln -s /workspace/input /opt/ComfyUI/input\n"
+        # 用户目录也落在持久卷上 —— 默认它在镜像里, 一回收用户自己存的工作流、
+        # 设置全没, 而且不报错, 只是下次进来空空如也。
+        "mkdir -p /workspace/.comfy-user/default/workflows\n"
+        # 预置那两张能直接跑的图。**只补缺的**: 无条件 cp 会在每次冷启动时把
+        # 用户改过的同名工作流覆盖回去。
+        "for f in /opt/ComfyUI/custom_nodes/dsh_cloud/example_workflows/*.json; do\n"
+        '  [ -e "$f" ] || continue\n'
+        '  t="/workspace/.comfy-user/default/workflows/$(basename "$f")"\n'
+        '  [ -e "$t" ] || cp "$f" "$t"\n'
+        "done\n"
         "cd /opt/ComfyUI\n"
-        "exec python main.py --cpu --listen 0.0.0.0 --port 8188\n"
+        "exec python main.py --cpu --listen 0.0.0.0 --port 8188 "
+        "--user-directory /workspace/.comfy-user\n"
     )
 
 

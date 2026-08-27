@@ -57,7 +57,9 @@ for i in $(seq 1 120); do
   sleep 1
 done
 
-echo "=== 节点注册了吗 ==="
+# 桩网关不提供 /media/models, 所以节点会走「取不到清单 -> 回落成文本框」那条
+# 路径。这是**故意**的: 网关不可达时节点必须仍能加载, 否则整个工作台起不来。
+echo "=== 节点注册了吗 (顺带验证清单取不到时的回落) ==="
 if curl -sf http://localhost:8188/object_info | python3 -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if {"DSHCloudVideo","DSHCloudImage"} <= set(d) else 1)'; then
   echo "✓ DSHCloudVideo / DSHCloudImage 已注册"
 else
@@ -70,7 +72,7 @@ RESP=$(curl -sf -X POST http://localhost:8188/prompt -H 'Content-Type: applicati
   \"client_id\": \"$CID\",
   \"prompt\": {\"1\": {\"class_type\": \"DSHCloudVideo\", \"inputs\": {
       \"prompt\": \"一只猫在雪地里奔跑\", \"model\": \"cogvideox-3\",
-      \"size\": \"1920x1080\", \"duration\": 5, \"fps\": 30}}}
+      \"resolution\": \"480p\", \"duration\": 5}}}
 }")
 PID=$(printf '%s' "$RESP" | python3 -c 'import json,sys;print(json.load(sys.stdin).get("prompt_id",""))')
 [ -n "$PID" ] || { echo "✗ 提交失败: $RESP"; exit 1; }
