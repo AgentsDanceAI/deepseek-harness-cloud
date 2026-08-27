@@ -18,6 +18,17 @@ MOUNT_NODE="${MOUNT_NODE:-1}"
 docker rm -f "$NAME" >/dev/null 2>&1 || true
 
 echo "=== 起容器 (mem=$MEM cpus=$CPUS, 无 GPU) ==="
+# 启动命令从 products.py 取, 不在这里另写一份。
+#
+# 生产镜像**故意不带 CMD** —— 启动命令由应用在创建实例时下发 (products.py 的
+# _comfyui_boot: 把 output/input 指到持久卷再起 ComfyUI)。所以裸 docker run 会
+# 落到基础镜像的 python3, 无 TTY 立刻退出、退出码 0、零日志, 看起来像"起不来"
+# 而毫无线索。这里取真正那一份, 于是启动脚本写错时这条测试会红。
+PY="$HERE/../../server/.venv/bin/python"
+[ -x "$PY" ] || PY=python3
+BOOT="$(cd "$HERE/../../server" && "$PY" -c 'from app import products; print(products.boot_script("comfyui"), end="")')"
+[ -n "$BOOT" ] || { echo "✗ 取不到 comfyui 启动脚本"; exit 1; }
+
 MOUNT_ARGS=""
 [ "$MOUNT_NODE" = "1" ] && MOUNT_ARGS="-v $HERE/custom_nodes/dsh_cloud:/opt/ComfyUI/custom_nodes/dsh_cloud:ro"
 # 桩跑在宿主上。macOS 的 Docker Desktop 有 host.docker.internal, Linux 没有 ——
@@ -31,7 +42,7 @@ docker run -d --name "$NAME" \
   -e DSH_CLOUD_TOKEN="spike-token-not-a-real-secret" \
   -e DSH_CLOUD_VIDEO_POLL_S=1 \
   $MOUNT_ARGS \
-  "$IMAGE" >/dev/null || { echo "启动失败"; exit 1; }
+  "$IMAGE" sh -c "$BOOT" >/dev/null || { echo "启动失败"; exit 1; }
 echo "  镜像 $IMAGE  挂载节点=$MOUNT_NODE"
 
 echo "=== 等 ComfyUI 起来 ==="
