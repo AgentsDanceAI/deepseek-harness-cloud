@@ -30,7 +30,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 from starlette.requests import Request  # noqa: E402
 from starlette.responses import StreamingResponse  # noqa: E402
 
-from app import config, credits, db, rate_limit, work_access, workbackend, workspace  # noqa: E402
+from app import config, credits, db, products, rate_limit, work_access, workbackend, workspace  # noqa: E402
 from app.main import app  # noqa: E402
 
 from ._signup import signup
@@ -137,8 +137,8 @@ def fake(monkeypatch):
     monkeypatch.setattr(workspace, "_backend", workbackend.DockerBackend())
     workspace._host.clear()
 
-    async def ready(uid):
-        return workspace._cname(uid) in fd.ready
+    async def ready(key, product=None):
+        return workspace._cname(key) in fd.ready
 
     monkeypatch.setattr(workspace, "_ready", ready)
     # fresh in-process state each test
@@ -1299,7 +1299,7 @@ async def test_a_burst_of_cold_requests_creates_exactly_one_instance(monkeypatch
             running=True, boot_fp="fp", image_id="img", host="172.29.0.5", state="Running"
         )
 
-    async def fake_create(_user):
+    async def fake_create(_user, _product=None):
         await asyncio.sleep(0)
         state["created"] += 1
         state["exists"] = True
@@ -1311,25 +1311,98 @@ async def test_a_burst_of_cold_requests_creates_exactly_one_instance(monkeypatch
         await asyncio.sleep(0)
         return []
 
-    async def not_stale(_info):
+    async def not_stale(_info, _product=None):
         return False
 
     monkeypatch.setattr(workspace, "_inspect", fake_inspect)
     monkeypatch.setattr(workspace, "_create", fake_create)
     monkeypatch.setattr(workspace, "_start", fake_start)
     monkeypatch.setattr(workspace, "_running_workspaces", no_running)
-    monkeypatch.setattr(workspace, "_boot_is_stale", lambda _info: False)
+    monkeypatch.setattr(workspace, "_boot_is_stale", lambda _info, _pid=None: False)
     monkeypatch.setattr(workspace, "_image_is_stale", not_stale)
     monkeypatch.setattr(workspace, "_capacity_reason", lambda: "")
-    monkeypatch.setattr(workspace, "_ready", lambda _uid: _true())
+    monkeypatch.setattr(workspace, "_ready", lambda _key, _product=None: _true())
     monkeypatch.setattr(config, "WORK_MAX_CONCURRENT", 10)
     workspace._ensure_locks.pop("u_burst", None)
     workspace._starting.pop("u_burst", None)
 
     user = {"id": "u_burst"}
-    await asyncio.gather(*[workspace.ensure_workspace(user) for _ in range(6)])
+    dsh = products.registry()[products.DEFAULT]
+    await asyncio.gather(*[workspace.ensure_workspace(user, dsh) for _ in range(6)])
     assert state["created"] == 1, f"一次冷启动建了 {state['created']} 台实例 —— 每台都按秒计费并各占一个 EIP"
 
 
 async def _true():
     return True
+
+
+# --- 多产品工作台 --------------------------------------------------------------
+
+
+def test_dsh_keeps_the_legacy_key(fake):
+    """dsh 的工作台键必须**仍然是 user_id 本身**。
+
+    线上已有一批按 user_id 命名的容器与卷 (dshwork-<hexid> / dshwork-home-<hexid>
+    / dshwork-ws-<hexid>)。给 dsh 也加上产品后缀 = 那些用户的工作台和历史文件
+    全部弃养: 容器成孤儿, 卷还在磁盘上但再没人引用, 而且不报错 —— 用户只会看到
+    自己的东西凭空消失。
+    """
+    assert products.wskey("usr_abc", products.DEFAULT) == "usr_abc"
+    assert products.wskey("usr_abc", "comfyui") == "usr_abc~comfyui"
+    assert products.split_key("usr_abc") == ("usr_abc", products.DEFAULT)
+    assert products.split_key("usr_abc~comfyui") == ("usr_abc", "comfyui")
+
+
+def test_two_products_get_two_containers(fake, monkeypatch):
+    """同一个人开两个产品, 必须是两台容器、两个卷、两个上游。
+
+    键是不透明字符串, 所以整条链路 (容器名/卷名/锁/回收计时) 都靠它分身 ——
+    这条用例钉的就是"它们真的没有互相顶掉"。
+    """
+    monkeypatch.setattr(config, "COMFY_IMAGE", "comfy:test")
+    monkeypatch.setattr(config, "COMFY_DOMAIN", "comfy.test.local")
+
+    dsh = products.registry()[products.DEFAULT]
+    comfy = products.registry()["comfyui"]
+
+    assert workspace._cname(products.wskey("usr_x", dsh.id)) != workspace._cname(
+        products.wskey("usr_x", comfy.id)
+    )
+    # 上游端口也按产品走: dsh 是 socat 转出来的 3081, ComfyUI 直接听 8188
+    assert workspace._upstream(products.wskey("usr_x", dsh.id), dsh).endswith(":3081")
+    assert workspace._upstream(products.wskey("usr_x", comfy.id), comfy).endswith(":8188")
+
+
+def test_comfyui_boot_persists_output_on_the_volume(monkeypatch):
+    """ComfyUI 默认往 /opt/ComfyUI/output 写, 而持久化的是 /workspace。
+
+    不改指向的话, 容器一回收用户生成的图和视频全没 —— 而且没有任何报错, 只是
+    下次进来空空如也。
+    """
+    boot = products.boot_script("comfyui")
+    assert "ln -s /workspace/output /opt/ComfyUI/output" in boot
+    assert "--port 8188" in boot
+    assert "--cpu" in boot, "编排模式不带 GPU"
+
+
+def test_comfyui_env_carries_only_the_gateway(monkeypatch):
+    """节点不认识任何一家厂商, 只认我们的网关 —— 容器里不该出现上游凭据。"""
+    env = products.env_for("comfyui", "tok_123")
+    assert env["DSH_CLOUD_TOKEN"] == "tok_123"
+    assert env["DSH_CLOUD_VIDEO_BASE"].endswith("/llm/v1")
+    joined = " ".join(env.values())
+    assert "qianmian" not in joined and "api.deepseek.com" not in joined
+
+
+def test_a_product_without_an_image_is_not_reachable(fake, monkeypatch):
+    """没配镜像 = 该产品未启用。默认就是这个状态, 所以这次改动上线后行为不变。"""
+    monkeypatch.setattr(config, "COMFY_IMAGE", "")
+    assert "comfyui" not in [p.id for p in products.enabled()]
+
+
+def test_machine_time_is_billed_to_the_person_not_the_workspace():
+    """回收器拿到的是工作台键。直接拿它计费会记到一个不存在的用户头上 ——
+    同一个人的 dsh 与 ComfyUI 花的是同一份机时额度。"""
+    owner, pid = products.split_key("usr_abc~comfyui")
+    assert owner == "usr_abc", "机时必须记在人头上"
+    assert pid == "comfyui"

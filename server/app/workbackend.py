@@ -59,7 +59,7 @@ class Backend(abc.ABC):
     async def inspect(self, user_id: str) -> WorkInfo | None: ...
 
     @abc.abstractmethod
-    async def current_image_id(self) -> str:
+    async def current_image_id(self, image: str) -> str:
         """Identity of the image a NEW workspace would be born from. Compared
         against WorkInfo.image_id to spot a workspace left on an old runtime.
         Empty string means "could not resolve" — callers treat that as
@@ -67,7 +67,18 @@ class Backend(abc.ABC):
         is far worse than running one build behind."""
 
     @abc.abstractmethod
-    async def create(self, user_id: str, *, boot: str, env: dict[str, str], boot_fp: str) -> None: ...
+    async def create(
+        self,
+        user_id: str,
+        *,
+        boot: str,
+        env: dict[str, str],
+        boot_fp: str,
+        image: str,
+        image_ref: str = "",
+        mem_mb: int = 0,
+        cpus: float = 0.0,
+    ) -> None: ...
 
     @abc.abstractmethod
     async def start(self, user_id: str) -> None: ...
@@ -146,28 +157,39 @@ class DockerBackend(Backend):
             state=(d.get("State") or {}).get("Status", ""),
         )
 
-    async def current_image_id(self) -> str:
+    async def current_image_id(self, image: str) -> str:
         """Resolved image *ID*, not the tag string: the usual upgrade here is
         `docker build -t image:tag` — sometimes the same tag rebuilt — and a
         tag comparison would call that unchanged, leaving every existing
         workspace on the old runtime forever."""
-        r = await self._api("GET", f"/images/{config.WORK_IMAGE}/json")
+        r = await self._api("GET", f"/images/{image}/json")
         if r.status_code != 200:
-            log.warning("[work] 解析不了镜像 %s (%s), 跳过镜像陈旧判定", config.WORK_IMAGE, r.status_code)
+            log.warning("[work] 解析不了镜像 %s (%s), 跳过镜像陈旧判定", image, r.status_code)
             return ""
         return (r.json() or {}).get("Id", "")
 
-    async def create(self, user_id: str, *, boot: str, env: dict[str, str], boot_fp: str) -> None:
+    async def create(
+        self,
+        user_id: str,
+        *,
+        boot: str,
+        env: dict[str, str],
+        boot_fp: str,
+        image: str,
+        image_ref: str = "",
+        mem_mb: int = 0,
+        cpus: float = 0.0,
+    ) -> None:
         hexid = cname(user_id)[len("dshwork-") :]
         body = {
-            "Image": config.WORK_IMAGE,
+            "Image": image,
             "Cmd": ["sh", "-c", boot],
             "WorkingDir": "/workspace",
             "Labels": {LABEL: user_id, CFG_LABEL: boot_fp},
             "Env": [f"{k}={v}" for k, v in env.items()],
             "HostConfig": {
-                "Memory": config.WORK_MEM_LIMIT_MB * 1024 * 1024,
-                "NanoCpus": int(config.WORK_CPUS * 1e9),
+                "Memory": (mem_mb or config.WORK_MEM_LIMIT_MB) * 1024 * 1024,
+                "NanoCpus": int((cpus or config.WORK_CPUS) * 1e9),
                 "PidsLimit": 512,
                 # Prefer reclaiming a restartable workspace over unrelated host
                 # services when the kernel must select an OOM victim.
@@ -450,22 +472,33 @@ class EciBackend(Backend):
                 )
                 return
 
-    async def current_image_id(self) -> str:
+    async def current_image_id(self, image: str) -> str:
         """ECI 上镜像身份就是仓库引用本身。
 
         不像本机 docker 能拿到解析后的镜像 ID —— 同名重推（tag 不变但
         tag 没变) 这里察觉不到。可接受: 工作台镜像走版本号 tag, 而重建镜像缓存
         本来就是发版流程的一步。"""
-        return config.WORK_IMAGE_REF or config.WORK_IMAGE
+        return image
 
-    async def create(self, user_id: str, *, boot: str, env: dict[str, str], boot_fp: str) -> None:
+    async def create(
+        self,
+        user_id: str,
+        *,
+        boot: str,
+        env: dict[str, str],
+        boot_fp: str,
+        image: str,
+        image_ref: str = "",
+        mem_mb: int = 0,
+        cpus: float = 0.0,
+    ) -> None:
         p = {
             "ContainerGroupName": cname(user_id),
             "ZoneId": config.ECI_ZONE_ID or None,
             "VSwitchId": config.ECI_VSWITCH_ID,
             "SecurityGroupId": config.ECI_SECURITY_GROUP_ID,
-            "Cpu": config.WORK_CPUS,
-            "Memory": round(config.WORK_MEM_LIMIT_MB / 1024, 2),
+            "Cpu": cpus or config.WORK_CPUS,
+            "Memory": round((mem_mb or config.WORK_MEM_LIMIT_MB) / 1024, 2),
             "ComputeCategory.1": config.ECI_COMPUTE_CATEGORY or None,
             "RestartPolicy": "Never",
             # Rebuild the cache for each immutable image release. A cache miss
@@ -473,8 +506,8 @@ class EciBackend(Backend):
             "AutoMatchImageCache": "true",
             "AutoCreateEip": "true",
             "EipBandwidth": config.ECI_EIP_BANDWIDTH,
-            "Container.1.Name": "dsh",
-            "Container.1.Image": config.WORK_IMAGE_REF or config.WORK_IMAGE,
+            "Container.1.Name": "app",
+            "Container.1.Image": image_ref or image,
             "Container.1.WorkingDir": "/workspace",
             "Container.1.Command.1": "sh",
             "Container.1.Arg.1": "-c",
