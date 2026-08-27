@@ -9,19 +9,30 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 NAME=comfy-spike-run
 MEM="${MEM:-2g}"
 CPUS="${CPUS:-1.0}"
+# 默认测本地 spike 镜像并挂载节点 (改节点后不用重建就能验)。
+# 验**生产镜像**时传 IMAGE=... MOUNT_NODE=0 —— 节点已经烤进去了, 再挂一层
+# 就测不到镜像里那份到底对不对。
+IMAGE="${IMAGE:-comfy-orchestrator:spike}"
+MOUNT_NODE="${MOUNT_NODE:-1}"
 
 docker rm -f "$NAME" >/dev/null 2>&1 || true
 
 echo "=== 起容器 (mem=$MEM cpus=$CPUS, 无 GPU) ==="
+MOUNT_ARGS=""
+[ "$MOUNT_NODE" = "1" ] && MOUNT_ARGS="-v $HERE/custom_nodes/dsh_cloud:/opt/ComfyUI/custom_nodes/dsh_cloud:ro"
+# 桩跑在宿主上。macOS 的 Docker Desktop 有 host.docker.internal, Linux 没有 ——
+# 那边用 host-gateway 显式加一条, 否则容器解析不了这个名字, 而报错只是"连不上"。
 docker run -d --name "$NAME" \
   --platform linux/amd64 \
+  --add-host=host.docker.internal:host-gateway \
   --memory "$MEM" --cpus "$CPUS" \
   -p 8188:8188 \
   -e DSH_CLOUD_VIDEO_BASE="http://host.docker.internal:9797" \
   -e DSH_CLOUD_TOKEN="spike-token-not-a-real-secret" \
   -e DSH_CLOUD_VIDEO_POLL_S=1 \
-  -v "$HERE/custom_nodes/dsh_cloud:/opt/ComfyUI/custom_nodes/dsh_cloud:ro" \
-  comfy-orchestrator:spike >/dev/null || { echo "启动失败"; exit 1; }
+  $MOUNT_ARGS \
+  "$IMAGE" >/dev/null || { echo "启动失败"; exit 1; }
+echo "  镜像 $IMAGE  挂载节点=$MOUNT_NODE"
 
 echo "=== 等 ComfyUI 起来 ==="
 boot_start=$(date +%s)
