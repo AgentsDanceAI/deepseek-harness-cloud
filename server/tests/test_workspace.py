@@ -1423,3 +1423,31 @@ def test_login_bounces_back_to_the_product_you_came_from(fake, monkeypatch):
 
     r2 = c.get("/api/work/route", headers={"host": "work.test.local"}, follow_redirects=False)
     assert r2.headers["location"].endswith("next=/work"), r2.headers["location"]
+
+
+def test_starting_page_can_see_a_non_default_workspace(fake, monkeypatch):
+    """启动等待页跑在**主站域**上, 只按 Host 判产品会永远查错工作台。
+
+    2026-08-27 实测故障: 打开 comfy.dshcloud.online -> 实例确实建出来了 ->
+    但页面跳到 dshcloud.online/work/starting, 那里轮询 /api/work/status 时
+    Host 是主站域 -> 判成 dsh -> 查一个不存在的 dsh 工作台 -> 进度条永远停在
+    「正在排队」。实例在跑、计费在走, 而用户以为坏了。
+
+    所以 status 必须认 ?product_id=, 且跳向 starting 时必须带上它。
+    """
+    monkeypatch.setattr(config, "COMFY_IMAGE", "comfy:test")
+    monkeypatch.setattr(config, "COMFY_DOMAIN", "comfy.test.local")
+    c, uid = _user("starting@test.local")
+
+    # 从 comfy 域进 —— 应当被送到带 product_id 的等待页
+    r = c.get("/api/work/route", headers={"host": "comfy.test.local"}, follow_redirects=False)
+    assert r.status_code in (200, 302)
+    if r.status_code == 302:
+        assert "product_id=comfyui" in r.headers["location"], r.headers["location"]
+
+    # 等待页在主站域上问状态: 不带 product_id 看到的是 dsh, 带上才是 comfy
+    as_dsh = c.get("/api/work/status").json()
+    as_comfy = c.get("/api/work/status?product_id=comfyui").json()
+    # 协议跟 PUBLIC_BASE 走 (测试环境是 http), 这里只认域名
+    assert "//comfy.test.local" in as_comfy["url"], as_comfy["url"]
+    assert "//comfy.test.local" not in as_dsh["url"], as_dsh["url"]

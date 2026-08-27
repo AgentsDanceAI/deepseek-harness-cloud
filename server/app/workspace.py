@@ -117,12 +117,22 @@ def _login_next(product: products.Product) -> str:
 
 
 def _product_of(request: Request) -> products.Product:
-    """这是哪个产品的工作台 —— 按 Host 判。
+    """这是哪个产品的工作台。
+
+    先看 **?product_id=**, 再看 Host。查询参数优先不是随意选的: 启动等待页
+    (/work/starting) 跑在**主站域**上, 它轮询 /api/work/status 时 Host 是
+    dshcloud.online —— 只按 Host 判就会永远在查 dsh 的工作台, 而用户等的是
+    ComfyUI 的, 于是进度条卡在「正在排队」不动, 且没有任何线索。
 
     每个产品一个域名, 因为 ComfyUI 前端用绝对路径引资源, 塞不进子路径。
-    Caddy 的 forward_auth 透传原始 Host, 所以这里看到的就是用户敲的那个域名。
-    认不出来时回落到 dsh: 主站 /work 入口用的是主站域名。
+    Caddy 的 forward_auth 透传原始 Host, 所以正常访问时 Host 就是用户敲的域名。
+    两者都认不出来时回落到 dsh。
     """
+    asked = (request.query_params.get("product_id") or "").strip()
+    if asked:
+        chosen = products.get(asked)
+        if chosen is not None:
+            return chosen
     return products.by_domain(request.headers.get("host", "")) or products.registry()[products.DEFAULT]
 
 
@@ -896,9 +906,11 @@ async def work_route(request: Request):
         state = await ensure_workspace(user, product)
     except RuntimeError as e:
         reason = "busy" if str(e) == "capacity" else "error"
-        return RedirectResponse(f"{site}/work/starting?state={reason}", status_code=302)
+        return RedirectResponse(
+            f"{site}/work/starting?state={reason}&product_id={product.id}", status_code=302
+        )
     if state != "running":
-        return RedirectResponse(f"{site}/work/starting", status_code=302)
+        return RedirectResponse(f"{site}/work/starting?product_id={product.id}", status_code=302)
     _last_seen[key] = now
     return Response(status_code=200, headers={"X-Work-Upstream": _upstream(key, product)})
 
@@ -953,9 +965,9 @@ async def work_shell(request: Request):
         state = await ensure_workspace(user, product)
     except RuntimeError as e:
         kind = "busy" if str(e) == "capacity" else "error"
-        return RedirectResponse(f"{site}/work/starting?state={kind}", status_code=302)
+        return RedirectResponse(f"{site}/work/starting?state={kind}&product_id={product.id}", status_code=302)
     if state != "running":
-        return RedirectResponse(f"{site}/work/starting", status_code=302)
+        return RedirectResponse(f"{site}/work/starting?product_id={product.id}", status_code=302)
     _last_seen[key] = time.time()
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
@@ -963,7 +975,7 @@ async def work_shell(request: Request):
                 f"http://{_upstream(key, product)}/", headers={"host": "127.0.0.1:3080"}
             )
     except httpx.HTTPError:
-        return RedirectResponse(f"{site}/work/starting", status_code=302)
+        return RedirectResponse(f"{site}/work/starting?product_id={product.id}", status_code=302)
     html = upstream.text
     if "</head>" in html:
         html = html.replace("</head>", _pwa_inject() + "</head>", 1)
@@ -1042,7 +1054,7 @@ async def work_status(request: Request):
         "enabled": True,
         "phase": phase,
         "state": "running" if ready else ("starting" if info and info.running else state),
-        "url": _work_url("/"),
+        "url": _work_url("/", product),
         "credits_per_min": config.WORK_CREDITS_PER_MIN,
         "idle_stop_min": config.WORK_IDLE_STOP_MIN,
         "balance": credits.balance(user["id"]),
@@ -1109,10 +1121,11 @@ async def work_entry(request: Request, product_id: str = products.DEFAULT):
         state = await ensure_workspace(user, product)
     except RuntimeError as e:
         kind = "busy" if str(e) == "capacity" else "error"
-        return RedirectResponse(f"{site}/work/starting?state={kind}", status_code=302)
+        return RedirectResponse(f"{site}/work/starting?state={kind}&product_id={product.id}", status_code=302)
     if state == "running":
         return RedirectResponse(_work_url("/" + suffix, product), status_code=302)
-    return RedirectResponse(f"{site}/work/starting{suffix}", status_code=302)
+    joiner = "&" if suffix else "?"
+    return RedirectResponse(f"{site}/work/starting{suffix}{joiner}product_id={product.id}", status_code=302)
 
 
 # Keep the launch-page assets outside the HTML f-string so CSS/JS braces remain
@@ -1181,7 +1194,7 @@ function paint(){
 setInterval(paint,120);paint();
 (async function poll(){
   try{
-    var s=await (await fetch('/api/work/status')).json();
+    var s=await (await fetch('/api/work/status'+location.search)).json();
     if(s.phase&&s.phase!==phase){phase=s.phase;since=Date.now();}
     if(s.state==='running'){
       phase='ready';cur=100;paint();
