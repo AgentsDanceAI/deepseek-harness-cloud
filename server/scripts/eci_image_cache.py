@@ -1,7 +1,7 @@
 """ECI 镜像缓存: 查漂移 / 重建。
 
-    python3 -m scripts.eci_image_cache check      # 缓存与 WORK_IMAGE_REF 对得上吗
-    python3 -m scripts.eci_image_cache rebuild    # 按当前 WORK_IMAGE_REF 重建
+    python3 -m scripts.eci_image_cache check      # 每个已启用产品的镜像都有缓存吗
+    python3 -m scripts.eci_image_cache rebuild    # 给缺的那些建, 顺带清掉谁都不认的
 
 镜像缓存按镜像引用匹配。WORK_IMAGE_REF 更新后必须同步重建缓存，否则新实例会
 静默回退到完整镜像拉取并增加冷启动时间。
@@ -65,11 +65,24 @@ def _caches() -> list[dict]:
     return _call("eci", "2018-08-08", "DescribeImageCaches").get("ImageCaches", [])
 
 
-def _ref() -> str:
-    ref = (config.WORK_IMAGE_REF or config.WORK_IMAGE).strip()
-    if not ref:
-        raise SystemExit("WORK_IMAGE_REF 为空 —— 没有可对照的镜像引用")
-    return ref
+def _refs() -> list[str]:
+    """所有**已启用产品**的镜像引用。
+
+    云工作台不再只有 dsh 一种 —— 每个产品一个镜像, 各自都要有缓存。
+    以前这里只返回 WORK_IMAGE_REF 一个值, 而 rebuild() 会把"Images 里没有它"的
+    缓存全部删掉: 拿 ComfyUI 的引用跑一次, 就会顺手删掉 dsh 的缓存, 让所有 dsh
+    工作台的冷启动退回全量拉取 —— 不报错, 只是从此每次都多等半分钟。
+    """
+    from app import products
+
+    refs = []
+    for product in products.enabled():
+        ref = (product.image_ref or product.image).strip()
+        if ref and ref not in refs:
+            refs.append(ref)
+    if not refs:
+        raise SystemExit("没有已启用的工作台产品 —— 没有可对照的镜像引用")
+    return refs
 
 
 def eip_headroom() -> int | None:
@@ -95,8 +108,13 @@ def eip_headroom() -> int | None:
 
 
 def check() -> int:
-    ref = _ref()
-    ready = [c for c in _caches() if c.get("Status") == "Ready" and ref in (c.get("Images") or [])]
+    refs = _refs()
+    caches = _caches()
+    missing = [
+        r
+        for r in refs
+        if not [c for c in caches if c.get("Status") == "Ready" and r in (c.get("Images") or [])]
+    ]
     rc = 0
     # 至少留几个 EIP 给"重建镜像缓存"和人工排查 —— 前者恰好在升级镜像版本时跑,
     # 是最不该因为抢不到 EIP 而失败的时刻。
@@ -120,27 +138,59 @@ def check() -> int:
             file=sys.stderr,
         )
         rc = 1
-    if ready:
-        print(f"✓ 镜像缓存与 WORK_IMAGE_REF 一致: {ref}")
-        print(f"  {ready[0].get('ImageCacheId')}  ({ready[0].get('ImageCacheName')})")
+    if not missing:
+        print(f"✓ {len(refs)} 个产品镜像都有 Ready 缓存:")
+        for r in refs:
+            hit = [c for c in caches if c.get("Status") == "Ready" and r in (c.get("Images") or [])]
+            print(f"  {r}  ->  {hit[0].get('ImageCacheId')} ({hit[0].get('ImageCacheName')})")
         if head is not None and head >= 5:
             print(f"✓ EIP 余量 {head} 个 (配额 - WORK_MAX_CONCURRENT)")
         return rc
-    print(f"✗ 没有对应 {ref} 的 Ready 镜像缓存。", file=sys.stderr)
+    for r in missing:
+        print(f"✗ 没有对应 {r} 的 Ready 镜像缓存。", file=sys.stderr)
     print("  缓存未命中会回退到完整镜像拉取并增加冷启动时间。", file=sys.stderr)
-    for c in _caches():
+    for c in caches:
         print(f"  现有: {c.get('ImageCacheId')} {c.get('Status')} {c.get('Images')}", file=sys.stderr)
     print("  修复: python3 -m scripts.eci_image_cache rebuild", file=sys.stderr)
     return 1
 
 
 def rebuild() -> int:
-    ref = _ref()
+    refs = _refs()
+    caches = _caches()
+    # 陈旧 = **哪个产品的镜像都不匹配**。只按单个 ref 判的话, 建 ComfyUI 缓存
+    # 会顺手删掉 dsh 的 (见 _refs 的说明)。
     stale = [
         c["ImageCacheId"]
-        for c in _caches()
-        if ref not in (c.get("Images") or []) or c.get("Status") not in ("Ready", "Creating", "Preparing")
+        for c in caches
+        if not (set(c.get("Images") or []) & set(refs))
+        or c.get("Status") not in ("Ready", "Creating", "Preparing")
     ]
+    todo = [
+        r
+        for r in refs
+        if not [
+            c
+            for c in caches
+            if r in (c.get("Images") or []) and c.get("Status") in ("Ready", "Creating", "Preparing")
+        ]
+    ]
+    if not todo:
+        print(f"==> {len(refs)} 个产品镜像都已有缓存, 无需重建")
+        for old in stale:
+            print(f"==> 删旧缓存 {old}")
+            try:
+                _call("eci", "2018-08-08", "DeleteImageCache", {"ImageCacheId": old})
+            except Exception as e:  # noqa: BLE001
+                print(f"   (跳过: {e})", file=sys.stderr)
+        return check()
+    rc = 0
+    for ref in todo:
+        rc |= _build_one(ref, stale if ref == todo[-1] else [])
+    return rc or check()
+
+
+def _build_one(ref: str, stale: list[str]) -> int:
     print(f"==> 目标镜像: {ref}")
 
     print("==> 申请临时 EIP (构建任务不共享业务实例的 EIP, 自己没有出网能力)")
@@ -201,7 +251,7 @@ def rebuild() -> int:
         except Exception as e:  # noqa: BLE001
             print(f"   (跳过: {e})", file=sys.stderr)
 
-    return check()
+    return 0
 
 
 if __name__ == "__main__":
