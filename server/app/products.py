@@ -42,6 +42,10 @@ class Product:
     mem_mb: int
     cpus: float
     domain: str  # 这个产品的工作台域名; 留空 = 该产品未启用
+    # 前端会不会主动上报「人还在」(dsh 调 /api/work/active)。False 表示没有
+    # 上报器, 回收器改用请求流量当在场信号 —— 否则容器起来十分钟就被当成
+    # 空闲杀掉, 不管人在不在用。见 workspace.reaper_tick。
+    reports_presence: bool = True
 
 
 def wskey(user_id: str, product_id: str = DEFAULT) -> str:
@@ -76,6 +80,8 @@ def registry() -> dict[str, Product]:
             mem_mb=config.COMFY_MEM_LIMIT_MB,
             cpus=config.COMFY_CPUS,
             domain=config.COMFY_DOMAIN,
+            # ComfyUI 不认识 /api/work/active, 也不经网关跑模型。
+            reports_presence=False,
         ),
     }
 

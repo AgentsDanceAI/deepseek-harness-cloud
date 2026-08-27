@@ -1451,3 +1451,79 @@ def test_starting_page_can_see_a_non_default_workspace(fake, monkeypatch):
     # 协议跟 PUBLIC_BASE 走 (测试环境是 http), 这里只认域名
     assert "//comfy.test.local" in as_comfy["url"], as_comfy["url"]
     assert "//comfy.test.local" not in as_dsh["url"], as_dsh["url"]
+
+
+def _reap(monkeypatch, key, *, last_ago, started_ago, product_id="dsh"):
+    """把回收器的输入摆成指定的样子, 跑一轮, 返回是否被回收。"""
+    now = time.time()
+    workspace._last_seen[key] = now - last_ago
+    workspace._started_at[key] = now - started_ago
+    workspace._user_active.pop(key, None)
+
+    stopped = []
+
+    async def running():
+        return [key]
+
+    async def stop(k):
+        stopped.append(k)
+
+    monkeypatch.setattr(workspace, "_running_workspaces", running)
+    monkeypatch.setattr(workspace, "_stop", stop)
+    asyncio.get_event_loop_policy().new_event_loop().run_until_complete(workspace.reaper_tick(now))
+    return bool(stopped)
+
+
+def test_a_workspace_in_active_use_is_not_reaped(fake, monkeypatch):
+    """ComfyUI 没有 /api/work/active 上报器, 也不经网关跑模型。
+
+    2026-08-27 实测事故: 老板正在 ComfyUI 里操作, 容器起来 101 秒后被回收,
+    日志只写一句 (idle)。根因是 present 退化成「容器启动时间」、quiet 恒为真 ——
+    于是**只要容器活过 WORK_IDLE_STOP_MIN, 不管人在不在用, 必被杀**。
+
+    页面还开着就一定有 /api/work/route 流量 (Caddy 为每个资源打一次), 所以
+    对没有上报器的产品, 流量就是在场。
+    """
+    monkeypatch.setattr(config, "COMFY_IMAGE", "comfy:test")
+    monkeypatch.setattr(config, "COMFY_DOMAIN", "comfy.test.local")
+    monkeypatch.setattr(config, "WORK_IDLE_STOP_MIN", 10)
+    monkeypatch.setattr(config, "WORK_AGENT_IDLE_STOP_MIN", 10)
+    monkeypatch.setattr(config, "WORK_TAB_GONE_MIN", 3)
+
+    key = products.wskey("u_reap", "comfyui")
+    # 容器活了 30 分钟 (远超 IDLE_STOP), 但 10 秒前还有流量 = 人就在用
+    assert not _reap(monkeypatch, key, last_ago=10, started_ago=1800), "有流量还被回收 = 把正在用的人踢了"
+
+
+def test_a_closed_tab_is_still_reaped(fake, monkeypatch):
+    """流量当在场的代价必须有边界: 标签页真关了, 流量就断, 该收还得收。
+
+    生效的窗口是 WORK_AGENT_IDLE_STOP_MIN 而不是 WORK_TAB_GONE_MIN —— 流量同时
+    喂给 present 与 agent 两个信号, 回收要求两者都超时。对 ComfyUI 这是**想要**
+    的: 一条视频要跑好几分钟, 关掉标签页不该把它掐掉。"""
+    monkeypatch.setattr(config, "COMFY_IMAGE", "comfy:test")
+    monkeypatch.setattr(config, "COMFY_DOMAIN", "comfy.test.local")
+    monkeypatch.setattr(config, "WORK_IDLE_STOP_MIN", 10)
+    monkeypatch.setattr(config, "WORK_AGENT_IDLE_STOP_MIN", 10)
+    monkeypatch.setattr(config, "WORK_TAB_GONE_MIN", 3)
+
+    key = products.wskey("u_reap2", "comfyui")
+    # 5 分钟无流量: 标签页确实关了, 但还在 AGENT_IDLE 窗口内 —— 故意不收
+    assert not _reap(monkeypatch, key, last_ago=300, started_ago=1800), "跑到一半的活儿不该被掐"
+    # 11 分钟无流量: 两个窗口都过了, 必须收掉, 否则一直烧机时
+    assert _reap(monkeypatch, key, last_ago=660, started_ago=1800), "标签页关了还不收, 会一直烧机时"
+
+
+def test_machine_time_and_overdraft_are_read_off_the_person(fake, monkeypatch):
+    """uid 是工作台键。拿它查余额永远得 0 —— 欠费用户的 ComfyUI 永远收不掉。"""
+    c, uid = _user("overdraft@test.local")
+    key = products.wskey(uid, "comfyui")
+    monkeypatch.setattr(config, "COMFY_IMAGE", "comfy:test")
+    monkeypatch.setattr(config, "COMFY_DOMAIN", "comfy.test.local")
+    monkeypatch.setattr(config, "OVERDRAFT_LIMIT_CREDITS", 20)
+    db.query("DELETE FROM credit_grants WHERE user_id=?", (uid,))
+    credits.spend(uid, 100, kind="llm", model="x")  # 欠到 -100
+    assert credits.balance(uid) <= -20
+    assert credits.balance(key) == 0, "前提: 工作台键不是用户, 查不到余额"
+    # 有流量也要收 —— 欠费优先于在场
+    assert _reap(monkeypatch, key, last_ago=5, started_ago=60), "欠费的工作台必须回收"
