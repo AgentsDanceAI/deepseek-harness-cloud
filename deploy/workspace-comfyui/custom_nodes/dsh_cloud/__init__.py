@@ -98,3 +98,68 @@ class DSHCloudVideo:
 
 NODE_CLASS_MAPPINGS = {"DSHCloudVideo": DSHCloudVideo}
 NODE_DISPLAY_NAME_MAPPINGS = {"DSHCloudVideo": "DSH Cloud 生视频"}
+
+
+class DSHCloudImage:
+    """文生图 —— 同步出图, 返回真正的 IMAGE 张量。
+
+    返回张量而不是文件路径, 是为了让它成为 ComfyUI 里的一等节点: 能直接接
+    SaveImage / PreviewImage / 各种后处理。返回路径的话它就是个死胡同, 用户
+    只能自己去翻文件。
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "prompt": ("STRING", {"multiline": True, "default": "一只柴犬在雪地里奔跑"}),
+                "model": ("STRING", {"default": "gpt-image-2"}),
+                "size": ("STRING", {"default": "1024x1024"}),
+                "n": ("INT", {"default": 1, "min": 1, "max": 4}),
+            },
+        }
+
+    RETURN_TYPES = ("IMAGE",)
+    RETURN_NAMES = ("images",)
+    FUNCTION = "generate"
+    CATEGORY = "DSH Cloud"
+
+    def generate(self, prompt, model, size, n):
+        import base64
+        import io
+
+        import numpy as np
+        import torch
+        from PIL import Image
+
+        result = _request(
+            "POST", f"{BASE}/images/generations",
+            {"model": model, "prompt": prompt, "size": size, "n": n},
+        )
+        items = result.get("data") or []
+        if not items:
+            raise RuntimeError(f"网关没有返回图片: {result}")
+
+        frames = []
+        for item in items:
+            if item.get("b64_json"):
+                raw = base64.b64decode(item["b64_json"])
+            elif item.get("url"):
+                with urllib.request.urlopen(item["url"], timeout=120) as src:
+                    raw = src.read()
+            else:
+                continue
+            img = Image.open(io.BytesIO(raw)).convert("RGB")
+            frames.append(np.array(img, dtype=np.float32) / 255.0)
+
+        if not frames:
+            raise RuntimeError("返回里既没有 b64_json 也没有 url")
+        # ComfyUI 的 IMAGE 是 [B,H,W,C] 的 float32, 取值 0..1。尺寸不一致时只取
+        # 第一张 —— 拼一个参差不齐的批次会在下游炸得莫名其妙。
+        if len({f.shape for f in frames}) > 1:
+            frames = frames[:1]
+        return (torch.from_numpy(np.stack(frames)),)
+
+
+NODE_CLASS_MAPPINGS["DSHCloudImage"] = DSHCloudImage
+NODE_DISPLAY_NAME_MAPPINGS["DSHCloudImage"] = "DSH Cloud 生图"
