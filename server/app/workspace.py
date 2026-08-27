@@ -105,6 +105,17 @@ def _upstream_host(user_id: str) -> str:
     return _host.get(user_id) or _cname(user_id)
 
 
+def _login_next(product: products.Product) -> str:
+    """登录后该回到哪个工作台。
+
+    写死 /work 的话, 从 comfy.dshcloud.online 被弹去登录的人, 登完会落进 dsh
+    工作台 —— 他要的那个从没打开过, 而且没有任何提示说发生了什么。
+    """
+    if product.id == products.DEFAULT:
+        return "/work"
+    return f"/work?product_id={product.id}"
+
+
 def _product_of(request: Request) -> products.Product:
     """这是哪个产品的工作台 —— 按 Host 判。
 
@@ -853,14 +864,14 @@ async def preview_fallback(request: Request):
 async def work_route(request: Request):
     if not config.WORK_ENABLED:
         return JSONResponse(status_code=404, content={"detail": "work_disabled"})
+    product = _product_of(request)
     user = try_resolve_user(request)
     site = config.PUBLIC_BASE.rstrip("/")
     if user is None:
-        return RedirectResponse(f"{site}/login?next=/work", status_code=302)
+        return RedirectResponse(f"{site}/login?next={_login_next(product)}", status_code=302)
     if credits.balance(user["id"]) <= 0:
         return RedirectResponse(f"{site}/pricing?reason=credits", status_code=302)
 
-    product = _product_of(request)
     if not product.image:
         return JSONResponse(status_code=404, content={"detail": "product_disabled"})
     # 计时/在场状态按**工作台**计, 额度按**用户**计 —— 两者不是一个键: 同一个人
@@ -926,15 +937,15 @@ async def work_shell(request: Request):
     untouched — this survives upstream updates (plain string injection)."""
     if not config.WORK_ENABLED:
         return JSONResponse(status_code=404, content={"detail": "work_disabled"})
+    product = _product_of(request)
     user = try_resolve_user(request)
     site = config.PUBLIC_BASE.rstrip("/")
     if user is None:
-        return RedirectResponse(f"{site}/login?next=/work", status_code=302)
+        return RedirectResponse(f"{site}/login?next={_login_next(product)}", status_code=302)
     if credits.balance(user["id"]) <= 0:
         return RedirectResponse(f"{site}/pricing?reason=credits", status_code=302)
     if work_access.blocked_reason(user["id"]):
         return RedirectResponse(f"{site}/pricing?reason=work#plans", status_code=302)
-    product = _product_of(request)
     if not product.image:
         return RedirectResponse(f"{site}/console", status_code=302)
     key = products.wskey(user["id"], product.id)

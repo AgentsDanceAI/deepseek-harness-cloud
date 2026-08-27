@@ -1406,3 +1406,20 @@ def test_machine_time_is_billed_to_the_person_not_the_workspace():
     owner, pid = products.split_key("usr_abc~comfyui")
     assert owner == "usr_abc", "机时必须记在人头上"
     assert pid == "comfyui"
+
+
+def test_login_bounces_back_to_the_product_you_came_from(fake, monkeypatch):
+    """从 comfy 域被弹去登录, 登完必须回 comfy。
+
+    写死 next=/work 的话人会落进 dsh 工作台 —— 他要的那个从没打开过, 而且
+    没有任何提示说发生了什么。
+    """
+    monkeypatch.setattr(config, "COMFY_IMAGE", "comfy:test")
+    monkeypatch.setattr(config, "COMFY_DOMAIN", "comfy.test.local")
+    c = TestClient(app)
+    r = c.get("/api/work/route", headers={"host": "comfy.test.local"}, follow_redirects=False)
+    assert r.status_code == 302
+    assert "next=/work?product_id=comfyui" in r.headers["location"], r.headers["location"]
+
+    r2 = c.get("/api/work/route", headers={"host": "work.test.local"}, follow_redirects=False)
+    assert r2.headers["location"].endswith("next=/work"), r2.headers["location"]
