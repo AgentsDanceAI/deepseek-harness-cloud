@@ -41,25 +41,65 @@ from .http_limits import read_limited_body
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/llm")
 
-_PRICES_PATH = Path(__file__).resolve().parents[1] / "config" / "video_models.json"
+_PRICES_PATH = Path(__file__).resolve().parents[1] / "config" / "media_models.json"
 _prices_cache: dict | None = None
+_image_cache: dict | None = None
+
+
+def _load(section: str) -> dict:
+    try:
+        raw = json.loads(_PRICES_PATH.read_text(encoding="utf-8"))
+        return {m["id"]: m for m in raw.get(section, [])}
+    except (OSError, ValueError, KeyError):
+        log.exception("media_models.json 读不了, %s 功能关闭", section)
+        return {}
 
 
 def _catalog() -> dict:
     """{model_id: {name, credits_per_second: {resolution: credits|None}}}"""
     global _prices_cache
     if _prices_cache is None:
-        try:
-            raw = json.loads(_PRICES_PATH.read_text(encoding="utf-8"))
-            _prices_cache = {m["id"]: m for m in raw.get("models", [])}
-        except (OSError, ValueError, KeyError):
-            log.exception("video_models.json 读不了, 视频功能关闭")
-            _prices_cache = {}
+        _prices_cache = _load("video")
     return _prices_cache
+
+
+def _image_catalog() -> dict:
+    """{model_id: {name, credits_per_image: credits|None}}"""
+    global _image_cache
+    if _image_cache is None:
+        _image_cache = _load("image")
+    return _image_cache
+
+
+def offered() -> dict:
+    """给 /studio 页面用: 当前真正在售的模型 (未定价的不列)。"""
+    video = [
+        {
+            "id": m["id"],
+            "name": m.get("name") or m["id"],
+            "resolutions": sorted(r for r, v in (m.get("credits_per_second") or {}).items() if v),
+        }
+        for m in _catalog().values()
+        if any((m.get("credits_per_second") or {}).values())
+    ]
+    image = [
+        {"id": m["id"], "name": m.get("name") or m["id"]}
+        for m in _image_catalog().values()
+        if m.get("credits_per_image")
+    ]
+    return {"video": video, "image": image}
 
 
 def _error(status: int, code: str, message: str) -> JSONResponse:
     return JSONResponse({"error": {"type": code, "message": message}}, status_code=status)
+
+
+def _gate(user: dict) -> JSONResponse | None:
+    """灰度闸。价格是手填且未经真实账单核对的, 在核对前只放管理员进来 ——
+    定价填错时全量开放意味着按错误的价格真金白银地卖, 那种错只能靠对账收场。"""
+    if config.MEDIA_ADMIN_ONLY and not user.get("is_admin"):
+        return _error(403, "not_available", "媒体生成正在灰度中，暂未对全部账号开放。")
+    return None
 
 
 def price_of(model: str, resolution: str) -> int | None:
@@ -118,6 +158,9 @@ def _refund_once(job: dict) -> None:
 async def create_video(request: Request, user: dict = Depends(resolve_user)):
     if not config.UPSTREAM_API_KEY:
         return _error(503, "upstream_unconfigured", "Video generation is not configured.")
+    gated = _gate(user)
+    if gated is not None:
+        return gated
 
     blocked = plans.check_run_blocked(user["id"])
     if blocked:
@@ -290,3 +333,83 @@ async def video_result(job_id: str, user: dict = Depends(resolve_user)):
         )
 
     return JSONResponse({"id": job_id, "task_status": "PROCESSING", "video_result": None})
+
+
+@router.post("/v1/images/generations")
+async def create_image(request: Request, user: dict = Depends(resolve_user)):
+    """图生成是**同步**的 (实测 ~15 秒出图), 所以不进 video_jobs, 一个请求打完。
+
+    上游的图像端点其实**返回 usage** (output_tokens 全是 image_tokens), 理论上
+    能走 charge_credits 那条按 token 的路 —— 但那要求模型在 models.json 目录里,
+    而它不在 (gen_models.py 的 SKIP_SUBSTRINGS 跳掉了 -image)。不在目录时
+    charge_credits 会按"最贵条目"兜底, 不会漏计费, 但价格离谱。所以这里和视频
+    一样按件计价, 口径统一, 也不用动聊天那条路。
+    """
+    if not config.UPSTREAM_API_KEY:
+        return _error(503, "upstream_unconfigured", "Image generation is not configured.")
+    gated = _gate(user)
+    if gated is not None:
+        return gated
+
+    blocked = plans.check_run_blocked(user["id"])
+    if blocked:
+        return _error(402, "insufficient_credits", "余额不足或已达额度上限。")
+
+    try:
+        raw = await read_limited_body(
+            request,
+            max_bytes=config.GATEWAY_BODY_MAX_BYTES,
+            timeout_s=config.REQUEST_BODY_TIMEOUT_S,
+        )
+        body = json.loads(raw)
+    except json.JSONDecodeError:
+        return _error(400, "invalid_request_error", "Body must be JSON.")
+
+    model = str(body.get("model") or "")
+    prompt = str(body.get("prompt") or "")
+    try:
+        n = max(1, min(int(body.get("n") or 1), config.IMAGE_MAX_BATCH))
+    except (TypeError, ValueError):
+        return _error(400, "invalid_request_error", "n must be an integer.")
+    if not prompt:
+        return _error(400, "invalid_request_error", "prompt is required.")
+
+    entry = _image_catalog().get(model)
+    per_image = (entry or {}).get("credits_per_image")
+    if not per_image:
+        return _error(404, "model_not_found", f"Model '{model}' is not offered for images.")
+    amount = int(per_image) * n
+
+    if credits.balance(user["id"]) < amount:
+        return _error(402, "insufficient_credits", f"这组图需要 {amount} 积分，当前余额不足。")
+
+    payload = {"model": model, "prompt": prompt, "n": n}
+    for passthrough in ("size", "quality", "background", "output_format", "image_url"):
+        if body.get(passthrough) is not None:
+            payload[passthrough] = body[passthrough]
+
+    url = config.UPSTREAM_BASE_URL.rstrip("/") + "/images/generations"
+    try:
+        async with _client() as client:
+            upstream = await client.post(url, headers=_auth_headers(), json=payload)
+    except httpx.HTTPError as exc:
+        log.warning("图像生成失败: %s", exc)
+        return _error(502, "upstream_error", "Upstream did not answer.")
+
+    if upstream.status_code >= 400:
+        try:
+            detail = upstream.json()
+        except ValueError:
+            detail = {"error": {"message": upstream.text[:400]}}
+        return JSONResponse(detail, status_code=upstream.status_code)
+
+    try:
+        result = upstream.json()
+    except ValueError:
+        return _error(502, "upstream_error", "Upstream returned invalid JSON.")
+
+    # 出图了才扣 —— 上游报错的路径上一分不收。
+    request_id = security.new_id("img_")
+    credits.spend(user["id"], amount, kind="image", model=model, request_id=request_id)
+    result["credits"] = amount
+    return JSONResponse(result)

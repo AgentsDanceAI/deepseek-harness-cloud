@@ -118,11 +118,16 @@ OVERDRAFT_LIMIT_CREDITS = _env_int("OVERDRAFT_LIMIT_CREDITS", 20)  # in-flight s
 # --- 视频生成 -----------------------------------------------------------------
 # 售价在 config/video_models.json (手写: 上游单价只在供应商控制台里, 没有 API)。
 # 那份文件默认全部未定价, 于是视频端点默认对所有模型 404 —— 要开卖得先填价。
+# 媒体生成默认只对管理员开放。价格是手填的、还没经过真实账单核对, 在那之前
+# 让所有人可用 = 拿真金白银试错。填准价格并确认毛利后再置 0 开放全量。
+MEDIA_ADMIN_ONLY = _env_bool("MEDIA_ADMIN_ONLY", True)
 VIDEO_DEFAULT_DURATION = _env_int("VIDEO_DEFAULT_DURATION", 5)
 VIDEO_DEFAULT_RESOLUTION = _env("VIDEO_DEFAULT_RESOLUTION", "480p")
 # 生成失败时退回的积分能活多久。作业是提交时预扣的, 失败退款只是把钱放回去,
 # 所以给足时间, 别让用户因为我们的上游出错而损失额度。
 VIDEO_REFUND_TTL_S = _env_float("VIDEO_REFUND_TTL_S", 365 * 24 * 3600)
+# 一次请求最多出几张。图是同步出的, 批量大了会把 UPSTREAM_TIMEOUT_S 顶穿。
+IMAGE_MAX_BATCH = _env_int("IMAGE_MAX_BATCH", 4)
 
 # --- gateway guards ---------------------------------------------------------
 GATEWAY_QPS = _env_float("GATEWAY_QPS", 5.0)  # per-user requests/second (token bucket)

@@ -41,6 +41,8 @@ PRICED = {
         "credits_per_second": {"480p": 10, "720p": 20},
     }
 }
+IMAGE_MODEL = "gpt-image-2"
+PRICED_IMAGES = {IMAGE_MODEL: {"id": IMAGE_MODEL, "name": "GPT Image 2", "credits_per_image": 15}}
 
 
 class _Resp:
@@ -79,6 +81,9 @@ def _pin(monkeypatch):
     monkeypatch.setattr(config, "UPSTREAM_API_KEY", "sk-upstream-test")
     monkeypatch.setattr(config, "UPSTREAM_BASE_URL", "https://api.qianmian.ai/v1")
     monkeypatch.setattr(media, "_prices_cache", PRICED)
+    monkeypatch.setattr(media, "_image_cache", PRICED_IMAGES)
+    # 灰度闸单独由 test_gate_* 覆盖; 其余用例测的是计费逻辑, 先放行。
+    monkeypatch.setattr(config, "MEDIA_ADMIN_ONLY", False)
 
 
 def _new_user(email):
@@ -241,3 +246,121 @@ def test_concurrent_pollers_refund_only_once(monkeypatch):
     media._refund_once(stale)  # 同一份旧快照, 模拟第二个并发请求
 
     assert credits.balance(user["id"]) == before, "并发退款必须只生效一次"
+
+
+# --- 灰度闸 -------------------------------------------------------------------
+# 价格是手填且未经账单核对的。开闸前若让全量用户可用, 等于按错误的价格真金白银
+# 地卖, 那种错只能靠对账收场 —— 所以默认关着这件事本身需要被钉死。
+
+
+def test_gate_blocks_non_admin_by_default(monkeypatch):
+    monkeypatch.setattr(config, "MEDIA_ADMIN_ONLY", True)
+    _new_user("vid-plebe@test.local")
+    log = []
+    r = _submit(monkeypatch, _Resp(200, {"task_id": "vtask_gate"}), log)
+    assert r.status_code == 403, r.text
+    assert log == [], "被闸挡住就不该打上游"
+
+
+def test_gate_lets_admin_through(monkeypatch):
+    monkeypatch.setattr(config, "MEDIA_ADMIN_ONLY", True)
+    email = "vid-boss@test.local"
+    monkeypatch.setattr(config, "ADMIN_EMAILS", [email])
+    _new_user(email)
+    r = _submit(monkeypatch, _Resp(200, {"task_id": "vtask_admin"}))
+    assert r.status_code == 200, r.text
+
+
+# --- 图像 ---------------------------------------------------------------------
+# 同步出图, 不进 video_jobs。计费口径与视频一致 (按件), 因为图像模型不在
+# models.json 目录里, charge_credits 会按"最贵条目"兜底 —— 不漏计费但价格离谱。
+
+
+def _gen_image(monkeypatch, response, log=None):
+    monkeypatch.setattr(media, "_client", lambda: _FakeClient(post=response, log=log))
+    return client.post(
+        "/llm/v1/images/generations",
+        json={"model": IMAGE_MODEL, "prompt": "一个红色的圆", "n": 1},
+    )
+
+
+def test_image_charges_per_item(monkeypatch):
+    user = _new_user("img-ok@test.local")
+    before = credits.balance(user["id"])
+    ok = _Resp(200, {"created": 1, "data": [{"b64_json": "AAAA"}], "usage": {"output_tokens": 196}})
+    r = _gen_image(monkeypatch, ok)
+    assert r.status_code == 200, r.text
+    assert r.json()["credits"] == 15
+    assert credits.balance(user["id"]) == before - 15
+
+
+def test_image_upstream_error_costs_nothing(monkeypatch):
+    user = _new_user("img-fail@test.local")
+    before = credits.balance(user["id"])
+    r = _gen_image(monkeypatch, _Resp(400, {"error": {"message": "bad prompt"}}))
+    assert r.status_code == 400
+    assert credits.balance(user["id"]) == before, "上游报错的路径上一分不收"
+
+
+def test_image_unpriced_model_is_not_offered(monkeypatch):
+    monkeypatch.setattr(media, "_image_cache", {IMAGE_MODEL: {"credits_per_image": None}})
+    _new_user("img-unpriced@test.local")
+    log = []
+    r = _gen_image(monkeypatch, _Resp(200, {"data": []}), log)
+    assert r.status_code == 404
+    assert log == []
+
+
+def test_offered_hides_unpriced_models(monkeypatch):
+    """/studio 的下拉只列真正在售的 —— 未定价的露出来只会点了报 404。"""
+    monkeypatch.setattr(
+        media,
+        "_prices_cache",
+        {
+            "priced": {"id": "priced", "name": "P", "credits_per_second": {"480p": 10, "720p": None}},
+            "unpriced": {"id": "unpriced", "name": "U", "credits_per_second": {"480p": None}},
+        },
+    )
+    monkeypatch.setattr(
+        media,
+        "_image_cache",
+        {
+            "img-priced": {"id": "img-priced", "name": "I", "credits_per_image": 5},
+            "img-unpriced": {"id": "img-unpriced", "name": "X", "credits_per_image": None},
+        },
+    )
+    out = media.offered()
+    assert [m["id"] for m in out["video"]] == ["priced"]
+    assert out["video"][0]["resolutions"] == ["480p"], "未定价的分辨率档也不该露出"
+    assert [m["id"] for m in out["image"]] == ["img-priced"]
+
+
+# --- /studio 页面 --------------------------------------------------------------
+
+
+def test_studio_page_renders_for_admin(monkeypatch):
+    email = "studio-boss@test.local"
+    monkeypatch.setattr(config, "MEDIA_ADMIN_ONLY", True)
+    monkeypatch.setattr(config, "ADMIN_EMAILS", [email])
+    _new_user(email)
+    r = client.get("/studio")
+    assert r.status_code == 200, r.text
+    assert "媒体工作台" in r.text
+    # 下拉的数据是服务端注入的, 页面不该自己去猜有哪些模型
+    assert "offered-data" in r.text
+    assert MODEL in r.text
+
+
+def test_studio_page_turns_non_admin_away(monkeypatch):
+    monkeypatch.setattr(config, "MEDIA_ADMIN_ONLY", True)
+    _new_user("studio-plebe@test.local")
+    r = client.get("/studio", follow_redirects=False)
+    assert r.status_code == 303
+    assert r.headers["location"] == "/console"
+
+
+def test_studio_page_requires_login(monkeypatch):
+    client.cookies.clear()
+    r = client.get("/studio", follow_redirects=False)
+    assert r.status_code == 303
+    assert "/login" in r.headers["location"]
