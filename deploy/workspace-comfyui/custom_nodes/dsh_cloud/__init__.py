@@ -22,10 +22,18 @@ POLL_TIMEOUT_S = float(os.environ.get("DSH_CLOUD_VIDEO_TIMEOUT_S", "600"))
 POLL_INTERVAL_S = float(os.environ.get("DSH_CLOUD_VIDEO_POLL_S", "3"))
 
 
+# 网关前面有 Cloudflare, 它按 **User-Agent** 拦机器人 —— urllib 的默认
+# "Python-urllib/3.x" 会直接吃 403 `error code: 1010`, 报文里不提 UA, 只说
+# Forbidden。2026-08-27 实测: 默认 UA 403, 换成下面这个就正常走到网关。
+# 这条在桩网关上永远测不出来 (桩前面没有 CDN), 所以桩改成校验 UA 存在。
+_USER_AGENT = "DSHCloud-ComfyUI/1.0 (+https://dshcloud.online)"
+
+
 def _request(method: str, url: str, payload: dict | None = None) -> dict:
     data = json.dumps(payload).encode() if payload is not None else None
     req = urllib.request.Request(url, data=data, method=method)
     req.add_header("Content-Type", "application/json")
+    req.add_header("User-Agent", _USER_AGENT)
     if TOKEN:
         req.add_header("Authorization", f"Bearer {TOKEN}")
     with urllib.request.urlopen(req, timeout=60) as resp:
@@ -157,7 +165,9 @@ class DSHCloudVideo:
         out_dir = os.environ.get("COMFY_OUTPUT_DIR", "/opt/ComfyUI/output")
         os.makedirs(out_dir, exist_ok=True)
         local_path = os.path.join(out_dir, f"dshcloud-{job_id}.mp4")
-        with urllib.request.urlopen(url, timeout=300) as src, open(local_path, "wb") as dst:
+        dl = urllib.request.Request(url)
+        dl.add_header("User-Agent", _USER_AGENT)  # 产物 URL 也可能在 CDN 后面
+        with urllib.request.urlopen(dl, timeout=300) as src, open(local_path, "wb") as dst:
             dst.write(src.read())
 
         return {"ui": {"text": [local_path]}, "result": (url, local_path)}
@@ -212,7 +222,9 @@ class DSHCloudImage:
             if item.get("b64_json"):
                 raw = base64.b64decode(item["b64_json"])
             elif item.get("url"):
-                with urllib.request.urlopen(item["url"], timeout=120) as src:
+                dl = urllib.request.Request(item["url"])
+                dl.add_header("User-Agent", _USER_AGENT)
+                with urllib.request.urlopen(dl, timeout=120) as src:
                     raw = src.read()
             else:
                 continue
