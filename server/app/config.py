@@ -115,6 +115,15 @@ FREE_SIGNUP_CREDITS = _env_int("FREE_SIGNUP_CREDITS", 500)  # $1 = 100 credits
 SEARCH_CALL_CREDITS = _env_int("SEARCH_CALL_CREDITS", 1)  # flat per web_search call, on top of tokens
 OVERDRAFT_LIMIT_CREDITS = _env_int("OVERDRAFT_LIMIT_CREDITS", 20)  # in-flight streams may finish
 
+# --- 视频生成 -----------------------------------------------------------------
+# 售价在 config/video_models.json (手写: 上游单价只在供应商控制台里, 没有 API)。
+# 那份文件默认全部未定价, 于是视频端点默认对所有模型 404 —— 要开卖得先填价。
+VIDEO_DEFAULT_DURATION = _env_int("VIDEO_DEFAULT_DURATION", 5)
+VIDEO_DEFAULT_RESOLUTION = _env("VIDEO_DEFAULT_RESOLUTION", "480p")
+# 生成失败时退回的积分能活多久。作业是提交时预扣的, 失败退款只是把钱放回去,
+# 所以给足时间, 别让用户因为我们的上游出错而损失额度。
+VIDEO_REFUND_TTL_S = _env_float("VIDEO_REFUND_TTL_S", 365 * 24 * 3600)
+
 # --- gateway guards ---------------------------------------------------------
 GATEWAY_QPS = _env_float("GATEWAY_QPS", 5.0)  # per-user requests/second (token bucket)
 GATEWAY_QPS_BURST = _env_int("GATEWAY_QPS_BURST", 15)
