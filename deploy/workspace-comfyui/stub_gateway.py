@@ -71,10 +71,27 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _check_ua(self) -> bool:
+        """节点必须带正经 User-Agent。
+
+        生产网关前面是 Cloudflare, 它按 UA 拦机器人 —— urllib 的默认
+        "Python-urllib/3.x" 吃 403 `error code: 1010`。桩前面没有 CDN, 所以这条
+        在这里**永远不会自然暴露**; 2026-08-27 就是这样漏到线上的: 桩全绿, 而
+        节点从没成功打通过生产网关。所以桩自己来把这道关。
+        """
+        ua = self.headers.get("User-Agent", "")
+        if not ua or ua.lower().startswith(("python-urllib", "python-requests")):
+            print(f"[stub] !! 拒绝: User-Agent 不合格 {ua!r} —— 生产上会被 CDN 403", flush=True)
+            self._json(403, {"error": "bad user agent", "ua": ua})
+            return False
+        return True
+
     def _json(self, code: int, obj: dict):
         self._send(code, json.dumps(obj).encode(), "application/json")
 
     def do_POST(self):
+        if not self._check_ua():
+            return
         if self.path.endswith("/images/generations"):
             length = int(self.headers.get("Content-Length", 0))
             payload = json.loads(self.rfile.read(length) or b"{}")
@@ -100,6 +117,8 @@ class Handler(BaseHTTPRequestHandler):
                          "request_id": job_id})
 
     def do_GET(self):
+        if not self._check_ua():
+            return
         if self.path.endswith("/sample.mp4"):
             return self._send(200, SAMPLE.read_bytes(), "video/mp4")
         if "/videos/result/" in self.path:
