@@ -155,6 +155,46 @@ def check() -> int:
     return 1
 
 
+def _drop(cache_id: str) -> None:
+    try:
+        _call("eci", "2018-08-08", "DeleteImageCache", {"ImageCacheId": cache_id})
+    except Exception as e:  # noqa: BLE001
+        print(f"   (删 {cache_id} 失败, 跳过: {e})", file=sys.stderr)
+
+
+def _await_ready(cache_id: str, ref: str, timeout: float = 900.0) -> bool:
+    """等一个在建的缓存到 Ready。返回它是否成功。
+
+    **为什么要等而不是直接认它**: ECI 在实例缓存未命中时会**自己建**一个缓存,
+    而自动建的那个没有临时 EIP、没有出网能力 —— 它会卡在 Preparing 0% 然后转
+    Failed。把 Creating/Preparing 一律当成「已经有了」而跳过, 就等于把这个必然
+    失败的缓存认下来: 之后没人再管它, 冷启动一直慢, 而且不报错。
+    2026-08-27 实测踩到, 只能人工删掉重建。
+    """
+    print(f"==> {ref} 已有在建的缓存 {cache_id}, 等它到 Ready (最多 {int(timeout)}s)")
+    t0 = time.time()
+    last = None
+    while time.time() - t0 < timeout:
+        cur = [c for c in _caches() if c.get("ImageCacheId") == cache_id]
+        if not cur:
+            print("    它消失了 —— 当作失败处理")
+            return False
+        st = cur[0].get("Status")
+        if st != last:
+            print(f"    {st} ({cur[0].get('Progress')}) @ {int(time.time() - t0)}s")
+            last = st
+        if st == "Ready":
+            return True
+        if st == "Failed":
+            print("    构建失败 —— 多半是 ECI 自动建的那个 (没有出网能力), 删掉自己建")
+            _drop(cache_id)
+            return False
+        time.sleep(10)
+    print("    等超时 —— 删掉自己建")
+    _drop(cache_id)
+    return False
+
+
 def rebuild() -> int:
     refs = _refs()
     caches = _caches()
@@ -166,23 +206,24 @@ def rebuild() -> int:
         if not (set(c.get("Images") or []) & set(refs))
         or c.get("Status") not in ("Ready", "Creating", "Preparing")
     ]
-    todo = [
-        r
-        for r in refs
-        if not [
-            c
-            for c in caches
-            if r in (c.get("Images") or []) and c.get("Status") in ("Ready", "Creating", "Preparing")
-        ]
-    ]
+
+    todo = []
+    for ref in refs:
+        mine = [c for c in caches if ref in (c.get("Images") or [])]
+        if any(c.get("Status") == "Ready" for c in mine):
+            continue
+        # 只有 Ready 才算数。在建的要**等出结果**, 不能当成已经有了 —— 见
+        # _await_ready 的说明。
+        building = [c for c in mine if c.get("Status") in ("Creating", "Preparing")]
+        if building and _await_ready(building[0]["ImageCacheId"], ref):
+            continue
+        todo.append(ref)
+
     if not todo:
-        print(f"==> {len(refs)} 个产品镜像都已有缓存, 无需重建")
+        print(f"==> {len(refs)} 个产品镜像都已有 Ready 缓存")
         for old in stale:
             print(f"==> 删旧缓存 {old}")
-            try:
-                _call("eci", "2018-08-08", "DeleteImageCache", {"ImageCacheId": old})
-            except Exception as e:  # noqa: BLE001
-                print(f"   (跳过: {e})", file=sys.stderr)
+            _drop(old)
         return check()
     rc = 0
     for ref in todo:
@@ -246,10 +287,7 @@ def _build_one(ref: str, stale: list[str]) -> int:
 
     for old in stale:
         print(f"==> 删旧缓存 {old}")
-        try:
-            _call("eci", "2018-08-08", "DeleteImageCache", {"ImageCacheId": old})
-        except Exception as e:  # noqa: BLE001
-            print(f"   (跳过: {e})", file=sys.stderr)
+        _drop(old)
 
     return 0
 
