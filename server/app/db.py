@@ -190,6 +190,27 @@ SCHEMA = [
         ref TEXT NOT NULL DEFAULT '',
         created REAL NOT NULL
     )""",
+    # 视频生成作业。聊天是一个请求打完就结束, 视频要几十秒到几分钟 —— 用户会
+    # 关掉页面、会换设备, 所以作业状态必须落库, 不能只活在一次请求的生命周期里。
+    #
+    # credits 是**提交时预扣**的额度 (见 media.py 的说明), refunded 让退款幂等:
+    # 轮询是客户端驱动的, 同一个失败作业会被查很多次, 不加这个会退很多次钱。
+    """CREATE TABLE IF NOT EXISTS video_jobs (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        model TEXT NOT NULL,
+        upstream_task_id TEXT NOT NULL DEFAULT '',
+        status TEXT NOT NULL,
+        prompt TEXT NOT NULL DEFAULT '',
+        duration INTEGER NOT NULL DEFAULT 0,
+        resolution TEXT NOT NULL DEFAULT '',
+        credits INTEGER NOT NULL DEFAULT 0,
+        refunded INTEGER NOT NULL DEFAULT 0,
+        url TEXT NOT NULL DEFAULT '',
+        error TEXT NOT NULL DEFAULT '',
+        created REAL NOT NULL,
+        updated REAL NOT NULL
+    )""",
     "CREATE INDEX IF NOT EXISTS idx_grants_user ON credit_grants(user_id, expires)",
     "CREATE INDEX IF NOT EXISTS idx_usage_user ON usage_log(user_id, created)",
     "CREATE INDEX IF NOT EXISTS idx_orders_user ON orders(user_id, created)",
@@ -198,6 +219,7 @@ SCHEMA = [
     "CREATE INDEX IF NOT EXISTS idx_api_keys_user ON api_keys(user_id, revoked)",
     "CREATE INDEX IF NOT EXISTS idx_passes_user ON work_passes(user_id, expires)",
     "CREATE INDEX IF NOT EXISTS idx_mgrants_user ON minute_grants(user_id, expires)",
+    "CREATE INDEX IF NOT EXISTS idx_vjobs_user ON video_jobs(user_id, created)",
     "CREATE INDEX IF NOT EXISTS idx_org_members_user ON org_members(user_id)",
     "CREATE INDEX IF NOT EXISTS idx_org_invites_org ON org_invites(org_id)",
 ]
