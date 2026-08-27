@@ -40,11 +40,21 @@ def _request(method: str, url: str, payload: dict | None = None) -> dict:
 # 一下就把整个工作台的启动拖住, 而用户看到的只是"一直起不来"。取不到就回落成
 # 文本框, 节点照常可用。
 _MODELS_CACHE: dict | None = None
+_MODELS_FAILED_AT: float = 0.0
+_RETRY_AFTER_S = 30.0
 
 
 def _offered() -> dict:
-    global _MODELS_CACHE
+    """在售清单。**失败不入缓存** —— 只缓存成功的结果。
+
+    ComfyUI 启动时 ECI 实例的 EIP 未必已经绑好, 此刻取不到是正常的。把失败也
+    缓存起来就等于一次抖动永久锁死: 之后按多少次「刷新节点」都还是文本框。
+    现在失败后 30 秒可重试, 用户按一下刷新就好了。
+    """
+    global _MODELS_CACHE, _MODELS_FAILED_AT
     if _MODELS_CACHE is None:
+        if time.time() - _MODELS_FAILED_AT < _RETRY_AFTER_S:
+            return {}
         url = f"{BASE}/media/models"
         try:
             _MODELS_CACHE = _request("GET", url)
@@ -67,7 +77,8 @@ def _offered() -> dict:
                 f"token={'有' if TOKEN else '无'}",
                 flush=True,
             )
-            _MODELS_CACHE = {}
+            _MODELS_FAILED_AT = time.time()
+            return {}
     return _MODELS_CACHE
 
 
