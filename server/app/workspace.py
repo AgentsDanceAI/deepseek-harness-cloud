@@ -40,9 +40,10 @@ import httpx
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 
-from . import config, credits, db, model_catalog, security, work_access, workbackend
+from . import config, credits, db, products, security, work_access, workbackend
 from .accounts import resolve_user, try_resolve_user
 from .http_limits import read_limited_body
+from .products import PREVIEW_STATIC_PORT
 
 log = logging.getLogger("dhc.work")
 router = APIRouter(tags=["workspace"])
@@ -83,12 +84,15 @@ _started_at: dict[str, float] = {}
 _user_active: dict[str, float] = {}
 
 
-def _work_url(path: str = "/") -> str:
+def _work_url(path: str = "/", product: products.Product | None = None) -> str:
     """Public URL of the workspace host. The scheme follows PUBLIC_BASE so a
     self-hosted deployment on plain HTTP (or localhost) is not redirected to an
-    https origin it does not serve."""
+    https origin it does not serve.
+
+    域名按产品走: 每个产品一个子域, 因为 ComfyUI 前端用绝对路径引资源。"""
     scheme = "http" if config.PUBLIC_BASE.startswith("http://") else "https"
-    return f"{scheme}://{config.WORK_DOMAIN}{path}"
+    domain = product.domain if product else config.WORK_DOMAIN
+    return f"{scheme}://{domain}{path}"
 
 
 def _boot_fingerprint(boot: str) -> str:
@@ -101,8 +105,20 @@ def _upstream_host(user_id: str) -> str:
     return _host.get(user_id) or _cname(user_id)
 
 
-def _upstream(user_id: str) -> str:
-    return f"{_upstream_host(user_id)}:3081"
+def _product_of(request: Request) -> products.Product:
+    """这是哪个产品的工作台 —— 按 Host 判。
+
+    每个产品一个域名, 因为 ComfyUI 前端用绝对路径引资源, 塞不进子路径。
+    Caddy 的 forward_auth 透传原始 Host, 所以这里看到的就是用户敲的那个域名。
+    认不出来时回落到 dsh: 主站 /work 入口用的是主站域名。
+    """
+    return products.by_domain(request.headers.get("host", "")) or products.registry()[products.DEFAULT]
+
+
+def _upstream(key: str, product: products.Product) -> str:
+    """写进 X-Work-Upstream 的 host:port。端口按产品走 —— dsh 是 socat 转出来的
+    3081, ComfyUI 直接听 8188。"""
+    return f"{_upstream_host(key)}:{product.port}"
 
 
 def _mint_workspace_token(user: dict) -> str:
@@ -170,120 +186,19 @@ async def _running_workspaces() -> list[str]:
     return await backend().running_users()
 
 
-def _boot_script() -> str:
-    """The container's entrypoint script.
-
-    Deliberately free of per-user values (the credential arrives through env),
-    so its digest identifies the CONFIGURATION rather than the user — that is
-    what lets a running container be recognised as out of date.
-    """
-    gateway = config.PUBLIC_BASE.rstrip("/")
-    # Chat goes through dsh's pi-ai adapter (openai-completions protocol), NOT
-    # the llm-deepseek adapter: our upstream speaks standard OpenAI streaming,
-    # and llm-deepseek's DeepSeek-flavored tool-call parsing assembles empty
-    # tool names from it (every tool call died with UNKNOWN_TOOL — the exact
-    # combination proven to work is pi-ai + openai-completions against this
-    # upstream). web_search stays on the deepseek search row via env.
-    # The model list is the catalog, not a hand-kept copy of it: the picker in
-    # the workspace and the price table on /pricing are then the same rows by
-    # construction, so a model can never be sellable but unpickable (or worse,
-    # pickable but unpriced — which bills at the most expensive entry).
-    model_rows = "".join(
-        f"        - id: {m['id']}\n          name: {m.get('display_name', m['id'])}\n"
-        for m in model_catalog.catalog().values()
-    )
-    settings_yaml = (
-        # dsh registers its own DeepSeek provider, which showed up in the model
-        # picker as a second "DeepSeek" group offering V4-Flash/V4-Pro. Those
-        # entries are incompatible with the gateway's tool-call deltas (see
-        # above), and their default endpoint is outside this service. An explicit
-        # empty catalog removes them from
-        # the picker; baseURL keeps anything that still resolves on-platform.
-        "llm-deepseek:\n"
-        f"  baseURL: {gateway}/llm/v1\n"
-        "  models: []\n"
-        "llm-pi-ai:\n"
-        "  providers:\n"
-        "    dshcloud:\n"
-        "      displayName: DSH Cloud\n"
-        "      apiKeyEnv: DSH_CLOUD_TOKEN\n"
-        "      api: openai-completions\n"
-        f"      baseURL: {gateway}/llm/v1\n"
-        "      models:\n" + model_rows + "agent-default-model:\n"
-        "  provider: dshcloud\n"
-        f"  model: {model_catalog.default_model()}\n"
-    )
-    # dsh loads $DSH_HOME/AGENTS.md as user-global instructions for every
-    # session. Without this the agent tells people to open http://localhost:PORT
-    # — which is the CONTAINER's loopback and unreachable from their browser.
-    agents_md = (
-        "# DSH Cloud 云工作台\n\n"
-        "你运行在一个云端容器里，用户通过浏览器访问你。用户的电脑和这个容器"
-        "**不是同一台机器**。\n\n"
-        "## 让用户能打开你做的网页 / 服务\n\n"
-        "- **绝不要**让用户访问 `http://localhost:<端口>` 或 `127.0.0.1` —— 那是本容器的"
-        "回环地址，用户的浏览器打不开。\n"
-        f"- 本容器的端口可以通过这个公网地址预览：`{gateway}/preview/<端口>/`\n"
-        f"  例如你在 8080 起了服务，就告诉用户打开 `{gateway}/preview/8080/`\n"
-        "- **服务必须监听 `0.0.0.0`**，只听 127.0.0.1 的服务无法被预览代理到。\n"
-        "  - `python3 -m http.server 8080 --bind 0.0.0.0`\n"
-        "  - vite: `--host 0.0.0.0`；next: `-H 0.0.0.0`\n"
-        "- 页面里引用资源请用**相对路径**（`./game.js`），预览代理对相对路径最稳。\n"
-        "- 纯静态单文件（如一个 index.html）也需要起个 http 服务再给预览地址，"
-        "不要只把文件路径告诉用户。\n"
-    )
-    # Boot runs on every container start, so both files self-heal if the agent
-    # or the user deletes them. AGENTS.md is merged rather than overwritten: our
-    # platform facts live between markers and anything the user wrote around
-    # them (their own global preferences) survives the restart.
-    merge_agents_md = (
-        "node -e '"
-        'const fs=require("fs"),p="/root/.dsh/AGENTS.md";'
-        'const B="<!-- dshcloud:begin -->",E="<!-- dshcloud:end -->";'
-        'const block=B+"\\n"+fs.readFileSync("/root/.dsh/.dshcloud-agents.md","utf8").trim()+"\\n"+E;'
-        'let cur="";try{cur=fs.readFileSync(p,"utf8")}catch(e){}'
-        'const re=new RegExp(B+"[\\\\s\\\\S]*?"+E);'
-        'fs.writeFileSync(p,re.test(cur)?cur.replace(re,block):(cur.trim()?block+"\\n\\n"+cur.trim()+"\\n":block+"\\n"));'
-        "'"
-    )
-    boot = (
-        "mkdir -p /root/.dsh && cat > /root/.dsh/settings.yaml <<'DHCEOF'\n" + settings_yaml + "DHCEOF\n"
-        "cat > /root/.dsh/.dshcloud-agents.md <<'DHCMDEOF'\n"
-        + agents_md
-        + "DHCMDEOF\n"
-        + merge_agents_md
-        + "\n"
-        # A always-on static server over /workspace. Without it, seeing a file
-        # the agent just wrote meant asking the agent to start a server — and
-        # that server dies with the container, so the link rots. This one is
-        # part of the workspace itself, so "open what it made" always works.
-        f"python3 -m http.server {PREVIEW_STATIC_PORT} --bind 0.0.0.0 "
-        "--directory /workspace >/dev/null 2>&1 & "
-        "socat TCP-LISTEN:3081,fork,reuseaddr TCP:127.0.0.1:3080 & "
-        "exec dsh web --host 127.0.0.1 --port 3080"
-    )
-    return boot
-
-
-async def _create(user: dict) -> None:
+async def _create(user: dict, product: products.Product) -> None:
     token = _mint_workspace_token(user)
-    gateway = config.PUBLIC_BASE.rstrip("/")
-    boot = _boot_script()
-    env = {
-        "DSH_CLOUD_TOKEN": token,
-        "DEEPSEEK_API_KEY": token,
-        "DEEPSEEK_BASE_URL": f"{gateway}/llm/v1",
-        "DEEPSEEK_SEARCH_BASE_URL": f"{gateway}/llm/anthropic/v1",
-        "DSH_TELEMETRY_DISABLED": "1",
-        # The per-user container is the sandbox boundary: resource limits,
-        # isolated networking, no docker socket, and no privileged mode. dsh
-        # currently couples its sandbox policy and interactive approval policy
-        # to this environment variable. The web client cannot answer approval
-        # prompts, so tools run without a second in-container sandbox. Revisit
-        # this setting when those policies can be configured independently.
-        "DSH_PERMISSION_MODE": "danger-full-access",
-    }
-    await backend().create(user["id"], boot=boot, env=env, boot_fp=_boot_fingerprint(boot))
+    boot = products.boot_script(product.id)
+    await backend().create(
+        products.wskey(user["id"], product.id),
+        boot=boot,
+        env=products.env_for(product.id, token),
+        boot_fp=_boot_fingerprint(boot),
+        image=product.image,
+        image_ref=product.image_ref,
+        mem_mb=product.mem_mb,
+        cpus=product.cpus,
+    )
 
 
 async def _start(user_id: str) -> None:
@@ -298,26 +213,30 @@ async def _stop(user_id: str) -> None:
     _host.pop(user_id, None)
 
 
-async def _ready(user_id: str) -> bool:
-    """dsh answers on :3081 once booted; the fence trusts a loopback Host."""
+async def _ready(key: str, product: products.Product) -> bool:
+    """产品在自己的端口上应答后才算就绪。
+
+    dsh 那道可达性围栏只信回环 Host, 所以探活要伪装成回环; ComfyUI 没有这道
+    围栏, 带上也无妨 —— 统一发, 免得每加一个产品就多一条分支。
+    """
     try:
         async with httpx.AsyncClient(timeout=3.0) as client:
-            r = await client.get(f"http://{_upstream(user_id)}/", headers={"host": "127.0.0.1:3080"})
+            r = await client.get(f"http://{_upstream(key, product)}/", headers={"host": "127.0.0.1:3080"})
             return r.status_code == 200
     except httpx.HTTPError:
         return False
 
 
-def _boot_is_stale(info: workbackend.WorkInfo) -> bool:
+def _boot_is_stale(info: workbackend.WorkInfo, product_id: str) -> bool:
     """True when the workspace was built from a different boot configuration.
 
     A workspace without a stamp predates the mechanism and is stale by
     definition.
     """
-    return info.boot_fp != _boot_fingerprint(_boot_script())
+    return info.boot_fp != _boot_fingerprint(products.boot_script(product_id))
 
 
-async def _image_is_stale(info: workbackend.WorkInfo) -> bool:
+async def _image_is_stale(info: workbackend.WorkInfo, product: products.Product) -> bool:
     """True when the workspace runs an image other than what it would be born
     from now.
 
@@ -330,7 +249,7 @@ async def _image_is_stale(info: workbackend.WorkInfo) -> bool:
     is deliberately *not* stale: tearing a working workspace down over a failed
     lookup trades a cosmetic staleness for a real outage.
     """
-    want = await backend().current_image_id()
+    want = await backend().current_image_id(product.image_ref or product.image)
     return bool(want) and bool(info.image_id) and want != info.image_id
 
 
@@ -354,22 +273,29 @@ def _ensure_lock(uid: str) -> asyncio.Lock:
     return lock
 
 
-async def ensure_workspace(user: dict) -> str:
-    async with _ensure_lock(user["id"]):
-        return await _ensure_workspace(user)
+async def ensure_workspace(user: dict, product: products.Product) -> str:
+    key = products.wskey(user["id"], product.id)
+    async with _ensure_lock(key):
+        return await _ensure_workspace(user, product)
 
 
-async def _ensure_workspace(user: dict) -> str:
+async def _ensure_workspace(user: dict, product: products.Product) -> str:
     """Idempotent create+start; returns 'running' | 'starting'. Raises on
     hard failures (cap reached, engine down)."""
-    uid = user["id"]
+    uid = products.wskey(user["id"], product.id)
     info = await _inspect(uid)
     if info is not None:
         # Rebuild rather than restart: the settings the user would get are baked
         # into the old Cmd, and the runtime into the old image. Storage is
         # named volumes (docker) or NAS (ECI), so files and history persist
         # across the recreate.
-        stale = "boot config" if _boot_is_stale(info) else "image" if await _image_is_stale(info) else None
+        stale = (
+            "boot config"
+            if _boot_is_stale(info, product.id)
+            else "image"
+            if await _image_is_stale(info, product)
+            else None
+        )
         if stale is not None:
             log.info("workspace %s has stale %s; recreating", uid, stale)
             await backend().destroy(uid)
@@ -379,7 +305,7 @@ async def _ensure_workspace(user: dict) -> str:
         running = await _running_workspaces()
         if len(running) >= config.WORK_MAX_CONCURRENT or _capacity_reason():
             raise RuntimeError("capacity")
-        await _create(user)
+        await _create(user, product)
         await _start(uid)
         _starting[uid] = time.time()
         return "starting"
@@ -393,7 +319,7 @@ async def _ensure_workspace(user: dict) -> str:
         await _start(uid)
         _starting[uid] = time.time()
         return "starting"
-    if await _ready(uid):
+    if await _ready(uid, product):
         _starting.pop(uid, None)
         return "running"
     if uid not in _starting:
@@ -410,7 +336,6 @@ async def _ensure_workspace(user: dict) -> str:
 
 # A static server over /workspace runs for the life of the container, so a file
 # the agent wrote is viewable without asking it to start anything.
-PREVIEW_STATIC_PORT = 8088
 PREVIEW_PROBE_PORTS = (8080, 3000, 5173, 8000, 5000, 4173, 8888, 3001, 4200, 9000)
 _PREVIEW_PORT_COOKIE = "dhc_preview_port"
 # Ports we will never expose: dsh's own UI (its API drives the agent with the
@@ -935,14 +860,21 @@ async def work_route(request: Request):
     if credits.balance(user["id"]) <= 0:
         return RedirectResponse(f"{site}/pricing?reason=credits", status_code=302)
 
+    product = _product_of(request)
+    if not product.image:
+        return JSONResponse(status_code=404, content={"detail": "product_disabled"})
+    # 计时/在场状态按**工作台**计, 额度按**用户**计 —— 两者不是一个键: 同一个人
+    # 的 dsh 与 ComfyUI 各自空闲、各自回收, 但花的是同一份机时。
+    key = products.wskey(user["id"], product.id)
+
     now = time.time()
     # Fast path first: this endpoint gates EVERY asset and WebSocket frame, so
     # the quota lookup must not run per request. A session already in flight
     # keeps its workspace to the end of the minute; the gate below catches it
     # on the next cold check, which is where a new task would land anyway.
-    if now - _last_seen.get(user["id"], 0) < 30 and user["id"] not in _starting:
-        _last_seen[user["id"]] = now
-        return Response(status_code=200, headers={"X-Work-Upstream": _upstream(user["id"])})
+    if now - _last_seen.get(key, 0) < 30 and key not in _starting:
+        _last_seen[key] = now
+        return Response(status_code=200, headers={"X-Work-Upstream": _upstream(key, product)})
 
     # When the machine-time allowance is exhausted, route to plans rather than
     # consuming model credits.
@@ -950,14 +882,14 @@ async def work_route(request: Request):
         return RedirectResponse(f"{site}/pricing?reason=work#plans", status_code=302)
 
     try:
-        state = await ensure_workspace(user)
+        state = await ensure_workspace(user, product)
     except RuntimeError as e:
         reason = "busy" if str(e) == "capacity" else "error"
         return RedirectResponse(f"{site}/work/starting?state={reason}", status_code=302)
     if state != "running":
         return RedirectResponse(f"{site}/work/starting", status_code=302)
-    _last_seen[user["id"]] = now
-    return Response(status_code=200, headers={"X-Work-Upstream": _upstream(user["id"])})
+    _last_seen[key] = now
+    return Response(status_code=200, headers={"X-Work-Upstream": _upstream(key, product)})
 
 
 # --- PWA shell: the workspace document with mobile/PWA layers injected -------
@@ -1002,18 +934,22 @@ async def work_shell(request: Request):
         return RedirectResponse(f"{site}/pricing?reason=credits", status_code=302)
     if work_access.blocked_reason(user["id"]):
         return RedirectResponse(f"{site}/pricing?reason=work#plans", status_code=302)
+    product = _product_of(request)
+    if not product.image:
+        return RedirectResponse(f"{site}/console", status_code=302)
+    key = products.wskey(user["id"], product.id)
     try:
-        state = await ensure_workspace(user)
+        state = await ensure_workspace(user, product)
     except RuntimeError as e:
         kind = "busy" if str(e) == "capacity" else "error"
         return RedirectResponse(f"{site}/work/starting?state={kind}", status_code=302)
     if state != "running":
         return RedirectResponse(f"{site}/work/starting", status_code=302)
-    _last_seen[user["id"]] = time.time()
+    _last_seen[key] = time.time()
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             upstream = await client.get(
-                f"http://{_upstream(user['id'])}/", headers={"host": "127.0.0.1:3080"}
+                f"http://{_upstream(key, product)}/", headers={"host": "127.0.0.1:3080"}
             )
     except httpx.HTTPError:
         return RedirectResponse(f"{site}/work/starting", status_code=302)
@@ -1075,9 +1011,11 @@ async def work_status(request: Request):
         return JSONResponse(status_code=401, content={"detail": "not_authenticated"})
     if not config.WORK_ENABLED:
         return {"enabled": False}
-    info = await _inspect(user["id"])
+    product = _product_of(request)
+    key = products.wskey(user["id"], product.id)
+    info = await _inspect(key)
     state = (info.state or "unknown") if info else "none"
-    ready = bool(info) and info.running and await _ready(user["id"])
+    ready = bool(info) and info.running and await _ready(key, product)
     # The startup page uses backend state rather than a time-based approximation.
     # 用一套与后端无关的词暴露出来, 免得页面去解析 docker/ECI 各自的状态名。
     phase = (
@@ -1124,20 +1062,27 @@ async def work_active(request: Request):
 @router.post("/api/work/stop")
 async def work_stop(request: Request):
     user = resolve_user(request)
-    await _stop(user["id"])
-    _last_seen.pop(user["id"], None)
-    _starting.pop(user["id"], None)
-    _started_at.pop(user["id"], None)
-    _user_active.pop(user["id"], None)
+    key = products.wskey(user["id"], _product_of(request).id)
+    await _stop(key)
+    _last_seen.pop(key, None)
+    _starting.pop(key, None)
+    _started_at.pop(key, None)
+    _user_active.pop(key, None)
     return {"ok": True}
 
 
 @router.get("/work")
-async def work_entry(request: Request):
-    """Site entry point: kick the container and land the user on the UI."""
+async def work_entry(request: Request, product_id: str = products.DEFAULT):
+    """Site entry point: kick the container and land the user on the UI.
+
+    product_id 决定进哪个工作台。默认 dsh —— /work 这个地址的语义不变。
+    """
     site = config.PUBLIC_BASE.rstrip("/")
     if not config.WORK_ENABLED:
         return RedirectResponse(f"{site}/download", status_code=302)
+    product = products.get(product_id)
+    if product is None or not product.image or not product.domain:
+        return RedirectResponse(f"{site}/console", status_code=302)
     user = try_resolve_user(request)
     if user is None:
         return RedirectResponse(f"{site}/login?next=/work", status_code=302)
@@ -1150,12 +1095,12 @@ async def work_entry(request: Request):
     task = (request.query_params.get("task") or "").strip()
     suffix = ("?task=" + quote(task[:2000], safe="")) if task else ""
     try:
-        state = await ensure_workspace(user)
+        state = await ensure_workspace(user, product)
     except RuntimeError as e:
         kind = "busy" if str(e) == "capacity" else "error"
         return RedirectResponse(f"{site}/work/starting?state={kind}", status_code=302)
     if state == "running":
-        return RedirectResponse(_work_url("/" + suffix), status_code=302)
+        return RedirectResponse(_work_url("/" + suffix, product), status_code=302)
     return RedirectResponse(f"{site}/work/starting{suffix}", status_code=302)
 
 
@@ -1308,10 +1253,17 @@ async def reaper_tick(now: float) -> None:
         # 机时依然只扣 MINUTES, 永不扣积分: 套餐里机时是单独的额度 (GitHub
         # Actions 那种口径), 积分留给 token。这里仍写一行 usage_log (work_access
         # 数的就是它), 但 credits=0, 所以一分钟机时绝不会动到 token 余额。
+        # uid 是**工作台键**, 不是用户 id —— 多产品之后二者不再相同。机时记在人
+        # 头上 (同一个人的 dsh 与 ComfyUI 花的是同一份额度), 而回收计时按工作台。
+        owner, product_id = products.split_key(uid)
         credits.spend(
-            uid, 0, kind=work_access.MINUTE_KIND, model="dshwork", request_id=f"ws-{int(now // 60)}"
+            owner,
+            0,
+            kind=work_access.MINUTE_KIND,
+            model=f"work:{product_id}",
+            request_id=f"ws-{product_id}-{int(now // 60)}",
         )
-        work_access.consume_minute(uid)
+        work_access.consume_minute(owner)
         last = _last_seen.setdefault(uid, now)  # re-seed after restart
         started = _started_at.setdefault(uid, now)  # re-seed after restart
         # 口径: **打开一次, 持续做事, 只关一次。**

@@ -170,9 +170,17 @@ async def test_create_asks_for_the_image_cache(eci):
     """没有 AutoMatchImageCache 就退回全量拉取: 冷启动 19s -> 50s, 不报错、
     不告警, 只是每个用户每次都多等半分钟。"""
     b, fake = eci
-    await b.create("u_abc", boot="echo hi", env={}, boot_fp="fp1")
+    await b.create(
+        "u_abc",
+        boot="echo hi",
+        env={},
+        boot_fp="fp1",
+        image="dsh-local:test",
+        image_ref="ghcr.io/x/dsh:rc8",
+    )
     p = fake.params_of("CreateContainerGroup")[0]
     assert p["AutoMatchImageCache"] == "true"
+    # image_ref 优先于 image: ECI 要能从仓库拉, 本机 tag 对它没意义
     assert p["Container.1.Image"] == "ghcr.io/x/dsh:rc8"
     assert p["RestartPolicy"] == "Never"
 
@@ -180,7 +188,7 @@ async def test_create_asks_for_the_image_cache(eci):
 @pytest.mark.asyncio
 async def test_create_stamps_user_and_boot_fingerprint_as_tags(eci):
     b, fake = eci
-    await b.create("u_abc", boot="echo hi", env={}, boot_fp="fp1")
+    await b.create("u_abc", boot="echo hi", env={}, boot_fp="fp1", image="dsh-local:test")
     p = fake.params_of("CreateContainerGroup")[0]
     tags = {p["Tag.1.Key"]: p["Tag.1.Value"], p["Tag.2.Key"]: p["Tag.2.Value"]}
     assert tags == {"dshwork-user": "u_abc", "dshwork-bootcfg": "fp1"}
@@ -189,7 +197,9 @@ async def test_create_stamps_user_and_boot_fingerprint_as_tags(eci):
 @pytest.mark.asyncio
 async def test_boot_script_and_env_reach_the_container(eci):
     b, fake = eci
-    await b.create("u_abc", boot="exec dsh web", env={"A": "1", "B": "2"}, boot_fp="fp")
+    await b.create(
+        "u_abc", boot="exec dsh web", env={"A": "1", "B": "2"}, boot_fp="fp", image="dsh-local:test"
+    )
     p = fake.params_of("CreateContainerGroup")[0]
     assert [p["Container.1.Command.1"], p["Container.1.Arg.1"], p["Container.1.Arg.2"]] == [
         "sh",
@@ -207,7 +217,7 @@ async def test_without_nas_no_volume_is_mounted(eci, caplog):
     """允许无 NAS 跑 (冒烟验证用), 但必须喊一声: 那种形态下工作台是一次性的。"""
     b, fake = eci
     with caplog.at_level("WARNING"):
-        await b.create("u_abc", boot="x", env={}, boot_fp="fp")
+        await b.create("u_abc", boot="x", env={}, boot_fp="fp", image="dsh-local:test")
     p = fake.params_of("CreateContainerGroup")[0]
     assert not [k for k in p if k.startswith("Volume.")]
     assert "WORK_NAS_SERVER" in caplog.text
@@ -220,7 +230,7 @@ async def test_nas_mounts_home_and_workspace_under_per_user_subpaths(eci, monkey
     b, fake = eci
     monkeypatch.setattr(config, "WORK_NAS_SERVER", "nas.example.com")
     monkeypatch.setattr(config, "WORK_NAS_PATH", "/dshwork")
-    await b.create("u_abc", boot="x", env={}, boot_fp="fp")
+    await b.create("u_abc", boot="x", env={}, boot_fp="fp", image="dsh-local:test")
     p = fake.params_of("CreateContainerGroup")[0]
     assert p["Volume.1.Type"] == "NFSVolume"
     assert p["Volume.1.NFSVolume.Server"] == "nas.example.com"
@@ -236,8 +246,8 @@ async def test_nas_mounts_home_and_workspace_under_per_user_subpaths(eci, monkey
 async def test_two_users_never_share_a_subpath(eci, monkeypatch):
     b, fake = eci
     monkeypatch.setattr(config, "WORK_NAS_SERVER", "nas.example.com")
-    await b.create("u_aaa", boot="x", env={}, boot_fp="fp")
-    await b.create("u_bbb", boot="x", env={}, boot_fp="fp")
+    await b.create("u_aaa", boot="x", env={}, boot_fp="fp", image="dsh-local:test")
+    await b.create("u_bbb", boot="x", env={}, boot_fp="fp", image="dsh-local:test")
     subs = [p["Container.1.VolumeMount.1.SubPath"] for p in fake.params_of("CreateContainerGroup")]
     assert subs[0] != subs[1]
 
@@ -352,7 +362,7 @@ def test_offline_dir_layout_matches_what_gets_mounted(eci, monkeypatch, tmp_path
     import asyncio
 
     asyncio.get_event_loop_policy().new_event_loop().run_until_complete(
-        b.create("u_abc", boot="x", env={}, boot_fp="fp")
+        b.create("u_abc", boot="x", env={}, boot_fp="fp", image="dsh-local:test")
     )
     p = fake.params_of("CreateContainerGroup")[0]
     sub = p["Container.1.VolumeMount.2.SubPath"]  # /workspace 那条
@@ -459,7 +469,7 @@ async def test_creating_an_instance_is_logged_with_who_it_was_for(eci, caplog):
     """
     b, _fake = eci
     with caplog.at_level("INFO", logger="dhc.work"):
-        await b.create("u_abc", boot="x", env={}, boot_fp="fp")
+        await b.create("u_abc", boot="x", env={}, boot_fp="fp", image="dsh-local:test")
     assert "eci-created" in caplog.text
     assert "u_abc" in caplog.text
 

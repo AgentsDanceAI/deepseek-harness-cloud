@@ -200,6 +200,17 @@ WORK_BACKEND = _env("WORK_BACKEND", "docker")
 # ECI 拉的是仓库引用 (ghcr.io/... 或 ACR), 本机 docker 拉的是本地 tag ——
 # 两者不是一回事, 所以分开配。留空则回落到 WORK_IMAGE。
 WORK_IMAGE_REF = _env("WORK_IMAGE_REF", "")
+
+# --- ComfyUI 工作台 -----------------------------------------------------------
+# 与 dsh 工作台同构的第二种产品: 每用户一个容器, 同一套回收与计费。
+# 以**纯编排器**模式运行 (无 GPU, 算力全在远端), 实测内存峰值 583MB, 所以规格
+# 与 dsh 工作台同量级。见 deploy/workspace-comfyui/README.md。
+# 域名必须独立: ComfyUI 前端用绝对路径引资源, 塞不进子路径。
+COMFY_IMAGE = _env("COMFY_IMAGE", "")
+COMFY_IMAGE_REF = _env("COMFY_IMAGE_REF", "")
+COMFY_DOMAIN = _env("COMFY_DOMAIN", "")
+COMFY_MEM_LIMIT_MB = _env_int("COMFY_MEM_LIMIT_MB", 1024)
+COMFY_CPUS = _env_float("COMFY_CPUS", 1.0)
 ECI_REGION_ID = _env("ECI_REGION_ID", "")
 ECI_ZONE_ID = _env("ECI_ZONE_ID", "")
 ECI_VSWITCH_ID = _env("ECI_VSWITCH_ID", "")

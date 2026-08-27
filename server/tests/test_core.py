@@ -25,7 +25,7 @@ import httpx  # noqa: E402
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
-from app import config, credits, db, gateway, plans, security  # noqa: E402
+from app import config, credits, db, gateway, plans, products, security  # noqa: E402
 from app.main import app  # noqa: E402
 
 from ._signup import signup, signup_with_password
@@ -540,9 +540,9 @@ def test_workspace_offers_exactly_the_sellable_catalog():
     it. A hardcoded list drifts: the workspace offered two models while twenty
     were priced and advertised, so nineteen of them were unreachable in the
     product we actually ship."""
-    from app import model_catalog, workspace
+    from app import model_catalog
 
-    boot = workspace._boot_script()
+    boot = products.boot_script(products.DEFAULT)
     ids = list(model_catalog.catalog())
     assert len(ids) == 20, f"curated catalog should be 20 models, got {len(ids)}"
     for mid in ids:
@@ -561,14 +561,14 @@ def test_boot_fingerprint_tracks_configuration_not_the_user():
     (or per call) every workspace would be rebuilt on every visit."""
     from app import workspace
 
-    a = workspace._boot_fingerprint(workspace._boot_script())
-    b = workspace._boot_fingerprint(workspace._boot_script())
+    a = workspace._boot_fingerprint(products.boot_script(products.DEFAULT))
+    b = workspace._boot_fingerprint(products.boot_script(products.DEFAULT))
     assert a == b
     from app.workbackend import WorkInfo
 
     blank = WorkInfo(running=True, boot_fp="", image_id="i", host="h")
-    assert workspace._boot_is_stale(blank) is True  # 没盖过戳 = 早于这套机制
-    assert workspace._boot_is_stale(WorkInfo(True, a, "i", "h")) is False
+    assert workspace._boot_is_stale(blank, products.DEFAULT) is True  # 没盖过戳 = 早于这套机制
+    assert workspace._boot_is_stale(WorkInfo(True, a, "i", "h"), products.DEFAULT) is False
 
 
 def test_smtp_rejection_is_a_client_error_not_a_500():
