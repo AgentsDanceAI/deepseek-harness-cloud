@@ -125,8 +125,17 @@ class DSHCloudVideo:
             },
         }
 
-    RETURN_TYPES = ("STRING", "STRING")
-    RETURN_NAMES = ("video_url", "local_path")
+    # 第一个输出必须是 **VIDEO**, 不能只给路径字符串。
+    #
+    # 2026-08-27 老板实测: 视频生成成功、文件也落盘了, 但他**播不了** —— 节点只
+    # 吐 video_url / local_path 两个字符串, 接不上「保存视频」(它要 VIDEO 输入),
+    # 界面里也没有任何预览。于是把 local_path 接到了「文件名前缀」上, 报
+    # 「缺少必需输入: video」。生成对了却拿不到手, 等于没做。
+    #
+    # 与生图节点返回 IMAGE 张量同理: 返回平台的原生类型才能和别的节点串起来,
+    # 返回路径就是死胡同。
+    RETURN_TYPES = ("VIDEO", "STRING", "STRING")
+    RETURN_NAMES = ("video", "video_url", "local_path")
     FUNCTION = "generate"
     CATEGORY = "DSH Cloud"
     # 必须: ComfyUI 只执行通向输出节点的分支, 不标这个的话整张图会被当成
@@ -188,7 +197,18 @@ class DSHCloudVideo:
         with urllib.request.urlopen(dl, timeout=300) as src, open(local_path, "wb") as dst:
             dst.write(src.read())
 
-        return {"ui": {"text": [local_path]}, "result": (url, local_path)}
+        # VideoFromFile 是 ComfyUI 的原生 VIDEO 载体 (comfy_api.input_impl)。
+        # 延迟导入: 上游若挪了位置, 至少节点还能加载并给出两个字符串, 而不是
+        # 整个工作台起不来。
+        try:
+            from comfy_api.input_impl import VideoFromFile
+
+            video = VideoFromFile(local_path)
+        except Exception as exc:  # noqa: BLE001
+            print(f"[dsh_cloud] !! 包不成 VIDEO 类型 ({type(exc).__name__}: {exc}), "
+                  f"只返回路径 —— 接不上保存/预览节点", flush=True)
+            video = None
+        return {"ui": {"text": [local_path]}, "result": (video, url, local_path)}
 
 
 NODE_CLASS_MAPPINGS = {"DSHCloudVideo": DSHCloudVideo}
