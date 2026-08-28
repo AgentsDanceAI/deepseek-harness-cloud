@@ -13,8 +13,16 @@ import subprocess
 import uuid
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
+# 在售清单。video 里刻意混了两个厂商: Seedance 走 Ark 形状的官方节点,
+# wan2.7-* 走 DashScope 形状的官方节点 —— 两条转译路径都得被 shim_check 走到。
+SOLD_VIDEO = ("doubao-seedance-2-5-260628", "wan2.7-t2v", "wan2.7-i2v")
+SOLD_IMAGE = ("gpt-image-2",)
+
 POLLS_BEFORE_SUCCESS = 2      # 前两次查询故意返回 PROCESSING
 JOBS: dict[str, int] = {}     # job_id -> 已被查询次数
+# 最后一次收到的建视频报文。自检据此断言**字段转译**真的发生了 ——
+# 否则把 DashScope 的 size 折成 resolution 这段改坏了也没人会红。
+LAST_VIDEO: dict = {}
 PORT = 9797
 # 容器里要 host.docker.internal, 宿主机自测要 localhost。
 ADVERTISE = os.environ.get("ADVERTISE_HOST", "host.docker.internal")
@@ -97,6 +105,9 @@ class Handler(BaseHTTPRequestHandler):
             payload = json.loads(self.rfile.read(length) or b"{}")
             print(f"[stub] 收到生图 model={payload.get('model')} "
                   f"prompt={payload.get('prompt')!r}", flush=True)
+            if payload.get("model") not in SOLD_IMAGE:
+                print(f"[stub] 图像型号 {payload.get('model')!r} 未在售 -> 404", flush=True)
+                return self._json(404, {"error": {"message": "model not offered"}})
             return self._json(200, {
                 "created": 0,
                 "data": [{"url": None, "b64_json": _png_b64(), "revised_prompt": None}],
@@ -107,11 +118,13 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(404, {"error": "not found"})
         length = int(self.headers.get("Content-Length", 0))
         payload = json.loads(self.rfile.read(length) or b"{}")
+        LAST_VIDEO.clear()
+        LAST_VIDEO.update(payload)
         auth = self.headers.get("Authorization", "")
         print(f"[stub] 收到作业 model={payload.get('model')} "
               f"prompt={payload.get('prompt')!r} 鉴权={'有' if auth else '无'}", flush=True)
-        # 只卖 /media/models 里列的那个 —— 与生产同款: 未定价 = 404。
-        if payload.get("model") not in ("doubao-seedance-2-5-260628",):
+        # 只卖 /media/models 里列的那些 —— 与生产同款: 未定价 = 404。
+        if payload.get("model") not in SOLD_VIDEO:
             print(f"[stub] 型号 {payload.get('model')!r} 未在售 -> 404", flush=True)
             return self._json(404, {"error": {"message": "model not offered"}})
         job_id = uuid.uuid4().hex[:12]
@@ -123,14 +136,16 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if not self._check_ua():
             return
+        if self.path.endswith("/_debug/last-video"):
+            return self._json(200, LAST_VIDEO)
         if self.path.endswith("/media/models"):
             # 垫片靠这份清单把官方节点发来的厂商公开名 (dreamina-…) 映射到我们
             # 在售的型号 (doubao-…)。返回的 id 刻意用 doubao- 前缀, 好让
             # shim_check 里那个 dreamina- 的请求真的走一次映射。
             return self._json(200, {
-                "video": [{"id": "doubao-seedance-2-5-260628", "name": "Seedance 2.5",
-                           "resolutions": ["480p", "720p", "1080p"]}],
-                "image": [{"id": "gpt-image-2", "name": "GPT Image 2"}],
+                "video": [{"id": m, "name": m, "resolutions": ["480p", "720p", "1080p"]}
+                          for m in SOLD_VIDEO],
+                "image": [{"id": m, "name": m} for m in SOLD_IMAGE],
             })
         if self.path.endswith("/sample.mp4"):
             return self._send(200, SAMPLE.read_bytes(), "video/mp4")

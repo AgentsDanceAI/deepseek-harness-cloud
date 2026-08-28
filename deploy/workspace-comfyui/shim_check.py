@@ -6,21 +6,33 @@
 
 import json
 import sys
+import time
 import urllib.error
 import urllib.request
 
 BASE = "http://127.0.0.1:8199"
+STUB = "http://127.0.0.1:9797"
 
 
-def call(method: str, path: str, payload: dict | None = None):
+def call(method: str, path: str, payload: dict | None = None, base: str = BASE):
     data = json.dumps(payload).encode() if payload is not None else None
-    req = urllib.request.Request(BASE + path, data=data, method=method)
+    req = urllib.request.Request(base + path, data=data, method=method)
     req.add_header("Content-Type", "application/json")
+    # 直连桩读回显时也得带 UA —— 桩有一道「UA 不合格就 403」的闸 (那是在替生产的
+    # Cloudflare 把关, 见 stub_gateway._check_ua), 不带就只能读回一句 403。
+    req.add_header("User-Agent", "DSHCloud-ShimCheck/1.0")
     try:
         with urllib.request.urlopen(req, timeout=90) as r:
             return r.status, json.loads(r.read().decode())
     except urllib.error.HTTPError as e:
-        return e.code, e.read()[:300].decode("utf-8", "replace")
+        # 整条读回来再解 —— 曾经这里截 300 字节, 报文一长 json.loads 就失败,
+        # 于是 \uXXXX 转义留在字符串里, 断言中文永远不成立 (在售型号从 2 个涨到
+        # 4 个时当场触发, 而垫片其实是对的)。
+        raw = e.read().decode("utf-8", "replace")
+        try:
+            return e.code, json.loads(raw)
+        except ValueError:
+            return e.code, raw
 
 
 def main() -> int:
@@ -90,12 +102,139 @@ def main() -> int:
         return 1
     print("  ✓ 未在售的型号 -> 404 且列出了可用型号")
 
-    # 别家的官方节点必须给出「未接通」而不是被误接。ComfyUI 里另有三家的路径
-    # 也以 /images/generations 结尾 (openai / kling / xai) —— 按后缀路由会把它们
+    # ---- OpenAI 官方图像节点 (GPT Image) ----
+    # 节点下拉里就是 gpt-image-2 / 1.5, 与我们在售的 id 一字不差, 所以这条几乎是
+    # 直通; 唯一要钉住的是**图必须以 b64_json 交出去** —— 节点的
+    # validate_and_cast_response 优先读它, 这条路径上一次落盘都不该发生。
+    code, out = call("POST", "/proxy/openai/images/generations",
+                     {"model": "gpt-image-2", "prompt": "一只柴犬", "size": "1024x1024", "n": 1})
+    if code != 200 or not isinstance(out, dict):
+        print(f"  ✗ OpenAI 生图: {code} {out}")
+        return 1
+    # 变量名不与上面那条 byteplus 生图共用 —— 末尾还要用那条的 url 去取图,
+    # 覆盖掉就会拿着 None 去 urlopen。
+    oai_data = out.get("data") or []
+    if not oai_data or not oai_data[0].get("b64_json"):
+        print(f"  ✗ OpenAI 生图没给 b64_json: {str(out)[:200]}")
+        return 1
+    if not out.get("usage"):
+        print(f"  ✗ OpenAI 生图没把 usage 带回去 (节点要拿它算价): {str(out)[:200]}")
+        return 1
+    print(f"  ✓ OpenAI 生图 -> b64_json {len(oai_data[0]['b64_json'])} 字符 + usage")
+
+    # DALL·E 节点写死发 dall-e-3, 我们不卖 —— 必须列出该换成哪个
+    code, out = call("POST", "/proxy/openai/images/generations",
+                     {"model": "dall-e-3", "prompt": "x"})
+    body = out if isinstance(out, str) else json.dumps(out, ensure_ascii=False)
+    if code != 404 or "当前可用" not in body:
+        print(f"  ✗ OpenAI 未在售型号应当 404 并列出可用: {code} {body[:200]}")
+        return 1
+    print("  ✓ OpenAI 未在售型号 -> 404 且列出了可用型号")
+
+    # ---- Wan 官方节点 (DashScope 原生形状) ----
+    code, out = call(
+        "POST", "/proxy/wan/api/v1/services/aigc/video-generation/video-synthesis",
+        {"model": "wan2.7-t2v",
+         "input": {"prompt": "一只猫在雪地里奔跑"},
+         "parameters": {"size": "1920*1080", "duration": 5}},
+    )
+    if code != 200 or not isinstance(out, dict) or not (out.get("output") or {}).get("task_id"):
+        print(f"  ✗ Wan 建视频: {code} {out}")
+        return 1
+    wan_task = out["output"]["task_id"]
+    print(f"  ✓ Wan 建视频 -> DashScope 形状的 task_id={wan_task}")
+
+    # 转译本身要被钉住: DashScope 的 input.prompt / parameters.size / duration
+    # 必须变成网关的 prompt / resolution / duration。不断言这一条, 把折算档位
+    # 那段改坏也不会红 —— 而它错了的表现是**按错档计价**, 用户看不出来。
+    _, sent = call("GET", "/llm/v1/_debug/last-video", None, base=STUB)
+    if sent.get("resolution") != "1080p":
+        print(f"  ✗ size 1920*1080 应折成 1080p, 实际 {sent.get('resolution')!r}")
+        return 1
+    if sent.get("duration") != 5 or sent.get("prompt") != "一只猫在雪地里奔跑":
+        print(f"  ✗ prompt/duration 没原样转过去: {sent}")
+        return 1
+    print(f"  ✓ 字段转译 -> resolution={sent['resolution']} duration={sent['duration']}")
+
+    # 图生视频: 首帧走 input.img_url -> 网关的 image_url
+    call("POST", "/proxy/wan/api/v1/services/aigc/video-generation/video-synthesis",
+         {"model": "wan2.7-i2v", "input": {"prompt": "p", "img_url": "data:image/png;base64,AAA"},
+          "parameters": {"resolution": "720P", "duration": 5}})
+    _, sent = call("GET", "/llm/v1/_debug/last-video", None, base=STUB)
+    if sent.get("image_url") != "data:image/png;base64,AAA" or sent.get("resolution") != "720p":
+        print(f"  ✗ 图生视频的首帧/分辨率没转对: {sent}")
+        return 1
+    print("  ✓ 图生视频 -> img_url 转成 image_url, 720P 折成 720p")
+
+    # 轮到终态。桩前两次故意回 PROCESSING —— 转译必须把它映成非终态,
+    # 否则节点会当场判定失败。
+    seen_running = False
+    for _ in range(8):
+        code, out = call("GET", f"/proxy/wan/api/v1/tasks/{wan_task}")
+        status = ((out or {}).get("output") or {}).get("task_status") if isinstance(out, dict) else None
+        if status in ("PENDING", "RUNNING"):
+            seen_running = True
+            continue
+        break
+    if not seen_running:
+        print("  ✗ 从没见到非终态: 轮询转译可能把 PROCESSING 当成了终态")
+        return 1
+    if status != "SUCCEEDED":
+        print(f"  ✗ Wan 轮询没到 SUCCEEDED: {out}")
+        return 1
+    video_url = out["output"].get("video_url")
+    if not video_url:
+        print(f"  ✗ Wan 成功了却没有 video_url (视频节点就是读这个键): {out}")
+        return 1
+    # 图像节点读的是 output.results —— 同一条路径两个节点共用, 少一个键就取不到结果
+    if not (out["output"].get("results") or [{}])[0].get("url"):
+        print(f"  ✗ Wan 成功了却没有 output.results[0].url: {out}")
+        return 1
+    print(f"  ✓ Wan 轮询 -> SUCCEEDED, video_url + results 都在")
+
+    # Wan 的失败必须是 **HTTP 200 + 顶层 code/message** —— 节点就是这么抛错的,
+    # 回 404 只会变成一句「请求失败」, 用户看不到该换成哪个型号。
+    code, out = call(
+        "POST", "/proxy/wan/api/v1/services/aigc/video-generation/video-synthesis",
+        {"model": "wan2.5-t2v-preview", "input": {"prompt": "x"}, "parameters": {"duration": 5}},
+    )
+    if code != 200 or not isinstance(out, dict) or out.get("output"):
+        print(f"  ✗ Wan 未在售型号应当回 200 且不带 output: {code} {out}")
+        return 1
+    if "当前可用" not in json.dumps(out, ensure_ascii=False):
+        print(f"  ✗ Wan 的错误里没告诉用户该换成哪个: {out}")
+        return 1
+    print("  ✓ Wan 未在售型号 -> 200 + code/message (节点能把中文原话抛出来)")
+
+    # Wan 的生图: DashScope 那侧是异步契约, 而网关的生图是同步的 —— 垫片得自己
+    # 造任务号并在后台跑, 不能让 POST 阻塞。
+    code, out = call(
+        "POST", "/proxy/wan/api/v1/services/aigc/text2image/image-synthesis",
+        {"model": "gpt-image-2", "input": {"prompt": "一只柴犬"},
+         "parameters": {"size": "1024*1024"}},
+    )
+    img_task = ((out or {}).get("output") or {}).get("task_id") if isinstance(out, dict) else None
+    if code != 200 or not img_task:
+        print(f"  ✗ Wan 建图任务: {code} {out}")
+        return 1
+    for _ in range(20):
+        code, out = call("GET", f"/proxy/wan/api/v1/tasks/{img_task}")
+        status = ((out or {}).get("output") or {}).get("task_status") if isinstance(out, dict) else None
+        if status in ("PENDING", "RUNNING"):
+            time.sleep(0.5)
+            continue
+        break
+    if status != "SUCCEEDED" or not (out["output"].get("results") or [{}])[0].get("url"):
+        print(f"  ✗ Wan 图任务没出图: {out}")
+        return 1
+    print(f"  ✓ Wan 生图 -> {out['output']['results'][0]['url']}")
+
+    # 别家的官方节点必须给出「未接通」而不是被误接。ComfyUI 里另有两家的路径
+    # 也以 /images/generations 结尾 (kling / xai) —— 按后缀路由会把它们
     # 的报文误当成我们的。
-    for path in ("/proxy/openai/images/generations",
-                 "/proxy/kling/v1/images/generations",
-                 "/proxy/xai/v1/images/generations"):
+    for path in ("/proxy/kling/v1/images/generations",
+                 "/proxy/xai/v1/images/generations",
+                 "/proxy/runway/v1/image_to_video"):
         code, out = call("POST", path, {"model": "x", "prompt": "y"})
         body = out if isinstance(out, str) else json.dumps(out, ensure_ascii=False)
         if code != 404 or "VendorNotWired" not in body:
