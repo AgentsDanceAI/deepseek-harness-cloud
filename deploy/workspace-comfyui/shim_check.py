@@ -90,6 +90,19 @@ def main() -> int:
         return 1
     print("  ✓ 未在售的型号 -> 404 且列出了可用型号")
 
+    # 别家的官方节点必须给出「未接通」而不是被误接。ComfyUI 里另有三家的路径
+    # 也以 /images/generations 结尾 (openai / kling / xai) —— 按后缀路由会把它们
+    # 的报文误当成我们的。
+    for path in ("/proxy/openai/images/generations",
+                 "/proxy/kling/v1/images/generations",
+                 "/proxy/xai/v1/images/generations"):
+        code, out = call("POST", path, {"model": "x", "prompt": "y"})
+        body = out if isinstance(out, str) else json.dumps(out, ensure_ascii=False)
+        if code != 404 or "VendorNotWired" not in body:
+            print(f"  ✗ {path} 应当回「未接通」, 实际 {code} {body[:120]}")
+            return 1
+    print("  ✓ 未接通的厂商 -> 404 VendorNotWired (没有被后缀误接)")
+
     # blob 是二进制, 不能用上面那个 (它 json.loads)
     try:
         with urllib.request.urlopen(data[0]["url"], timeout=30) as r:
