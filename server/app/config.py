@@ -279,6 +279,8 @@ WORK_IDLE_STOP_MIN = _env_int("WORK_IDLE_STOP_MIN", 15)
 # 机时 (按容器存在时间计费, 关了还留着就是白烧)。别缩到 1 分钟以内: 手机切个
 # 应用、隧道抖一下都会短暂断掉轮询, 回来时不该是一次冷启动。
 WORK_TAB_GONE_MIN = _env_int("WORK_TAB_GONE_MIN", 3)
+# ComfyUI 的冷启动比 dsh 贵得多 (实测 ~26 秒), 所以它的标签页宽限期单列。
+COMFY_TAB_GRACE_MIN = _env_int("COMFY_TAB_GRACE_MIN", 10)
 # 智能体最后一次调网关之后再等这么久。长任务必须能在关掉标签页之后接着跑完,
 # 所以这一条单独顶着, 与"有没有人在"无关。
 WORK_AGENT_IDLE_STOP_MIN = _env_int("WORK_AGENT_IDLE_STOP_MIN", 30)
