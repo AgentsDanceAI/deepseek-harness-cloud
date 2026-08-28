@@ -239,6 +239,16 @@ def video_param_style(model: str) -> str:
     return style if style in _PARAM_STYLES else "size"
 
 
+def supports_auto_duration(model: str) -> bool:
+    """这个型号认不认「auto」时长 (发 -1 由上游自己定长度)。
+
+    ComfyUI 的 Wan 3.0 节点 duration 下拉**第一项就是 auto**, 也就是默认值 ——
+    挡掉它等于这个节点开箱即坏。所以要支持: 预扣一个估值, 出片后按
+    usage.output_video_duration 结算真实秒数。
+    """
+    return bool((_catalog().get(model) or {}).get("auto_duration"))
+
+
 def video_input_style(model: str) -> str:
     """素材是给一张首帧 (img_url) 还是给一个数组 (media)。"""
     style = str((_catalog().get(model) or {}).get("video_input") or "img_url")
@@ -275,6 +285,7 @@ def _bailian_headers(async_mode: bool = False) -> dict:
 async def submit_video(
     provider: str, model: str, prompt: str, resolution: str, duration: int,
     image_url: str = "", ratio: str = "", media: list | None = None,
+    auto_duration: bool = False,
 ) -> tuple[str, dict | None, int]:
     """向上游下单。返回 (task_id, 错误报文, 错误码) —— 成功时后两者为 None/0。"""
     if provider == BAILIAN:
@@ -282,7 +293,9 @@ async def submit_video(
             params: dict = {"resolution": _BAILIAN_RESOLUTION.get(resolution), "ratio": ratio or "16:9"}
         else:
             params = {"size": _BAILIAN_SIZE.get(resolution)}
-        params["duration"] = duration or None
+        # auto 照 ComfyUI 那个节点的原样发 -1 —— 实测百炼认这个值, 出 5 秒,
+        # 并在 usage.output_video_duration 里如实报回来。
+        params["duration"] = -1 if auto_duration else (duration or None)
         payload: dict = {
             "model": model,
             "input": {"prompt": prompt},
@@ -327,10 +340,17 @@ async def poll_video(provider: str, task_id: str) -> dict:
             url = f"{config.BAILIAN_NATIVE_BASE}/tasks/{task_id}"
             async with _client() as client:
                 up = await client.get(url, headers=_bailian_headers())
-            out = (up.json() or {}).get("output") or {}
+            body = up.json() or {}
+            out = body.get("output") or {}
             state = _BAILIAN_TERMINAL.get(str(out.get("task_status") or "").upper())
             if state == "succeeded":
-                return {"status": "succeeded", "url": str(out.get("video_url") or ""), "error": ""}
+                # 实际出片秒数。auto 时长的作业靠它结算真实费用 —— 预扣时只是估值。
+                try:
+                    secs = float((body.get("usage") or {}).get("output_video_duration") or 0)
+                except (TypeError, ValueError):
+                    secs = 0.0
+                return {"status": "succeeded", "url": str(out.get("video_url") or ""),
+                        "error": "", "seconds": secs}
             if state == "failed":
                 msg = str(out.get("message") or out.get("code") or "生成失败")
                 return {"status": "failed", "url": "", "error": msg[:500]}
@@ -478,12 +498,14 @@ async def create_video(request: Request, user: dict = Depends(resolve_user)):
         duration = int(body.get("duration") or config.VIDEO_DEFAULT_DURATION)
     except (TypeError, ValueError):
         return _error(400, "invalid_request_error", "duration must be an integer.")
-    # 时长必须是正整数。quote() 里的 max(1, duration) 挡住了负积分, 但挡不住
-    # **少收钱**: duration=-1 (ComfyUI 的 auto 档) 会按 1 秒计价, 而上游可能自动
-    # 生成到 30 秒。宁可让客户端明确选一个时长, 也不按未知长度卖。
-    if duration < 1:
+    # duration <= 0 表示「auto」—— 由上游自己定长度。支持它的型号才放行:
+    # 预扣一个估值, 出片后按 usage.output_video_duration 结算真实秒数
+    # (见 _settle)。不支持的型号只能给具体秒数, 否则我们既不知道该收多少,
+    # 上游也不认这个值。
+    auto_duration = duration < 1
+    if auto_duration and not supports_auto_duration(model):
         return _error(400, "invalid_request_error",
-                      "duration must be a positive integer (自动时长无法计价，请选一个具体秒数).")
+                      f"「{model}」不支持自动时长，请在 duration 里给一个具体秒数。")
 
     if not model:
         return _error(400, "invalid_request_error", "model is required.")
@@ -500,7 +522,8 @@ async def create_video(request: Request, user: dict = Depends(resolve_user)):
             if provider == BAILIAN
             else f"Model '{model}' is not offered.",
         )
-    amount = quote(model, resolution, duration)
+    # auto 先按估值预扣, 真实秒数出片后再补差/退差。
+    amount = quote(model, resolution, config.VIDEO_AUTO_DURATION_S if auto_duration else duration)
     if amount is None:
         return _error(
             404,
@@ -526,6 +549,7 @@ async def create_video(request: Request, user: dict = Depends(resolve_user)):
             str(body.get("image_url") or ""),
             ratio,
             media,
+            auto_duration,
         )
     except httpx.HTTPError as exc:
         log.warning("视频作业提交失败: %s", exc)
@@ -551,7 +575,7 @@ async def create_video(request: Request, user: dict = Depends(resolve_user)):
                 task_id,
                 "processing",
                 prompt[:2000],
-                duration,
+                0 if auto_duration else duration,   # 0 = auto, 结算时按实际秒数补差
                 resolution,
                 amount,
                 provider,
@@ -562,6 +586,41 @@ async def create_video(request: Request, user: dict = Depends(resolve_user)):
     return JSONResponse(
         {"id": job_id, "model": model, "task_status": "PROCESSING", "video_result": None, "credits": amount}
     )
+
+
+def _settle_auto_duration(job: dict, seconds: float) -> dict:
+    """auto 时长的作业: 按**实际出片秒数**把费用找平。
+
+    预扣时不知道会出多长 (ComfyUI 的 Wan 3.0 节点 duration 默认就是 auto), 所以
+    按 VIDEO_AUTO_DURATION_S 估一个。上游在 usage.output_video_duration 里如实
+    报了实际秒数, 到这里补差或退差。
+
+    duration=0 是「这是一笔 auto 作业」的标记 —— 非 auto 的作业秒数是用户自己
+    选的, 不该因为上游报了个别的数就改账。
+    """
+    if int(job.get("duration") or 0) != 0 or seconds <= 0:
+        return job
+    real = quote(str(job["model"]), str(job["resolution"]), math.ceil(seconds))
+    charged = int(job.get("credits") or 0)
+    if real is None or real == charged:
+        return job
+    delta = real - charged
+    with db.tx() as conn:
+        conn.execute(
+            "UPDATE video_jobs SET credits = ?, duration = ?, updated = ? WHERE id = ?",
+            (real, math.ceil(seconds), time.time(), job["id"]),
+        )
+    if delta > 0:
+        credits.spend(job["user_id"], delta, kind="video", model=str(job["model"]),
+                      request_id=f"{job['id']}-adj")
+        log.info("作业 %s 实际 %.1f 秒, 补收 %d 积分 (预扣 %d -> %d)",
+                 job["id"], seconds, delta, charged, real)
+    else:
+        credits.grant(job["user_id"], -delta, config.VIDEO_REFUND_TTL_S,
+                      kind="refund", ref=f"{job['id']}-adj")
+        log.info("作业 %s 实际 %.1f 秒, 退回 %d 积分 (预扣 %d -> %d)",
+                 job["id"], seconds, -delta, charged, real)
+    return {**job, "credits": real, "duration": math.ceil(seconds)}
 
 
 async def _settle(job: dict) -> dict:
@@ -602,11 +661,18 @@ async def _settle(job: dict) -> dict:
     if state["status"] == "succeeded":
         video_url = state["url"]
         with db.tx() as conn:
-            conn.execute(
-                "UPDATE video_jobs SET status = 'succeeded', url = ?, updated = ? WHERE id = ?",
+            cur = conn.execute(
+                "UPDATE video_jobs SET status = 'succeeded', url = ?, updated = ? "
+                "WHERE id = ? AND status != 'succeeded'",
                 (video_url, now, job["id"]),
             )
-        return {**job, "status": "succeeded", "url": video_url}
+            changed = getattr(cur, "rowcount", 0)
+        # 补差只能发生一次。客户端轮询与兜底循环共用这一段, 上面那条 UPDATE 就是
+        # 闸: 谁把行改成 succeeded, 谁负责结算。
+        settled = dict(job)
+        if changed == 1:
+            settled = _settle_auto_duration(job, state.get("seconds") or 0.0)
+        return {**settled, "status": "succeeded", "url": video_url}
 
     if state["status"] == "failed":
         message = state["error"][:500]

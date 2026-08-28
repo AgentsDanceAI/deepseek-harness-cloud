@@ -542,15 +542,11 @@ class Handler(BaseHTTPRequestHandler):
             duration = int(params.get("duration") or 0)
         except (TypeError, ValueError):
             duration = 0
-        # Wan 3.0 的节点有个 "auto" 时长档, 发过来是 -1。按秒计价的东西不能按未知
-        # 长度卖 (网关会当成 1 秒, 而上游可能出到 30 秒), 所以在这里就拦下, 并说清
-        # 该怎么办 —— 让错误停在节点上, 而不是变成一笔算错的账。
-        if duration < 0:
-            return self._dashscope_error(
-                "InvalidParameter",
-                "本平台按秒计价，无法为「auto」时长报价。请在节点的 duration 里选一个具体秒数。")
-        if duration:
-            payload["duration"] = duration
+        # Wan 3.0 节点的 duration 下拉**第一项就是 auto** (发过来 -1), 也就是默认
+        # 值 —— 挡掉它等于这个节点开箱即坏。原样转给网关: 那边按估值预扣, 出片后
+        # 用 usage.output_video_duration 结算真实秒数。
+        # 型号认不认 auto 由网关按目录判 (auto_duration), 不认的会回一句人话。
+        payload["duration"] = duration
         # 素材。两代都送上去, 由**网关按型号**挑用哪个 (media_models.json 的
         # video_input) —— 垫片不知道哪个型号要哪种, 也不该知道。
         #

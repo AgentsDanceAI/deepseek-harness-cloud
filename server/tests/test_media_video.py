@@ -8,6 +8,7 @@
   生成失败 -> 退且只退一次    (轮询是客户端驱动的, 会重复查同一个失败作业)
 """
 
+import asyncio
 import os
 import tempfile
 import time
@@ -707,6 +708,138 @@ def test_abandoned_job_that_failed_upstream_gets_refunded(monkeypatch):
     assert row["status"] == "failed"
     assert "sensitive" in row["error"]
     assert credits.balance(user["id"]) == before, "失败必须退全款"
+
+
+# ---- auto 时长 ----
+# ComfyUI 的 Wan 3.0 节点 duration 下拉**第一项就是 auto**, 也就是默认值。
+# 挡掉它等于这个节点开箱即坏 —— 2026-08-28 我就是这么做的, 用户连着撞了几次。
+
+_AUTO_ENTRY = {"id": "wan3.0-video", "provider": "bailian", "video_params": "resolution_ratio",
+               "video_input": "media", "auto_duration": True,
+               "credits_per_second": {"720p": 10}}
+
+
+def _auto_job(monkeypatch, upstream_seconds=None, entry=None):
+    """提一笔 auto 时长的作业; 给了 upstream_seconds 就顺带结算一次。"""
+    monkeypatch.setattr(config, "BAILIAN_NATIVE_BASE", "https://ws-x.example.com/api/v1")
+    monkeypatch.setattr(config, "BAILIAN_API_KEY", "sk-fake")
+    monkeypatch.setattr(config, "VIDEO_AUTO_DURATION_S", 5)
+    monkeypatch.setattr(media, "_prices_cache", {"wan3.0-video": entry or _AUTO_ENTRY})
+    sent = {}
+    monkeypatch.setattr(media, "_client",
+                        lambda: _Spy(post=_Resp(200, {"output": {"task_id": "t_auto"}}), sent=sent))
+    r = client.post("/llm/v1/videos/generations",
+                    json={"model": "wan3.0-video", "prompt": "p", "resolution": "720p",
+                          "duration": -1, "ratio": "adaptive"})
+    if upstream_seconds is None or r.status_code != 200:
+        return r, sent, None
+    job_id = r.json()["id"]
+    monkeypatch.setattr(media, "_client", lambda: _FakeClient(get=_Resp(200, {
+        "output": {"task_status": "SUCCEEDED", "video_url": "https://x/v.mp4"},
+        "usage": {"output_video_duration": upstream_seconds},
+    })))
+    client.get("/llm/v1/videos/result/" + job_id)
+    return r, sent, job_id
+
+
+def test_auto_duration_is_accepted_and_forwarded_as_minus_one(monkeypatch):
+    """auto 是节点的默认值, 必须能用。上游认 -1 (实测百炼出 5 秒)。"""
+    _new_user("auto-ok@test.local")
+    r, sent, _ = _auto_job(monkeypatch)
+    assert r.status_code == 200, r.text
+    assert (sent.get("parameters") or {}).get("duration") == -1, sent
+    assert r.json()["credits"] == 50, "预扣按估值 5 秒 x 10 积分"
+
+
+def test_auto_duration_settles_to_the_real_length(monkeypatch):
+    """预扣只是估值 —— 出片后按 usage.output_video_duration 找平。"""
+    user = _new_user("auto-settle@test.local")
+    before = credits.balance(user["id"])
+    r, _, job_id = _auto_job(monkeypatch, upstream_seconds=8.0)
+    assert r.json()["credits"] == 50            # 预扣 5 秒
+    row = dict(db.query_one("SELECT * FROM video_jobs WHERE id=?", (job_id,)))
+    assert row["credits"] == 80, "实际 8 秒应当补收到 80"
+    assert row["duration"] == 8
+    assert credits.balance(user["id"]) == before - 80, "补差没落到账上"
+
+
+def test_auto_duration_refunds_when_shorter_than_estimated(monkeypatch):
+    """出得比估值短就得退 —— 只补不退等于稳赚, 那是坑用户。"""
+    user = _new_user("auto-refund@test.local")
+    before = credits.balance(user["id"])
+    _, _, job_id = _auto_job(monkeypatch, upstream_seconds=3.0)
+    row = dict(db.query_one("SELECT * FROM video_jobs WHERE id=?", (job_id,)))
+    assert row["credits"] == 30, "实际 3 秒应当退到 30"
+    assert credits.balance(user["id"]) == before - 30
+
+
+def test_settling_twice_does_not_double_charge(monkeypatch):
+    """客户端轮询与兜底循环共用结算路径 —— 补差只能发生一次。
+
+    顺序再调一次是测不出来的: 那时作业已是终态, _settle 开头就返回了。要复现的
+    是**并发**那一幕 —— 两边都拿着 status='processing' 的旧行同时进来。所以这里
+    拿同一份旧行调两次, 那正是竞态下会发生的事。
+    """
+    user = _new_user("auto-twice@test.local")
+    before = credits.balance(user["id"])
+    monkeypatch.setattr(config, "BAILIAN_NATIVE_BASE", "https://ws-x.example.com/api/v1")
+    monkeypatch.setattr(config, "BAILIAN_API_KEY", "sk-fake")
+    monkeypatch.setattr(config, "VIDEO_AUTO_DURATION_S", 5)
+    monkeypatch.setattr(media, "_prices_cache", {"wan3.0-video": _AUTO_ENTRY})
+    monkeypatch.setattr(media, "_client",
+                        lambda: _Spy(post=_Resp(200, {"output": {"task_id": "t_race"}}), sent={}))
+    job_id = client.post("/llm/v1/videos/generations",
+                         json={"model": "wan3.0-video", "prompt": "p", "resolution": "720p",
+                               "duration": -1}).json()["id"]
+    stale = dict(db.query_one("SELECT * FROM video_jobs WHERE id=?", (job_id,)))
+    assert stale["status"] == "processing"
+
+    monkeypatch.setattr(media, "_client", lambda: _FakeClient(get=_Resp(200, {
+        "output": {"task_status": "SUCCEEDED", "video_url": "https://x/v.mp4"},
+        "usage": {"output_video_duration": 8.0},
+    })))
+    loop = asyncio.get_event_loop_policy().new_event_loop()
+    loop.run_until_complete(media._settle(dict(stale)))
+    loop.run_until_complete(media._settle(dict(stale)))   # 同一份旧行再来一次
+    assert credits.balance(user["id"]) == before - 80, "并发结算把差价补了两遍"
+
+
+def test_fixed_duration_jobs_are_never_re_settled(monkeypatch):
+    """用户自己选了秒数就按那个收 —— 不能因为上游报了别的数就改账。
+
+    必须用**百炼**的作业: 千面那条路的 poll_video 根本不带秒数, 拿它测等于走了
+    seconds<=0 的早退, 时长判断一次都没被碰到 (第一版就是这么写错的)。
+    """
+    user = _new_user("fixed-dur@test.local")
+    before = credits.balance(user["id"])
+    monkeypatch.setattr(config, "BAILIAN_NATIVE_BASE", "https://ws-x.example.com/api/v1")
+    monkeypatch.setattr(config, "BAILIAN_API_KEY", "sk-fake")
+    monkeypatch.setattr(media, "_prices_cache", {"wan3.0-video": _AUTO_ENTRY})
+    monkeypatch.setattr(media, "_client",
+                        lambda: _Spy(post=_Resp(200, {"output": {"task_id": "t_fixed"}}), sent={}))
+    job_id = client.post("/llm/v1/videos/generations",
+                         json={"model": "wan3.0-video", "prompt": "p", "resolution": "720p",
+                               "duration": 4}).json()["id"]           # 明确选了 4 秒
+    monkeypatch.setattr(media, "_client", lambda: _FakeClient(get=_Resp(200, {
+        "output": {"task_status": "SUCCEEDED", "video_url": "https://x/v.mp4"},
+        "usage": {"output_video_duration": 30.0},                     # 上游报了 30 秒
+    })))
+    client.get("/llm/v1/videos/result/" + job_id)
+    row = dict(db.query_one("SELECT * FROM video_jobs WHERE id=?", (job_id,)))
+    assert row["credits"] == 40, "用户选了 4 秒, 却按上游报的 30 秒改了账"
+    assert row["duration"] == 4
+    assert credits.balance(user["id"]) == before - 40
+
+
+def test_auto_duration_rejected_for_models_that_do_not_support_it(monkeypatch):
+    """不支持 auto 的型号要说人话, 而不是拿一个猜的秒数去下单。"""
+    _new_user("auto-unsupported@test.local")
+    entry = {**_AUTO_ENTRY}
+    entry.pop("auto_duration")
+    r, sent, _ = _auto_job(monkeypatch, entry=entry)
+    assert r.status_code == 400, r.text
+    assert "自动时长" in r.text or "auto" in r.text.lower(), r.text
+    assert sent == {}, "被拒的请求不该打上游"
 
 
 def test_a_job_upstream_forgot_is_failed_and_refunded(monkeypatch):

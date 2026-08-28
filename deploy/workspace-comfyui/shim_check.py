@@ -245,21 +245,16 @@ def main() -> int:
         return 1
     print("  ✓ Wan 3.0 参考素材 -> media[] 原样转达 (没被压成一张首帧)")
 
-    # Wan 3.0 的 auto 时长发过来是 -1。按秒计价的东西不能按未知长度卖 ——
-    # 网关会当成 1 秒, 而上游可能出到 30 秒。必须在垫片这里就拦住并说清怎么办。
-    code, out = call(
-        "POST", "/proxy/wan/api/v1/services/aigc/video-generation/video-synthesis",
-        {"model": "wan3.0-video", "input": {"prompt": "p"},
-         "parameters": {"resolution": "720P", "ratio": "16:9", "duration": -1}},
-    )
-    body = json.dumps(out, ensure_ascii=False) if isinstance(out, dict) else str(out)
-    if code != 200 or (isinstance(out, dict) and out.get("output")):
-        print(f"  ✗ auto 时长应当被拒且不建任务: {code} {body[:200]}")
+    # Wan 3.0 节点的 duration 下拉第一项就是 auto (发 -1), 也就是默认值 ——
+    # 挡掉它等于这个节点开箱即坏。垫片必须原样转给网关。
+    call("POST", "/proxy/wan/api/v1/services/aigc/video-generation/video-synthesis",
+         {"model": "wan3.0-video", "input": {"prompt": "p"},
+          "parameters": {"resolution": "720P", "ratio": "16:9", "duration": -1}})
+    _, sent = call("GET", "/llm/v1/_debug/last-video", None, base=STUB)
+    if sent.get("duration") != -1:
+        print(f"  ✗ auto 时长没原样转给网关 (被拦或被改): {sent}")
         return 1
-    if "duration" not in body and "秒数" not in body:
-        print(f"  ✗ 错误里没说该去改 duration: {body[:200]}")
-        return 1
-    print("  ✓ auto 时长(-1) -> 被拦下, 并指明去 duration 里选具体秒数")
+    print("  ✓ auto 时长(-1) -> 原样转给网关 (由网关按实际秒数结算)")
 
     # 型号在售、但**这个分辨率**不在售 (wan2.7 的 480p 厂商不提供): 错误里必须
     # 出现分辨率, 否则用户会去换型号 —— 而他该做的是换分辨率。

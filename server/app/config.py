@@ -82,6 +82,9 @@ API_BODY_MAX_BYTES = _env_int("API_BODY_MAX_BYTES", 2 * 1024 * 1024)
 GATEWAY_BODY_MAX_BYTES = _env_int("GATEWAY_BODY_MAX_BYTES", 32 * 1024 * 1024)
 # 官方节点的素材输入 (参考图、参考视频、驱动音频) 要先换成一个**公网可取**的 URL
 # 才能交给上游厂商, 所以本站得存一下。只是中转, 存活期很短。
+# 「auto」时长的预扣估值。真实秒数出片后由 usage.output_video_duration 结算,
+# 这个数只影响预扣多少 —— 实测 wan3.0 的 auto 出 5 秒。
+VIDEO_AUTO_DURATION_S = _env_int("VIDEO_AUTO_DURATION_S", 5)
 MEDIA_UPLOAD_MAX_BYTES = _env_int("MEDIA_UPLOAD_MAX_BYTES", 64 * 1024 * 1024)
 MEDIA_UPLOAD_TTL_S = _env_int("MEDIA_UPLOAD_TTL_S", 6 * 3600)
 # Preview applications may accept file uploads through the authenticated proxy.
