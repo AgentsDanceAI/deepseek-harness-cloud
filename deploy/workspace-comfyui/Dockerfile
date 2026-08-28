@@ -41,6 +41,12 @@ RUN pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu 
 # 宿主目录可挂。节点只认我们自己的网关, 由网关去适配具体厂商。
 COPY custom_nodes/dsh_cloud /opt/ComfyUI/custom_nodes/dsh_cloud
 
+# 把 .pyc 预编译进镜像。ComfyUI 是 git clone 进来的, 793 个 .py 一个 .pyc 都没有
+# (pip 装的那 15000 个反倒有), 于是**每次冷启动都在现场编译一遍**。
+# 实测 (2026-08-28, 5 次取中位数): 7008ms -> 5526ms, 省 1.48 秒; 构建期只花 0.33 秒。
+# 放在 COPY 自有节点之后, 好让节点自己那几个文件也一起编上。
+RUN python -m compileall -q -j 4 /opt/ComfyUI
+
 # 让 ComfyUI **自带的官方 API 节点**也能跑我们的模型 —— 启动脚本把
 # --comfy-api-base 指向它。见 api_shim.py 开头的说明。
 COPY api_shim.py /opt/dsh-api-shim.py
