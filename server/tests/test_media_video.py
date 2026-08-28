@@ -600,3 +600,33 @@ def test_bailian_images_price_per_item_not_per_token(monkeypatch):
     assert media.image_credits(per_item, None) == 7
     assert media.image_credits(per_item, {"output_tokens": 9999}) == 7, "按张就不看 token"
     assert media.image_credits(by_token, {"output_tokens": 196}) == 1
+
+
+def test_postgres_migrations_actually_run(monkeypatch):
+    """迁移在 postgres 上必须真的执行 —— 2026-08-28 之前它一条都没跑成过。
+
+    连接池配的是 row_factory=dict_row (行是字典), 而 pg_columns 写的是 r[0],
+    KeyError 被 _apply_migrations 的 except 吞掉 —— **每条迁移都被静默跳过**。
+    一直没被发现, 是因为迁移涉及的列同时也写在 CREATE TABLE 里: 新库建表时就带上
+    了, 迁移路径从没真正跑成。加 video_jobs.provider 时才撞上 —— 那是第一个真
+    需要迁移到既有表的列。
+
+    这里用一个假的 dict_row 游标复现那次失败: 取列名必须按键名, 不能按下标。
+    """
+    import app.db as dbmod
+
+    class _DictCursor:
+        def fetchall(self):
+            return [{"column_name": "id"}, {"column_name": "user_id"}]
+
+    applied = []
+
+    def columns_of(table):
+        # 与生产同款: dict_row。按 r[0] 取会 KeyError。
+        return {r["column_name"] for r in _DictCursor().fetchall()}
+
+    monkeypatch.setattr(dbmod, "MIGRATIONS", [("some_table", "new_col", "TEXT")])
+    dbmod._apply_migrations(lambda sql: applied.append(sql), columns_of)
+    assert applied and "ADD COLUMN new_col TEXT" in applied[0], (
+        "迁移没有执行 —— 列查询若按下标取字典就会静默跳过所有迁移"
+    )

@@ -9,6 +9,7 @@ portable subset.
 
 from __future__ import annotations
 
+import logging
 import os
 import sqlite3
 import threading
@@ -329,6 +330,9 @@ def query_one(sql: str, params: tuple = ()):
 # Columns added to tables that already exist in deployed databases. CREATE TABLE
 # IF NOT EXISTS is a no-op once the table is there, so new columns need their own
 # idempotent step. (table, column, DDL type) — applied only when absent.
+# 挂在 "dhc" 这一支: main.py 只配置了这棵树, 用 __name__ 会被静默丢弃。
+log = logging.getLogger("dhc.db")
+
 MIGRATIONS: list[tuple[str, str, str]] = [
     # 作业得记住是哪个上游下的单 —— 轮询时才知道问谁。不能靠 model 反查配置:
     # 型号一旦从 media_models.json 里删掉, 还在跑的作业就永远收不了尾。
@@ -346,7 +350,12 @@ def _apply_migrations(execute, columns_of) -> None:
             if column in columns_of(table):
                 continue
             execute(f"ALTER TABLE {table} ADD COLUMN {column} {coltype}")
+            log.info("迁移: %s 加列 %s %s", table, column, coltype)
         except Exception:  # noqa: BLE001 — a missing table is fine; SCHEMA creates it
+            # **必须留痕**。原来是静默 continue, 于是 pg_columns 的一个
+            # KeyError 让整套迁移哑了不知道多久, 而症状是「新列莫名其妙不存在」。
+            # 缺表是正常的 (SCHEMA 会建), 所以只告警不抛。
+            log.warning("迁移跳过: %s.%s —— %s", table, column, "见异常", exc_info=True)
             continue
 
 
@@ -367,7 +376,13 @@ def ensure_schema() -> None:
                     cur = raw.execute(
                         "SELECT column_name FROM information_schema.columns WHERE table_name=%s", (table,)
                     )
-                    return {r[0] for r in cur.fetchall()}
+                    # 连接池配的是 row_factory=dict_row —— 行是**字典**, r[0] 会
+                    # KeyError, 而 _apply_migrations 把异常吞掉, 于是 postgres 上
+                    # **每一条迁移都被静默跳过**。
+                    # 一直没被发现是因为迁移涉及的列同时也写在 CREATE TABLE 里:
+                    # 新库建表时就带上了, 迁移路径从没真正跑成过。2026-08-28 加
+                    # video_jobs.provider 时才撞上 —— 那是第一个真需要迁移的列。
+                    return {r["column_name"] for r in cur.fetchall()}
 
                 _apply_migrations(lambda s: raw.execute(_pg_schema(s)), pg_columns)
                 raw.commit()
