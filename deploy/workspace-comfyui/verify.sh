@@ -78,12 +78,14 @@ else
   echo "✗ 节点没加载"; docker logs "$NAME" 2>&1 | grep -i -A5 "dsh_cloud\|error" | tail -30; exit 1
 fi
 
+# 型号必须是桩 /media/models 里给的那个 —— 下拉是**枚举**, ComfyUI 会校验,
+# 填别的会被 prompt_outputs_failed_validation 拒掉 (2026-08-27 踩过)。
 echo "=== 提交 workflow ==="
 CID=$(python3 -c 'import uuid;print(uuid.uuid4().hex)')
 RESP=$(curl -sf -X POST http://localhost:8188/prompt -H 'Content-Type: application/json' -d "{
   \"client_id\": \"$CID\",
   \"prompt\": {\"1\": {\"class_type\": \"DSHCloudVideo\", \"inputs\": {
-      \"prompt\": \"一只猫在雪地里奔跑\", \"model\": \"cogvideox-3\",
+      \"prompt\": \"一只猫在雪地里奔跑\", \"model\": \"doubao-seedance-2-5-260628\",
       \"resolution\": \"480p\", \"duration\": 5}}}
 }")
 PID=$(printf '%s' "$RESP" | python3 -c 'import json,sys;print(json.load(sys.stdin).get("prompt_id",""))')
