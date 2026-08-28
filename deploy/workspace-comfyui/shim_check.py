@@ -77,6 +77,13 @@ def main() -> int:
     if code != 404 or not isinstance(out, (dict, str)):
         print(f"  ✗ 未在售的型号应当回 404: {code} {out}")
         return 1
+    # 错误路径返回的是原始报文文本, 里面是 \uXXXX 转义 —— 得先解回来再匹配中文,
+    # 否则断言永远不成立 (2026-08-28 我就这么误报过一次)。
+    if isinstance(out, str):
+        try:
+            out = json.loads(out)
+        except ValueError:
+            pass
     body = out if isinstance(out, str) else json.dumps(out, ensure_ascii=False)
     if "当前可用" not in body and "没有可用型号" not in body:
         print(f"  ✗ 错误里没有告诉用户该换成哪个: {body[:200]}")
