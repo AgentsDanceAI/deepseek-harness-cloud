@@ -146,7 +146,25 @@ class DSHCloudVideo:
 
         deadline = time.time() + POLL_TIMEOUT_S
         while True:
-            result = _request("GET", f"{BASE}/videos/result/{job_id}")
+            # 轮询期间的**瞬时错误不能让作业作废** —— 钱在提交那一刻就扣掉了。
+            # 2026-08-27 实测: 服务端重新部署的十几秒里节点收到一个 502, 直接
+            # 放弃了一条已付费的 1080p 作业 (600 积分), 而上游其实已经出片。
+            # 5xx 与网络错误一律重试到超时为止; 4xx 是真错 (作业不存在/无权),
+            # 重试没有意义, 照旧抛出。
+            try:
+                result = _request("GET", f"{BASE}/videos/result/{job_id}")
+            except urllib.error.HTTPError as exc:
+                if exc.code < 500 or time.time() > deadline:
+                    raise
+                print(f"[dsh_cloud] 轮询遇到 {exc.code}, {POLL_INTERVAL_S}s 后重试", flush=True)
+                time.sleep(POLL_INTERVAL_S)
+                continue
+            except (urllib.error.URLError, TimeoutError, ConnectionError) as exc:
+                if time.time() > deadline:
+                    raise
+                print(f"[dsh_cloud] 轮询网络错误 {exc}, 重试", flush=True)
+                time.sleep(POLL_INTERVAL_S)
+                continue
             status = (result.get("task_status") or "").upper()
             if status == "SUCCESS":
                 break

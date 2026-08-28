@@ -118,6 +118,18 @@ def create_app() -> FastAPI:
 
             app.state.workspace_loop = asyncio.create_task(billing_reaper_loop())
 
+    # 视频作业的服务端兜底。**不挂在 WORK_ENABLED 下面**: 媒体端点不依赖云工作台
+    # (可以只用 API), 而钱是提交时就扣的 —— 没有这个循环, 客户端一走那笔钱就
+    # 永远悬着: 失败不退款, 成功不记账。
+    if config.UPSTREAM_API_KEY:
+        from .media import reconcile_loop
+
+        @app.on_event("startup")
+        async def _start_media_loop() -> None:
+            import asyncio
+
+            app.state.media_loop = asyncio.create_task(reconcile_loop())
+
     # Report a bad offline-volume mount at startup instead of silently rendering
     # empty files for stopped workspaces.
     if config.WORK_VOLUME_ROOT and not Path(config.WORK_VOLUME_ROOT).is_dir():

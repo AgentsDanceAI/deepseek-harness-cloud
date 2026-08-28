@@ -126,6 +126,12 @@ VIDEO_DEFAULT_RESOLUTION = _env("VIDEO_DEFAULT_RESOLUTION", "480p")
 # 生成失败时退回的积分能活多久。作业是提交时预扣的, 失败退款只是把钱放回去,
 # 所以给足时间, 别让用户因为我们的上游出错而损失额度。
 VIDEO_REFUND_TTL_S = _env_float("VIDEO_REFUND_TTL_S", 365 * 24 * 3600)
+# 服务端兜底: 作业状态不能只靠客户端轮询驱动 —— 浏览器一关、节点一报错,
+# 作业就永远停在 processing, 而钱是提交时就扣掉的 (失败不退, 成功不记账)。
+VIDEO_RECONCILE_INTERVAL_S = _env_float("VIDEO_RECONCILE_INTERVAL_S", 60.0)
+# 超过这么久还没终态就判失败并退款。上游偶尔会把作业丢掉 —— 既不 succeeded
+# 也不 failed, 就是不动, 不设上限那笔钱永远悬着。
+VIDEO_JOB_MAX_AGE_S = _env_float("VIDEO_JOB_MAX_AGE_S", 30 * 60)
 # 一次请求最多出几张。图是同步出的, 批量大了会把 UPSTREAM_TIMEOUT_S 顶穿。
 IMAGE_MAX_BATCH = _env_int("IMAGE_MAX_BATCH", 4)
 
