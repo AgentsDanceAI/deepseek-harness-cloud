@@ -431,6 +431,59 @@ def test_wanx21_still_sends_size(monkeypatch):
     assert "ratio" not in params and "resolution" not in params, params
 
 
+def test_wan3_passes_reference_media_through_not_just_a_first_frame(monkeypatch):
+    """参考图**不是首帧**。
+
+    Wan 3.0 Reference to Video 传的是 reference_image / reference_video。把这个
+    数组压成一张 img_url, 用户付了钱却拿到一条无视参考素材的视频 —— 那种错不会
+    报错, 只会让人觉得"模型不听话"。
+    """
+    _new_user("wan3-media@test.local")
+    entry = {"id": "wan3.0-video", "provider": "bailian", "video_params": "resolution_ratio",
+             "video_input": "media", "credits_per_second": {"720p": 10}}
+    r, sent = _bailian(monkeypatch, "wan3.0-video", entry, {
+        "prompt": "p", "resolution": "720p", "duration": 5,
+        "media": [{"type": "reference_image", "url": "https://x/a.png"},
+                  {"type": "reference_video", "url": "https://x/b.mp4"}],
+    })
+    assert r.status_code == 200, r.text
+    got = (sent.get("input") or {}).get("media")
+    assert got and len(got) == 2, sent
+    assert {m["type"] for m in got} == {"reference_image", "reference_video"}, got
+    assert "img_url" not in (sent.get("input") or {}), "wan3 不该同时塞 img_url"
+
+
+def test_wan27_still_uses_img_url_not_media(monkeypatch):
+    """老一代只认一张首帧 —— 不能顺手把两代都改成 media[]。"""
+    _new_user("wan27-media@test.local")
+    entry = {"id": "wan2.7-i2v", "provider": "bailian", "video_params": "resolution_ratio",
+             "credits_per_second": {"720p": 10}}
+    r, sent = _bailian(monkeypatch, "wan2.7-i2v", entry, {
+        "prompt": "p", "resolution": "720p", "duration": 5,
+        "image_url": "data:image/png;base64,AAA",
+        "media": [{"type": "reference_image", "url": "https://x/a.png"}],
+    })
+    assert r.status_code == 200, r.text
+    inp = sent.get("input") or {}
+    assert inp.get("img_url") == "data:image/png;base64,AAA", inp
+    assert "media" not in inp, "wan2.7 不认 media[], 塞了会被静默忽略"
+
+
+def test_media_list_is_bounded_and_urls_checked(monkeypatch):
+    """media 里的 URL 会原样交给上游, 数量和形状都要有边界。"""
+    _new_user("wan3-media-bad@test.local")
+    entry = {"id": "wan3.0-video", "provider": "bailian", "video_params": "resolution_ratio",
+             "video_input": "media", "credits_per_second": {"720p": 10}}
+    base = {"prompt": "p", "resolution": "720p", "duration": 5}
+    for bad in ([{"type": "x"}],                                   # 没有 url
+                [{"type": "x", "url": "javascript:alert(1)"}],     # 不是 http/data
+                [{"type": "x", "url": "https://x/a.png"}] * 9,     # 超过上限
+                "not-a-list"):
+        r, sent = _bailian(monkeypatch, "wan3.0-video", entry, {**base, "media": bad})
+        assert r.status_code == 400, (bad, r.status_code)
+        assert sent == {}, "被拒的请求不该打上游"
+
+
 def test_auto_duration_is_rejected_rather_than_billed_as_one_second(monkeypatch):
     """ComfyUI 的 Wan 3.0 节点有个 auto 时长, 发过来是 duration=-1。
 
@@ -471,6 +524,78 @@ def test_every_bailian_video_model_declares_its_param_generation():
         assert style in ("size", "resolution_ratio"), (
             f"{m['id']}: video_params={style!r} —— 百炼的视频模型必须显式声明用哪代参数"
         )
+
+
+# ---- 素材中转 (官方节点的 image/video/audio 输入) ----
+# 这是一条**公开可取**的出口: 上游厂商的服务器要来 GET 它, 它没有我们的令牌。
+# 所以这几条测的不是功能, 是暴露面。
+
+
+def _open_upload(ctype="image/png", name="ref.png"):
+    return client.post("/llm/v1/media/uploads",
+                       json={"file_name": name, "content_type": ctype})
+
+
+def test_only_media_types_can_be_uploaded():
+    """不挡类型的话, 这就是一个挂在自家域名下、任何付费账号都能塞任意文件的
+    公开文件站 —— text/html 还能拿来做同源钓鱼。"""
+    _new_user("upl-type@test.local")
+    assert _open_upload("image/png").status_code == 200
+    assert _open_upload("video/mp4").status_code == 200
+    assert _open_upload("audio/mpeg").status_code == 200
+    for bad in ("text/html", "application/pdf", "application/octet-stream", ""):
+        r = _open_upload(bad)
+        assert r.status_code == 415, (bad, r.status_code)
+
+
+def test_upload_slot_belongs_to_one_user_and_probing_gets_404():
+    """别人的上传位要和「不存在」同一个回答 —— 403 会把 id 是否存在告诉对方。"""
+    _new_user("upl-a@test.local")
+    blob = _open_upload().json()["id"]
+    _new_user("upl-b@test.local")  # 换个人
+    r = client.put(f"/llm/v1/media/uploads/{blob}", content=b"x")
+    assert r.status_code == 404, r.text
+
+
+def test_blob_is_public_but_never_sniffable():
+    """取回必须无鉴权 (厂商的服务器没有令牌), 所以别的防线要立住。"""
+    _new_user("upl-pub@test.local")
+    up = _open_upload().json()
+    assert client.put(f"/llm/v1/media/uploads/{up['id']}", content=b"\x89PNG-fake").status_code == 200
+    path = "/llm/v1/media/blobs/" + up["id"]
+    anon = TestClient(app)  # 全新客户端, 没有任何 cookie
+    r = anon.get(path)
+    assert r.status_code == 200, "厂商取不到就等于这条链路是废的"
+    assert r.content == b"\x89PNG-fake"
+    assert r.headers.get("content-type", "").startswith("image/png")
+    assert r.headers.get("x-content-type-options") == "nosniff"
+
+
+def test_blob_id_never_becomes_a_path():
+    """id 会被拼进文件名, 所以先过一道形状校验。
+
+    直接测这个函数而不是打路由: 路由那层就算不校验也会 404 (拼出来的路径本来
+    就不存在), 于是"有没有校验"在路由上根本区分不出来 —— 那样的用例是摆设。
+    """
+    for bad in ("../../etc/passwd", "a/b", "..", "", "x" * 65, "a.b", "a\x00b"):
+        assert media._safe_blob_id(bad) == "", bad
+    for ok in ("abcdef0123456789", "a-b_c", "x" * 64):
+        assert media._safe_blob_id(ok) == ok, ok
+    # 路由层也确认一遍: 非法 id 一律 404
+    _new_user("upl-trav@test.local")
+    assert client.get("/llm/v1/media/blobs/..").status_code == 404
+
+
+def test_expired_uploads_are_swept(monkeypatch, tmp_path):
+    """中转素材是**公开**的, 留着纯属扩大暴露窗口 —— 到点必须删。"""
+    monkeypatch.setattr(media, "_UPLOAD_DIR", tmp_path)
+    monkeypatch.setattr(config, "MEDIA_UPLOAD_TTL_S", 60)
+    fresh, stale = tmp_path / "a.bin", tmp_path / "b.bin"
+    fresh.write_bytes(b"1"); stale.write_bytes(b"2")
+    import os
+    os.utime(stale, (time.time() - 3600, time.time() - 3600))
+    assert media.sweep_uploads() == 1
+    assert fresh.exists() and not stale.exists()
 
 
 def test_only_calibrated_media_models_carry_a_price():

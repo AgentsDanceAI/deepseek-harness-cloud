@@ -67,6 +67,17 @@ def _gateway(method: str, path: str, payload: dict | None = None, timeout: float
         return json.loads(resp.read().decode())
 
 
+def _gateway_put(path: str, data: bytes, content_type: str, timeout: float = 300.0) -> None:
+    """把原始字节 PUT 到网关。素材可能是几十兆的视频, 所以不走 _gateway 的 JSON 路。"""
+    req = urllib.request.Request(f"{GATEWAY}{path}", data=data, method="PUT")
+    req.add_header("Content-Type", content_type or "application/octet-stream")
+    req.add_header("User-Agent", USER_AGENT)
+    if TOKEN:
+        req.add_header("Authorization", f"Bearer {TOKEN}")
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        resp.read()
+
+
 def _text_of(content) -> str:
     """把 Ark 的 content 数组压成一句提示词。
 
@@ -130,6 +141,9 @@ def _offered() -> dict:
 # 本地图任务表 (Wan 的图像走异步契约, 而网关的生图是同步的)。
 _IMG_PREFIX = "shimimg-"
 _IMG_TASKS: dict[str, dict] = {}
+# 开过的上传位 blob_id -> content_type。上传那一步节点不会再带类型信息,
+# 而网关要靠它决定取回时怎么标 Content-Type。
+_UPLOADS: dict[str, str] = {}
 
 # DashScope 的 size 是 "1920*1080", 我们按短边定档。
 _RES_BUCKETS = ((1000, "1080p"), (700, "720p"), (0, "480p"))
@@ -291,6 +305,11 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):  # noqa: N802
         path = self.path.split("?")[0]
+        # 素材上传不是"某个厂商"的端点, 是 comfy.org 自己的对象存储。所有带
+        # image/video/audio 输入的官方节点都先走它换一个公网 URL, 再把那个 URL
+        # 放进给厂商的请求里。没有它, 这类节点全部 0 秒失败。
+        if path == "/customers/storage":
+            return self._open_upload()
         if not self._is_wired(path):
             return self._not_wired(path)
         # --- ByteDance / Seedance (Ark 形状) ---
@@ -316,6 +335,12 @@ class Handler(BaseHTTPRequestHandler):
             if path.endswith("/multimodal-generation/generation"):
                 return self._qwen_image()
         return self._not_wired(path)
+
+    def do_PUT(self):  # noqa: N802
+        path = self.path.split("?")[0]
+        if path.startswith("/upload/"):
+            return self._recv_upload(path.rsplit("/", 1)[-1])
+        return self._fail(404, f"没有这个上传地址: {path}")
 
     def do_GET(self):  # noqa: N802
         path = self.path.split("?")[0]
@@ -526,12 +551,25 @@ class Handler(BaseHTTPRequestHandler):
                 "本平台按秒计价，无法为「auto」时长报价。请在节点的 duration 里选一个具体秒数。")
         if duration:
             payload["duration"] = duration
-        # 首帧: 2.5/2.7 放在 input.img_url, 3.0 改放 input.media[] 里 type=first_frame。
+        # 素材。两代都送上去, 由**网关按型号**挑用哪个 (media_models.json 的
+        # video_input) —— 垫片不知道哪个型号要哪种, 也不该知道。
+        #
+        #   2.5/2.7  只认一张首帧 img_url
+        #   3.0      认一个数组: first_frame / last_frame / reference_image /
+        #            reference_video。压成一张首帧等于把用户的参考素材悄悄丢掉,
+        #            他付了钱却拿到一条无视素材的视频 —— 比直接报错更糟。
+        media = [
+            {"type": str(m.get("type") or ""), "url": str(m.get("url") or "")}
+            for m in (inp.get("media") or [])
+            if isinstance(m, dict) and m.get("url")
+        ]
+        if media:
+            payload["media"] = media
         img = str(inp.get("img_url") or "")
         if not img:
-            for item in (inp.get("media") or []):
-                if isinstance(item, dict) and item.get("type") == "first_frame" and item.get("url"):
-                    img = str(item["url"])
+            for item in media:
+                if item["type"] == "first_frame":
+                    img = item["url"]
                     break
         if img:
             payload["image_url"] = img
@@ -666,6 +704,58 @@ class Handler(BaseHTTPRequestHandler):
             "finish_reason": "stop",
             "message": {"role": "assistant", "content": [{"image": u} for u in urls]},
         }]}})
+
+    # ---- 素材上传 (官方节点的 image / video / audio 输入) ----
+
+    def _open_upload(self):
+        """comfy.org 的 POST /customers/storage: 开一个上传位。
+
+        节点拿到的 **download_url 会被交给上游厂商** —— 阿里云的服务器要去 GET
+        它, 所以那个地址必须是公网的, 由网关给。upload_url 则指回垫片自己:
+        节点上传时不带鉴权 (它以为那是一个签名过的 S3 地址), 令牌只有我们有。
+        """
+        body = self._body()
+        try:
+            out = _gateway("POST", "/media/uploads", {
+                "file_name": body.get("file_name") or "",
+                "content_type": body.get("content_type") or "",
+            }, timeout=30.0)
+        except urllib.error.HTTPError as exc:
+            detail = exc.read()[:400].decode("utf-8", "replace")
+            print(f"[shim] 开上传位失败 {exc.code}: {detail}", flush=True)
+            return self._send(exc.code, detail.encode(), "application/json")
+        except Exception as exc:  # noqa: BLE001
+            return self._fail(502, f"网关不可达: {type(exc).__name__}: {exc}")
+        blob_id = out.get("id") or ""
+        with _lock:
+            _UPLOADS[blob_id] = str(body.get("content_type") or "application/octet-stream")
+        print(f"[shim] 开上传位 {blob_id} ({body.get('content_type')})", flush=True)
+        return self._json(200, {
+            "upload_url": f"http://127.0.0.1:{PORT}/upload/{blob_id}",
+            "download_url": out.get("download_url") or "",
+        })
+
+    def _recv_upload(self, blob_id: str):
+        """节点把字节 PUT 到这里, 我们补上令牌转给网关。"""
+        with _lock:
+            ctype = _UPLOADS.get(blob_id, "")
+        if not ctype:
+            return self._fail(404, "没有这个上传位（可能已过期）")
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+        except (TypeError, ValueError):
+            length = 0
+        data = self.rfile.read(length) if length else b""
+        try:
+            _gateway_put(f"/media/uploads/{blob_id}", data, ctype)
+        except urllib.error.HTTPError as exc:
+            detail = exc.read()[:400].decode("utf-8", "replace")
+            print(f"[shim] 转发素材失败 {exc.code}: {detail}", flush=True)
+            return self._send(exc.code, detail.encode(), "application/json")
+        except Exception as exc:  # noqa: BLE001
+            return self._fail(502, f"网关不可达: {type(exc).__name__}: {exc}")
+        print(f"[shim] 素材 {blob_id} 转发 {len(data)} 字节", flush=True)
+        return self._json(200, {"ok": True})
 
     def _blob(self, name: str):
         # 只认自己造的文件名, 不接受任何路径成分 —— 这个端口虽然只在回环上,
