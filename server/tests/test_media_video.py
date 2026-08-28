@@ -42,7 +42,16 @@ PRICED = {
     }
 }
 IMAGE_MODEL = "gpt-image-2"
-PRICED_IMAGES = {IMAGE_MODEL: {"id": IMAGE_MODEL, "name": "GPT Image 2", "credits_per_image": 15}}
+# 官方公开价: 图像输出 $30/百万 token, 文本输入 $5/百万。
+PRICED_IMAGES = {
+    IMAGE_MODEL: {
+        "id": IMAGE_MODEL,
+        "name": "GPT Image 2",
+        "usd_per_1m_image_tokens": 30.0,
+        "usd_per_1m_text_input_tokens": 5.0,
+        "fallback_credits": 25,
+    }
+}
 
 
 class _Resp:
@@ -284,14 +293,43 @@ def _gen_image(monkeypatch, response, log=None):
     )
 
 
-def test_image_charges_per_item(monkeypatch):
+def test_image_charges_by_token_not_per_item(monkeypatch):
+    """按张收会要么坑用户要么亏钱: 同一模型低画质与高画质相差 35 倍
+    (gpt-image-2 一张 1024²: $0.006 vs $0.211)。token 数如实反映画质与尺寸。"""
+    monkeypatch.setattr(config, "MODEL_PRICE_MARKUP", 1.2)
     user = _new_user("img-ok@test.local")
     before = credits.balance(user["id"])
-    ok = _Resp(200, {"created": 1, "data": [{"b64_json": "AAAA"}], "usage": {"output_tokens": 196}})
+    # 生产实测的那一次: 低画质 1024², output_tokens=196
+    ok = _Resp(
+        200,
+        {
+            "created": 1,
+            "data": [{"b64_json": "AAAA"}],
+            "usage": {"output_tokens": 196, "input_tokens_details": {"text_tokens": 12}},
+        },
+    )
     r = _gen_image(monkeypatch, ok)
     assert r.status_code == 200, r.text
-    assert r.json()["credits"] == 15
-    assert credits.balance(user["id"]) == before - 15
+    # 196 x $30/1M + 12 x $5/1M = $0.00594 -> x100 积分 x1.2 倍率 = 0.71 -> 进位 1
+    assert r.json()["credits"] == 1, r.json()
+    assert credits.balance(user["id"]) == before - 1
+
+
+def test_high_quality_image_costs_much_more(monkeypatch):
+    """同一个模型, 高画质 token 数是低画质的几十倍 —— 按张收就永远收错。"""
+    monkeypatch.setattr(config, "MODEL_PRICE_MARKUP", 1.2)
+    entry = PRICED_IMAGES[IMAGE_MODEL]
+    low = media.image_credits(entry, {"output_tokens": 196})
+    high = media.image_credits(entry, {"output_tokens": 7000})
+    assert low == 1 and high == 26, (low, high)
+    assert high > low * 20, "高低画质的价差必须传导到用户账单上"
+
+
+def test_image_without_usage_falls_back_but_never_free(monkeypatch):
+    """上游没给 usage 时宁可贵也不能免费 —— 免费的那条路会被人发现并刷爆。"""
+    assert media.image_credits(PRICED_IMAGES[IMAGE_MODEL], None) == 25
+    assert media.image_credits(PRICED_IMAGES[IMAGE_MODEL], {}) == 25
+    assert media.image_credits({}, None) >= 1, "连 fallback 都没配也不能免费"
 
 
 def test_image_upstream_error_costs_nothing(monkeypatch):
@@ -303,7 +341,7 @@ def test_image_upstream_error_costs_nothing(monkeypatch):
 
 
 def test_image_unpriced_model_is_not_offered(monkeypatch):
-    monkeypatch.setattr(media, "_image_cache", {IMAGE_MODEL: {"credits_per_image": None}})
+    monkeypatch.setattr(media, "_image_cache", {IMAGE_MODEL: {"usd_per_1m_image_tokens": None}})
     _new_user("img-unpriced@test.local")
     log = []
     r = _gen_image(monkeypatch, _Resp(200, {"data": []}), log)
