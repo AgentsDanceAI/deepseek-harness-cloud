@@ -229,6 +229,22 @@ def main() -> int:
         return 1
     print("  ✓ Wan 3.0 -> media[] 里的 first_frame 转成 image_url")
 
+    # 参考图**不是首帧**。Wan 3.0 Reference to Video 传的是 reference_image,
+    # 把 media[] 压成一张首帧等于把用户的参考素材悄悄丢掉 —— 他付了钱却拿到一条
+    # 无视素材的视频, 比直接报错更糟。
+    call("POST", "/proxy/wan/api/v1/services/aigc/video-generation/video-synthesis",
+         {"model": "wan3.0-video",
+          "input": {"prompt": "p", "media": [
+              {"type": "reference_image", "url": "https://x/ref1.png"},
+              {"type": "reference_video", "url": "https://x/ref2.mp4"}]},
+          "parameters": {"resolution": "1080P", "ratio": "adaptive", "duration": 6}})
+    _, sent = call("GET", "/llm/v1/_debug/last-video", None, base=STUB)
+    got = sent.get("media") or []
+    if len(got) != 2 or {m.get("type") for m in got} != {"reference_image", "reference_video"}:
+        print(f"  ✗ 参考素材没原样转达 (被压成首帧或丢了): {sent}")
+        return 1
+    print("  ✓ Wan 3.0 参考素材 -> media[] 原样转达 (没被压成一张首帧)")
+
     # Wan 3.0 的 auto 时长发过来是 -1。按秒计价的东西不能按未知长度卖 ——
     # 网关会当成 1 秒, 而上游可能出到 30 秒。必须在垫片这里就拦住并说清怎么办。
     code, out = call(
@@ -349,6 +365,58 @@ def main() -> int:
         print(f"  ✗ Qwen 的错误里没告诉用户该换成哪个: {out}")
         return 1
     print("  ✓ Qwen 未在售型号 -> 200 + code/message")
+
+    # ---- 素材上传 (image / video / audio 输入的官方节点全靠它) ----
+    #
+    # 2026-08-28 之前这条根本没实现: 官方节点先 POST /customers/storage 换一个
+    # 公网 URL, 而垫片把它当成"厂商 storage"回了 404 —— 于是 Wan 3.0 Reference
+    # to Video 这类带素材输入的节点**全部 0 秒失败**, 报的还是一句通用错误。
+    code, out = call("POST", "/customers/storage",
+                     {"file_name": "ref.png", "content_type": "image/png"})
+    if code != 200 or not isinstance(out, dict):
+        print(f"  ✗ 开上传位: {code} {out}")
+        return 1
+    up, down = out.get("upload_url") or "", out.get("download_url") or ""
+    if not up or not down:
+        print(f"  ✗ 缺 upload_url/download_url: {out}")
+        return 1
+    # download_url 必须指向**网关**而不是垫片自己 —— 阿里云的服务器要去取它,
+    # 回环地址它够不着。这一条错了在本地测不出来, 只会在真跑时静默失败。
+    if "127.0.0.1:8199" in down:
+        print(f"  ✗ download_url 指回了垫片的回环地址, 上游取不到: {down}")
+        return 1
+    print(f"  ✓ 开上传位 -> 上传到垫片, 取回走网关 ({down.split('/')[2]})")
+
+    png = bytes.fromhex("89504e470d0a1a0a") + b"fake-bytes"
+    req = urllib.request.Request(up, data=png, method="PUT")
+    req.add_header("Content-Type", "image/png")
+    req.add_header("User-Agent", "DSHCloud-ShimCheck/1.0")
+    try:
+        with urllib.request.urlopen(req, timeout=60) as r:
+            r.read()
+    except Exception as exc:  # noqa: BLE001
+        print(f"  ✗ 上传失败: {type(exc).__name__}: {exc}")
+        return 1
+    dreq = urllib.request.Request(down)
+    dreq.add_header("User-Agent", "DSHCloud-ShimCheck/1.0")
+    try:
+        with urllib.request.urlopen(dreq, timeout=60) as r:
+            got = r.read()
+    except Exception as exc:  # noqa: BLE001
+        print(f"  ✗ 取回失败: {type(exc).__name__}: {exc}")
+        return 1
+    if got != png:
+        print(f"  ✗ 取回的字节和上传的不一样: {len(got)} vs {len(png)}")
+        return 1
+    print(f"  ✓ 上传 -> 取回 字节一致 ({len(got)} 字节)")
+
+    # 非媒体类型要被网关挡掉, 而且错误要原样透到节点
+    code, out = call("POST", "/customers/storage",
+                     {"file_name": "x.html", "content_type": "text/html"})
+    if code == 200:
+        print(f"  ✗ text/html 被放行了 —— 这就成了挂在自家域名下的公开文件站: {out}")
+        return 1
+    print(f"  ✓ 非媒体类型 -> {code} 挡掉")
 
     # 别家的官方节点必须给出「未接通」而不是被误接。ComfyUI 里另有两家的路径
     # 也以 /images/generations 结尾 (kling / xai) —— 按后缀路由会把它们

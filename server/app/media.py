@@ -33,7 +33,7 @@ from pathlib import Path
 
 import httpx
 from fastapi import APIRouter, Depends, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 
 from . import config, credits, db, model_catalog, plans, security
 from .accounts import resolve_user
@@ -224,12 +224,25 @@ _BAILIAN_SIZE = {"480p": "832*480", "720p": "1280*720", "1080p": "1920*1080"}
 _BAILIAN_RESOLUTION = {"480p": "480P", "720p": "720P", "1080p": "1080P"}
 _RATIOS = ("16:9", "9:16", "1:1", "4:3", "3:4", "adaptive")
 _PARAM_STYLES = ("size", "resolution_ratio")
+# 素材怎么给。wan2.5-2.7 只有一张首帧图 (input.img_url); wan3.0 改成一个数组,
+# 能带首帧、尾帧、参考图、参考视频 —— 把它压成一张首帧, 等于把用户的参考素材
+# 悄悄丢掉, 他付了钱却拿到一条无视素材的视频, 比直接报错更糟。
+_INPUT_STYLES = ("img_url", "media")
+# 一次最多带几件素材, 以及单个 URL 的长度上限 (data: URI 会很长)。
+_MEDIA_MAX_ITEMS = 8
+_MEDIA_MAX_URL = 8 * 1024 * 1024
 
 
 def video_param_style(model: str) -> str:
     """这个模型该用哪代参数写法。目录没写就按老写法 —— 老写法是 wanx2.1 那批。"""
     style = str((_catalog().get(model) or {}).get("video_params") or "size")
     return style if style in _PARAM_STYLES else "size"
+
+
+def video_input_style(model: str) -> str:
+    """素材是给一张首帧 (img_url) 还是给一个数组 (media)。"""
+    style = str((_catalog().get(model) or {}).get("video_input") or "img_url")
+    return style if style in _INPUT_STYLES else "img_url"
 _BAILIAN_TERMINAL = {"SUCCEEDED": "succeeded", "FAILED": "failed", "CANCELED": "failed", "UNKNOWN": "failed"}
 
 
@@ -261,7 +274,7 @@ def _bailian_headers(async_mode: bool = False) -> dict:
 
 async def submit_video(
     provider: str, model: str, prompt: str, resolution: str, duration: int,
-    image_url: str = "", ratio: str = "",
+    image_url: str = "", ratio: str = "", media: list | None = None,
 ) -> tuple[str, dict | None, int]:
     """向上游下单。返回 (task_id, 错误报文, 错误码) —— 成功时后两者为 None/0。"""
     if provider == BAILIAN:
@@ -275,7 +288,10 @@ async def submit_video(
             "input": {"prompt": prompt},
             "parameters": {k: v for k, v in params.items() if v},
         }
-        if image_url:
+        if video_input_style(model) == "media":
+            if media:
+                payload["input"]["media"] = media
+        elif image_url:
             payload["input"]["img_url"] = image_url
         url = f"{config.BAILIAN_NATIVE_BASE}/services/aigc/video-generation/video-synthesis"
         async with _client() as client:
@@ -448,6 +464,16 @@ async def create_video(request: Request, user: dict = Depends(resolve_user)):
     ratio = str(body.get("ratio") or "")
     if ratio and ratio not in _RATIOS:
         return _error(400, "invalid_request_error", f"ratio must be one of {', '.join(_RATIOS)}.")
+    media = body.get("media") or []
+    if not isinstance(media, list) or len(media) > _MEDIA_MAX_ITEMS:
+        return _error(400, "invalid_request_error",
+                      f"media must be a list of at most {_MEDIA_MAX_ITEMS} items.")
+    for item in media:
+        url_ = str((item or {}).get("url") or "") if isinstance(item, dict) else ""
+        if not url_ or len(url_) > _MEDIA_MAX_URL:
+            return _error(400, "invalid_request_error", "each media item needs a url.")
+        if not url_.startswith(("http://", "https://", "data:")):
+            return _error(400, "invalid_request_error", "media url must be http(s) or a data URI.")
     try:
         duration = int(body.get("duration") or config.VIDEO_DEFAULT_DURATION)
     except (TypeError, ValueError):
@@ -499,6 +525,7 @@ async def create_video(request: Request, user: dict = Depends(resolve_user)):
             duration,
             str(body.get("image_url") or ""),
             ratio,
+            media,
         )
     except httpx.HTTPError as exc:
         log.warning("视频作业提交失败: %s", exc)
@@ -638,6 +665,14 @@ async def reconcile_tick() -> int:
         if after["status"] != job["status"]:
             settled += 1
             log.info("视频作业 %s 收尾为 %s", job["id"], after["status"])
+    # 顺手扫掉过期的中转素材。搭在这个循环上而不是另起一个: 它已经是每分钟一次的
+    # "媒体侧收尾"了, 再加一个循环只是多一处会忘的地方。
+    try:
+        gone = sweep_uploads()
+        if gone:
+            log.info("清掉 %d 个过期的中转素材", gone)
+    except Exception:  # noqa: BLE001 — 清理失败不能让作业收尾停摆
+        log.exception("清理中转素材失败")
     return settled
 
 
@@ -746,6 +781,136 @@ async def create_image(request: Request, user: dict = Depends(resolve_user)):
     )
     result["credits"] = amount
     return JSONResponse(result)
+
+
+# ---- 素材上传: 官方节点的 image / video / audio 输入 ----
+#
+# ComfyUI 的官方节点在把素材交给厂商之前, 先上传到 comfy.org 换一个 URL:
+#
+#   POST /customers/storage  {file_name, content_type}  -> {upload_url, download_url}
+#   PUT  <upload_url>        <原始字节>
+#   然后把 **download_url** 放进给厂商的请求里 (Wan3 的 input.media[].url 等)
+#
+# --comfy-api-base 指向我们的垫片, 所以这条链路也落在我们身上。2026-08-28 之前
+# 没实现, 于是**所有带素材输入的官方节点都是死的** —— 表现是节点 0 秒失败, 报
+# 一句「该节点在执行过程中发生错误」, 而垫片日志里写的是「厂商 storage 未接入」,
+# 那句话本身就是胡说 (storage 根本不是厂商)。
+#
+# 关键约束: download_url 必须**上游厂商能从公网抓到**。回环 (垫片自己那个 /blob)
+# 和 VPC 内网都不行 —— 阿里云的服务器要去 GET 它。所以取回那一端是**无鉴权**的,
+# 靠 id 不可猜来防遍历, 靠 TTL 限制暴露窗口。
+_UPLOAD_DIR = config.DATA_DIR / "media_uploads"
+# 只收媒体。不做白名单的话, 这就是一个挂在自家域名下、任何付费账号都能往里塞
+# 任意文件的公开文件站 —— text/html 还能拿来做同源钓鱼。
+_UPLOAD_TYPES = ("image/", "video/", "audio/")
+
+
+def _upload_paths(blob_id: str) -> tuple[Path, Path]:
+    return _UPLOAD_DIR / f"{blob_id}.bin", _UPLOAD_DIR / f"{blob_id}.json"
+
+
+def _safe_blob_id(blob_id: str) -> str:
+    """只认自己发出去的形状。任何路径成分都不接受 —— 这个 id 会被拼进文件名。"""
+    ok = blob_id and len(blob_id) <= 64 and all(c.isalnum() or c in "-_" for c in blob_id)
+    return blob_id if ok else ""
+
+
+def sweep_uploads(now: float | None = None) -> int:
+    """删掉过期的中转素材。只在这儿删 —— 上游抓完就不需要了, 留着纯属暴露面。"""
+    now = time.time() if now is None else now
+    removed = 0
+    if not _UPLOAD_DIR.is_dir():
+        return 0
+    for f in _UPLOAD_DIR.iterdir():
+        try:
+            if now - f.stat().st_mtime > config.MEDIA_UPLOAD_TTL_S:
+                f.unlink()
+                removed += 1
+        except OSError:
+            continue
+    return removed
+
+
+@router.post("/v1/media/uploads")
+async def create_upload(request: Request, user: dict = Depends(resolve_user)):
+    """开一个上传位, 返回「往哪 PUT」和「厂商去哪取」。"""
+    gated = _gate(user)
+    if gated is not None:
+        return gated
+    try:
+        raw = await read_limited_body(request, max_bytes=8192, timeout_s=config.REQUEST_BODY_TIMEOUT_S)
+        body = json.loads(raw or b"{}")
+    except json.JSONDecodeError:
+        return _error(400, "invalid_request_error", "Body must be JSON.")
+    ctype = str(body.get("content_type") or "application/octet-stream").split(";")[0].strip().lower()
+    if not ctype.startswith(_UPLOAD_TYPES):
+        return _error(
+            415, "unsupported_media_type",
+            f"只接受图片/视频/音频 (收到 {ctype})。",
+        )
+    blob_id = security.new_id()  # 96 位随机十六进制 —— 取回那端无鉴权, 全靠它猜不到
+    _UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    _, meta = _upload_paths(blob_id)
+    meta.write_text(json.dumps({
+        "user_id": user["id"],
+        "content_type": ctype,
+        "file_name": str(body.get("file_name") or "")[:200],
+        "created": time.time(),
+    }))
+    base = config.PUBLIC_BASE.rstrip("/")
+    return JSONResponse({
+        "id": blob_id,
+        "upload_url": f"{base}/llm/v1/media/uploads/{blob_id}",
+        "download_url": f"{base}/llm/v1/media/blobs/{blob_id}",
+    })
+
+
+@router.put("/v1/media/uploads/{blob_id}")
+async def put_upload(blob_id: str, request: Request, user: dict = Depends(resolve_user)):
+    blob_id = _safe_blob_id(blob_id)
+    blob, meta = _upload_paths(blob_id) if blob_id else (None, None)
+    if not blob_id or not meta.is_file():
+        return _error(404, "not_found", "没有这个上传位。")
+    info = json.loads(meta.read_text() or "{}")
+    if info.get("user_id") != user["id"]:
+        # 别人的上传位 —— 与「不存在」同一个回答, 不让人拿它探 id 是否存在。
+        return _error(404, "not_found", "没有这个上传位。")
+    data = await read_limited_body(
+        request, max_bytes=config.MEDIA_UPLOAD_MAX_BYTES, timeout_s=config.REQUEST_BODY_TIMEOUT_S
+    )
+    blob.write_bytes(data)
+    log.info("素材中转 %s 收到 %d 字节 (%s)", blob_id, len(data), info.get("content_type"))
+    return JSONResponse({"id": blob_id, "bytes": len(data)})
+
+
+@router.get("/v1/media/blobs/{blob_id}")
+async def get_blob(blob_id: str):
+    """**无鉴权** —— 上游厂商的服务器要来抓这个 URL, 它没有我们的令牌。
+
+    安全性靠三条: id 不可猜、TTL 到点就删、Content-Type 只允许媒体且禁止嗅探。
+    """
+    blob_id = _safe_blob_id(blob_id)
+    if not blob_id:
+        return _error(404, "not_found", "没有这个素材。")
+    blob, meta = _upload_paths(blob_id)
+    if not blob.is_file() or not meta.is_file():
+        return _error(404, "not_found", "没有这个素材。")
+    info = json.loads(meta.read_text() or "{}")
+    ctype = str(info.get("content_type") or "")
+    if not ctype.startswith(_UPLOAD_TYPES):
+        # 理论上进不来 (创建时挡过一次), 但这是**公开**出口, 再挡一次不亏。
+        ctype = "application/octet-stream"
+    return Response(
+        blob.read_bytes(),
+        media_type=ctype,
+        # nosniff 由 security_headers 中间件统一加, 这里不重复设 ——
+        # 重复的那一行没有任何测试能区分它在不在, 是死代码。
+        # (test_blob_is_public_but_never_sniffable 验的是"这条路由确实被中间件覆盖到")
+        headers={
+            "Content-Disposition": "inline",
+            "Cache-Control": "private, max-age=300",
+        },
+    )
 
 
 @router.get("/v1/media/models")

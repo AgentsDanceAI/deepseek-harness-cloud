@@ -31,6 +31,9 @@ JOBS: dict[str, int] = {}     # job_id -> 已被查询次数
 # 最后一次收到的建视频报文。自检据此断言**字段转译**真的发生了 ——
 # 否则把 DashScope 的 size 折成 resolution 这段改坏了也没人会红。
 LAST_VIDEO: dict = {}
+# 素材中转: blob_id -> 字节。带 image/video/audio 输入的官方节点都要先走这条,
+# 换一个**上游厂商能从公网取到**的 URL。
+BLOBS: dict[str, bytes] = {}
 LAST_IMAGE: dict = {}
 PORT = 9797
 # 容器里要 host.docker.internal, 宿主机自测要 localhost。
@@ -106,9 +109,34 @@ class Handler(BaseHTTPRequestHandler):
     def _json(self, code: int, obj: dict):
         self._send(code, json.dumps(obj).encode(), "application/json")
 
+    def do_PUT(self):
+        if not self._check_ua():
+            return
+        if "/media/uploads/" not in self.path:
+            return self._json(404, {"error": "not found"})
+        n = int(self.headers.get("Content-Length", 0))
+        bid = self.path.rsplit("/", 1)[-1]
+        BLOBS[bid] = self.rfile.read(n) if n else b""
+        print(f"[stub] 收到素材 {bid} {len(BLOBS[bid])} 字节", flush=True)
+        self._json(200, {"id": bid, "bytes": len(BLOBS[bid])})
+
     def do_POST(self):
         if not self._check_ua():
             return
+        if self.path.endswith("/media/uploads"):
+            length = int(self.headers.get("Content-Length", 0))
+            payload = json.loads(self.rfile.read(length) or b"{}")
+            ctype = str(payload.get("content_type") or "")
+            # 与生产同款: 只收媒体, 别的一律 415
+            if not ctype.startswith(("image/", "video/", "audio/")):
+                print(f"[stub] 拒收类型 {ctype!r} -> 415", flush=True)
+                return self._json(415, {"error": {"message": "unsupported media type"}})
+            bid = uuid.uuid4().hex
+            return self._json(200, {
+                "id": bid,
+                "upload_url": f"http://{ADVERTISE}:{PORT}/llm/v1/media/uploads/{bid}",
+                "download_url": f"http://{ADVERTISE}:{PORT}/llm/v1/media/blobs/{bid}",
+            })
         if self.path.endswith("/images/generations"):
             length = int(self.headers.get("Content-Length", 0))
             payload = json.loads(self.rfile.read(length) or b"{}")
@@ -172,6 +200,11 @@ class Handler(BaseHTTPRequestHandler):
                           for m, rs in SOLD_VIDEO.items()],
                 "image": [{"id": m, "name": m} for m in SOLD_IMAGE],
             })
+        if "/media/blobs/" in self.path:
+            bid = self.path.rsplit("/", 1)[-1]
+            if bid not in BLOBS:
+                return self._json(404, {"error": "no such blob"})
+            return self._send(200, BLOBS[bid], "image/png")
         if self.path.endswith("/sample.mp4"):
             return self._send(200, SAMPLE.read_bytes(), "video/mp4")
         if "/videos/result/" in self.path:

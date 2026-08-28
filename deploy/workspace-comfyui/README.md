@@ -90,6 +90,40 @@ ComfyUI 自带 **40 个厂商**的官方节点, 全部打 `--comfy-api-base` 那
 | Ark (byteplus) | `content[]` 数组 | `{status, content.video_url}` | HTTP 4xx |
 | DashScope multimodal (qwen) | `input.messages[].content[]` 混着 text/image | 无 (**同步**) | HTTP 200 + code/message |
 
+### 带素材输入的节点还要一条上传链路
+
+`image` / `video` / `audio` 输入的官方节点, 在把素材交给厂商之前先换一个 URL:
+
+    POST /customers/storage  {file_name, content_type} -> {upload_url, download_url}
+    PUT  <upload_url>        <原始字节>
+    然后把 **download_url** 放进给厂商的请求里
+
+`--comfy-api-base` 指向垫片, 所以这条也落在我们身上。2026-08-28 之前没实现,
+于是**所有带素材输入的官方节点都是死的** —— 表现是节点 0 秒失败、报一句通用的
+「该节点在执行过程中发生错误」, 而垫片日志里写的是「厂商 storage 未接入」,
+那句话本身就是胡说 (storage 根本不是厂商)。
+
+关键约束: **download_url 必须上游厂商能从公网抓到**。垫片自己那个回环 `/blob`
+和 VPC 内网都不行 —— 阿里云的服务器要去 GET 它。所以走网关:
+
+    垫片 POST /media/uploads  -> 网关发一个不可猜的 id, 回 {upload_url, download_url}
+    节点 PUT  垫片/upload/<id> -> 垫片补上令牌转给网关 (节点以为那是签名过的 S3 地址, 不带鉴权)
+    厂商 GET  网关/media/blobs/<id>  ← **无鉴权**, 厂商没有我们的令牌
+
+取回那端无鉴权, 所以别的防线要立住: id 96 位随机、只收 image/video/audio
+(否则就是挂在自家域名下的公开文件站, text/html 还能做同源钓鱼)、6 小时到期删除。
+
+### 素材有**两代**给法
+
+| | 怎么给 |
+|---|---|
+| wan2.5 / 2.6 / 2.7 | `input.img_url` 一张首帧 |
+| wan3.0 | `input.media[]`: first_frame / last_frame / reference_image / reference_video |
+
+**参考图不是首帧**。把 media[] 压成一张 img_url, 用户付了钱却拿到一条无视参考
+素材的视频 —— 那种错不报错, 只会让人觉得"模型不听话"。哪代由
+`media_models.json` 的 `video_input` 决定, 垫片两代都送上去、网关按型号挑。
+
 ### 百炼视频有**三代报文**, 用错那代不会报错
 
 |  | 尺寸怎么写 | 首帧放哪 |
@@ -116,7 +150,7 @@ Wan 3.0 的节点还有个 **auto 时长** (发过来 `duration: -1`)。按秒�
 用户。回 4xx 只会变成一句「请求失败」, 用户看不到该换哪个型号 —— 所以 Wan 的
 未在售走的是 200。
 
-改完跑 `shim_check.py` (23 项), 它对着 `stub_gateway.py` 走完四家的全部转译路径。
+改完跑 `shim_check.py` (27 项), 它对着 `stub_gateway.py` 走完四家的全部转译路径。
 
 ## 怎么跑验证
 

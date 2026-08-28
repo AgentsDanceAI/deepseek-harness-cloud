@@ -80,6 +80,10 @@ API_BODY_MAX_BYTES = _env_int("API_BODY_MAX_BYTES", 2 * 1024 * 1024)
 # Multimodal prompts and tool definitions are commonly larger than account API
 # payloads. The gateway still buffers JSON, so keep the default finite.
 GATEWAY_BODY_MAX_BYTES = _env_int("GATEWAY_BODY_MAX_BYTES", 32 * 1024 * 1024)
+# 官方节点的素材输入 (参考图、参考视频、驱动音频) 要先换成一个**公网可取**的 URL
+# 才能交给上游厂商, 所以本站得存一下。只是中转, 存活期很短。
+MEDIA_UPLOAD_MAX_BYTES = _env_int("MEDIA_UPLOAD_MAX_BYTES", 64 * 1024 * 1024)
+MEDIA_UPLOAD_TTL_S = _env_int("MEDIA_UPLOAD_TTL_S", 6 * 3600)
 # Preview applications may accept file uploads through the authenticated proxy.
 PREVIEW_BODY_MAX_BYTES = _env_int("PREVIEW_BODY_MAX_BYTES", 64 * 1024 * 1024)
 # HTML preview responses must be buffered briefly to inject their base URL.
