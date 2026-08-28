@@ -206,6 +206,22 @@ def main() -> int:
         return 1
     print("  ✓ Wan 未在售型号 -> 200 + code/message (节点能把中文原话抛出来)")
 
+    # 型号在售、但**这个分辨率**不在售 (wan2.7 的 480p 厂商不提供): 错误里必须
+    # 出现分辨率, 否则用户会去换型号 —— 而他该做的是换分辨率。
+    code, out = call(
+        "POST", "/proxy/wan/api/v1/services/aigc/video-generation/video-synthesis",
+        {"model": "wan2.7-t2v", "input": {"prompt": "x"},
+         "parameters": {"size": "854*480", "duration": 5}},
+    )
+    body = json.dumps(out, ensure_ascii=False) if isinstance(out, dict) else str(out)
+    if code != 200 or (isinstance(out, dict) and out.get("output")):
+        print(f"  ✗ 分辨率不在售应当回 200 且不带 output: {code} {body[:200]}")
+        return 1
+    if "480p" not in body:
+        print(f"  ✗ 错误里没提分辨率, 用户会去换型号: {body[:220]}")
+        return 1
+    print("  ✓ 分辨率不在售 -> 错误里带上了 480p (不是笼统说「型号未开放」)")
+
     # Wan 的生图: DashScope 那侧是异步契约, 而网关的生图是同步的 —— 垫片得自己
     # 造任务号并在后台跑, 不能让 POST 阻塞。
     code, out = call(

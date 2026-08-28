@@ -69,7 +69,7 @@ ComfyUI 自带 **40 个厂商**的官方节点, 全部打 `--comfy-api-base` 那
 |---|---|---|---|
 | byteplus / seedance | doubao-seedance-2.5 / 2.0 / fast / mini | dreamina-seedance-… | ✅ 已接 (去厂商前缀后匹配) |
 | openai | gpt-image-2 / gpt-image-1.5 | `gpt-image-1 / 1.5 / 2` | ✅ 已接 (名字一字不差) |
-| wan | wan2.7-t2v / i2v、wanx2.1-\* | `wan2.5-… / 2.6-… / 2.7-t2v / 2.7-i2v / 3.0-…` | ✅ 已接 (2.7 两个对得上) |
+| wan | wan2.7-t2v / i2v (720p/1080p; **480p 厂商不提供**)、wanx2.1-\* | `wan2.5-… / 2.6-… / 2.7-t2v / 2.7-i2v / 3.0-…` | ✅ 已接 (2.7 两个对得上) |
 | qwen | qwen-image-3.0 / -pro | `qwen-image-3.0 / -pro` | ✅ 已接 (名字一字不差) |
 | kling | kling-v3 / v3.0-std / v3.0-pro / v2-6 | `kling-3.0-turbo / v3-omni / video-o1 / v2-5-turbo` | ❌ 名字全对不上 |
 | gemini / vertexai | 无 (只有 gemini 对话模型) | gemini-\*-image | ❌ 网关没有这些图模型 |
@@ -96,7 +96,7 @@ ComfyUI 自带 **40 个厂商**的官方节点, 全部打 `--comfy-api-base` 那
 用户。回 4xx 只会变成一句「请求失败」, 用户看不到该换哪个型号 —— 所以 Wan 的
 未在售走的是 200。
 
-改完跑 `shim_check.py` (19 项), 它对着 `stub_gateway.py` 走完三家的全部转译路径。
+改完跑 `shim_check.py` (20 项), 它对着 `stub_gateway.py` 走完四家的全部转译路径。
 
 ## 怎么跑验证
 

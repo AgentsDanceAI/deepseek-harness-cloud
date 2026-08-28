@@ -375,7 +375,7 @@ def _media_config() -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def test_only_calibrated_video_models_carry_a_price():
+def test_only_calibrated_media_models_carry_a_price():
     """定价表是按**某一个型号的网关牌价**算出来的, 不能顺手套给别的型号。
 
     AgentsDance 2026-08-27 的事故就是这一条: 按 Seedance 2.5 重定价后, 默认模型
@@ -386,6 +386,14 @@ def test_only_calibrated_video_models_carry_a_price():
     """
     for m in _media_config()["video"]:
         priced = any((m.get("credits_per_second") or {}).values())
+        calibrated = bool(m.get("calibrated"))
+        assert priced == calibrated, (
+            f"{m['id']}: 定价({priced}) 与 calibrated({calibrated}) 不一致 —— 要么补校准, 要么把价格置 null"
+        )
+    # 图像同理。这条守卫原来只看视频, 而"拿甲型号的价卖乙型号"在图像上一样会犯 ——
+    # qwen-image-3.0 的 2K 是 4 积分、-pro 的 2K 是 9, 套错就是按 pro 的价卖标准版。
+    for m in _media_config()["image"]:
+        priced = media._image_priced(m)
         calibrated = bool(m.get("calibrated"))
         assert priced == calibrated, (
             f"{m['id']}: 定价({priced}) 与 calibrated({calibrated}) 不一致 —— 要么补校准, 要么把价格置 null"
