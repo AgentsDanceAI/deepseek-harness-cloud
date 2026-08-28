@@ -142,35 +142,50 @@ def _upstream(key: str, product: products.Product) -> str:
     return f"{_upstream_host(key)}:{product.port}"
 
 
-def _mint_workspace_token(user: dict) -> str:
-    """Device token for the container's gateway auth — same lifecycle as a
-    desktop device: visible in the console's device list, revocable there.
+def _mint_workspace_token(user: dict, product: products.Product) -> str:
+    """容器用来打网关的凭据, 生命周期与桌面设备一致 (控制台的设备列表里可见、可撤)。
 
-    There is ONE workspace per user (the container is named after the user id),
-    so each rebuild replaces the credential rather than adding another: the old
-    row is revoked and pruned. Otherwise every recreate left a dead "云工作台"
-    entry behind and the device list filled with历史 noise.
+    **按工作台隔离, 不按人。** 撤销条件原来只有 user_id+platform='cloud' —— 那是
+    "一个人只有一个工作台"时代的写法 (容器就以用户 id 命名)。加了 ComfyUI 之后
+    这个前提不成立了: 开第二个工作台会把第一个容器里的令牌撤掉, 而那个容器还在
+    跑、界面照常, 只是**往网关发的每一发都 401**, 没有任何提示。
+    2026-08-28 线上踩到: 12:51 起 ComfyUI, 13:03 起 dsh, ComfyUI 从此取不到在售
+    清单也生成不了任何东西。
     """
+    key = products.wskey(user["id"], product.id)
     device_id = security.new_id("dev_")
     epoch = int(user["session_epoch"])
     token = security.sign_token(user["id"], device_id=device_id, epoch=epoch, ttl=config.DEVICE_TOKEN_TTL)
     now = time.time()
+    name = "云工作台" if product.id == products.DEFAULT else f"云工作台 · {product.name}"
     with db.tx() as conn:
-        # the superseded credential must stop working the moment a new one exists
+        # 迁移前铸的凭据没有 workspace, 新逻辑永远撤不到它们 —— 那就成了系统再也
+        # 收不回的长期凭据。归属到 **dsh**: ComfyUI 是 2026-08 才有的, 历史行
+        # 几乎都是 dsh 的。归属完再走下面的按工作台撤销, 于是"给 ComfyUI 铸币"
+        # 不会误伤这些历史行, 而"给 dsh 铸币"会正常顶替掉它们。
         conn.execute(
-            "UPDATE devices SET revoked=1 WHERE user_id=? AND platform='cloud' AND revoked=0", (user["id"],)
+            "UPDATE devices SET workspace=? WHERE user_id=? AND platform='cloud' "
+            "AND (workspace IS NULL OR workspace='')",
+            (products.wskey(user["id"]), user["id"]),
         )
-        # keep the last few for the audit trail; drop the rest
+        # 被顶替的那份必须立刻失效 —— 但只顶替**同一个工作台**的。
+        conn.execute(
+            "UPDATE devices SET revoked=1 WHERE user_id=? AND platform='cloud' "
+            "AND workspace=? AND revoked=0",
+            (user["id"], key),
+        )
+        # 留最近几条备查, 其余删掉
         stale = conn.execute(
-            "SELECT id FROM devices WHERE user_id=? AND platform='cloud' AND revoked=1 ORDER BY created DESC",
-            (user["id"],),
+            "SELECT id FROM devices WHERE user_id=? AND platform='cloud' AND workspace=? "
+            "AND revoked=1 ORDER BY created DESC",
+            (user["id"], key),
         ).fetchall()
         for row in stale[2:]:
             conn.execute("DELETE FROM devices WHERE id=?", (row["id"],))
         conn.execute(
-            "INSERT INTO devices (id, user_id, name, platform, token_hash, epoch, last_seen, created) "
-            "VALUES (?,?,?,?,?,?,?,?)",
-            (device_id, user["id"], "云工作台", "cloud", security.token_hash(token), epoch, now, now),
+            "INSERT INTO devices (id, user_id, name, platform, workspace, token_hash, epoch, "
+            "last_seen, created) VALUES (?,?,?,?,?,?,?,?,?)",
+            (device_id, user["id"], name, "cloud", key, security.token_hash(token), epoch, now, now),
         )
     return token
 
@@ -208,7 +223,7 @@ async def _running_workspaces() -> list[str]:
 
 
 async def _create(user: dict, product: products.Product) -> None:
-    token = _mint_workspace_token(user)
+    token = _mint_workspace_token(user, product)
     boot = products.boot_script(product.id)
     await backend().create(
         products.wskey(user["id"], product.id),
