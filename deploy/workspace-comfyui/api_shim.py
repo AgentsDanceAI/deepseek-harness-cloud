@@ -22,8 +22,9 @@ ComfyUI 内置了 30+ 个厂商的 API 节点 (Seedance、Kling、Veo、Luma…)
     byteplus / seedance   Ark 形状          文生视频、图生视频、生图
     openai                与网关同构        GPT Image 生图 (gpt-image-2 / 1.5)
     wan                   DashScope 形状    文生视频、图生视频、文生图/图生图
+    qwen                  DashScope 同步    Qwen-Image 3.0 / 3.0-pro 生图与图像编辑
 
-其余 37 家一律回 VendorNotWired —— **不是没写代码, 是网关不卖它们的型号,
+其余 36 家一律回 VendorNotWired —— **不是没写代码, 是网关不卖它们的型号,
 或者节点下拉里写死的名字与我们在售的对不上**。
 
 ⚠️ 这套路径与报文是 comfy.org 与 ComfyUI 之间的**私有约定, 没有文档、版本间会变**。
@@ -152,22 +153,34 @@ def _resolution_of(params: dict) -> str:
     return ""
 
 
+def _urls_from(out: dict) -> list[str]:
+    """把网关的 data[] 折成一串可下载的 URL。
+
+    网关给的是 b64_json, 而按 URL 取图的节点 (Wan / Qwen 这些原生形状的) 拿不了
+    base64 —— 落盘再给个回环地址。图只在本容器内被取一次, 不删也无所谓
+    (容器本身是临时的)。
+    """
+    urls: list[str] = []
+    for item in out.get("data") or []:
+        if item.get("url"):
+            urls.append(item["url"])
+            continue
+        b64 = item.get("b64_json")
+        if not b64:
+            continue
+        BLOBS.mkdir(parents=True, exist_ok=True)
+        name = f"{uuid.uuid4().hex}.png"
+        (BLOBS / name).write_bytes(base64.b64decode(b64))
+        urls.append(f"http://127.0.0.1:{PORT}/blob/{name}")
+    return urls
+
+
 def _run_image_task(task_id: str, payload: dict) -> None:
     """后台跑一次同步生图, 把结果落进本地任务表。"""
     status, urls, message = "FAILED", [], ""
     try:
         out = _gateway("POST", "/images/generations", payload, timeout=300.0)
-        BLOBS.mkdir(parents=True, exist_ok=True)
-        for item in out.get("data") or []:
-            if item.get("url"):
-                urls.append(item["url"])
-                continue
-            b64 = item.get("b64_json")
-            if not b64:
-                continue
-            name = f"{uuid.uuid4().hex}.png"
-            (BLOBS / name).write_bytes(base64.b64decode(b64))
-            urls.append(f"http://127.0.0.1:{PORT}/blob/{name}")
+        urls = _urls_from(out)
         status = "SUCCEEDED" if urls else "FAILED"
         if not urls:
             message = "网关没有返回图像"
@@ -251,6 +264,7 @@ class Handler(BaseHTTPRequestHandler):
         "/proxy/byteplus-seedance2/",
         "/proxy/openai/",
         "/proxy/wan/",
+        "/proxy/qwen/",
     )
 
     def _is_wired(self, path: str) -> bool:
@@ -278,6 +292,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self._wan_video()
             if path.endswith("/image-synthesis"):
                 return self._wan_image()
+        # --- Qwen (DashScope multimodal, 同步) ---
+        elif path.startswith("/proxy/qwen/"):
+            if path.endswith("/multimodal-generation/generation"):
+                return self._qwen_image()
         return self._not_wired(path)
 
     def do_GET(self):  # noqa: N802
@@ -301,7 +319,7 @@ class Handler(BaseHTTPRequestHandler):
             "code": "VendorNotWired",
             "message": (
                 f"「{vendor}」这类官方节点尚未接入本平台。"
-                "已接通: ByteDance/Seedance 视频、OpenAI GPT Image、Wan 视频；"
+                "已接通: ByteDance/Seedance 视频、OpenAI GPT Image、Wan 视频、Qwen 生图；"
                 "其余能力请用「DSH Cloud 生图 / 生视频」节点。"
             ),
         }})
@@ -556,6 +574,56 @@ class Handler(BaseHTTPRequestHandler):
             "results": [{"url": url}] if url else [],
             "message": str(out.get("error") or ""),
         }})
+
+    # ---- Qwen 官方图像节点 (DashScope multimodal, 同步) ----
+
+    def _qwen_image(self):
+        """Qwen-Image 3.0 / 3.0-pro。
+
+        这条**是同步的** (不像 Wan 走建任务+轮询), 与我们网关的生图正好对上,
+        所以不用造任务号。形状差在两头: 进来是 messages[].content[] 里混着
+        text 与 image, 出去要包成 output.choices[].message.content[].image。
+        """
+        body = self._body()
+        content: list = []
+        for msg in ((body.get("input") or {}).get("messages") or []):
+            content.extend(msg.get("content") or [])
+        prompt = " ".join(
+            str(c.get("text") or "") for c in content if isinstance(c, dict) and c.get("text")
+        ).strip()
+        if not prompt:
+            return self._dashscope_error("InvalidParameter", "input.messages 里没有文本提示词")
+        images = [str(c["image"]) for c in content if isinstance(c, dict) and c.get("image")]
+        model = _map_model(body.get("model") or "")
+        params = body.get("parameters") or {}
+        payload = {"model": model, "prompt": prompt}
+        # size 一定要带上 —— 网关按尺寸分档计价 (pro 的 1K 与 2K 差一倍)。
+        if params.get("size"):
+            payload["size"] = str(params["size"])
+        try:
+            if int(params.get("n") or 1) > 1:
+                payload["n"] = int(params["n"])
+        except (TypeError, ValueError):
+            pass
+        if images:
+            payload["image_url"] = images[0]
+        try:
+            out = _gateway("POST", "/images/generations", payload, timeout=300.0)
+        except urllib.error.HTTPError as exc:
+            detail = exc.read()[:400].decode("utf-8", "replace")
+            print(f"[shim] Qwen 生图失败 {exc.code}: {detail}", flush=True)
+            if exc.code == 404:
+                return self._unsold_dashscope(model)
+            return self._dashscope_error("UpstreamError", detail)
+        except Exception as exc:  # noqa: BLE001
+            return self._dashscope_error("GatewayUnreachable", f"{type(exc).__name__}: {exc}")
+        urls = _urls_from(out)
+        if not urls:
+            return self._dashscope_error("NoImage", "网关没有返回图像")
+        return self._json(200, {"request_id": uuid.uuid4().hex, "output": {"choices": [{
+            "finish_reason": "stop",
+            "message": {"role": "assistant", "content": [{"image": u} for u in urls]},
+        }]}})
 
     def _blob(self, name: str):
         # 只认自己造的文件名, 不接受任何路径成分 —— 这个端口虽然只在回环上,

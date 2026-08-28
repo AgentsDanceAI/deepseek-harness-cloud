@@ -16,13 +16,14 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 # 在售清单。video 里刻意混了两个厂商: Seedance 走 Ark 形状的官方节点,
 # wan2.7-* 走 DashScope 形状的官方节点 —— 两条转译路径都得被 shim_check 走到。
 SOLD_VIDEO = ("doubao-seedance-2-5-260628", "wan2.7-t2v", "wan2.7-i2v")
-SOLD_IMAGE = ("gpt-image-2",)
+SOLD_IMAGE = ("gpt-image-2", "qwen-image-3.0-pro")
 
 POLLS_BEFORE_SUCCESS = 2      # 前两次查询故意返回 PROCESSING
 JOBS: dict[str, int] = {}     # job_id -> 已被查询次数
 # 最后一次收到的建视频报文。自检据此断言**字段转译**真的发生了 ——
 # 否则把 DashScope 的 size 折成 resolution 这段改坏了也没人会红。
 LAST_VIDEO: dict = {}
+LAST_IMAGE: dict = {}
 PORT = 9797
 # 容器里要 host.docker.internal, 宿主机自测要 localhost。
 ADVERTISE = os.environ.get("ADVERTISE_HOST", "host.docker.internal")
@@ -105,6 +106,13 @@ class Handler(BaseHTTPRequestHandler):
             payload = json.loads(self.rfile.read(length) or b"{}")
             print(f"[stub] 收到生图 model={payload.get('model')} "
                   f"prompt={payload.get('prompt')!r}", flush=True)
+            LAST_IMAGE.clear()
+            LAST_IMAGE.update(payload)
+            # 「200 但没出图」是真会发生的 —— 内容审核拦下来时上游就这么回。
+            # 桩得能造出这一幕, 否则垫片里那条空结果分支永远没人走过。
+            if payload.get("prompt") == "__noimage__":
+                print("[stub] 造一次「200 但没出图」", flush=True)
+                return self._json(200, {"created": 0, "data": [], "usage": {}})
             if payload.get("model") not in SOLD_IMAGE:
                 print(f"[stub] 图像型号 {payload.get('model')!r} 未在售 -> 404", flush=True)
                 return self._json(404, {"error": {"message": "model not offered"}})
@@ -138,6 +146,8 @@ class Handler(BaseHTTPRequestHandler):
             return
         if self.path.endswith("/_debug/last-video"):
             return self._json(200, LAST_VIDEO)
+        if self.path.endswith("/_debug/last-image"):
+            return self._json(200, LAST_IMAGE)
         if self.path.endswith("/media/models"):
             # 垫片靠这份清单把官方节点发来的厂商公开名 (dreamina-…) 映射到我们
             # 在售的型号 (doubao-…)。返回的 id 刻意用 doubao- 前缀, 好让

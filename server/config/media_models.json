@@ -148,16 +148,28 @@
       "credits_per_image": null
     },
     {
+      "id": "qwen-image-3.0-pro",
+      "name": "Qwen Image 3.0 Pro",
+      "provider": "bailian",
+      "credits_per_image": {
+        "1k": 4,
+        "2k": 8
+      },
+      "_derivation": "官方牌价 (阿里云百炼): qwen-image-3.0 ¥0.18/张 (1K 与 2K 同价); -pro 1K ¥0.25、2K ¥0.5。按 ¥7.1/$ 折美元, ×100 积分 ×1.2 毛利, 四舍五入到整积分 (不向上取整: 小数进位在个位数上等于凭空加 30% 毛利)。实际毛利 1.14~1.18 倍, 全部高于成本。有真实账单后应复核。"
+    },
+    {
       "id": "qwen-image-3.0",
       "name": "Qwen Image 3.0",
       "provider": "bailian",
-      "credits_per_image": null
+      "credits_per_image": 3,
+      "_derivation": "官方牌价 (阿里云百炼): qwen-image-3.0 ¥0.18/张 (1K 与 2K 同价); -pro 1K ¥0.25、2K ¥0.5。按 ¥7.1/$ 折美元, ×100 积分 ×1.2 毛利, 四舍五入到整积分 (不向上取整: 小数进位在个位数上等于凭空加 30% 毛利)。实际毛利 1.14~1.18 倍, 全部高于成本。有真实账单后应复核。"
     },
     {
       "id": "wan2.7-image",
       "name": "万相 2.7 图像",
       "provider": "bailian",
-      "credits_per_image": null
+      "credits_per_image": null,
+      "_note": "官方 Wan 文生图节点的下拉是 wan2.5-t2i-preview, 对不上这个 id"
     }
   ],
   "_note_image": "图像**按 token 计价, 不按张**。上游返回 usage.output_tokens (全是 image_tokens), 而同一个模型低画质与高画质相差 35 倍 (gpt-image-2: $0.006 vs $0.211 一张 1024²) —— 按张收要么坑用户要么亏钱, 而 token 数会如实反映画质与尺寸。口径与聊天完全一致: usd -> credits 走同一个 CREDITS_PER_USD 与 MODEL_PRICE_MARKUP。fallback_credits 是上游没给 usage 时的兜底, 宁可贵也不能免费。 百炼那侧的图像按张计价 (credits_per_image) —— 它的同步生图接口不返回 token 用量。",

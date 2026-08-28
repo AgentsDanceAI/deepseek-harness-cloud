@@ -77,11 +77,11 @@ class _FakeClient:
     async def __aexit__(self, *_):
         return False
 
-    async def post(self, url, headers=None, json=None):  # noqa: A002
+    async def post(self, url, headers=None, json=None, timeout=None):  # noqa: A002
         self._log.append(("POST", url))
         return self._post
 
-    async def get(self, url, headers=None):
+    async def get(self, url, headers=None, timeout=None):
         self._log.append(("GET", url))
         return self._get
 
@@ -595,6 +595,101 @@ def test_bailian_images_price_per_item_not_per_token(monkeypatch):
     assert media.image_credits(per_item, None) == 7
     assert media.image_credits(per_item, {"output_tokens": 9999}) == 7, "按张就不看 token"
     assert media.image_credits(by_token, {"output_tokens": 196}) == 1
+
+
+def test_per_item_image_price_follows_the_size_tier(monkeypatch):
+    """qwen-image-3.0-pro 的 1K 与 2K 差整整一倍 (¥0.25 / ¥0.5)。
+
+    一口价必然坑一头: 按 2K 收则 1K 的人被多收一倍, 按 1K 收则 2K 单单亏本。
+    分档判的是**面积**不是边长 —— 按边长会把 2560x800 这种宽幅错判成 2K。
+    """
+    entry = {"credits_per_image": {"1k": 4, "2k": 8}}
+    assert media.image_credits(entry, None, "1328*1328") == 4      # 1.76M <= 2.25M
+    assert media.image_credits(entry, None, "1024x1024") == 4      # x 与 * 都要认
+    assert media.image_credits(entry, None, "2048*2048") == 8      # 4.19M
+    assert media.image_credits(entry, None, "2560*800") == 4, "宽幅面积只有 2.05M, 是 1K 档"
+    assert media.image_credits(entry, None, "") == 8, "认不出尺寸时按贵的算, 不能亏本"
+
+
+def test_all_null_tiers_count_as_unpriced(monkeypatch):
+    """{"1k": null, "2k": null} 是"还没定价", 不是"已定价"。
+
+    直接判 dict 真假会把它当成在售 -> 露在下拉里 -> 点了按 1 积分卖出去。
+    """
+    assert not media._image_priced({"credits_per_image": {"1k": None, "2k": None}})
+    assert media._image_priced({"credits_per_image": {"1k": None, "2k": 8}})
+    assert not media._image_priced({"credits_per_image": None})
+    assert media._image_priced({"usd_per_1m_image_tokens": 30.0})
+
+
+def test_bailian_image_model_actually_reaches_the_bailian_adapter(monkeypatch):
+    """按张计价的模型必须真的能出图。
+
+    gen_image 里的百炼分支写完后**没人调用** —— create_image 那条路写死打千面,
+    而且只认 usd_per_1m_image_tokens, 于是百炼那半边图像模型 (qwen-image-3.0
+    这些) 全部 404, 在售清单里却列着。这条测试钉住整条路: 路由 -> provider ->
+    百炼原生端点 -> 按张扣费。
+    """
+    monkeypatch.setattr(config, "BAILIAN_NATIVE_BASE", "https://ws-x.example.com/api/v1")
+    monkeypatch.setattr(config, "BAILIAN_API_KEY", "sk-fake")
+    monkeypatch.setattr(media, "_image_cache", {
+        "qwen-image-3.0": {"id": "qwen-image-3.0", "provider": "bailian", "credits_per_image": 3},
+    })
+    user = _new_user("img-bailian@test.local")
+    before = credits.balance(user["id"])
+    log = []
+    # 百炼的同步生图形状: output.choices[].message.content[].image, **没有 usage**
+    monkeypatch.setattr(media, "_client", lambda: _FakeClient(post=_Resp(200, {
+        "output": {"choices": [{"message": {"content": [{"image": "https://oss/x.png"}]}}]},
+    }), log=log))
+    r = client.post("/llm/v1/images/generations",
+                    json={"model": "qwen-image-3.0", "prompt": "一只柴犬"})
+    assert r.status_code == 200, r.text
+    assert r.json()["data"][0]["url"] == "https://oss/x.png"
+    assert r.json()["credits"] == 3, "百炼没有 token 用量, 只能按张"
+    assert credits.balance(user["id"]) == before - 3
+    assert log and "ws-x.example.com" in log[0][1], f"没打到百炼专属域名: {log}"
+    assert "multimodal-generation" in log[0][1], f"没走百炼的原生生图端点: {log}"
+
+
+def test_bailian_image_request_carries_the_size(monkeypatch):
+    """尺寸不转达上去 = 按 2K 收钱、按默认尺寸出图, 两边都不报错。"""
+    monkeypatch.setattr(config, "BAILIAN_NATIVE_BASE", "https://ws-x.example.com/api/v1")
+    monkeypatch.setattr(config, "BAILIAN_API_KEY", "sk-fake")
+    sent = {}
+
+    class _Spy(_FakeClient):
+        async def post(self, url, headers=None, json=None, timeout=None):  # noqa: A002
+            sent.update(json or {})
+            return await super().post(url, headers=headers, json=json, timeout=timeout)
+
+    monkeypatch.setattr(media, "_client", lambda: _Spy(post=_Resp(200, {
+        "output": {"choices": [{"message": {"content": [{"image": "https://oss/x.png"}]}}]}})))
+    import asyncio
+    asyncio.get_event_loop_policy().new_event_loop().run_until_complete(
+        media.gen_image("bailian", "qwen-image-3.0-pro", "p", 1, {"size": "2048x2048"}))
+    # 百炼写 "*", OpenAI 那套写 "x" —— 转达时要统一
+    assert sent.get("parameters", {}).get("size") == "2048*2048", sent
+
+
+def test_bailian_image_without_credentials_is_not_offered(monkeypatch):
+    """凭据没配就不该在售 —— 露出来只会让人选了报 502。
+
+    尤其不能回落到公共 dashscope 域名: 一样能通、结果一样, 但预付套餐不抵扣。
+    """
+    monkeypatch.setattr(config, "BAILIAN_NATIVE_BASE", "")
+    monkeypatch.setattr(config, "BAILIAN_API_KEY", "")
+    monkeypatch.setattr(media, "_image_cache", {
+        "qwen-image-3.0": {"id": "qwen-image-3.0", "provider": "bailian", "credits_per_image": 3},
+    })
+    _new_user("img-bailian-nocred@test.local")
+    log = []
+    monkeypatch.setattr(media, "_client", lambda: _FakeClient(post=_Resp(200, {}), log=log))
+    r = client.post("/llm/v1/images/generations",
+                    json={"model": "qwen-image-3.0", "prompt": "x"})
+    assert r.status_code == 404, r.text
+    assert log == [], "凭据没配却还是打了上游"
+    assert "qwen-image-3.0" not in [m["id"] for m in media.offered()["image"]]
 
 
 def test_postgres_migrations_actually_run(monkeypatch):
