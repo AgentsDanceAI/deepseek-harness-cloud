@@ -1527,3 +1527,21 @@ def test_machine_time_and_overdraft_are_read_off_the_person(fake, monkeypatch):
     assert credits.balance(key) == 0, "前提: 工作台键不是用户, 查不到余额"
     # 有流量也要收 —— 欠费优先于在场
     assert _reap(monkeypatch, key, last_ago=5, started_ago=60), "欠费的工作台必须回收"
+
+
+def test_preset_workflows_update_only_when_untouched():
+    """发出去的工作流要能更新到已有用户, 但不能抹掉用户自己的改动。
+
+    2026-08-27 实测: 生视频节点改成返回 VIDEO、预置图接上了 SaveVideo, 而老板
+    工作台里仍是那张孤零零的旧图 —— 启动脚本当时是「只补缺的」, 于是任何更新都
+    到不了已有用户。反过来无条件覆盖又会每次冷启动抹掉用户的改动。
+
+    做法: 留一份「我们发的是什么」在 .shipped/, 磁盘上那份与它逐字节相同才换新。
+    """
+    boot = products.boot_script("comfyui")
+    assert "/.shipped/" in boot, "没有留发货标记就无法判断用户改没改过"
+    assert "cmp -s" in boot, "必须逐字节比对, 不能只看时间戳"
+    # 三个分支缺一不可: 没有本地文件 / 没有标记(迁移) / 与标记相同
+    assert '[ ! -e "$live" ]' in boot
+    assert '[ ! -e "$mark" ]' in boot, "已有用户没有标记, 缺这条就永远收不到更新"
+    assert 'cp "$f" "$mark"' in boot, "更新后必须同步标记, 否则下次又判成被改过"
