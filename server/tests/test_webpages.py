@@ -57,6 +57,55 @@ def test_landing_renders(client):
     assert "/legal/terms" in body
 
 
+def test_apps_page_shows_all_16_with_live_status(client, monkeypatch):
+    """云空间: 16 张卡, 上线与否由 products.enabled() 实时判定。
+
+    目录 (apps_catalog) 是愿景, registry 才是事实 —— 卡片可点性必须跟着 registry
+    走, 否则接入新产品时这页会静默漏掉它, 或者反过来给没上线的挂真链接。
+    """
+    from app import apps_catalog, config, products
+
+    assert len(apps_catalog.CATALOG) == 16, "4x4 网格就是 16 个, 少一个都摆不满"
+    ids = [a.id for a in apps_catalog.CATALOG]
+    assert len(set(ids)) == 16, "目录里有重复 id"
+
+    monkeypatch.setattr(config, "WORK_ENABLED", True)
+    monkeypatch.setattr(config, "COMFY_IMAGE", "comfy:test")
+    monkeypatch.setattr(config, "COMFY_DOMAIN", "comfy.test.local")
+    body = client.get("/apps").text
+    for a in apps_catalog.CATALOG:
+        assert a.name in body, f"{a.name} 没出现在页面上"
+    # 上线的卡是真链接
+    assert '/work?product_id=comfyui' in body
+    enabled = {pr.id for pr in products.enabled()}
+    assert "comfyui" in enabled, "前提: 测试配置里 comfyui 已启用"
+    # 没上线的绝不能挂工作台链接 —— 点进去是 404/错误页
+    for a in apps_catalog.CATALOG:
+        if a.id not in enabled:
+            assert f"/work?product_id={a.id}" not in body, f"{a.id} 未上线却挂了链接"
+
+
+def test_apps_page_without_workspace_has_no_dead_links(client, monkeypatch):
+    """自部署 (云工作台关) 且没配托管地址: 只陈列, 不放会 404 的按钮。"""
+    from app import config
+
+    monkeypatch.setattr(config, "WORK_ENABLED", False)
+    monkeypatch.setattr(config, "HOSTED_SITE", "")
+    body = client.get("/apps").text
+    assert "/work?product_id=" not in body
+    assert 'href="/work"' not in body
+
+
+def test_landing_shows_the_apps_mini_grid(client, monkeypatch):
+    """主页要体现「16 合一」: 迷你网格 + 去 /apps 的 CTA。"""
+    from app import config
+
+    monkeypatch.setattr(config, "WORK_ENABLED", True)
+    body = client.get("/").text
+    assert 'href="/apps"' in body, "主页没有云空间入口"
+    assert "ComfyUI" in body and "Penpot" in body, "迷你网格没渲染出来"
+
+
 def test_landing_no_icp_when_unset(client):
     r = client.get("/")
     assert "beian.miit.gov.cn" not in r.text  # ICP_NUMBER empty by default

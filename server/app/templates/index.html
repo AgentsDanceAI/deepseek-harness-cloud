@@ -117,6 +117,28 @@
 </section>
 
 <section class="section">
+  <div class="container center">
+    <span class="eyebrow">{{ t("home.apps.eyebrow") }}</span>
+    <h2 class="section-title">{{ t("home.apps.title") }}</h2>
+    <p class="section-lede">{{ t("home.apps.lede") }}</p>
+    <div class="apps-mini">
+      {% for app in apps %}
+      {# 上线的直达工作台, 没上线的去 /apps 看全景 —— 主页不摆死链接。 #}
+      <a href="{% if app.live and work_enabled %}{{ '/work' if app.id == 'dsh' else '/work?product_id=' + app.id }}{% else %}/apps{% endif %}"
+         {% if not app.live %}class="soon"{% endif %}>
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{{ app.icon | safe }}</svg>
+        {{ app.name }}
+        <span class="dot {{ '' if app.live else 'off' }}" style="margin-left:auto" aria-hidden="true"></span>
+      </a>
+      {% endfor %}
+    </div>
+    <div class="hero-actions-sub" style="justify-content:center;margin-top:24px">
+      <a class="btn btn-primary" href="/apps">{{ t("home.apps.cta") }}</a>
+    </div>
+  </div>
+</section>
+
+<section class="section">
   <div class="container">
     <span class="eyebrow">{{ t("home.two.eyebrow") }}</span>
     <h2 class="section-title">{{ t("home.two.title") }}</h2>

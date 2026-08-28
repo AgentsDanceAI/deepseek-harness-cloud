@@ -73,6 +73,7 @@
             <strong>{{ t("nav.s.subscription") }}</strong><span>{{ t("nav.s.subscription_desc") }}</span></a>
         </div>
       </div>
+      <a href="/apps" {% if page == 'apps' %}class="active"{% endif %}>{{ t("nav.apps") }}</a>
       <a href="/pricing" {% if page == 'pricing' %}class="active"{% endif %}>{{ t("nav.pricing") }}</a>
     </nav>
     {# The main nav row is identical logged in or out — account state lives here,

@@ -1233,3 +1233,35 @@ body:not([data-page="landing"]) .section:first-of-type { position: relative; z-i
 .key-usage { margin-top: 6px; padding: 12px; border-radius: 8px; background: #0f172a;
   color: #e2e8f0; font-size: 12.5px; overflow-x: auto; }
 td.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
+
+/* ---------- 云空间 (/apps): 16 产品卡片网格 ---------- */
+.apps-hero { padding-bottom: 26px; }
+.apps-count { margin-top: 10px; }
+.apps-grid { gap: 16px; }
+.app-card { display: flex; flex-direction: column; padding: 20px; text-decoration: none; color: inherit; }
+.app-card h3 { font-size: 15.5px; margin: 12px 0 2px; }
+.app-card p { color: var(--muted); font-size: 13px; line-height: 1.55; flex: 1; margin-top: 8px; }
+.app-card-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.app-icon { width: 40px; height: 40px; border-radius: 10px; }
+.app-cat { color: var(--muted); font-size: 11.5px; letter-spacing: .3px; text-transform: uppercase; }
+.app-card.is-soon { opacity: .62; }
+.app-card.is-soon:hover { transform: none; box-shadow: var(--shadow-sm); border-color: var(--border); }
+.app-badge { font-size: 11.5px; padding: 3px 9px; border-radius: 999px; white-space: nowrap; display: inline-flex; align-items: center; gap: 5px; }
+.app-badge.live { color: var(--ok); background: var(--ok-weak); }
+.app-badge.live i { width: 6px; height: 6px; border-radius: 50%; background: var(--ok); }
+.app-badge.soon { color: var(--muted); border: 1px solid var(--border); }
+.app-enter { display: inline-flex; align-items: center; gap: 6px; margin-top: 12px; color: var(--brand); font-size: 13.5px; font-weight: 600; }
+.app-card.is-live:hover .app-enter svg { transform: translateX(3px); }
+.app-enter svg { transition: transform .15s; }
+
+/* 主页上的迷你版: 只报名字与状态, 详情去 /apps */
+.apps-mini { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 26px; }
+@media (max-width: 900px) { .apps-mini { grid-template-columns: repeat(2, 1fr); } }
+.apps-mini a { display: flex; align-items: center; gap: 9px; padding: 11px 14px; border: 1px solid var(--border);
+  border-radius: 10px; background: var(--card); color: inherit; text-decoration: none; font-size: 13.5px; font-weight: 600;
+  transition: border-color .15s, transform .15s; }
+.apps-mini a:hover { border-color: var(--border-strong); transform: translateY(-1px); }
+.apps-mini a.soon { opacity: .55; font-weight: 500; }
+.apps-mini .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); flex: none; }
+.apps-mini .dot.off { background: var(--border-strong); }
+.apps-mini svg { flex: none; color: var(--brand); }

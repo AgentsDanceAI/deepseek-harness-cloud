@@ -364,8 +364,15 @@ def markdown_to_html(md: str) -> str:
 
 @router.get("/")
 def landing(request: Request):
+    from . import apps_catalog, products
+
     pricing = _pricing_safe()
-    return _render(request, "index.html", "landing", pricing=pricing)
+    enabled = {p.id for p in products.enabled()}
+    return _render(
+        request, "index.html", "landing",
+        pricing=pricing,
+        apps=apps_catalog.entries_with_status(enabled),
+    )
 
 
 # --- auth pages --------------------------------------------------------------
@@ -395,6 +402,35 @@ def activate_page(request: Request, code: str = ""):
 @router.get("/product")
 def product_page(request: Request):
     return _render(request, "product.html", "product")
+
+
+@router.get("/apps")
+def apps_page(request: Request):
+    """云空间: 16 个开源 AI 产品的 4x4 卡片网格。
+
+    哪些能点进工作台由 products.enabled() 实时判定 —— 目录 (apps_catalog) 只是
+    愿景清单, registry 才是事实。本实例没开云工作台时 (自部署默认), 卡片指向
+    官方托管版; 连托管地址都没配就只作陈列, 不放会 404 的按钮。
+    """
+    from . import apps_catalog, products
+
+    enabled = {p.id for p in products.enabled()}
+    apps = apps_catalog.entries_with_status(enabled)
+    if config.WORK_ENABLED:
+        target = ""  # 本站自己 —— 相对链接
+    else:
+        hosted = config.HOSTED_SITE if config.HOSTED_SITE not in ("", config.PUBLIC_BASE.rstrip("/")) else ""
+        target = hosted.rstrip("/") if hosted else None
+    return _render(
+        request, "apps.html", "apps",
+        apps=apps,
+        live_count=sum(1 for a in apps if a["live"]),
+        # 两个变量分开给: clickable 是"有没有可去之处", base 是链接前缀。
+        # 合成一个的话, 本站前缀是空串 "" —— 在 Jinja 里是假值, 上线的卡会被
+        # 误判成不可点 (第一版就踩了)。
+        apps_clickable=target is not None,
+        apps_base=target or "",
+    )
 
 
 @router.get("/solutions")
