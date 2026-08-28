@@ -74,6 +74,17 @@ def _image_catalog() -> dict:
     return _image_cache
 
 
+def _image_priced(m: dict) -> bool:
+    """有没有定价。按张分档时, 全档都是 null 才算没定价 —— 直接判 dict 真假会把
+    {"1k": null, "2k": null} 当成"已定价", 于是它露在下拉里, 点了按 1 积分卖。"""
+    if m.get("usd_per_1m_image_tokens"):
+        return True
+    per_item = m.get("credits_per_image")
+    if isinstance(per_item, dict):
+        return any(per_item.values())
+    return bool(per_item)
+
+
 def offered() -> dict:
     """当前真正在售的媒体模型。未定价的不列 —— 露出来只会让人选了报 404。
 
@@ -97,8 +108,7 @@ def offered() -> dict:
     image = [
         {"id": m["id"], "name": m.get("name") or m["id"]}
         for m in _image_catalog().values()
-        if (m.get("usd_per_1m_image_tokens") or m.get("credits_per_image"))
-        and provider_available(provider_of(m))
+        if _image_priced(m) and provider_available(provider_of(m))
     ]
     return {"video": video, "image": image}
 
@@ -131,7 +141,20 @@ def quote(model: str, resolution: str, duration: int) -> int | None:
     return max(1, math.ceil(per_second * max(1, duration)))
 
 
-def image_credits(entry: dict, usage: dict | None) -> int:
+# 1K/2K 的分档按**像素面积**, 不按边长 —— 厂商就是这么算的 (百炼: 面积
+# <= 2,250,000 算 1K)。按边长判会把 2560x800 这种宽幅错判成 2K。
+_IMAGE_1K_MAX_AREA = 2_250_000
+
+
+def _image_tier(size: str) -> str:
+    """把 "1328*1328" / "1024x1024" 折成 1k / 2k 档。认不出来时按贵的算。"""
+    nums = [int(n) for n in str(size or "").replace("x", "*").split("*") if n.strip().isdigit()]
+    if len(nums) != 2:
+        return "2k"
+    return "1k" if nums[0] * nums[1] <= _IMAGE_1K_MAX_AREA else "2k"
+
+
+def image_credits(entry: dict, usage: dict | None, size: str = "") -> int:
     """按 usage 里的真实 token 数计价。
 
     图像**不按张收**: 同一个模型低画质与高画质相差 35 倍
@@ -144,7 +167,12 @@ def image_credits(entry: dict, usage: dict | None) -> int:
     # 百炼那侧的同步生图**不返回 token 用量**, 只能按张。千面有 usage, 按 token ——
     # 后者更准 (同一模型高低画质差 35 倍), 所以有 token 单价就优先用它。
     if not entry.get("usd_per_1m_image_tokens"):
-        return max(1, int(entry.get("credits_per_image") or entry.get("fallback_credits") or 0))
+        per_item = entry.get("credits_per_image")
+        # 按张也可能分档: qwen-image-3.0-pro 的 1K 与 2K 差整整一倍 (¥0.25 / ¥0.5)。
+        # 一口价要么按 2K 收 (1K 的人被多收一倍), 要么按 1K 收 (2K 亏本)。
+        if isinstance(per_item, dict):
+            per_item = per_item.get(_image_tier(size))
+        return max(1, int(per_item or entry.get("fallback_credits") or 0))
     out = int((usage or {}).get("output_tokens") or 0)
     text_in = int(((usage or {}).get("input_tokens_details") or {}).get("text_tokens") or 0)
     if not out:
@@ -297,6 +325,16 @@ async def gen_image(
         if extra.get("image_url"):
             content.insert(0, {"image": extra["image_url"]})
         payload = {"model": model, "input": {"messages": [{"role": "user", "content": content}]}}
+        # size 必须转达上去。丢掉它的话我们按 2K 档收钱, 百炼却按默认尺寸出图 ——
+        # 用户多付了钱, 拿到的还是小图, 而且两边都不报错。
+        # 百炼写 "1328*1328", OpenAI 那套写 "1024x1024", 统一成前者。
+        params = {}
+        if extra.get("size"):
+            params["size"] = str(extra["size"]).replace("x", "*")
+        if n > 1:
+            params["n"] = n
+        if params:
+            payload["parameters"] = params
         async with _client() as client:
             up = await client.post(url, headers=_bailian_headers(), json=payload, timeout=300.0)
         if up.status_code >= 400:
@@ -604,8 +642,6 @@ async def create_image(request: Request, user: dict = Depends(resolve_user)):
     charge_credits 会按"最贵条目"兜底, 不会漏计费, 但价格离谱。所以这里和视频
     一样按件计价, 口径统一, 也不用动聊天那条路。
     """
-    if not config.UPSTREAM_API_KEY:
-        return _error(503, "upstream_unconfigured", "Image generation is not configured.")
     gated = _gate(user)
     if gated is not None:
         return gated
@@ -634,41 +670,38 @@ async def create_image(request: Request, user: dict = Depends(resolve_user)):
         return _error(400, "invalid_request_error", "prompt is required.")
 
     entry = _image_catalog().get(model)
-    if not (entry or {}).get("usd_per_1m_image_tokens"):
+    # 两种计价都算在售: 千面有 usage 走 token, 百炼没有只能按张 (image_credits
+    # 里那条分叉)。只认 token 单价的话, 百炼那半边模型永远进不来 —— gen_image
+    # 里的百炼适配就是这么写完却没人调用的。
+    if not _image_priced(entry or {}):
         return _error(404, "model_not_found", f"Model '{model}' is not offered for images.")
+
+    provider = provider_of(entry)
+    if not provider_available(provider):
+        return _error(404, "model_not_found", f"Model '{model}' is not available yet.")
+    if provider == QIANMIAN and not config.UPSTREAM_API_KEY:
+        return _error(503, "upstream_unconfigured", "Image generation is not configured.")
 
     # 准入与聊天同口径: 出图前只看"有没有余额", 真实费用出图后按 usage 结算 ——
     # 出图前算不出价钱, 因为 token 数取决于画质与尺寸。
     if credits.balance(user["id"]) <= 0:
         return _error(402, "insufficient_credits", "余额不足。")
 
-    payload = {"model": model, "prompt": prompt, "n": n}
-    for passthrough in ("size", "quality", "background", "output_format", "image_url"):
-        if body.get(passthrough) is not None:
-            payload[passthrough] = body[passthrough]
-
-    url = config.UPSTREAM_BASE_URL.rstrip("/") + "/images/generations"
+    extra = {
+        key: body[key]
+        for key in ("size", "quality", "background", "output_format", "image_url")
+        if body.get(key) is not None
+    }
     try:
-        async with _client() as client:
-            upstream = await client.post(url, headers=_auth_headers(), json=payload)
+        result, err, code = await gen_image(provider, model, prompt, n, extra)
     except httpx.HTTPError as exc:
         log.warning("图像生成失败: %s", exc)
         return _error(502, "upstream_error", "Upstream did not answer.")
-
-    if upstream.status_code >= 400:
-        try:
-            detail = upstream.json()
-        except ValueError:
-            detail = {"error": {"message": upstream.text[:400]}}
-        return JSONResponse(detail, status_code=upstream.status_code)
-
-    try:
-        result = upstream.json()
-    except ValueError:
-        return _error(502, "upstream_error", "Upstream returned invalid JSON.")
+    if err is not None:
+        return JSONResponse(err, status_code=code or 502)
 
     # 出图了才扣 —— 上游报错的路径上一分不收。
-    amount = image_credits(entry, result.get("usage"))
+    amount = image_credits(entry, result.get("usage"), str(extra.get("size") or ""))
     request_id = security.new_id("img_")
     credits.spend(
         user["id"],

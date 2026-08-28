@@ -229,6 +229,72 @@ def main() -> int:
         return 1
     print(f"  ✓ Wan 生图 -> {out['output']['results'][0]['url']}")
 
+    # ---- Qwen 官方图像节点 (DashScope multimodal, 同步) ----
+    code, out = call(
+        "POST", "/proxy/qwen/api/v1/services/aigc/multimodal-generation/generation",
+        {"model": "qwen-image-3.0-pro",
+         "input": {"messages": [{"role": "user", "content": [{"text": "一只柴犬"}]}]},
+         "parameters": {"size": "2048*2048", "n": 1, "seed": 42}},
+    )
+    if code != 200 or not isinstance(out, dict):
+        print(f"  ✗ Qwen 生图: {code} {out}")
+        return 1
+    try:
+        qwen_url = out["output"]["choices"][0]["message"]["content"][0]["image"]
+    except (KeyError, IndexError, TypeError):
+        print(f"  ✗ Qwen 的响应不是 output.choices[].message.content[].image: {str(out)[:250]}")
+        return 1
+    print(f"  ✓ Qwen 生图 -> {qwen_url}")
+
+    # size 必须转达 —— 网关按尺寸分档计价 (pro 的 1K 与 2K 差整整一倍),
+    # 丢了就会按 2K 收钱却出默认尺寸的小图, 两边都不报错。
+    _, sent = call("GET", "/llm/v1/_debug/last-image", None, base=STUB)
+    if sent.get("size") != "2048*2048":
+        print(f"  ✗ Qwen 的 size 没转达: {sent}")
+        return 1
+    if sent.get("prompt") != "一只柴犬":
+        print(f"  ✗ Qwen 的提示词没从 messages[].content[] 里取出来: {sent}")
+        return 1
+    print("  ✓ Qwen 字段转译 -> prompt 从 messages 里取出, size 原样转达")
+
+    # 图生图: content 里混着 image 项, 要变成网关的 image_url
+    call("POST", "/proxy/qwen/api/v1/services/aigc/multimodal-generation/generation",
+         {"model": "qwen-image-3.0-pro",
+          "input": {"messages": [{"role": "user", "content": [
+              {"image": "https://x/in.png"}, {"text": "换成夜景"}]}]},
+          "parameters": {"size": "1328*1328"}})
+    _, sent = call("GET", "/llm/v1/_debug/last-image", None, base=STUB)
+    if sent.get("image_url") != "https://x/in.png" or sent.get("prompt") != "换成夜景":
+        print(f"  ✗ Qwen 图生图的参考图/提示词没拆对: {sent}")
+        return 1
+    print("  ✓ Qwen 图生图 -> content 里的 image 拆成 image_url")
+
+    # 网关 200 却没出图 (内容审核拦截就是这样): 必须报错, 不能回一个空的
+    # choices —— 节点拿空数组会抛一句看不懂的话, 用户不知道是被拦了。
+    code, out = call(
+        "POST", "/proxy/qwen/api/v1/services/aigc/multimodal-generation/generation",
+        {"model": "qwen-image-3.0-pro",
+         "input": {"messages": [{"role": "user", "content": [{"text": "__noimage__"}]}]}},
+    )
+    if code != 200 or out.get("output") or not out.get("code"):
+        print(f"  ✗ 「200 但没出图」应当变成带 code 的失败: {code} {out}")
+        return 1
+    print(f"  ✓ 网关 200 但没出图 -> code={out['code']}")
+
+    # 未在售同样要走 DashScope 的失败形状 (200 + 顶层 code/message)
+    code, out = call(
+        "POST", "/proxy/qwen/api/v1/services/aigc/multimodal-generation/generation",
+        {"model": "qwen-image-9.9",
+         "input": {"messages": [{"role": "user", "content": [{"text": "x"}]}]}},
+    )
+    if code != 200 or not isinstance(out, dict) or out.get("output"):
+        print(f"  ✗ Qwen 未在售型号应当回 200 且不带 output: {code} {out}")
+        return 1
+    if "当前可用" not in json.dumps(out, ensure_ascii=False):
+        print(f"  ✗ Qwen 的错误里没告诉用户该换成哪个: {out}")
+        return 1
+    print("  ✓ Qwen 未在售型号 -> 200 + code/message")
+
     # 别家的官方节点必须给出「未接通」而不是被误接。ComfyUI 里另有两家的路径
     # 也以 /images/generations 结尾 (kling / xai) —— 按后缀路由会把它们
     # 的报文误当成我们的。
