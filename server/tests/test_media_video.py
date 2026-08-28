@@ -10,6 +10,7 @@
 
 import os
 import tempfile
+import time
 
 _TMP = tempfile.mkdtemp(prefix="dhc-media-")
 os.environ.update(
@@ -416,3 +417,100 @@ def test_the_calibrated_model_is_the_one_we_actually_sell():
     assert "doubao-seedance-2-5-260628" in calibrated, (
         "价目表是按 Seedance 2.5 的牌价算的 —— 换校准对象必须同步改这张表"
     )
+
+
+# --- 服务端兜底 ---------------------------------------------------------------
+# 作业的生命周期**不能只靠客户端轮询驱动**。浏览器一关、ComfyUI 一报错、网络一抖,
+# 作业就永远停在 processing —— 而钱是提交时就扣掉的。
+#
+# 2026-08-27 实测事故: 两条 1080p 作业卡住, 各扣 600 积分。一条上游明明
+# succeeded, 另一条上游 failed (内容审核), 13 小时无人退款 —— 只因为节点在轮询时
+# 撞上一次 502 (我正在重新部署) 就放弃了。
+
+
+def _reconcile(monkeypatch, upstream_payload, status=200):
+    monkeypatch.setattr(media, "_client", lambda: _FakeClient(get=_Resp(status, upstream_payload)))
+    import asyncio
+
+    return asyncio.get_event_loop_policy().new_event_loop().run_until_complete(media.reconcile_tick())
+
+
+def test_abandoned_job_that_succeeded_upstream_gets_settled(monkeypatch):
+    """客户端走了, 但视频其实出来了 —— 兜底循环要把它记上, 否则用户付了钱
+    却在界面上永远看不到结果。"""
+    _new_user("recon-ok@test.local")
+    job_id = _submit(monkeypatch, _Resp(200, {"task_id": "vtask_recon1"})).json()["id"]
+    assert dict(db.query_one("SELECT * FROM video_jobs WHERE id=?", (job_id,)))["status"] == "processing"
+
+    n = _reconcile(
+        monkeypatch, {"code": "success", "data": {"status": "succeeded", "url": "https://cdn.example/ok.mp4"}}
+    )
+    assert n >= 1
+    row = dict(db.query_one("SELECT * FROM video_jobs WHERE id=?", (job_id,)))
+    assert row["status"] == "succeeded" and row["url"] == "https://cdn.example/ok.mp4"
+
+
+def test_abandoned_job_that_failed_upstream_gets_refunded(monkeypatch):
+    """内容审核拒了、客户端也走了 —— 没有兜底就是白扣钱。实测那次卡了 13 小时。"""
+    user = _new_user("recon-fail@test.local")
+    before = credits.balance(user["id"])
+    job_id = _submit(monkeypatch, _Resp(200, {"task_id": "vtask_recon2"})).json()["id"]
+    assert credits.balance(user["id"]) == before - 50
+
+    _reconcile(
+        monkeypatch,
+        {
+            "code": "success",
+            "data": {"status": "failed", "error": "output video may contain sensitive information"},
+        },
+    )
+    row = dict(db.query_one("SELECT * FROM video_jobs WHERE id=?", (job_id,)))
+    assert row["status"] == "failed"
+    assert "sensitive" in row["error"]
+    assert credits.balance(user["id"]) == before, "失败必须退全款"
+
+
+def test_a_job_upstream_forgot_is_failed_and_refunded(monkeypatch):
+    """上游偶尔把作业丢掉 —— 既不 succeeded 也不 failed, 就是不动。
+    不设上限那笔钱永远悬着。"""
+    user = _new_user("recon-lost@test.local")
+    before = credits.balance(user["id"])
+    job_id = _submit(monkeypatch, _Resp(200, {"task_id": "vtask_lost"})).json()["id"]
+    # 把创建时间推回到超过上限
+    monkeypatch.setattr(config, "VIDEO_JOB_MAX_AGE_S", 1800)
+    db.query("UPDATE video_jobs SET created = ? WHERE id = ?", (time.time() - 3600, job_id))
+
+    _reconcile(monkeypatch, {"code": "success", "data": {"status": "processing"}})
+    row = dict(db.query_one("SELECT * FROM video_jobs WHERE id=?", (job_id,)))
+    assert row["status"] == "failed", "超时的作业必须落终态"
+    assert credits.balance(user["id"]) == before, "超时也要退款"
+
+
+def test_upstream_hiccup_during_reconcile_leaves_the_job_alone(monkeypatch):
+    """上游抖一下不能把作业判死 —— 那会白退钱, 而视频可能马上就好。"""
+    user = _new_user("recon-hiccup@test.local")
+    job_id = _submit(monkeypatch, _Resp(200, {"task_id": "vtask_hiccup"})).json()["id"]
+    after_submit = credits.balance(user["id"])
+
+    class _Boom(_FakeClient):
+        async def get(self, url, headers=None):
+            raise __import__("httpx").ConnectError("upstream down")
+
+    monkeypatch.setattr(media, "_client", lambda: _Boom())
+    import asyncio
+
+    asyncio.get_event_loop_policy().new_event_loop().run_until_complete(media.reconcile_tick())
+    row = dict(db.query_one("SELECT * FROM video_jobs WHERE id=?", (job_id,)))
+    assert row["status"] == "processing"
+    assert credits.balance(user["id"]) == after_submit
+
+
+def test_reconcile_does_not_double_refund(monkeypatch):
+    """兜底循环每分钟跑一次, 同一个失败作业会被看到很多次。"""
+    user = _new_user("recon-once@test.local")
+    before = credits.balance(user["id"])
+    _submit(monkeypatch, _Resp(200, {"task_id": "vtask_once"}))
+    failed = {"code": "success", "data": {"status": "failed", "error": "boom"}}
+    for _ in range(5):
+        _reconcile(monkeypatch, failed)
+    assert credits.balance(user["id"]) == before, "退款必须幂等"

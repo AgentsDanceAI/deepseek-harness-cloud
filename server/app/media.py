@@ -24,6 +24,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import math
@@ -290,31 +291,17 @@ async def create_video(request: Request, user: dict = Depends(resolve_user)):
     )
 
 
-@router.get("/v1/videos/result/{job_id}")
-async def video_result(job_id: str, user: dict = Depends(resolve_user)):
-    job = _job_row(job_id, user["id"])
-    if job is None:
-        return _error(404, "not_found", "No such video job.")
-    job = dict(job)
+async def _settle(job: dict) -> dict:
+    """向上游问一次并落定这个作业, 返回更新后的行。
 
-    status = str(job["status"])
-    if status == "succeeded":
-        return JSONResponse(
-            {
-                "id": job_id,
-                "task_status": "SUCCESS",
-                "video_result": [{"url": job["url"], "cover_image_url": ""}],
-            }
-        )
-    if status == "failed":
-        return JSONResponse(
-            {
-                "id": job_id,
-                "task_status": "FAIL",
-                "video_result": None,
-                "error": job["error"],
-            }
-        )
+    **客户端轮询与服务端兜底循环共用这一段**。分成两份实现必然漂, 而漂的后果是
+    钱: 一边退款一边不退, 或者两边都退。
+
+    上游一次抖动不落终态 —— 保持 processing, 下次再问。作业状态本来就是最终
+    一致的, 把一次网络抖动当成失败会白退钱。
+    """
+    if job["status"] in ("succeeded", "failed"):
+        return job
 
     url = config.UPSTREAM_BASE_URL.rstrip("/") + f"/video/generations/{job['upstream_task_id']}"
     try:
@@ -322,8 +309,7 @@ async def video_result(job_id: str, user: dict = Depends(resolve_user)):
             upstream = await client.get(url, headers=_auth_headers())
         data = (upstream.json() or {}).get("data") or {}
     except (httpx.HTTPError, ValueError):
-        # 上游一次抖动不该让作业变成终态 —— 保持 processing, 下次轮询再看。
-        return JSONResponse({"id": job_id, "task_status": "PROCESSING", "video_result": None})
+        return job
 
     upstream_status = str(data.get("status") or "").lower()
     now = time.time()
@@ -333,36 +319,106 @@ async def video_result(job_id: str, user: dict = Depends(resolve_user)):
         with db.tx() as conn:
             conn.execute(
                 "UPDATE video_jobs SET status = 'succeeded', url = ?, updated = ? WHERE id = ?",
-                (video_url, now, job_id),
+                (video_url, now, job["id"]),
             )
-        return JSONResponse(
-            {
-                "id": job_id,
-                "task_status": "SUCCESS",
-                "video_result": [{"url": video_url, "cover_image_url": ""}],
-            }
-        )
+        return {**job, "status": "succeeded", "url": video_url}
 
     if upstream_status in ("failed", "error", "cancelled"):
-        message = str(
-            (data.get("error") or {}) if isinstance(data.get("error"), dict) else data.get("error") or ""
-        )[:500]
+        raw = data.get("error")
+        message = str(raw if not isinstance(raw, dict) else json.dumps(raw, ensure_ascii=False))[:500]
         with db.tx() as conn:
             conn.execute(
                 "UPDATE video_jobs SET status = 'failed', error = ?, updated = ? WHERE id = ?",
-                (message, now, job_id),
+                (message, now, job["id"]),
             )
         _refund_once(job)
+        return {**job, "status": "failed", "error": message}
+
+    # 太久没有终态就当它废了并退款。上游偶尔会把作业丢掉 (既不 succeeded 也不
+    # failed, 就是不动), 不设上限的话那笔钱永远悬着。
+    if now - float(job["created"] or now) > config.VIDEO_JOB_MAX_AGE_S:
+        message = f"上游超过 {int(config.VIDEO_JOB_MAX_AGE_S / 60)} 分钟未给出结果"
+        log.warning("视频作业 %s %s, 判失败并退款", job["id"], message)
+        with db.tx() as conn:
+            conn.execute(
+                "UPDATE video_jobs SET status = 'failed', error = ?, updated = ? WHERE id = ?",
+                (message, now, job["id"]),
+            )
+        _refund_once(job)
+        return {**job, "status": "failed", "error": message}
+
+    return job
+
+
+def _job_response(job: dict) -> JSONResponse:
+    if job["status"] == "succeeded":
         return JSONResponse(
             {
-                "id": job_id,
-                "task_status": "FAIL",
-                "video_result": None,
-                "error": message,
+                "id": job["id"],
+                "task_status": "SUCCESS",
+                "video_result": [{"url": job["url"], "cover_image_url": ""}],
             }
         )
+    if job["status"] == "failed":
+        return JSONResponse(
+            {
+                "id": job["id"],
+                "task_status": "FAIL",
+                "video_result": None,
+                "error": job["error"],
+            }
+        )
+    return JSONResponse({"id": job["id"], "task_status": "PROCESSING", "video_result": None})
 
-    return JSONResponse({"id": job_id, "task_status": "PROCESSING", "video_result": None})
+
+async def reconcile_tick() -> int:
+    """把没人认领的作业收尾。返回落定的条数。
+
+    **作业的生命周期不能只靠客户端轮询驱动。** 浏览器一关、ComfyUI 一报错、
+    网络一抖, 作业就永远停在 processing —— 而钱是**提交时就扣掉**的:
+    失败不退款, 成功也不记账。
+
+    2026-08-27 实测: 两条 1080p 作业卡住, 各扣 600 积分。其中一条上游明明
+    succeeded, 另一条上游 failed (内容审核), 13 小时无人退款 —— 只因为节点
+    在轮询时撞上一次 502 就放弃了。
+    """
+    rows = db.query("SELECT * FROM video_jobs WHERE status = 'processing' ORDER BY created LIMIT 50")
+    settled = 0
+    for row in rows:
+        job = dict(row)
+        try:
+            after = await _settle(job)
+        except Exception:  # noqa: BLE001 — 一条坏账不能让整个循环停摆
+            log.exception("收尾视频作业 %s 失败", job["id"])
+            continue
+        if after["status"] != job["status"]:
+            settled += 1
+            log.info("视频作业 %s 收尾为 %s", job["id"], after["status"])
+    return settled
+
+
+async def reconcile_loop() -> None:
+    log.info(
+        "视频作业收尾循环启动 (每 %ss 一次, 超过 %s 分钟未出结果判失败并退款)",
+        config.VIDEO_RECONCILE_INTERVAL_S,
+        int(config.VIDEO_JOB_MAX_AGE_S / 60),
+    )
+    while True:
+        try:
+            await asyncio.sleep(config.VIDEO_RECONCILE_INTERVAL_S)
+            await reconcile_tick()
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001
+            log.exception("视频作业收尾循环出错")  # 绝不退出
+
+
+@router.get("/v1/videos/result/{job_id}")
+async def video_result(job_id: str, user: dict = Depends(resolve_user)):
+    job = _job_row(job_id, user["id"])
+    if job is None:
+        return _error(404, "not_found", "No such video job.")
+    return _job_response(await _settle(dict(job)))
 
 
 @router.post("/v1/images/generations")
