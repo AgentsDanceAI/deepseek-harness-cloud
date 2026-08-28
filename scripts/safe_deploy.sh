@@ -63,8 +63,12 @@ if docker exec "$CONTAINER" sh -c '[ "$WORK_BACKEND" = eci ]' 2>/dev/null; then
   if [ -n "$refs" ] && [ "${SKIP_IMAGE_CACHE:-0}" != "1" ]; then
     echo "==> 预备镜像缓存 (切换前, 旧镜像仍在服务):"
     echo "$refs" | sed 's/^/    /'
+    # 用**工作树里**那份脚本, 不用容器里烤好的那份。这一步跑在旧容器上, 而旧镜像
+    # 里的脚本是上一版 —— 新加的子命令它不认识, 闸门会因此误报失败 (2026-08-28
+    # 首次上线这道闸时就是这么栽的)。拷进去再跑, 自举问题一次解决。
+    docker cp server/scripts/eci_image_cache.py "$CONTAINER":/tmp/eci_image_cache.py >/dev/null
     # 故意不加引号: 多个引用要拆成多个参数, 而镜像引用里不会有空格。
-    if ! docker exec -w /srv/dhc "$CONTAINER" python3 -m scripts.eci_image_cache prepare $refs; then
+    if ! docker exec -w /srv/dhc "$CONTAINER" python3 /tmp/eci_image_cache.py prepare $refs; then
       echo "!! 镜像缓存没备好 —— 现在切过去, 每个冷启动都会退回完整拉取 (几分钟)。" >&2
       echo "   首次部署或确知要带冷缓存上线, 用 SKIP_IMAGE_CACHE=1 覆盖。" >&2
       exit 1
