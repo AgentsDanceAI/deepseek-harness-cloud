@@ -763,6 +763,22 @@ def test_auto_duration_settles_to_the_real_length(monkeypatch):
     assert credits.balance(user["id"]) == before - 80, "补差没落到账上"
 
 
+def test_auto_duration_records_the_real_length_even_when_the_estimate_was_right(monkeypatch):
+    """估值猜中时也得把实际时长写回去。
+
+    2026-08-28 线上实测: auto 出 5 秒, 估值也是 5 秒, 差额为 0, 于是我的代码直接
+    返回, duration 留在 0 —— 那是"这是 auto 作业"的内部标记, 账单里就成了
+    「一条 0 秒的视频收了 100 积分」。
+    """
+    user = _new_user("auto-exact@test.local")
+    before = credits.balance(user["id"])
+    _, _, job_id = _auto_job(monkeypatch, upstream_seconds=5.0)
+    row = dict(db.query_one("SELECT * FROM video_jobs WHERE id=?", (job_id,)))
+    assert row["duration"] == 5, "估值猜中时实际时长没落库, 账单会显示 0 秒"
+    assert row["credits"] == 50
+    assert credits.balance(user["id"]) == before - 50, "不该多收也不该少收"
+
+
 def test_auto_duration_refunds_when_shorter_than_estimated(monkeypatch):
     """出得比估值短就得退 —— 只补不退等于稳赚, 那是坑用户。"""
     user = _new_user("auto-refund@test.local")

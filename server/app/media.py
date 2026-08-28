@@ -602,14 +602,21 @@ def _settle_auto_duration(job: dict, seconds: float) -> dict:
         return job
     real = quote(str(job["model"]), str(job["resolution"]), math.ceil(seconds))
     charged = int(job.get("credits") or 0)
-    if real is None or real == charged:
+    if real is None:
         return job
+    # **实际时长无论如何都要落库**, 哪怕估值恰好猜中 (差额为 0)。duration=0 是
+    # "这是一笔 auto 作业"的内部标记, 留在行里会让账单显示 0 秒 —— 用户看到的
+    # 是"一条 0 秒的视频收了 100 积分"。
+    actual = math.ceil(seconds)
     delta = real - charged
     with db.tx() as conn:
         conn.execute(
             "UPDATE video_jobs SET credits = ?, duration = ?, updated = ? WHERE id = ?",
-            (real, math.ceil(seconds), time.time(), job["id"]),
+            (real, actual, time.time(), job["id"]),
         )
+    if delta == 0:
+        log.info("作业 %s 实际 %.1f 秒, 与预扣一致 (%d 积分)", job["id"], seconds, real)
+        return {**job, "duration": actual}
     if delta > 0:
         credits.spend(job["user_id"], delta, kind="video", model=str(job["model"]),
                       request_id=f"{job['id']}-adj")
