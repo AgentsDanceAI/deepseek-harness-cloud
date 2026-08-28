@@ -1,7 +1,17 @@
 """ECI 镜像缓存: 查漂移 / 重建。
 
-    python3 -m scripts.eci_image_cache check      # 每个已启用产品的镜像都有缓存吗
-    python3 -m scripts.eci_image_cache rebuild    # 给缺的那些建, 顺带清掉谁都不认的
+    python3 -m scripts.eci_image_cache check            # 每个已启用产品的镜像都有缓存吗
+    python3 -m scripts.eci_image_cache prepare <ref>...  # 给指定镜像建缓存, **什么都不删**
+    python3 -m scripts.eci_image_cache rebuild          # 给缺的那些建, 顺带清掉谁都不认的
+
+**发布顺序很重要**: rebuild 只认当前 .env 里的引用, 所以"改 .env -> 部署 ->
+rebuild"这个顺序会留下一段**线上 tag 没有缓存**的窗口 (缓存要建十来分钟)。那段
+时间里每个冷启动都是完整拉 2.5GB 镜像 —— 从二十几秒变成几分钟, 而且不报错。
+2026-08-28 就是这么让人卡住的。正确顺序是先 prepare 新 tag, 再切 .env:
+
+    prepare <新 ref>   # 旧镜像仍在服务, 用户无感
+    改 .env / 部署
+    rebuild            # 这时才清掉旧的
 
 镜像缓存按镜像引用匹配。WORK_IMAGE_REF 更新后必须同步重建缓存，否则新实例会
 静默回退到完整镜像拉取并增加冷启动时间。
@@ -292,10 +302,35 @@ def _build_one(ref: str, stale: list[str]) -> int:
     return 0
 
 
+def prepare(refs: list[str]) -> int:
+    """给指定镜像备好缓存, **一个都不删**。
+
+    切 tag 之前用: 那时 .env 还指着旧镜像, 旧缓存必须留着继续服务。rebuild 会
+    删掉"当前 .env 认不出的"缓存, 拿它来做这件事等于把还在用的那个删了。
+    """
+    caches = _caches()
+    rc = 0
+    for ref in refs:
+        mine = [c for c in caches if ref in (c.get("Images") or [])]
+        if any(c.get("Status") == "Ready" for c in mine):
+            print(f"==> {ref} 已有 Ready 缓存, 跳过")
+            continue
+        building = [c for c in mine if c.get("Status") in ("Creating", "Preparing")]
+        if building and _await_ready(building[0]["ImageCacheId"], ref):
+            continue
+        rc |= _build_one(ref, [])   # stale=[] —— 这一步什么都不删
+    return rc
+
+
 if __name__ == "__main__":
     cmd = sys.argv[1] if len(sys.argv) > 1 else "check"
     if cmd == "check":
         raise SystemExit(check())
     if cmd == "rebuild":
         raise SystemExit(rebuild())
-    raise SystemExit(f"用法: {sys.argv[0]} [check|rebuild]")
+    if cmd == "prepare":
+        wanted = [a for a in sys.argv[2:] if a.strip()]
+        if not wanted:
+            raise SystemExit("prepare 需要至少一个镜像引用")
+        raise SystemExit(prepare(wanted))
+    raise SystemExit(f"用法: {sys.argv[0]} [check|rebuild|prepare <ref>...]")

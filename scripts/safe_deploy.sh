@@ -13,6 +13,7 @@
 #   3. 构建 + 重启
 #   4. 等健康
 #   5. **带鉴权的深链路冒烟** (见 smoke 函数)
+#   2.5 目标镜像的 ECI 缓存**先备好再切** (拦部署; SKIP_IMAGE_CACHE=1 可越过)
 #   6. 工作台镜像缓存是否跟上 WORK_IMAGE_REF (只告警, 不拦部署)
 set -euo pipefail
 
@@ -50,6 +51,26 @@ except Exception:
     print('sick')
 " 2>/dev/null || echo unknown)"
 echo "==> 部署前基线: $before"
+
+# --- 闸门 2.5: 目标镜像的缓存必须**先**备好 ----------------------------------
+# rebuild 只认当前 .env 里的引用, 所以「改 .env -> 部署 -> rebuild」这个顺序会
+# 留下一段**线上 tag 没有缓存**的窗口, 而建缓存要十来分钟。那段时间里每个冷启动
+# 都是完整拉 2.5GB 镜像 —— 从二十几秒变成几分钟, 不报错, 只是卡着。
+# 2026-08-28 就是这么让人「根本启动不了」的。
+# 所以在**切过去之前**先备好: 那时旧镜像还在服务, 用户无感。
+if docker exec "$CONTAINER" sh -c '[ "$WORK_BACKEND" = eci ]' 2>/dev/null; then
+  refs="$(grep -hoE '^(WORK|COMFY)_IMAGE_REF=.+' "$ENVFILE" | cut -d= -f2- | tr -d '"'"'"'"' | sort -u)"
+  if [ -n "$refs" ] && [ "${SKIP_IMAGE_CACHE:-0}" != "1" ]; then
+    echo "==> 预备镜像缓存 (切换前, 旧镜像仍在服务):"
+    echo "$refs" | sed 's/^/    /'
+    # 故意不加引号: 多个引用要拆成多个参数, 而镜像引用里不会有空格。
+    if ! docker exec -w /srv/dhc "$CONTAINER" python3 -m scripts.eci_image_cache prepare $refs; then
+      echo "!! 镜像缓存没备好 —— 现在切过去, 每个冷启动都会退回完整拉取 (几分钟)。" >&2
+      echo "   首次部署或确知要带冷缓存上线, 用 SKIP_IMAGE_CACHE=1 覆盖。" >&2
+      exit 1
+    fi
+  fi
+fi
 
 # --- 部署 --------------------------------------------------------------------
 echo "==> build + up"
