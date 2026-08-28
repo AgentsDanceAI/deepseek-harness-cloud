@@ -361,3 +361,58 @@ def test_resolutions_are_ordered_cheapest_first(monkeypatch):
     )
     monkeypatch.setattr(media, "_image_cache", {})
     assert media.offered()["video"][0]["resolutions"] == ["480p", "720p", "1080p"]
+
+
+# --- 定价校准守护 --------------------------------------------------------------
+
+
+def _media_config() -> dict:
+    import json
+    from pathlib import Path
+
+    path = Path(__file__).resolve().parents[1] / "config" / "media_models.json"
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def test_only_calibrated_video_models_carry_a_price():
+    """定价表是按**某一个型号的网关牌价**算出来的, 不能顺手套给别的型号。
+
+    AgentsDance 2026-08-27 的事故就是这一条: 按 Seedance 2.5 重定价后, 默认模型
+    没跟着换, 用户按 2.5 的价拿 2.0 的成品, 7 天无人发现 (2.5 牌价 ¥70/M,
+    2.0 是 ¥23/M —— 3 倍差)。我们卖 6 个视频模型, 共用一张表就是那件事的放大版。
+
+    所以: 有价 <=> 标了 calibrated。要开新型号, 先拿它的牌价重算一遍再标。
+    """
+    for m in _media_config()["video"]:
+        priced = any((m.get("credits_per_second") or {}).values())
+        calibrated = bool(m.get("calibrated"))
+        assert priced == calibrated, (
+            f"{m['id']}: 定价({priced}) 与 calibrated({calibrated}) 不一致 —— 要么补校准, 要么把价格置 null"
+        )
+
+
+def test_video_prices_match_agentsdance():
+    """与 AgentsDance 的 _VIDEO_USD_PER_SEC 对齐 (老板 2026-08-27 要求「一致就好」)。
+
+    那边是售价 USD/秒, 这边是积分/秒, $1 = 100 积分。任何一边单方面改价都会让
+    同一个模型在两个产品里卖不同的钱 —— 这条用例让它当场红。
+    """
+    # AgentsDance backend/dataset/agent_entitlements.py::_VIDEO_USD_PER_SEC
+    agentsdance_usd = {"480p": 0.12, "720p": 0.26, "1080p": 0.60}
+    priced = [m for m in _media_config()["video"] if m.get("calibrated")]
+    assert priced, "至少要有一个校准过的型号在售"
+    for m in priced:
+        for res, usd in agentsdance_usd.items():
+            assert m["credits_per_second"][res] == round(usd * 100), (
+                f"{m['id']} {res}: {m['credits_per_second'][res]} 积分/秒 != AgentsDance 的 ${usd}/秒 x100"
+            )
+
+
+def test_the_calibrated_model_is_the_one_we_actually_sell():
+    """校准的型号必须真的在网关目录里。AgentsDance 那次事故的另一半就是
+    「定价指向的型号」与「实际跑的型号」脱钩。"""
+    cfg = _media_config()
+    calibrated = [m["id"] for m in cfg["video"] if m.get("calibrated")]
+    assert "doubao-seedance-2-5-260628" in calibrated, (
+        "价目表是按 Seedance 2.5 的牌价算的 —— 换校准对象必须同步改这张表"
+    )

@@ -1,61 +1,67 @@
 {
   "_comment": "媒体模型售价。手写 —— 上游单价只在 cloud.qianmian.ai 控制台里, 探过 /pricing、/models/pricing 等一律 404, 没有 API 能取。$1 = 100 积分。",
-  "_WARNING": "视频价格是**没有核对过真实账单的占位值**。正因如此 MEDIA_ADMIN_ONLY 默认为 1, 只有管理员能调 —— 拿错误的价格对全量用户开卖, 那种错只能靠对账收场。填准价格、确认毛利之后才可以置 0。图像不在此列: 它按 usage 里的真实 token 数计价, 单价取自厂商公开价目, 见 image[].usd_per_1m_*。",
+  "_WARNING": "视频价目与 AgentsDance 对齐 (backend/dataset/agent_entitlements.py 的 _VIDEO_USD_PER_SEC), 那张表是按**网关牌价校准**过的: Seedance 2.5 牌价 ¥70/M tokens, tokens=宽×高×24fps×秒/1024 -> 1080p 成本 $0.49/s, 售价 $0.60/s (毛利 ≈1.22x)。$1 = 100 积分, 所以 credits_per_second = 售价 x 100。",
   "_note_duration": "刻意不做 duration 白名单。实测 doubao-seedance-2-0-mini 拒 3 秒、收 5 秒, 但各模型的合法档位既无文档也无 API, 逐个真调去试要花钱。所以透传上游的 InvalidParameter 原文 —— 厂商原话比我们猜的白名单可靠。",
   "video": [
     {
       "id": "doubao-seedance-2-0-mini-260615",
       "name": "Seedance 2.0 Mini",
       "credits_per_second": {
-        "480p": 10,
-        "720p": 20,
-        "1080p": 40
-      }
+        "480p": null,
+        "720p": null,
+        "1080p": null
+      },
+      "calibrated": false
     },
     {
       "id": "doubao-seedance-2-0-fast-260128",
       "name": "Seedance 2.0 Fast",
       "credits_per_second": {
-        "480p": 15,
-        "720p": 30,
-        "1080p": 60
-      }
+        "480p": null,
+        "720p": null,
+        "1080p": null
+      },
+      "calibrated": false
     },
     {
       "id": "doubao-seedance-2-0-260128",
       "name": "Seedance 2.0",
       "credits_per_second": {
-        "480p": 25,
-        "720p": 50,
-        "1080p": 100
-      }
+        "480p": null,
+        "720p": null,
+        "1080p": null
+      },
+      "calibrated": false
     },
     {
       "id": "doubao-seedance-2-5-260628",
       "name": "Seedance 2.5",
       "credits_per_second": {
-        "480p": 30,
-        "720p": 60,
-        "1080p": 120
-      }
+        "480p": 12,
+        "720p": 26,
+        "1080p": 60
+      },
+      "calibrated": true
     },
     {
       "id": "kling-v3",
       "name": "Kling v3",
       "credits_per_second": {
-        "480p": 25,
-        "720p": 50,
-        "1080p": 100
-      }
+        "480p": null,
+        "720p": null,
+        "1080p": null
+      },
+      "calibrated": false
     },
     {
       "id": "sora-2",
       "name": "Sora 2",
       "credits_per_second": {
-        "480p": 40,
-        "720p": 80,
-        "1080p": 160
-      }
+        "480p": null,
+        "720p": null,
+        "1080p": null
+      },
+      "calibrated": false
     }
   ],
   "image": [
@@ -75,5 +81,6 @@
     }
   ],
   "_note_image": "图像**按 token 计价, 不按张**。上游返回 usage.output_tokens (全是 image_tokens), 而同一个模型低画质与高画质相差 35 倍 (gpt-image-2: $0.006 vs $0.211 一张 1024²) —— 按张收要么坑用户要么亏钱, 而 token 数会如实反映画质与尺寸。口径与聊天完全一致: usd -> credits 走同一个 CREDITS_PER_USD 与 MODEL_PRICE_MARKUP。fallback_credits 是上游没给 usage 时的兜底, 宁可贵也不能免费。",
-  "_note_image_todo": "只留了官方单价可查的两个。Seedream / Gemini Image / Qwen-Image 的 token 单价没核实, **未定价 = 不售卖**, 端点会 404 —— 这比填个猜的数字安全。"
+  "_note_image_todo": "只留了官方单价可查的两个。Seedream / Gemini Image / Qwen-Image 的 token 单价没核实, **未定价 = 不售卖**, 端点会 404 —— 这比填个猜的数字安全。",
+  "_note_calibration": "⚠️ 这张表**只对 doubao-seedance-2-5-260628 成立**。AgentsDance 2026-08-27 的事故就是这一条: 按 2.5 重定价后默认模型没跟着换, 用户按 2.5 的价拿 2.0 的成品, 7 天无人发现。我们卖 6 个视频模型, 共用一张表就是那个事故的放大版 —— 所以**只给校准过的那个定价**, 其余一律 null (未定价 = 不售卖, 端点 404)。要开某个型号, 先拿它的网关牌价重新算一遍。参考比例: 2.5 牌价 ¥70/M, 2.0 是 ¥23/M (3.04 倍)。"
 }
