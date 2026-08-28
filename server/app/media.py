@@ -25,6 +25,7 @@
 from __future__ import annotations
 
 import asyncio
+import datetime
 import json
 import logging
 import math
@@ -92,12 +93,13 @@ def offered() -> dict:
             ),
         }
         for m in _catalog().values()
-        if any((m.get("credits_per_second") or {}).values())
+        if any((m.get("credits_per_second") or {}).values()) and provider_available(provider_of(m))
     ]
     image = [
         {"id": m["id"], "name": m.get("name") or m["id"]}
         for m in _image_catalog().values()
-        if m.get("usd_per_1m_image_tokens")
+        if (m.get("usd_per_1m_image_tokens") or m.get("credits_per_image"))
+        and provider_available(provider_of(m))
     ]
     return {"video": video, "image": image}
 
@@ -140,6 +142,10 @@ def image_credits(entry: dict, usage: dict | None) -> int:
 
     上游没给 usage 时回落到 fallback_credits: 宁可贵也不能免费。
     """
+    # 百炼那侧的同步生图**不返回 token 用量**, 只能按张。千面有 usage, 按 token ——
+    # 后者更准 (同一模型高低画质差 35 倍), 所以有 token 单价就优先用它。
+    if not entry.get("usd_per_1m_image_tokens"):
+        return max(1, int(entry.get("credits_per_image") or entry.get("fallback_credits") or 0))
     out = int((usage or {}).get("output_tokens") or 0)
     text_in = int(((usage or {}).get("input_tokens_details") or {}).get("text_tokens") or 0)
     if not out:
@@ -160,6 +166,183 @@ def _auth_headers() -> dict:
         "authorization": f"Bearer {config.UPSTREAM_API_KEY}",
         "content-type": "application/json",
     }
+
+
+# --- 上游适配 ------------------------------------------------------------------
+# 两家上游的形状完全不同, 差异集中在三处:
+#
+#              千面 (经网关)                 百炼 (直连)
+#   分辨率     "480p"                        "832*480"  (宽*高)
+#   状态词     PROCESSING/SUCCESS/FAIL       PENDING/RUNNING/SUCCEEDED/FAILED/CANCELED
+#   产物       data.url                      output.video_url
+#   视频用量   usage: null (只能按件计价)     usage:{video_duration,video_ratio,video_count}
+#
+# 图像那边差得更远: 千面是 OpenAI 风格 /images/generations 返回 b64 + token 用量;
+# 百炼要走原生 multimodal-generation, 返回一个 OSS URL, 没有 token 用量。
+
+QIANMIAN = "qianmian"
+BAILIAN = "bailian"
+
+# 百炼要的是像素尺寸。这几个是各分辨率的标准宽高 (实测 wanx2.1-t2v-turbo 接受)。
+_BAILIAN_SIZE = {"480p": "832*480", "720p": "1280*720", "1080p": "1920*1080"}
+_BAILIAN_TERMINAL = {"SUCCEEDED": "succeeded", "FAILED": "failed", "CANCELED": "failed", "UNKNOWN": "failed"}
+
+
+def provider_of(entry: dict | None) -> str:
+    return str((entry or {}).get("provider") or QIANMIAN)
+
+
+def provider_available(provider: str) -> bool:
+    """这个上游现在能不能用。
+
+    百炼是**直连**, 涉及向中国境内传输 —— 隐私政策 1.1 为此提前 15 天公告,
+    2026-09-12 生效。生效前一律不可用: 政策写了生效日, 提前上线就是拿政策当摆设。
+    到期后自然放行, 不需要改代码。
+    """
+    if provider != BAILIAN:
+        return True
+    if not (config.BAILIAN_NATIVE_BASE and config.BAILIAN_API_KEY):
+        return False
+    since = (config.BAILIAN_AVAILABLE_FROM or "").strip()
+    if not since:
+        return True
+    try:
+        ready = datetime.date.fromisoformat(since)
+    except ValueError:
+        log.error("BAILIAN_AVAILABLE_FROM=%r 不是 ISO 日期, 按未生效处理", since)
+        return False
+    return datetime.date.today() >= ready
+
+
+def _bailian_headers(async_mode: bool = False) -> dict:
+    h = {
+        "authorization": f"Bearer {config.BAILIAN_API_KEY}",
+        "content-type": "application/json",
+    }
+    if async_mode:
+        h["X-DashScope-Async"] = "enable"
+    return h
+
+
+async def submit_video(
+    provider: str, model: str, prompt: str, resolution: str, duration: int, image_url: str = ""
+) -> tuple[str, dict | None, int]:
+    """向上游下单。返回 (task_id, 错误报文, 错误码) —— 成功时后两者为 None/0。"""
+    if provider == BAILIAN:
+        size = _BAILIAN_SIZE.get(resolution)
+        payload: dict = {
+            "model": model,
+            "input": {"prompt": prompt},
+            "parameters": {k: v for k, v in (("size", size), ("duration", duration or None)) if v},
+        }
+        if image_url:
+            payload["input"]["img_url"] = image_url
+        url = f"{config.BAILIAN_NATIVE_BASE}/services/aigc/video-generation/video-synthesis"
+        async with _client() as client:
+            up = await client.post(url, headers=_bailian_headers(async_mode=True), json=payload)
+        if up.status_code >= 400:
+            return "", _safe_json(up), up.status_code
+        task = ((up.json() or {}).get("output") or {}).get("task_id")
+        if not task:
+            return "", {"error": {"message": "百炼没有返回 task_id"}}, 502
+        return str(task), None, 0
+
+    payload = {"model": model, "prompt": prompt, "resolution": resolution, "duration": duration}
+    if image_url:
+        payload["image_url"] = image_url
+    url = config.UPSTREAM_BASE_URL.rstrip("/") + "/video/generations"
+    async with _client() as client:
+        up = await client.post(url, headers=_auth_headers(), json=payload)
+    if up.status_code >= 400:
+        return "", _safe_json(up), up.status_code
+    try:
+        return str(up.json()["task_id"]), None, 0
+    except (ValueError, KeyError):
+        return "", {"error": {"message": "上游没有返回 task id"}}, 502
+
+
+async def poll_video(provider: str, task_id: str) -> dict:
+    """问一次上游。返回 {status: processing|succeeded|failed, url, error}。
+
+    **上游抖动一律返回 processing** —— 把网络错误当成失败会白退钱。
+    """
+    try:
+        if provider == BAILIAN:
+            url = f"{config.BAILIAN_NATIVE_BASE}/tasks/{task_id}"
+            async with _client() as client:
+                up = await client.get(url, headers=_bailian_headers())
+            out = (up.json() or {}).get("output") or {}
+            state = _BAILIAN_TERMINAL.get(str(out.get("task_status") or "").upper())
+            if state == "succeeded":
+                return {"status": "succeeded", "url": str(out.get("video_url") or ""), "error": ""}
+            if state == "failed":
+                msg = str(out.get("message") or out.get("code") or "生成失败")
+                return {"status": "failed", "url": "", "error": msg[:500]}
+            return {"status": "processing", "url": "", "error": ""}
+
+        url = config.UPSTREAM_BASE_URL.rstrip("/") + f"/video/generations/{task_id}"
+        async with _client() as client:
+            up = await client.get(url, headers=_auth_headers())
+        data = (up.json() or {}).get("data") or {}
+        state = str(data.get("status") or "").lower()
+        if state == "succeeded":
+            return {"status": "succeeded", "url": str(data.get("url") or ""), "error": ""}
+        if state in ("failed", "error", "cancelled"):
+            raw = data.get("error")
+            msg = str(raw if not isinstance(raw, dict) else json.dumps(raw, ensure_ascii=False))
+            return {"status": "failed", "url": "", "error": msg[:500]}
+        return {"status": "processing", "url": "", "error": ""}
+    except (httpx.HTTPError, ValueError):
+        return {"status": "processing", "url": "", "error": ""}
+
+
+async def gen_image(
+    provider: str, model: str, prompt: str, n: int, extra: dict
+) -> tuple[dict | None, dict | None, int]:
+    """出图。返回 (结果, 错误报文, 错误码)。结果统一成 OpenAI 那套形状。"""
+    if provider == BAILIAN:
+        # 百炼的图像走原生 multimodal-generation, 同步返回一个 OSS URL, **没有
+        # token 用量** —— 所以这一侧只能按张计价。
+        url = f"{config.BAILIAN_NATIVE_BASE}/services/aigc/multimodal-generation/generation"
+        content: list = [{"text": prompt}]
+        if extra.get("image_url"):
+            content.insert(0, {"image": extra["image_url"]})
+        payload = {"model": model, "input": {"messages": [{"role": "user", "content": content}]}}
+        async with _client() as client:
+            up = await client.post(url, headers=_bailian_headers(), json=payload, timeout=300.0)
+        if up.status_code >= 400:
+            return None, _safe_json(up), up.status_code
+        out = (up.json() or {}).get("output") or {}
+        images = [
+            part["image"]
+            for choice in (out.get("choices") or [])
+            for part in ((choice.get("message") or {}).get("content") or [])
+            if isinstance(part, dict) and part.get("image")
+        ]
+        if not images:
+            return None, {"error": {"message": "百炼没有返回图片"}}, 502
+        return {"created": 0, "data": [{"url": u} for u in images], "usage": None}, None, 0
+
+    payload = {"model": model, "prompt": prompt, "n": n}
+    for key in ("size", "quality", "background", "output_format", "image_url"):
+        if extra.get(key) is not None:
+            payload[key] = extra[key]
+    url = config.UPSTREAM_BASE_URL.rstrip("/") + "/images/generations"
+    async with _client() as client:
+        up = await client.post(url, headers=_auth_headers(), json=payload, timeout=300.0)
+    if up.status_code >= 400:
+        return None, _safe_json(up), up.status_code
+    try:
+        return up.json(), None, 0
+    except ValueError:
+        return None, {"error": {"message": "上游返回的不是 JSON"}}, 502
+
+
+def _safe_json(resp) -> dict:  # noqa: ANN001
+    try:
+        return resp.json()
+    except ValueError:
+        return {"error": {"message": resp.text[:400]}}
 
 
 def _job_row(job_id: str, user_id: str):
@@ -222,6 +405,16 @@ async def create_video(request: Request, user: dict = Depends(resolve_user)):
     if not prompt:
         return _error(400, "invalid_request_error", "prompt is required.")
 
+    entry = _catalog().get(model)
+    provider = provider_of(entry)
+    if not provider_available(provider):
+        return _error(
+            404,
+            "model_not_found",
+            f"Model '{model}' is not available yet."
+            if provider == BAILIAN
+            else f"Model '{model}' is not offered.",
+        )
     amount = quote(model, resolution, duration)
     if amount is None:
         return _error(
@@ -238,32 +431,22 @@ async def create_video(request: Request, user: dict = Depends(resolve_user)):
             f"这条视频需要 {amount} 积分，当前余额不足。",
         )
 
-    payload = {"model": model, "prompt": prompt, "duration": duration, "resolution": resolution}
-    for passthrough in ("image_url", "ratio", "seed", "camera_fixed", "watermark"):
-        if body.get(passthrough) is not None:
-            payload[passthrough] = body[passthrough]
-
-    url = config.UPSTREAM_BASE_URL.rstrip("/") + "/video/generations"
     try:
-        async with _client() as client:
-            upstream = await client.post(url, headers=_auth_headers(), json=payload)
+        task_id, err, code = await submit_video(
+            provider,
+            model,
+            prompt,
+            resolution,
+            duration,
+            str(body.get("image_url") or ""),
+        )
     except httpx.HTTPError as exc:
         log.warning("视频作业提交失败: %s", exc)
         return _error(502, "upstream_error", "Upstream did not accept the job.")
-
-    if upstream.status_code >= 400:
+    if err is not None:
         # 上游的参数校验原样转达 —— duration/resolution 的合法档位没有文档也没有
         # API, 厂商原话比我们猜的白名单准。此路径未扣费。
-        try:
-            detail = upstream.json()
-        except ValueError:
-            detail = {"error": {"message": upstream.text[:400]}}
-        return JSONResponse(detail, status_code=upstream.status_code)
-
-    try:
-        task_id = str(upstream.json()["task_id"])
-    except (ValueError, KeyError):
-        return _error(502, "upstream_error", "Upstream returned no task id.")
+        return JSONResponse(err, status_code=code or 502)
 
     # 到这里作业已经在上游跑了, 钱花出去了 —— 现在扣。
     job_id = security.new_id("vjob_")
@@ -272,8 +455,8 @@ async def create_video(request: Request, user: dict = Depends(resolve_user)):
     with db.tx() as conn:
         conn.execute(
             "INSERT INTO video_jobs (id, user_id, model, upstream_task_id, status, prompt, "
-            "duration, resolution, credits, refunded, url, error, created, updated) "
-            "VALUES (?,?,?,?,?,?,?,?,?,0,'','',?,?)",
+            "duration, resolution, credits, refunded, url, error, provider, created, updated) "
+            "VALUES (?,?,?,?,?,?,?,?,?,0,'','',?,?,?)",
             (
                 job_id,
                 user["id"],
@@ -284,6 +467,7 @@ async def create_video(request: Request, user: dict = Depends(resolve_user)):
                 duration,
                 resolution,
                 amount,
+                provider,
                 now,
                 now,
             ),
@@ -305,19 +489,31 @@ async def _settle(job: dict) -> dict:
     if job["status"] in ("succeeded", "failed"):
         return job
 
-    url = config.UPSTREAM_BASE_URL.rstrip("/") + f"/video/generations/{job['upstream_task_id']}"
-    try:
-        async with _client() as client:
-            upstream = await client.get(url, headers=_auth_headers())
-        data = (upstream.json() or {}).get("data") or {}
-    except (httpx.HTTPError, ValueError):
-        return job
-
-    upstream_status = str(data.get("status") or "").lower()
+    # provider 从作业行读, 不从配置反查 —— 见 db.py 的迁移说明。老行没有这一列
+    # (迁移前建的), 回落到千面: 那时只有千面。
+    provider = str(job.get("provider") or QIANMIAN)
+    state = await poll_video(provider, str(job["upstream_task_id"]))
     now = time.time()
 
-    if upstream_status == "succeeded":
-        video_url = str(data.get("url") or "")
+    if state["status"] == "processing":
+        # 还在跑 —— 但太久没有终态就当它废了并退款。上游偶尔会把作业丢掉 (既不
+        # succeeded 也不 failed, 就是不动), 不设上限那笔钱永远悬着。
+        # ⚠️ 这段必须在「processing 就返回」**之前**生效, 否则整条超时保护是死代码
+        # (2026-08-28 重构时我把它写死过一次, 被 test_a_job_upstream_forgot 抓到)。
+        if now - float(job["created"] or now) > config.VIDEO_JOB_MAX_AGE_S:
+            message = f"上游超过 {int(config.VIDEO_JOB_MAX_AGE_S / 60)} 分钟未给出结果"
+            log.warning("视频作业 %s %s, 判失败并退款", job["id"], message)
+            with db.tx() as conn:
+                conn.execute(
+                    "UPDATE video_jobs SET status = 'failed', error = ?, updated = ? WHERE id = ?",
+                    (message, now, job["id"]),
+                )
+            _refund_once(job)
+            return {**job, "status": "failed", "error": message}
+        return job
+
+    if state["status"] == "succeeded":
+        video_url = state["url"]
         with db.tx() as conn:
             conn.execute(
                 "UPDATE video_jobs SET status = 'succeeded', url = ?, updated = ? WHERE id = ?",
@@ -325,22 +521,8 @@ async def _settle(job: dict) -> dict:
             )
         return {**job, "status": "succeeded", "url": video_url}
 
-    if upstream_status in ("failed", "error", "cancelled"):
-        raw = data.get("error")
-        message = str(raw if not isinstance(raw, dict) else json.dumps(raw, ensure_ascii=False))[:500]
-        with db.tx() as conn:
-            conn.execute(
-                "UPDATE video_jobs SET status = 'failed', error = ?, updated = ? WHERE id = ?",
-                (message, now, job["id"]),
-            )
-        _refund_once(job)
-        return {**job, "status": "failed", "error": message}
-
-    # 太久没有终态就当它废了并退款。上游偶尔会把作业丢掉 (既不 succeeded 也不
-    # failed, 就是不动), 不设上限的话那笔钱永远悬着。
-    if now - float(job["created"] or now) > config.VIDEO_JOB_MAX_AGE_S:
-        message = f"上游超过 {int(config.VIDEO_JOB_MAX_AGE_S / 60)} 分钟未给出结果"
-        log.warning("视频作业 %s %s, 判失败并退款", job["id"], message)
+    if state["status"] == "failed":
+        message = state["error"][:500]
         with db.tx() as conn:
             conn.execute(
                 "UPDATE video_jobs SET status = 'failed', error = ?, updated = ? WHERE id = ?",

@@ -135,6 +135,21 @@ VIDEO_JOB_MAX_AGE_S = _env_float("VIDEO_JOB_MAX_AGE_S", 30 * 60)
 # 一次请求最多出几张。图是同步出的, 批量大了会把 UPSTREAM_TIMEOUT_S 顶穿。
 IMAGE_MAX_BATCH = _env_int("IMAGE_MAX_BATCH", 4)
 
+# --- 阿里云百炼 (直连, 不经千面) ---------------------------------------------
+# 千面没有的两项能力在这里: 图像编辑 (qwen-image-edit) 与视频编辑 (vace)。
+#
+# ⚠️ NATIVE_BASE 必须是**业务空间专属域名**, 绝不能回落到公共的
+# dashscope.aliyuncs.com —— 打公共域名一样能通、结果也一样, 但**预付套餐不抵扣,
+# 走按量计费, 且没有任何报错提示** (AgentsDance 2026-08-12 踩过, 见其
+# backend/dataset/bailian_native.py 的注释)。所以默认值留空: 没配就不启用,
+# 而不是偷偷去打公共域名。
+BAILIAN_NATIVE_BASE = _env("BAILIAN_NATIVE_BASE", "").rstrip("/")
+BAILIAN_API_KEY = _env("BAILIAN_API_KEY")
+# 直连百炼 = 新增一个直接数据接收方, 且在中国境内 —— 隐私政策 1.1 为此提前 15 天
+# 公告, 2026-09-12 生效。**在那之前不得启用**: 政策写了生效日, 提前上线就是拿
+# 政策当摆设。到期后此值会自然放行, 不需要改代码。
+BAILIAN_AVAILABLE_FROM = _env("BAILIAN_AVAILABLE_FROM", "2026-09-12")
+
 # --- gateway guards ---------------------------------------------------------
 GATEWAY_QPS = _env_float("GATEWAY_QPS", 5.0)  # per-user requests/second (token bucket)
 GATEWAY_QPS_BURST = _env_int("GATEWAY_QPS_BURST", 15)
