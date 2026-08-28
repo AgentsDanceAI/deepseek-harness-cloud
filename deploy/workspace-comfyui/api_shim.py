@@ -167,6 +167,32 @@ def _resolution_of(params: dict) -> str:
     return ""
 
 
+# 上游的失败原因 -> 人话。**内容审核是正常结果, 不是故障** —— 原样甩过去的话,
+# 用户看到的是一句英文被包在 "Polling aborted due to error: {一坨 JSON}" 里,
+# 看着像系统崩了, 而实际上作业跑完了、钱也已经退了。
+_FAILURE_HINTS = (
+    ("real human faces", "上游的内容审核判定生成结果可能含真实人物面孔，拒绝输出。"
+                         "换一个不指向真实人物的提示词再试。"),
+    ("inappropriate content", "上游的内容审核认为输入含不当内容，拒绝生成。"),
+    ("data inspection failed", "上游的内容审核没放行这次请求。"),
+    ("risk control", "上游风控拦下了这次请求。"),
+    ("sensitive", "上游的内容审核判定涉及敏感内容，拒绝生成。"),
+)
+
+
+def _explain_failure(msg: str) -> str:
+    """把上游的失败原因翻成一句人话, 并说清钱的去向。
+
+    失败的作业网关一律全额退款 (media._refund_once), 所以这句话可以无条件加 ——
+    不说的话, 用户看到"失败"第一反应是"钱是不是白扣了"。
+    """
+    low = (msg or "").lower()
+    for needle, hint in _FAILURE_HINTS:
+        if needle in low:
+            return f"{hint}（本次已全额退款）原文：{msg}"
+    return f"{msg}（本次已全额退款）" if msg else "生成失败（本次已全额退款）"
+
+
 def _urls_from(out: dict) -> list[str]:
     """把网关的 data[] 折成一串可下载的 URL。
 
@@ -414,7 +440,8 @@ class Handler(BaseHTTPRequestHandler):
             url = (items[0] or {}).get("url") if items else ""
             body["content"] = {"video_url": url or ""}
         elif status == "failed":
-            body["error"] = {"code": "GenerationFailed", "message": str(out.get("error") or "生成失败")}
+            body["error"] = {"code": "GenerationFailed",
+                             "message": _explain_failure(str(out.get("error") or ""))}
         return self._json(200, body)
 
     # ---- 图像 ----
@@ -648,7 +675,7 @@ class Handler(BaseHTTPRequestHandler):
             "task_status": status,
             "video_url": url or "",
             "results": [{"url": url}] if url else [],
-            "message": str(out.get("error") or ""),
+            "message": _explain_failure(str(out.get("error") or "")) if status == "FAILED" else "",
         }})
 
     # ---- Qwen 官方图像节点 (DashScope multimodal, 同步) ----

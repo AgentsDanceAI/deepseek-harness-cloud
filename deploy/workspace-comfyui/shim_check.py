@@ -256,6 +256,32 @@ def main() -> int:
         return 1
     print("  ✓ auto 时长(-1) -> 原样转给网关 (由网关按实际秒数结算)")
 
+    # 内容审核拒绝是**正常结果**, 不是故障。原样甩过去的话用户看到的是一句英文被
+    # 包在 "Polling aborted due to error: {一坨 JSON}" 里, 看着像系统崩了 ——
+    # 而实际上作业跑完了、钱也退了。
+    code, out = call(
+        "POST", "/proxy/wan/api/v1/services/aigc/video-generation/video-synthesis",
+        {"model": "wan2.7-t2v", "input": {"prompt": "__moderated__"},
+         "parameters": {"resolution": "720P", "ratio": "16:9", "duration": 5}},
+    )
+    mod_task = ((out or {}).get("output") or {}).get("task_id") if isinstance(out, dict) else None
+    if not mod_task:
+        print(f"  ✗ 审核用例建任务失败: {code} {out}")
+        return 1
+    for _ in range(8):
+        _, out = call("GET", f"/proxy/wan/api/v1/tasks/{mod_task}")
+        st = ((out or {}).get("output") or {}).get("task_status")
+        if st not in ("PENDING", "RUNNING"):
+            break
+    msg = ((out or {}).get("output") or {}).get("message") or ""
+    if st != "FAILED":
+        print(f"  ✗ 审核拒绝应当落 FAILED: {st} {out}")
+        return 1
+    if "内容审核" not in msg or "退款" not in msg:
+        print(f"  ✗ 失败原因没翻成人话/没说钱的去向: {msg[:160]}")
+        return 1
+    print("  ✓ 内容审核拒绝 -> 中文原因 + 已退款说明")
+
     # 型号在售、但**这个分辨率**不在售 (wan2.7 的 480p 厂商不提供): 错误里必须
     # 出现分辨率, 否则用户会去换型号 —— 而他该做的是换分辨率。
     code, out = call(
