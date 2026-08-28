@@ -211,7 +211,25 @@ QIANMIAN = "qianmian"
 BAILIAN = "bailian"
 
 # 百炼要的是像素尺寸。这几个是各分辨率的标准宽高 (实测 wanx2.1-t2v-turbo 接受)。
+# 百炼的视频参数有**两代写法**, 用错那代不会报错 —— 字段被静默忽略, 按模型默认
+# 值出片。2026-08-28 实测: 给 wan2.7-t2v 发 size="1280*720", 它照样按 1080P 出,
+# usage 回 SR=1080。我们按 720p 收 10 积分/秒, 成本却是 1080P 的 $0.1434/秒 ——
+# 每单亏七成, 而且没有任何报错。所以哪个模型用哪代必须写在目录里, 不靠猜。
+#
+#   size            wanx2.1 / wan2.6 一代: parameters.size = "1280*720"
+#   resolution_ratio wan2.7 / wan3.0 一代: parameters.resolution="720P" + ratio="16:9"
+#
+# 后者是唯一能出**竖屏**的写法 —— 前者那张表全是 16:9, 用户选 9:16 也拿不到。
 _BAILIAN_SIZE = {"480p": "832*480", "720p": "1280*720", "1080p": "1920*1080"}
+_BAILIAN_RESOLUTION = {"480p": "480P", "720p": "720P", "1080p": "1080P"}
+_RATIOS = ("16:9", "9:16", "1:1", "4:3", "3:4", "adaptive")
+_PARAM_STYLES = ("size", "resolution_ratio")
+
+
+def video_param_style(model: str) -> str:
+    """这个模型该用哪代参数写法。目录没写就按老写法 —— 老写法是 wanx2.1 那批。"""
+    style = str((_catalog().get(model) or {}).get("video_params") or "size")
+    return style if style in _PARAM_STYLES else "size"
 _BAILIAN_TERMINAL = {"SUCCEEDED": "succeeded", "FAILED": "failed", "CANCELED": "failed", "UNKNOWN": "failed"}
 
 
@@ -242,15 +260,20 @@ def _bailian_headers(async_mode: bool = False) -> dict:
 
 
 async def submit_video(
-    provider: str, model: str, prompt: str, resolution: str, duration: int, image_url: str = ""
+    provider: str, model: str, prompt: str, resolution: str, duration: int,
+    image_url: str = "", ratio: str = "",
 ) -> tuple[str, dict | None, int]:
     """向上游下单。返回 (task_id, 错误报文, 错误码) —— 成功时后两者为 None/0。"""
     if provider == BAILIAN:
-        size = _BAILIAN_SIZE.get(resolution)
+        if video_param_style(model) == "resolution_ratio":
+            params: dict = {"resolution": _BAILIAN_RESOLUTION.get(resolution), "ratio": ratio or "16:9"}
+        else:
+            params = {"size": _BAILIAN_SIZE.get(resolution)}
+        params["duration"] = duration or None
         payload: dict = {
             "model": model,
             "input": {"prompt": prompt},
-            "parameters": {k: v for k, v in (("size", size), ("duration", duration or None)) if v},
+            "parameters": {k: v for k, v in params.items() if v},
         }
         if image_url:
             payload["input"]["img_url"] = image_url
@@ -422,10 +445,19 @@ async def create_video(request: Request, user: dict = Depends(resolve_user)):
     model = str(body.get("model") or "")
     prompt = str(body.get("prompt") or "")
     resolution = str(body.get("resolution") or config.VIDEO_DEFAULT_RESOLUTION)
+    ratio = str(body.get("ratio") or "")
+    if ratio and ratio not in _RATIOS:
+        return _error(400, "invalid_request_error", f"ratio must be one of {', '.join(_RATIOS)}.")
     try:
         duration = int(body.get("duration") or config.VIDEO_DEFAULT_DURATION)
     except (TypeError, ValueError):
         return _error(400, "invalid_request_error", "duration must be an integer.")
+    # 时长必须是正整数。quote() 里的 max(1, duration) 挡住了负积分, 但挡不住
+    # **少收钱**: duration=-1 (ComfyUI 的 auto 档) 会按 1 秒计价, 而上游可能自动
+    # 生成到 30 秒。宁可让客户端明确选一个时长, 也不按未知长度卖。
+    if duration < 1:
+        return _error(400, "invalid_request_error",
+                      "duration must be a positive integer (自动时长无法计价，请选一个具体秒数).")
 
     if not model:
         return _error(400, "invalid_request_error", "model is required.")
@@ -466,6 +498,7 @@ async def create_video(request: Request, user: dict = Depends(resolve_user)):
             resolution,
             duration,
             str(body.get("image_url") or ""),
+            ratio,
         )
     except httpx.HTTPError as exc:
         log.warning("视频作业提交失败: %s", exc)

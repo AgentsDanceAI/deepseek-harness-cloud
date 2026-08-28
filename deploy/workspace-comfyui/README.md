@@ -69,7 +69,7 @@ ComfyUI 自带 **40 个厂商**的官方节点, 全部打 `--comfy-api-base` 那
 |---|---|---|---|
 | byteplus / seedance | doubao-seedance-2.5 / 2.0 / fast / mini | dreamina-seedance-… | ✅ 已接 (去厂商前缀后匹配) |
 | openai | gpt-image-2 / gpt-image-1.5 | `gpt-image-1 / 1.5 / 2` | ✅ 已接 (名字一字不差) |
-| wan | wan2.7-t2v / i2v (720p/1080p; **480p 厂商不提供**)、wanx2.1-\* | `wan2.5-… / 2.6-… / 2.7-t2v / 2.7-i2v / 3.0-…` | ✅ 已接 (2.7 两个对得上) |
+| wan | wan2.7-t2v/i2v (720p/1080p)、wan3.0-video/-prime、wanx2.1-\* | `wan2.5-… / 2.6-… / 2.7-t2v / 2.7-i2v / 3.0-video(-prime)` | ✅ 已接 (2.7 与 3.0 都对得上) |
 | qwen | qwen-image-3.0 / -pro | `qwen-image-3.0 / -pro` | ✅ 已接 (名字一字不差) |
 | kling | kling-v3 / v3.0-std / v3.0-pro / v2-6 | `kling-3.0-turbo / v3-omni / video-o1 / v2-5-turbo` | ❌ 名字全对不上 |
 | gemini / vertexai | 无 (只有 gemini 对话模型) | gemini-\*-image | ❌ 网关没有这些图模型 |
@@ -89,6 +89,26 @@ ComfyUI 自带 **40 个厂商**的官方节点, 全部打 `--comfy-api-base` 那
 |---|---|---|---|
 | Ark (byteplus) | `content[]` 数组 | `{status, content.video_url}` | HTTP 4xx |
 | DashScope multimodal (qwen) | `input.messages[].content[]` 混着 text/image | 无 (**同步**) | HTTP 200 + code/message |
+
+### 百炼视频有**三代报文**, 用错那代不会报错
+
+|  | 尺寸怎么写 | 首帧放哪 |
+|---|---|---|
+| wan2.5 / 2.6 | `parameters.size = "1920*1080"` | `input.img_url` |
+| wan2.7 | `parameters.resolution` + `ratio` | `input.img_url` |
+| wan3.0 | `parameters.resolution` + `ratio` | `input.media[{type:"first_frame"}]` |
+
+2026-08-28 实测: 给 wan2.7-t2v 发 `size="1280*720"`, 它**照样按 1080P 出片**
+(`usage` 回 `SR: 1080`), 字段被静默忽略。我们按 720p 收 10 积分/秒, 成本却是
+1080P 的 $0.1434/秒 —— **每单亏七成, 两边都不报错**。所以哪个模型用哪代写在
+`media_models.json` 的 `video_params` 里, 不靠型号名去猜; 漏标有守卫测试会红。
+
+`ratio` 也必须转达: `size` 那张表全是 16:9, 用户在节点里选 9:16 竖屏, 走老写法
+只会拿回横屏。
+
+Wan 3.0 的节点还有个 **auto 时长** (发过来 `duration: -1`)。按秒计价的东西不能按
+未知长度卖 —— 网关的 `max(1, duration)` 会把它算成 1 秒, 而上游可能出到 30 秒。
+垫片在转发前就拦下, 并告诉用户去 duration 里选一个具体秒数。
 | OpenAI | 与网关同构, 近乎直通 | 无 (同步) | HTTP 4xx |
 | DashScope (wan/qwen) | `{input:{}, parameters:{}}` | `{output:{task_status, video_url}}` | **HTTP 200 + 顶层 code/message** |
 
@@ -96,7 +116,7 @@ ComfyUI 自带 **40 个厂商**的官方节点, 全部打 `--comfy-api-base` 那
 用户。回 4xx 只会变成一句「请求失败」, 用户看不到该换哪个型号 —— 所以 Wan 的
 未在售走的是 200。
 
-改完跑 `shim_check.py` (20 项), 它对着 `stub_gateway.py` 走完四家的全部转译路径。
+改完跑 `shim_check.py` (23 项), 它对着 `stub_gateway.py` 走完四家的全部转译路径。
 
 ## 怎么跑验证
 
