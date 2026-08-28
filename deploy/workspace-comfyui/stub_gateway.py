@@ -34,6 +34,8 @@ LAST_VIDEO: dict = {}
 # 素材中转: blob_id -> 字节。带 image/video/audio 输入的官方节点都要先走这条,
 # 换一个**上游厂商能从公网取到**的 URL。
 BLOBS: dict[str, bytes] = {}
+# 注定被内容审核拒掉的作业号
+FAILED_JOBS: set[str] = set()
 LAST_IMAGE: dict = {}
 PORT = 9797
 # 容器里要 host.docker.internal, 宿主机自测要 localhost。
@@ -178,7 +180,12 @@ class Handler(BaseHTTPRequestHandler):
             print(f"[stub] {model} 的 {res} 档未在售 -> 404", flush=True)
             return self._json(404, {"error": {"message":
                 f"Model '{model}' at {res} is not offered for video generation."}})
+        # 「跑完了但被内容审核拒绝」是**正常结果**, 线上真会遇到 (2026-08-28:
+        # 提示词点了真实人物, 上游回 "suspected to include real human faces")。
+        # 桩得能造出这一幕, 否则垫片里那条翻译永远没人走过。
         job_id = uuid.uuid4().hex[:12]
+        if "__moderated__" in str(payload.get("prompt") or ""):
+            FAILED_JOBS.add(job_id)
         JOBS[job_id] = 0
         self._json(200, {"id": job_id, "model": payload.get("model"),
                          "video_result": None, "task_status": "PROCESSING",
@@ -216,6 +223,12 @@ class Handler(BaseHTTPRequestHandler):
             if n <= POLLS_BEFORE_SUCCESS:
                 print(f"[stub] 轮询 #{n} -> PROCESSING", flush=True)
                 return self._json(200, {"id": job_id, "task_status": "PROCESSING"})
+            if job_id in FAILED_JOBS:
+                print(f"[stub] 轮询 #{n} -> FAIL (内容审核)", flush=True)
+                return self._json(200, {
+                    "id": job_id, "task_status": "FAIL",
+                    "error": "The output content is suspected to include real human faces.",
+                })
             print(f"[stub] 轮询 #{n} -> SUCCESS", flush=True)
             return self._json(200, {
                 "id": job_id, "task_status": "SUCCESS",
