@@ -85,7 +85,8 @@
         "480p": null,
         "720p": 0.086012,
         "1080p": 0.143353
-      }
+      },
+      "video_params": "resolution_ratio"
     },
     {
       "id": "wan2.7-i2v",
@@ -102,7 +103,8 @@
         "480p": null,
         "720p": 0.086012,
         "1080p": 0.143353
-      }
+      },
+      "video_params": "resolution_ratio"
     },
     {
       "id": "wanx2.1-vace-plus",
@@ -120,7 +122,8 @@
         "480p": null,
         "720p": 0.100347,
         "1080p": null
-      }
+      },
+      "video_params": "size"
     },
     {
       "id": "wanx2.1-t2v-turbo",
@@ -137,6 +140,43 @@
         "480p": 0.034405,
         "720p": 0.034405,
         "1080p": null
+      },
+      "video_params": "size"
+    },
+    {
+      "id": "wan3.0-video",
+      "name": "万相 3.0 视频",
+      "provider": "bailian",
+      "video_params": "resolution_ratio",
+      "credits_per_second": {
+        "480p": 5,
+        "720p": 10,
+        "1080p": 20
+      },
+      "calibrated": true,
+      "_derivation": "阿里云百炼「模型价格」页, **华北2(北京)** 档。wan3.0-video 页面标着「限时7折」, 这里按**原价**定 —— 按折后定则促销一停当场亏本卖, 而促销何时停不由我们决定。credits = 美元每秒 x100 积分 x1.2 毛利, 四舍五入。有真实账单后应复核。",
+      "_upstream_usd_per_second": {
+        "480p": 0.041256,
+        "720p": 0.082513,
+        "1080p": 0.165025
+      }
+    },
+    {
+      "id": "wan3.0-video-prime",
+      "name": "万相 3.0 视频 Prime",
+      "provider": "bailian",
+      "video_params": "resolution_ratio",
+      "credits_per_second": {
+        "480p": 8,
+        "720p": 15,
+        "1080p": 31
+      },
+      "calibrated": true,
+      "_derivation": "阿里云百炼「模型价格」页, **华北2(北京)** 档。wan3.0-video 页面标着「限时7折」, 这里按**原价**定 —— 按折后定则促销一停当场亏本卖, 而促销何时停不由我们决定。credits = 美元每秒 x100 积分 x1.2 毛利, 四舍五入。有真实账单后应复核。",
+      "_upstream_usd_per_second": {
+        "480p": 0.0636,
+        "720p": 0.127199,
+        "1080p": 0.254399
       }
     }
   ],

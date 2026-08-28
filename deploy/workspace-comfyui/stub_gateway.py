@@ -22,6 +22,7 @@ SOLD_VIDEO = {
     "doubao-seedance-2-5-260628": ("480p", "720p", "1080p"),
     "wan2.7-t2v": ("720p", "1080p"),
     "wan2.7-i2v": ("720p", "1080p"),
+    "wan3.0-video": ("480p", "720p", "1080p"),
 }
 SOLD_IMAGE = ("gpt-image-2", "qwen-image-3.0-pro")
 

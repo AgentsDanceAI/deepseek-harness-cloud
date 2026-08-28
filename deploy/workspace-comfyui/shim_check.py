@@ -206,6 +206,45 @@ def main() -> int:
         return 1
     print("  ✓ Wan 未在售型号 -> 200 + code/message (节点能把中文原话抛出来)")
 
+    # ratio 必须转达: 丢了它, 用户在节点里选 9:16 竖屏会拿回 16:9 横屏 —— 而且
+    # 两边都不报错。wan2.7 起百炼改用 resolution+ratio, 不再认 size。
+    call("POST", "/proxy/wan/api/v1/services/aigc/video-generation/video-synthesis",
+         {"model": "wan2.7-t2v", "input": {"prompt": "竖屏测试"},
+          "parameters": {"resolution": "720P", "ratio": "9:16", "duration": 5}})
+    _, sent = call("GET", "/llm/v1/_debug/last-video", None, base=STUB)
+    if sent.get("ratio") != "9:16" or sent.get("resolution") != "720p":
+        print(f"  ✗ ratio/resolution 没转达 (竖屏会变横屏): {sent}")
+        return 1
+    print("  ✓ Wan 2.7 -> resolution+ratio 都转达了 (竖屏不会变横屏)")
+
+    # Wan 3.0: 首帧从 input.img_url 改到了 input.media[] 里 type=first_frame
+    call("POST", "/proxy/wan/api/v1/services/aigc/video-generation/video-synthesis",
+         {"model": "wan3.0-video",
+          "input": {"prompt": "p", "media": [{"type": "reference_image", "url": "https://x/ref.png"},
+                                             {"type": "first_frame", "url": "https://x/first.png"}]},
+          "parameters": {"resolution": "1080P", "ratio": "16:9", "duration": 6}})
+    _, sent = call("GET", "/llm/v1/_debug/last-video", None, base=STUB)
+    if sent.get("image_url") != "https://x/first.png":
+        print(f"  ✗ Wan 3.0 的首帧没从 media[] 里挑出来 (挑错了或漏了): {sent}")
+        return 1
+    print("  ✓ Wan 3.0 -> media[] 里的 first_frame 转成 image_url")
+
+    # Wan 3.0 的 auto 时长发过来是 -1。按秒计价的东西不能按未知长度卖 ——
+    # 网关会当成 1 秒, 而上游可能出到 30 秒。必须在垫片这里就拦住并说清怎么办。
+    code, out = call(
+        "POST", "/proxy/wan/api/v1/services/aigc/video-generation/video-synthesis",
+        {"model": "wan3.0-video", "input": {"prompt": "p"},
+         "parameters": {"resolution": "720P", "ratio": "16:9", "duration": -1}},
+    )
+    body = json.dumps(out, ensure_ascii=False) if isinstance(out, dict) else str(out)
+    if code != 200 or (isinstance(out, dict) and out.get("output")):
+        print(f"  ✗ auto 时长应当被拒且不建任务: {code} {body[:200]}")
+        return 1
+    if "duration" not in body and "秒数" not in body:
+        print(f"  ✗ 错误里没说该去改 duration: {body[:200]}")
+        return 1
+    print("  ✓ auto 时长(-1) -> 被拦下, 并指明去 duration 里选具体秒数")
+
     # 型号在售、但**这个分辨率**不在售 (wan2.7 的 480p 厂商不提供): 错误里必须
     # 出现分辨率, 否则用户会去换型号 —— 而他该做的是换分辨率。
     code, out = call(

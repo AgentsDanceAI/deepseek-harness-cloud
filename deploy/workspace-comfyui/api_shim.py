@@ -488,10 +488,16 @@ class Handler(BaseHTTPRequestHandler):
         )
 
     def _wan_video(self):
-        """Wan 的文生视频/图生视频。
+        """Wan 的文生视频/图生视频, 2.5 到 3.0 共用这一条路径。
 
-        Wan 系是百炼通道的原生型号 —— 节点下拉里的 wan2.7-t2v / wan2.7-i2v
-        跟我们在售的 id **一字不差**, 所以型号不用改名, 只是形状要拆。
+        节点下拉里的 wan2.7-t2v / wan2.7-i2v / wan3.0-video 跟我们在售的 id
+        **一字不差**, 所以型号不用改名。但**三代报文不一样**, 要都认:
+
+            2.5/2.6   parameters.size = "1920*1080"      input.img_url
+            2.7       parameters.resolution + ratio      input.img_url
+            3.0       parameters.resolution + ratio      input.media[{type,url}]
+
+        ratio 必须转达 —— 丢了它, 用户在节点里选 9:16 竖屏, 拿回来的是 16:9 横屏。
         """
         body = self._body()
         inp = body.get("input") or {}
@@ -504,14 +510,29 @@ class Handler(BaseHTTPRequestHandler):
         resolution = _resolution_of(params)
         if resolution:
             payload["resolution"] = resolution
+        ratio = str(params.get("ratio") or "")
+        if ratio:
+            payload["ratio"] = ratio
         try:
             duration = int(params.get("duration") or 0)
         except (TypeError, ValueError):
             duration = 0
+        # Wan 3.0 的节点有个 "auto" 时长档, 发过来是 -1。按秒计价的东西不能按未知
+        # 长度卖 (网关会当成 1 秒, 而上游可能出到 30 秒), 所以在这里就拦下, 并说清
+        # 该怎么办 —— 让错误停在节点上, 而不是变成一笔算错的账。
+        if duration < 0:
+            return self._dashscope_error(
+                "InvalidParameter",
+                "本平台按秒计价，无法为「auto」时长报价。请在节点的 duration 里选一个具体秒数。")
         if duration:
             payload["duration"] = duration
-        # 节点把首帧塞成 data:image/png;base64,... 的 img_url, 网关收的是 image_url。
+        # 首帧: 2.5/2.7 放在 input.img_url, 3.0 改放 input.media[] 里 type=first_frame。
         img = str(inp.get("img_url") or "")
+        if not img:
+            for item in (inp.get("media") or []):
+                if isinstance(item, dict) and item.get("type") == "first_frame" and item.get("url"):
+                    img = str(item["url"])
+                    break
         if img:
             payload["image_url"] = img
         try:

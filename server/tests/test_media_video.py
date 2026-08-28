@@ -375,6 +375,104 @@ def _media_config() -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+class _Spy(_FakeClient):
+    """记下真正发出去的报文 —— 只看 URL 不看 body 抓不到"发错了字段"这类错。"""
+
+    def __init__(self, *a, sent=None, **kw):
+        super().__init__(*a, **kw)
+        self.sent = sent if sent is not None else {}
+
+    async def post(self, url, headers=None, json=None, timeout=None):  # noqa: A002
+        self.sent.clear()
+        self.sent.update(json or {})
+        return await super().post(url, headers=headers, json=json, timeout=timeout)
+
+
+def _bailian(monkeypatch, model, entry, body):
+    monkeypatch.setattr(config, "BAILIAN_NATIVE_BASE", "https://ws-x.example.com/api/v1")
+    monkeypatch.setattr(config, "BAILIAN_API_KEY", "sk-fake")
+    monkeypatch.setattr(media, "_prices_cache", {model: entry})
+    sent = {}
+    monkeypatch.setattr(media, "_client",
+                        lambda: _Spy(post=_Resp(200, {"output": {"task_id": "t1"}}), sent=sent))
+    r = client.post("/llm/v1/videos/generations", json={"model": model, **body})
+    return r, sent
+
+
+def test_wan27_sends_resolution_and_ratio_never_size(monkeypatch):
+    """百炼的视频参数有两代写法, **用错那代不会报错** —— 字段被静默忽略。
+
+    2026-08-28 实测: 给 wan2.7-t2v 发 size="1280*720", 它照样按 1080P 出片
+    (usage 回 SR=1080)。我们按 720p 收 10 积分/秒, 成本是 1080P 的 $0.1434/秒 ——
+    每单亏七成, 而且两边都不报错, 只能靠对账发现。
+    """
+    _new_user("wan27-shape@test.local")
+    entry = {"id": "wan2.7-t2v", "provider": "bailian", "video_params": "resolution_ratio",
+             "credits_per_second": {"720p": 10, "1080p": 17}}
+    r, sent = _bailian(monkeypatch, "wan2.7-t2v", entry,
+                       {"prompt": "p", "resolution": "720p", "duration": 5, "ratio": "9:16"})
+    assert r.status_code == 200, r.text
+    params = sent.get("parameters") or {}
+    assert params.get("resolution") == "720P", params
+    assert params.get("ratio") == "9:16", "竖屏选择必须传上去, 否则用户拿到横屏"
+    assert "size" not in params, "wan2.7 不认 size, 发了会被静默忽略并回落到 1080P"
+
+
+def test_wanx21_still_sends_size(monkeypatch):
+    """老一代 (wanx2.1) 用的就是 size —— 不能顺手把两代都改成新写法。"""
+    _new_user("wanx21-shape@test.local")
+    entry = {"id": "wanx2.1-t2v-turbo", "provider": "bailian", "video_params": "size",
+             "credits_per_second": {"480p": 4}}
+    r, sent = _bailian(monkeypatch, "wanx2.1-t2v-turbo", entry,
+                       {"prompt": "p", "resolution": "480p", "duration": 5})
+    assert r.status_code == 200, r.text
+    params = sent.get("parameters") or {}
+    assert params.get("size") == "832*480", params
+    assert "ratio" not in params and "resolution" not in params, params
+
+
+def test_auto_duration_is_rejected_rather_than_billed_as_one_second(monkeypatch):
+    """ComfyUI 的 Wan 3.0 节点有个 auto 时长, 发过来是 duration=-1。
+
+    quote() 里的 max(1, duration) 挡住了负积分, 但挡不住**少收钱**: 按 1 秒计价,
+    而上游可能自动生成到 30 秒。宁可让客户端选一个具体秒数。
+    """
+    _new_user("auto-dur@test.local")
+    entry = {"id": "wan3.0-video", "provider": "bailian", "video_params": "resolution_ratio",
+             "credits_per_second": {"720p": 10}}
+    for bad in (-1, 0 - 5):
+        r, sent = _bailian(monkeypatch, "wan3.0-video", entry,
+                           {"prompt": "p", "resolution": "720p", "duration": bad})
+        assert r.status_code == 400, (bad, r.text)
+        assert sent == {}, "被拒的请求不该打上游"
+
+
+def test_bad_ratio_is_rejected(monkeypatch):
+    """ratio 会原样转给上游, 白名单之外的一律拒。"""
+    _new_user("bad-ratio@test.local")
+    entry = {"id": "wan3.0-video", "provider": "bailian", "video_params": "resolution_ratio",
+             "credits_per_second": {"720p": 10}}
+    r, sent = _bailian(monkeypatch, "wan3.0-video", entry,
+                       {"prompt": "p", "resolution": "720p", "duration": 5, "ratio": "16:10"})
+    assert r.status_code == 400, r.text
+    assert sent == {}
+
+
+def test_every_bailian_video_model_declares_its_param_generation():
+    """漏标就按老写法发, 而老写法在 wan2.7+ 上是**静默失效**的。
+
+    这条守卫存在的理由: 那种错不会报错, 只会让账单和成品对不上 —— 上一次是靠
+    读 usage 里的 SR=1080 才发现的, 没有任何日志会提示。
+    """
+    for m in _media_config()["video"]:
+        if m.get("provider") != "bailian":
+            continue
+        style = m.get("video_params")
+        assert style in ("size", "resolution_ratio"), (
+            f"{m['id']}: video_params={style!r} —— 百炼的视频模型必须显式声明用哪代参数"
+        )
+
+
 def test_only_calibrated_media_models_carry_a_price():
     """定价表是按**某一个型号的网关牌价**算出来的, 不能顺手套给别的型号。
 
