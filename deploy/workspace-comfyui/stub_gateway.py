@@ -15,7 +15,14 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 
 # 在售清单。video 里刻意混了两个厂商: Seedance 走 Ark 形状的官方节点,
 # wan2.7-* 走 DashScope 形状的官方节点 —— 两条转译路径都得被 shim_check 走到。
-SOLD_VIDEO = ("doubao-seedance-2-5-260628", "wan2.7-t2v", "wan2.7-i2v")
+# 型号 -> **在售的分辨率档**。分辨率也要能不在售: wan2.7 的 480p 是厂商根本不
+# 提供的那档 (生产的 media_models.json 里就是 null)。一律说成「该型号未开放」
+# 会把人引去换型号, 而他真正该做的是换分辨率。
+SOLD_VIDEO = {
+    "doubao-seedance-2-5-260628": ("480p", "720p", "1080p"),
+    "wan2.7-t2v": ("720p", "1080p"),
+    "wan2.7-i2v": ("720p", "1080p"),
+}
 SOLD_IMAGE = ("gpt-image-2", "qwen-image-3.0-pro")
 
 POLLS_BEFORE_SUCCESS = 2      # 前两次查询故意返回 PROCESSING
@@ -132,9 +139,16 @@ class Handler(BaseHTTPRequestHandler):
         print(f"[stub] 收到作业 model={payload.get('model')} "
               f"prompt={payload.get('prompt')!r} 鉴权={'有' if auth else '无'}", flush=True)
         # 只卖 /media/models 里列的那些 —— 与生产同款: 未定价 = 404。
-        if payload.get("model") not in SOLD_VIDEO:
-            print(f"[stub] 型号 {payload.get('model')!r} 未在售 -> 404", flush=True)
-            return self._json(404, {"error": {"message": "model not offered"}})
+        # 错误措辞照抄生产 (media.py 的 create_video), 垫片会把它原样转给用户。
+        model = payload.get("model")
+        if model not in SOLD_VIDEO:
+            print(f"[stub] 型号 {model!r} 未在售 -> 404", flush=True)
+            return self._json(404, {"error": {"message": f"Model '{model}' is not offered."}})
+        res = payload.get("resolution") or "720p"
+        if res not in SOLD_VIDEO[model]:
+            print(f"[stub] {model} 的 {res} 档未在售 -> 404", flush=True)
+            return self._json(404, {"error": {"message":
+                f"Model '{model}' at {res} is not offered for video generation."}})
         job_id = uuid.uuid4().hex[:12]
         JOBS[job_id] = 0
         self._json(200, {"id": job_id, "model": payload.get("model"),
@@ -153,8 +167,8 @@ class Handler(BaseHTTPRequestHandler):
             # 在售的型号 (doubao-…)。返回的 id 刻意用 doubao- 前缀, 好让
             # shim_check 里那个 dreamina- 的请求真的走一次映射。
             return self._json(200, {
-                "video": [{"id": m, "name": m, "resolutions": ["480p", "720p", "1080p"]}
-                          for m in SOLD_VIDEO],
+                "video": [{"id": m, "name": m, "resolutions": list(rs)}
+                          for m, rs in SOLD_VIDEO.items()],
                 "image": [{"id": m, "name": m} for m in SOLD_IMAGE],
             })
         if self.path.endswith("/sample.mp4"):

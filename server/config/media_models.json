@@ -76,10 +76,16 @@
       "provider": "bailian",
       "credits_per_second": {
         "480p": null,
-        "720p": null,
-        "1080p": null
+        "720p": 10,
+        "1080p": 17
       },
-      "calibrated": false
+      "calibrated": true,
+      "_derivation": "阿里云百炼「模型价格」页, **华北2(北京)** 档 (我们的 BAILIAN_NATIVE_BASE 在 cn-beijing; 新加坡是 $0.10/$0.15, 用错区就是按别人的成本算自己的毛利)。credits = 美元每秒 x100 积分 x1.2 毛利, 四舍五入。480p 留 null 是因为该档**厂商不提供**, 不是没定价 —— quote() 会回「该分辨率不在售」, 正是想要的行为。有真实账单后应复核。",
+      "_upstream_usd_per_second": {
+        "480p": null,
+        "720p": 0.086012,
+        "1080p": 0.143353
+      }
     },
     {
       "id": "wan2.7-i2v",
@@ -87,10 +93,16 @@
       "provider": "bailian",
       "credits_per_second": {
         "480p": null,
-        "720p": null,
-        "1080p": null
+        "720p": 10,
+        "1080p": 17
       },
-      "calibrated": false
+      "calibrated": true,
+      "_derivation": "阿里云百炼「模型价格」页, **华北2(北京)** 档 (我们的 BAILIAN_NATIVE_BASE 在 cn-beijing; 新加坡是 $0.10/$0.15, 用错区就是按别人的成本算自己的毛利)。credits = 美元每秒 x100 积分 x1.2 毛利, 四舍五入。480p 留 null 是因为该档**厂商不提供**, 不是没定价 —— quote() 会回「该分辨率不在售」, 正是想要的行为。有真实账单后应复核。",
+      "_upstream_usd_per_second": {
+        "480p": null,
+        "720p": 0.086012,
+        "1080p": 0.143353
+      }
     },
     {
       "id": "wanx2.1-vace-plus",
@@ -99,21 +111,33 @@
       "kind": "edit",
       "credits_per_second": {
         "480p": null,
-        "720p": null,
+        "720p": 12,
         "1080p": null
       },
-      "calibrated": false
+      "calibrated": true,
+      "_derivation": "阿里云百炼「模型价格」页, **华北2(北京)** 档 (我们的 BAILIAN_NATIVE_BASE 在 cn-beijing; 新加坡是 $0.10/$0.15, 用错区就是按别人的成本算自己的毛利)。credits = 美元每秒 x100 积分 x1.2 毛利, 四舍五入。480p 留 null 是因为该档**厂商不提供**, 不是没定价 —— quote() 会回「该分辨率不在售」, 正是想要的行为。有真实账单后应复核。",
+      "_upstream_usd_per_second": {
+        "480p": null,
+        "720p": 0.100347,
+        "1080p": null
+      }
     },
     {
       "id": "wanx2.1-t2v-turbo",
       "name": "万相 2.1 文生视频 Turbo",
       "provider": "bailian",
       "credits_per_second": {
-        "480p": null,
-        "720p": null,
+        "480p": 4,
+        "720p": 4,
         "1080p": null
       },
-      "calibrated": false
+      "calibrated": true,
+      "_derivation": "阿里云百炼「模型价格」页, **华北2(北京)** 档 (我们的 BAILIAN_NATIVE_BASE 在 cn-beijing; 新加坡是 $0.10/$0.15, 用错区就是按别人的成本算自己的毛利)。credits = 美元每秒 x100 积分 x1.2 毛利, 四舍五入。480p 留 null 是因为该档**厂商不提供**, 不是没定价 —— quote() 会回「该分辨率不在售」, 正是想要的行为。有真实账单后应复核。",
+      "_upstream_usd_per_second": {
+        "480p": 0.034405,
+        "720p": 0.034405,
+        "1080p": null
+      }
     }
   ],
   "image": [
@@ -123,7 +147,8 @@
       "usd_per_1m_image_tokens": 30.0,
       "usd_per_1m_text_input_tokens": 5.0,
       "fallback_credits": 25,
-      "provider": "qianmian"
+      "provider": "qianmian",
+      "calibrated": true
     },
     {
       "id": "gpt-image-1.5",
@@ -131,7 +156,8 @@
       "usd_per_1m_image_tokens": 30.0,
       "usd_per_1m_text_input_tokens": 5.0,
       "fallback_credits": 25,
-      "provider": "qianmian"
+      "provider": "qianmian",
+      "calibrated": true
     },
     {
       "id": "qwen-image-edit-max",
@@ -152,17 +178,19 @@
       "name": "Qwen Image 3.0 Pro",
       "provider": "bailian",
       "credits_per_image": {
-        "1k": 4,
-        "2k": 8
+        "1k": 5,
+        "2k": 9
       },
-      "_derivation": "官方牌价 (阿里云百炼): qwen-image-3.0 ¥0.18/张 (1K 与 2K 同价); -pro 1K ¥0.25、2K ¥0.5。按 ¥7.1/$ 折美元, ×100 积分 ×1.2 毛利, 四舍五入到整积分 (不向上取整: 小数进位在个位数上等于凭空加 30% 毛利)。实际毛利 1.14~1.18 倍, 全部高于成本。有真实账单后应复核。"
+      "_derivation": "官方牌价两种写法: 人民币 ¥0.25/¥0.5 (1k/2k), 美元 $0.04/$0.075。两者按 ¥7.1/$ 折算差一档 (阿里的换算率不是 7.1), 取**大值**才两种读法下都在成本之上。x100 积分 x1.2 毛利。另有参考图输入 $0.003/张 (图像编辑时), 已被这个价覆盖。有账单后复核。",
+      "calibrated": true
     },
     {
       "id": "qwen-image-3.0",
       "name": "Qwen Image 3.0",
       "provider": "bailian",
-      "credits_per_image": 3,
-      "_derivation": "官方牌价 (阿里云百炼): qwen-image-3.0 ¥0.18/张 (1K 与 2K 同价); -pro 1K ¥0.25、2K ¥0.5。按 ¥7.1/$ 折美元, ×100 积分 ×1.2 毛利, 四舍五入到整积分 (不向上取整: 小数进位在个位数上等于凭空加 30% 毛利)。实际毛利 1.14~1.18 倍, 全部高于成本。有真实账单后应复核。"
+      "credits_per_image": 4,
+      "_derivation": "官方牌价两种写法: 人民币 ¥0.18/¥0.18 (1k/2k), 美元 $0.03/$0.03。两者按 ¥7.1/$ 折算差一档 (阿里的换算率不是 7.1), 取**大值**才两种读法下都在成本之上。x100 积分 x1.2 毛利。另有参考图输入 $0.003/张 (图像编辑时), 已被这个价覆盖。有账单后复核。",
+      "calibrated": true
     },
     {
       "id": "wan2.7-image",

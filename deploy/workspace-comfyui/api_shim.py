@@ -220,7 +220,24 @@ class Handler(BaseHTTPRequestHandler):
         # 用 Ark 的错误形状回, 否则节点解不出来只会说「请求失败」。
         self._json(code, {"error": {"code": "ShimError", "message": message}})
 
-    def _unsold(self, model: str, kind: str) -> None:
+    @staticmethod
+    def _upstream_msg(detail: str) -> str:
+        """从网关的错误报文里抠出那句人话。
+
+        网关的 404 分两种: 型号不在售, 和**型号在售但这个分辨率不在售**
+        (wan2.7 的 480p 就是这样 —— 厂商根本不提供那档)。一律说成「该型号未开放」
+        会把人引去换型号, 而他真正该做的是换分辨率。
+        """
+        try:
+            body = json.loads(detail)
+        except (ValueError, TypeError):
+            return ""
+        err = body.get("error") if isinstance(body, dict) else None
+        if isinstance(err, dict):
+            return str(err.get("message") or "")
+        return ""
+
+    def _unsold(self, model: str, kind: str, detail: str = "") -> None:
         """选了个没在售的型号 —— 说清楚现在能用哪些。
 
         官方节点的模型下拉是**写死在节点里的** (Seedance 2.5/2.0/Fast/Mini 都在),
@@ -230,10 +247,12 @@ class Handler(BaseHTTPRequestHandler):
         table = _offered()
         avail = sorted(v for k, v in table.items()) if table else []
         tip = ("当前可用: " + "、".join(avail)) if avail else "当前没有可用型号"
-        print(f"[shim] 型号 {model!r} 未在售; {tip}", flush=True)
+        upstream = self._upstream_msg(detail)
+        head = f"上游回复：{upstream}" if upstream else f"「{model}」当前未开放。"
+        print(f"[shim] 型号 {model!r} 未在售; {upstream or tip}", flush=True)
         self._json(404, {"error": {
             "code": "ModelNotOffered",
-            "message": f"「{model}」当前未开放。{tip}。（在节点的模型下拉里换一个）",
+            "message": f"{head} {tip}。（在节点的模型/分辨率下拉里换一个）",
         }})
 
     def _body(self) -> dict:
@@ -348,7 +367,7 @@ class Handler(BaseHTTPRequestHandler):
             detail = exc.read()[:400].decode("utf-8", "replace")
             print(f"[shim] 建视频任务失败 {exc.code}: {detail}", flush=True)
             if exc.code == 404:
-                return self._unsold(payload["model"], "video")
+                return self._unsold(payload["model"], "video", detail)
             return self._send(exc.code, detail.encode(), "application/json")
         except Exception as exc:  # noqa: BLE001
             return self._fail(502, f"网关不可达: {type(exc).__name__}: {exc}")
@@ -389,7 +408,7 @@ class Handler(BaseHTTPRequestHandler):
             detail = exc.read()[:400].decode("utf-8", "replace")
             print(f"[shim] 生图失败 {exc.code}: {detail}", flush=True)
             if exc.code == 404:
-                return self._unsold(payload["model"], "image")
+                return self._unsold(payload["model"], "image", detail)
             return self._send(exc.code, detail.encode(), "application/json")
         except Exception as exc:  # noqa: BLE001
             return self._fail(502, f"网关不可达: {type(exc).__name__}: {exc}")
@@ -437,7 +456,7 @@ class Handler(BaseHTTPRequestHandler):
             detail = exc.read()[:400].decode("utf-8", "replace")
             print(f"[shim] OpenAI 生图失败 {exc.code}: {detail}", flush=True)
             if exc.code == 404:
-                return self._unsold(model, "image")
+                return self._unsold(model, "image", detail)
             return self._send(exc.code, detail.encode(), "application/json")
         except Exception as exc:  # noqa: BLE001
             return self._fail(502, f"网关不可达: {type(exc).__name__}: {exc}")
@@ -458,12 +477,14 @@ class Handler(BaseHTTPRequestHandler):
         print(f"[shim] {code}: {message}", flush=True)
         return self._json(200, {"request_id": uuid.uuid4().hex, "code": code, "message": message})
 
-    def _unsold_dashscope(self, model: str):
+    def _unsold_dashscope(self, model: str, detail: str = ""):
         table = _offered()
         avail = sorted(table.values()) if table else []
         tip = ("当前可用: " + "、".join(avail)) if avail else "当前没有可用型号"
+        upstream = self._upstream_msg(detail)
+        head = f"上游回复：{upstream}" if upstream else f"「{model}」当前未开放。"
         return self._dashscope_error(
-            "ModelNotOffered", f"「{model}」当前未开放。{tip}。（在节点的模型下拉里换一个）"
+            "ModelNotOffered", f"{head} {tip}。（在节点的模型/分辨率下拉里换一个）"
         )
 
     def _wan_video(self):
@@ -499,7 +520,7 @@ class Handler(BaseHTTPRequestHandler):
             detail = exc.read()[:400].decode("utf-8", "replace")
             print(f"[shim] Wan 建视频失败 {exc.code}: {detail}", flush=True)
             if exc.code == 404:
-                return self._unsold_dashscope(model)
+                return self._unsold_dashscope(model, detail)
             return self._dashscope_error("UpstreamError", detail)
         except Exception as exc:  # noqa: BLE001
             return self._dashscope_error("GatewayUnreachable", f"{type(exc).__name__}: {exc}")
@@ -613,7 +634,7 @@ class Handler(BaseHTTPRequestHandler):
             detail = exc.read()[:400].decode("utf-8", "replace")
             print(f"[shim] Qwen 生图失败 {exc.code}: {detail}", flush=True)
             if exc.code == 404:
-                return self._unsold_dashscope(model)
+                return self._unsold_dashscope(model, detail)
             return self._dashscope_error("UpstreamError", detail)
         except Exception as exc:  # noqa: BLE001
             return self._dashscope_error("GatewayUnreachable", f"{type(exc).__name__}: {exc}")
