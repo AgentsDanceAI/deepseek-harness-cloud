@@ -399,14 +399,22 @@ def test_video_prices_match_agentsdance():
     同一个模型在两个产品里卖不同的钱 —— 这条用例让它当场红。
     """
     # AgentsDance backend/dataset/agent_entitlements.py::_VIDEO_USD_PER_SEC
+    # 那张表是**按 Seedance 2.5 的网关牌价校准**的 (VIDEO_PRICING_CALIBRATED_FOR),
+    # 所以只有 2.5 该逐档相等。别的型号牌价不同, 必须各自写明推导依据。
     agentsdance_usd = {"480p": 0.12, "720p": 0.26, "1080p": 0.60}
-    priced = [m for m in _media_config()["video"] if m.get("calibrated")]
-    assert priced, "至少要有一个校准过的型号在售"
-    for m in priced:
-        for res, usd in agentsdance_usd.items():
-            assert m["credits_per_second"][res] == round(usd * 100), (
-                f"{m['id']} {res}: {m['credits_per_second'][res]} 积分/秒 != AgentsDance 的 ${usd}/秒 x100"
-            )
+    cfg = _media_config()["video"]
+    anchor = [m for m in cfg if m["id"] == "doubao-seedance-2-5-260628"]
+    assert anchor, "校准锚点型号不在目录里"
+    for res, usd in agentsdance_usd.items():
+        assert anchor[0]["credits_per_second"][res] == round(usd * 100), (
+            f"2.5 {res}: {anchor[0]['credits_per_second'][res]} != AgentsDance ${usd}/秒 x100"
+        )
+    # 其余校准过的型号: 价格可以不同, 但必须说得出出处 —— 否则就是拍脑袋,
+    # 而拍脑袋的价格上次让我们一边多收 25 倍、一边亏一半。
+    for m in cfg:
+        if not m.get("calibrated") or m["id"] == "doubao-seedance-2-5-260628":
+            continue
+        assert m.get("_derivation"), f"{m['id']} 标了 calibrated 却没有 _derivation —— 价格从哪来的?"
 
 
 def test_the_calibrated_model_is_the_one_we_actually_sell():

@@ -29,12 +29,13 @@
       "id": "doubao-seedance-2-0-260128",
       "name": "Seedance 2.0",
       "credits_per_second": {
-        "480p": null,
-        "720p": null,
-        "1080p": null
+        "480p": 4,
+        "720p": 9,
+        "1080p": 20
       },
-      "calibrated": false,
-      "provider": "qianmian"
+      "calibrated": true,
+      "provider": "qianmian",
+      "_derivation": "由 Seedance 2.5 的校准价按**网关牌价比**反推: 2.5 ¥70/M tokens, 2.0 ¥23/M (3.04 倍, 出处见 AgentsDance backend/dataset/agent_entitlements.py 的注释), 毛利率沿用 2.5 的 1.22 倍。不是拍脑袋, 但也不是实测账单 —— 有真实账单后应当复核。"
     },
     {
       "id": "doubao-seedance-2-5-260628",
@@ -161,6 +162,6 @@
   ],
   "_note_image": "图像**按 token 计价, 不按张**。上游返回 usage.output_tokens (全是 image_tokens), 而同一个模型低画质与高画质相差 35 倍 (gpt-image-2: $0.006 vs $0.211 一张 1024²) —— 按张收要么坑用户要么亏钱, 而 token 数会如实反映画质与尺寸。口径与聊天完全一致: usd -> credits 走同一个 CREDITS_PER_USD 与 MODEL_PRICE_MARKUP。fallback_credits 是上游没给 usage 时的兜底, 宁可贵也不能免费。 百炼那侧的图像按张计价 (credits_per_image) —— 它的同步生图接口不返回 token 用量。",
   "_note_image_todo": "只留了官方单价可查的两个。Seedream / Gemini Image / Qwen-Image 的 token 单价没核实, **未定价 = 不售卖**, 端点会 404 —— 这比填个猜的数字安全。",
-  "_note_calibration": "⚠️ 这张表**只对 doubao-seedance-2-5-260628 成立**。AgentsDance 2026-08-27 的事故就是这一条: 按 2.5 重定价后默认模型没跟着换, 用户按 2.5 的价拿 2.0 的成品, 7 天无人发现。我们卖 6 个视频模型, 共用一张表就是那个事故的放大版 —— 所以**只给校准过的那个定价**, 其余一律 null (未定价 = 不售卖, 端点 404)。要开某个型号, 先拿它的网关牌价重新算一遍。参考比例: 2.5 牌价 ¥70/M, 2.0 是 ¥23/M (3.04 倍)。",
+  "_note_calibration": "⚠️ 价目只对**校准过的型号**成立。AgentsDance 2026-08-27 的事故就是这一条: 按 2.5 重定价后默认模型没跟着换, 用户按 2.5 的价拿 2.0 的成品, 7 天无人发现。所以每个型号要么有自己的校准依据 (calibrated=true, 并在 _derivation 里写明出处), 要么置 null 不售卖。未定价的型号在 ComfyUI 里点了会 404, 而垫片会把在售清单摆出来告诉用户换哪个。",
   "_note_provider": "provider 决定走哪个上游: qianmian (经千面网关, 默认) 或 bailian (直连阿里云百炼)。两者的请求/响应形状完全不同, 见 media.py 的适配器。直连百炼涉及向中国境内传输, 隐私政策 1.1 为此提前公告, 2026-09-12 生效 —— 在那之前 BAILIAN_AVAILABLE_FROM 会挡住。"
 }
