@@ -143,6 +143,22 @@ class Handler(BaseHTTPRequestHandler):
         # 用 Ark 的错误形状回, 否则节点解不出来只会说「请求失败」。
         self._json(code, {"error": {"code": "ShimError", "message": message}})
 
+    def _unsold(self, model: str, kind: str) -> None:
+        """选了个没在售的型号 —— 说清楚现在能用哪些。
+
+        官方节点的模型下拉是**写死在节点里的** (Seedance 2.5/2.0/Fast/Mini 都在),
+        我们过滤不了它。选到没定价的型号时, 网关回 404, 而节点只会显示
+        「请求失败」—— 用户无从知道该换成哪个。所以这里把在售清单摆出来。
+        """
+        table = _offered()
+        avail = sorted(v for k, v in table.items()) if table else []
+        tip = ("当前可用: " + "、".join(avail)) if avail else "当前没有可用型号"
+        print(f"[shim] 型号 {model!r} 未在售; {tip}", flush=True)
+        self._json(404, {"error": {
+            "code": "ModelNotOffered",
+            "message": f"「{model}」当前未开放。{tip}。（在节点的模型下拉里换一个）",
+        }})
+
     def _body(self) -> dict:
         length = int(self.headers.get("Content-Length", 0))
         if not length:
@@ -196,6 +212,8 @@ class Handler(BaseHTTPRequestHandler):
         except urllib.error.HTTPError as exc:
             detail = exc.read()[:400].decode("utf-8", "replace")
             print(f"[shim] 建视频任务失败 {exc.code}: {detail}", flush=True)
+            if exc.code == 404:
+                return self._unsold(payload["model"], "video")
             return self._send(exc.code, detail.encode(), "application/json")
         except Exception as exc:  # noqa: BLE001
             return self._fail(502, f"网关不可达: {type(exc).__name__}: {exc}")
@@ -235,6 +253,8 @@ class Handler(BaseHTTPRequestHandler):
         except urllib.error.HTTPError as exc:
             detail = exc.read()[:400].decode("utf-8", "replace")
             print(f"[shim] 生图失败 {exc.code}: {detail}", flush=True)
+            if exc.code == 404:
+                return self._unsold(payload["model"], "image")
             return self._send(exc.code, detail.encode(), "application/json")
         except Exception as exc:  # noqa: BLE001
             return self._fail(502, f"网关不可达: {type(exc).__name__}: {exc}")

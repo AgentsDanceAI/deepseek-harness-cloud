@@ -110,6 +110,10 @@ class Handler(BaseHTTPRequestHandler):
         auth = self.headers.get("Authorization", "")
         print(f"[stub] 收到作业 model={payload.get('model')} "
               f"prompt={payload.get('prompt')!r} 鉴权={'有' if auth else '无'}", flush=True)
+        # 只卖 /media/models 里列的那个 —— 与生产同款: 未定价 = 404。
+        if payload.get("model") not in ("doubao-seedance-2-5-260628",):
+            print(f"[stub] 型号 {payload.get('model')!r} 未在售 -> 404", flush=True)
+            return self._json(404, {"error": {"message": "model not offered"}})
         job_id = uuid.uuid4().hex[:12]
         JOBS[job_id] = 0
         self._json(200, {"id": job_id, "model": payload.get("model"),

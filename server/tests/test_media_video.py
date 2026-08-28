@@ -519,41 +519,28 @@ def test_reconcile_does_not_double_refund(monkeypatch):
 # --- 多上游 (千面 / 百炼) -------------------------------------------------------
 
 
-def test_bailian_is_locked_until_the_policy_takes_effect(monkeypatch):
-    """直连百炼 = 新增一个直接数据接收方, 且在中国境内。
-
-    隐私政策第 12 条是我们自己写的:「重大变更于生效前至少 15 天通知」。为此
-    政策升到 1.1、2026-09-12 生效。**生效前不得启用** —— 政策写了生效日, 提前
-    上线就是拿政策当摆设。
-    """
-    monkeypatch.setattr(config, "BAILIAN_NATIVE_BASE", "https://x.example/api/v1")
-    monkeypatch.setattr(config, "BAILIAN_API_KEY", "k")
-    monkeypatch.setattr(config, "BAILIAN_AVAILABLE_FROM", "2099-01-01")
-    assert media.provider_available(media.BAILIAN) is False
-    monkeypatch.setattr(config, "BAILIAN_AVAILABLE_FROM", "2000-01-01")
-    assert media.provider_available(media.BAILIAN) is True
-    # 千面不受这道闸影响
-    assert media.provider_available(media.QIANMIAN) is True
-
-
 def test_bailian_without_credentials_is_unavailable(monkeypatch):
     """没配专属域名就不可用 —— **绝不回落到公共 dashscope 域名**。
 
     公共域名一样能通、结果也一样, 但预付套餐不抵扣、走按量计费, 且没有任何报错
     提示 (AgentsDance 2026-08-12 踩过)。所以宁可不可用, 也不偷偷去打公共域名。
     """
-    monkeypatch.setattr(config, "BAILIAN_AVAILABLE_FROM", "2000-01-01")
     monkeypatch.setattr(config, "BAILIAN_NATIVE_BASE", "")
     monkeypatch.setattr(config, "BAILIAN_API_KEY", "k")
     assert media.provider_available(media.BAILIAN) is False
     monkeypatch.setattr(config, "BAILIAN_NATIVE_BASE", "https://x.example/api/v1")
     monkeypatch.setattr(config, "BAILIAN_API_KEY", "")
     assert media.provider_available(media.BAILIAN) is False
+    # 两个都配齐才可用
+    monkeypatch.setattr(config, "BAILIAN_API_KEY", "k")
+    assert media.provider_available(media.BAILIAN) is True
+    # 千面不受这个影响
+    assert media.provider_available(media.QIANMIAN) is True
 
 
 def test_unavailable_provider_models_are_not_offered(monkeypatch):
-    """未生效的上游, 型号不该出现在下拉里 —— 露出来只会点了报错。"""
-    monkeypatch.setattr(config, "BAILIAN_AVAILABLE_FROM", "2099-01-01")
+    """凭据没配的上游, 型号不该出现在下拉里 —— 露出来只会点了报错。"""
+    monkeypatch.setattr(config, "BAILIAN_NATIVE_BASE", "")
     monkeypatch.setattr(
         media,
         "_prices_cache",

@@ -145,10 +145,6 @@ IMAGE_MAX_BATCH = _env_int("IMAGE_MAX_BATCH", 4)
 # 而不是偷偷去打公共域名。
 BAILIAN_NATIVE_BASE = _env("BAILIAN_NATIVE_BASE", "").rstrip("/")
 BAILIAN_API_KEY = _env("BAILIAN_API_KEY")
-# 直连百炼 = 新增一个直接数据接收方, 且在中国境内 —— 隐私政策 1.1 为此提前 15 天
-# 公告, 2026-09-12 生效。**在那之前不得启用**: 政策写了生效日, 提前上线就是拿
-# 政策当摆设。到期后此值会自然放行, 不需要改代码。
-BAILIAN_AVAILABLE_FROM = _env("BAILIAN_AVAILABLE_FROM", "2026-09-12")
 
 # --- gateway guards ---------------------------------------------------------
 GATEWAY_QPS = _env_float("GATEWAY_QPS", 5.0)  # per-user requests/second (token bucket)
