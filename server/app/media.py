@@ -39,7 +39,9 @@ from . import config, credits, db, model_catalog, plans, security
 from .accounts import resolve_user
 from .http_limits import read_limited_body
 
-log = logging.getLogger(__name__)
+# 必须挂在 "dhc" 这一支下面: main.py 只配置了这棵树, 用 __name__ ("app.media")
+# 的话本模块所有日志被静默丢弃 —— 退款记录、兜底循环的异常, 全都写进虚空。
+log = logging.getLogger("dhc.media")
 router = APIRouter(prefix="/llm")
 
 _PRICES_PATH = Path(__file__).resolve().parents[1] / "config" / "media_models.json"
