@@ -1514,6 +1514,64 @@ def test_a_closed_tab_is_still_reaped(fake, monkeypatch):
     assert _reap(monkeypatch, key, last_ago=660, started_ago=1800), "标签页关了还不收, 会一直烧机时"
 
 
+def test_opening_one_workspace_does_not_kill_the_others_credential(monkeypatch):
+    """凭据按**工作台**隔离, 不按人。
+
+    撤销条件原来只有 user_id + platform='cloud' —— 那是"一个人只有一个工作台"
+    时代的写法。加了 ComfyUI 之后: 开第二个工作台会把第一个容器里的令牌撤掉,
+    而那个容器还在跑、界面照常, 只是**往网关发的每一发都 401**, 没有任何提示。
+    2026-08-28 线上就是这么坏的 —— 12:51 起 ComfyUI, 13:03 起 dsh, ComfyUI 从此
+    取不到在售清单也生成不了任何东西, 用户只看到"执行失败"。
+    """
+    monkeypatch.setattr(config, "COMFY_IMAGE", "comfy:test")
+    monkeypatch.setattr(config, "COMFY_DOMAIN", "comfy.test.local")
+    _, uid = _user("two-workspaces@test.local")
+    user = db.query_one("SELECT id, session_epoch FROM users WHERE id=?", (uid,))
+    reg = products.registry()
+
+    workspace._mint_workspace_token(dict(user), reg["comfyui"])
+    workspace._mint_workspace_token(dict(user), reg[products.DEFAULT])
+
+    live = db.query("SELECT workspace FROM devices WHERE user_id=? AND platform='cloud' "
+                    "AND revoked=0", (uid,))
+    keys = sorted(r["workspace"] for r in live)
+    assert keys == sorted([products.wskey(uid, "comfyui"), products.wskey(uid)]), (
+        f"开第二个工作台把第一个的凭据撤了: {keys}"
+    )
+
+    # 同一个工作台再铸一次, 旧的**必须**失效 —— 顶替语义不能因为分了产品就丢掉
+    workspace._mint_workspace_token(dict(user), reg["comfyui"])
+    comfy_live = db.query("SELECT id FROM devices WHERE user_id=? AND platform='cloud' "
+                          "AND workspace=? AND revoked=0", (uid, products.wskey(uid, "comfyui")))
+    assert len(comfy_live) == 1, f"同一工作台重铸后应只剩一份有效凭据: {len(comfy_live)}"
+
+
+def test_legacy_credentials_are_adopted_by_dsh_not_left_unrevocable(monkeypatch):
+    """迁移前铸的凭据没有 workspace —— 不认领的话新逻辑永远撤不到它们, 那就成了
+    系统再也收不回的长期凭据。归属到 dsh (ComfyUI 是 2026-08 才有的)。
+    """
+    monkeypatch.setattr(config, "COMFY_IMAGE", "comfy:test")
+    monkeypatch.setattr(config, "COMFY_DOMAIN", "comfy.test.local")
+    _, uid = _user("legacy-cred@test.local")
+    user = db.query_one("SELECT id, session_epoch FROM users WHERE id=?", (uid,))
+    now = time.time()
+    with db.tx() as conn:
+        conn.execute(
+            "INSERT INTO devices (id, user_id, name, platform, workspace, token_hash, epoch, "
+            "last_seen, created) VALUES (?,?,?,?,?,?,?,?,?)",
+            ("dev_legacy", uid, "云工作台", "cloud", "", "hash_legacy", 0, now, now),
+        )
+    reg = products.registry()
+    # 给 ComfyUI 铸币不该误伤历史行 —— 但要把它认领给 dsh
+    workspace._mint_workspace_token(dict(user), reg["comfyui"])
+    row = db.query_one("SELECT workspace, revoked FROM devices WHERE id='dev_legacy'")
+    assert row["workspace"] == products.wskey(uid), "历史凭据没被认领, 将永远撤不掉"
+    assert not row["revoked"], "给 ComfyUI 铸币误伤了历史凭据"
+    # 给 dsh 铸币则应正常顶替掉它
+    workspace._mint_workspace_token(dict(user), reg[products.DEFAULT])
+    assert db.query_one("SELECT revoked FROM devices WHERE id='dev_legacy'")["revoked"]
+
+
 def test_tab_grace_is_per_product_not_global(fake, monkeypatch):
     """宽限期一刀切会替 dsh 用户白烧机时。
 

@@ -62,6 +62,7 @@ SCHEMA = [
         user_id TEXT NOT NULL,
         name TEXT NOT NULL DEFAULT '',
         platform TEXT NOT NULL DEFAULT '',
+        workspace TEXT NOT NULL DEFAULT '',
         token_hash TEXT UNIQUE NOT NULL,
         epoch INTEGER NOT NULL DEFAULT 0,
         revoked INTEGER NOT NULL DEFAULT 0,
@@ -337,6 +338,10 @@ MIGRATIONS: list[tuple[str, str, str]] = [
     # 作业得记住是哪个上游下的单 —— 轮询时才知道问谁。不能靠 model 反查配置:
     # 型号一旦从 media_models.json 里删掉, 还在跑的作业就永远收不了尾。
     ("video_jobs", "provider", "TEXT"),
+    # 云工作台凭据得记住是**哪个工作台**的。原来撤销条件只按 user_id+platform,
+    # 于是多产品之后, 开第二个工作台会把第一个容器里的令牌撤掉 —— 界面照常, 但
+    # 那个容器往网关发的每一发都 401, 而且没有任何提示。2026-08-28 线上踩到。
+    ("devices", "workspace", "TEXT"),
     ("org_members", "credit_cap", "INTEGER"),
     ("org_members", "minute_cap", "INTEGER"),
     ("orgs", "default_credit_cap", "INTEGER"),
