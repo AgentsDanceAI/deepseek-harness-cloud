@@ -173,21 +173,49 @@ class Handler(BaseHTTPRequestHandler):
 
     # ---- 路由 ----
 
+    # **按厂商显式路由**, 不按后缀。
+    #
+    # 曾经是 path.endswith("/images/generations") —— 而 ComfyUI 里另有三家的路径
+    # 也是这个后缀 (/proxy/openai/…、/proxy/kling/…、/proxy/xai/…)。那样会把它们
+    # 的请求误接过来, 用**它们的报文形状**打我们的网关, 产生看不懂的错误。
+    # 官方节点一共用到 207 条代理路径、40 个厂商; 这里只接通了 byteplus 这一家。
+    _WIRED = ("/proxy/byteplus/", "/proxy/byteplus-seedance2/")
+
+    def _is_wired(self, path: str) -> bool:
+        return path.startswith(self._WIRED)
+
     def do_POST(self):  # noqa: N802
         path = self.path.split("?")[0]
+        if not self._is_wired(path):
+            return self._not_wired(path)
         if path.endswith("/contents/generations/tasks"):
             return self._create_video()
         if path.endswith("/images/generations"):
             return self._create_image()
-        return self._fail(404, f"垫片未实现: {path}")
+        return self._not_wired(path)
 
     def do_GET(self):  # noqa: N802
         path = self.path.split("?")[0]
-        if "/contents/generations/tasks/" in path:
-            return self._video_status(path.rsplit("/", 1)[-1])
         if path.startswith("/blob/"):
             return self._blob(path.rsplit("/", 1)[-1])
-        return self._fail(404, f"垫片未实现: {path}")
+        if not self._is_wired(path):
+            return self._not_wired(path)
+        if "/contents/generations/tasks/" in path:
+            return self._video_status(path.rsplit("/", 1)[-1])
+        return self._not_wired(path)
+
+    def _not_wired(self, path: str) -> None:
+        """这个官方节点还没接到我们的网关 —— 说清楚, 别让人对着「请求失败」猜。"""
+        vendor = path.split("/")[2] if path.count("/") >= 2 else path
+        print(f"[shim] 未接通的厂商 {vendor!r} (path={path})", flush=True)
+        self._json(404, {"error": {
+            "code": "VendorNotWired",
+            "message": (
+                f"「{vendor}」这类官方节点尚未接入本平台。"
+                "目前只有 ByteDance / Seedance 系列的官方节点接通了；"
+                "其余能力请用「DSH Cloud 生图 / 生视频」节点。"
+            ),
+        }})
 
     # ---- 视频 ----
 
