@@ -191,12 +191,27 @@ def _comfyui_boot() -> str:
         # 用户目录也落在持久卷上 —— 默认它在镜像里, 一回收用户自己存的工作流、
         # 设置全没, 而且不报错, 只是下次进来空空如也。
         "mkdir -p /workspace/.comfy-user/default/workflows\n"
-        # 预置那两张能直接跑的图。**只补缺的**: 无条件 cp 会在每次冷启动时把
-        # 用户改过的同名工作流覆盖回去。
+        # 预置那两张能直接跑的图。
+        #
+        # 规则: **用户没动过才更新**。两个极端都不行 ——
+        #   只补缺的 (原做法): 发出去的工作流永远到不了已有用户。2026-08-27 实测:
+        #     生视频节点改成返回 VIDEO、预置图接上了 SaveVideo, 而老板工作台里
+        #     仍是那张孤零零的旧图。
+        #   无条件覆盖: 用户在同名工作流上的改动每次冷启动都被抹掉。
+        # 做法是留一份「我们发的是什么」在 .shipped/, 磁盘上那份与它逐字节相同
+        # 就说明没人动过, 可以安全换新。
+        "mkdir -p /workspace/.comfy-user/default/workflows/.shipped\n"
         "for f in /opt/ComfyUI/custom_nodes/dsh_cloud/example_workflows/*.json; do\n"
         '  [ -e "$f" ] || continue\n'
-        '  t="/workspace/.comfy-user/default/workflows/$(basename "$f")"\n'
-        '  [ -e "$t" ] || cp "$f" "$t"\n'
+        '  base="$(basename "$f")"\n'
+        '  live="/workspace/.comfy-user/default/workflows/$base"\n'
+        '  mark="/workspace/.comfy-user/default/workflows/.shipped/$base"\n'
+        # 没有标记 = 这份是标记机制上线前铺下去的, 当作未改动更新一次并补上标记。
+        # 一次性风险: 若用户在那之前就改过同名工作流, 这次会被覆盖。可接受 ——
+        # 机制与工作流是同一版发出去的, 中间只隔几小时。
+        '  if [ ! -e "$live" ] || [ ! -e "$mark" ] || cmp -s "$live" "$mark"; then\n'
+        '    cp "$f" "$live"; cp "$f" "$mark"\n'
+        "  fi\n"
         "done\n"
         "cd /opt/ComfyUI\n"
         "exec python main.py --cpu --listen 0.0.0.0 --port 8188 "
