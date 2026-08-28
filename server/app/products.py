@@ -220,7 +220,10 @@ def _comfyui_boot() -> str:
         # 那 30+ 个厂商节点的请求转译到我们的网关并补上令牌 —— 于是官方节点和官方
         # 模板都能跑我们的模型, 用户不必只用我们自己那两个节点。
         # 只监听回环: 它是拿着容器令牌的, 绝不能对外。
-        "python /opt/dsh-api-shim.py >/tmp/dsh-shim.log 2>&1 &\n"
+        # 日志走 **stdout**, 不落文件: ECI 上没有 docker exec, 落进容器里的文件
+        # 谁也看不到 —— 垫片一出问题就完全没有线索。stdout 会进容器日志
+        # (DescribeContainerLog 能取), 与 ComfyUI 的交错但有 [shim] 前缀。
+        "python -u /opt/dsh-api-shim.py 2>&1 &\n"
         "cd /opt/ComfyUI\n"
         "exec python main.py --cpu --listen 0.0.0.0 --port 8188 "
         "--user-directory /workspace/.comfy-user "

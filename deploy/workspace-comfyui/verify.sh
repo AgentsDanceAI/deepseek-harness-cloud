@@ -177,7 +177,7 @@ echo "=== 官方 API 节点的垫片 ==="
 # 升级 ComfyUI 后必须重跑本节 —— 断掉的表现是「官方节点报错」而不是我们报错。
 docker cp "$HERE/shim_check.py" "$NAME":/tmp/shim_check.py >/dev/null
 docker exec "$NAME" python /tmp/shim_check.py || {
-  echo "✗ 垫片不通"; docker exec "$NAME" sh -c 'cat /tmp/dsh-shim.log 2>/dev/null | tail -20'; exit 1; }
+  echo "✗ 垫片不通"; docker logs "$NAME" 2>&1 | grep "\[shim\]" | tail -20; exit 1; }
 
 echo "=== ComfyUI 确实指向垫片 ==="
 docker exec "$NAME" sh -c 'tr "\0" " " < /proc/1/cmdline' | grep -o -- "--comfy-api-base [^ ]*" | sed "s/^/  ✓ /" \
