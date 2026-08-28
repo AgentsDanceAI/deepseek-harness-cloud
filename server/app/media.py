@@ -25,7 +25,6 @@
 from __future__ import annotations
 
 import asyncio
-import datetime
 import json
 import logging
 import math
@@ -193,25 +192,15 @@ def provider_of(entry: dict | None) -> str:
 
 
 def provider_available(provider: str) -> bool:
-    """这个上游现在能不能用。
+    """这个上游现在能不能用 —— 只看凭据配没配。
 
-    百炼是**直连**, 涉及向中国境内传输 —— 隐私政策 1.1 为此提前 15 天公告,
-    2026-09-12 生效。生效前一律不可用: 政策写了生效日, 提前上线就是拿政策当摆设。
-    到期后自然放行, 不需要改代码。
+    ⚠️ BAILIAN_NATIVE_BASE 必须是**业务空间专属域名**。没配就不可用, **绝不回落
+    到公共 dashscope.aliyuncs.com**: 公共域名一样能通、结果也一样, 但预付套餐不
+    抵扣、走按量计费, 且没有任何报错提示 (AgentsDance 2026-08-12 踩过)。
     """
     if provider != BAILIAN:
         return True
-    if not (config.BAILIAN_NATIVE_BASE and config.BAILIAN_API_KEY):
-        return False
-    since = (config.BAILIAN_AVAILABLE_FROM or "").strip()
-    if not since:
-        return True
-    try:
-        ready = datetime.date.fromisoformat(since)
-    except ValueError:
-        log.error("BAILIAN_AVAILABLE_FROM=%r 不是 ISO 日期, 按未生效处理", since)
-        return False
-    return datetime.date.today() >= ready
+    return bool(config.BAILIAN_NATIVE_BASE and config.BAILIAN_API_KEY)
 
 
 def _bailian_headers(async_mode: bool = False) -> dict:

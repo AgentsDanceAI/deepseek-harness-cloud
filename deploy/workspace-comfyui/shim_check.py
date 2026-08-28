@@ -65,6 +65,24 @@ def main() -> int:
         return 1
     print(f"  ✓ 生图 -> {data[0]['url']}")
 
+    # 选一个没在售的型号: 必须给出**能照做**的错误, 而不是「请求失败」。
+    # 官方节点的下拉写死了 2.5/2.0/Fast/Mini, 我们过滤不了 —— 用户选到没定价的
+    # 那个时, 得从错误里看出该换成哪个。
+    code, out = call(
+        "POST",
+        "/proxy/byteplus/api/v3/contents/generations/tasks",
+        {"model": "dreamina-seedance-2-0-mini", "content": [{"type": "text", "text": "x"}],
+         "resolution": "480p", "duration": 5},
+    )
+    if code != 404 or not isinstance(out, (dict, str)):
+        print(f"  ✗ 未在售的型号应当回 404: {code} {out}")
+        return 1
+    body = out if isinstance(out, str) else json.dumps(out, ensure_ascii=False)
+    if "当前可用" not in body and "没有可用型号" not in body:
+        print(f"  ✗ 错误里没有告诉用户该换成哪个: {body[:200]}")
+        return 1
+    print("  ✓ 未在售的型号 -> 404 且列出了可用型号")
+
     # blob 是二进制, 不能用上面那个 (它 json.loads)
     try:
         with urllib.request.urlopen(data[0]["url"], timeout=30) as r:
