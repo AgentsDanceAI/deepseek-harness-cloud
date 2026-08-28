@@ -1308,8 +1308,12 @@ async def reaper_tick(now: float) -> None:
         # 没上报过在场的客户端 (老缓存、脚本没跑起来) 回落到 started, 于是行为
         # 与加这条之前完全一致 —— 由 quiet 单独决定, 绝不会因为"没收到心跳"
         # 而把正在用的人踢掉。
-        tab_gone = now - last > config.WORK_TAB_GONE_MIN * 60
-        idle_min = config.WORK_TAB_GONE_MIN if tab_gone else config.WORK_IDLE_STOP_MIN
+        product = products.get(product_id)
+        # 宽限期按产品走: ComfyUI 冷启动 ~26 秒, 多留几分钟机时比让人重等一遍划算;
+        # dsh 没这个包袱, 用全局值。
+        grace_min = (product.tab_grace_min if product else 0) or config.WORK_TAB_GONE_MIN
+        tab_gone = now - last > grace_min * 60
+        idle_min = grace_min if tab_gone else config.WORK_IDLE_STOP_MIN
         # 上面两个信号都是 **dsh 专有** 的:
         #   _user_active   由 dsh 前端调 /api/work/active 上报
         #   agent_last_active 数的是智能体经本站网关发起的调用
@@ -1323,7 +1327,6 @@ async def reaper_tick(now: float) -> None:
         # forward_auth 会为页面上每个资源、每个 WebSocket 帧打一次
         # /api/work/route, 页面还开着就一定有流量。代价是"忘了关的标签页会续租",
         # 但那正是 tab_gone 那套机制在管的事: 标签页真关了流量就断, 3 分钟后收掉。
-        product = products.get(product_id)
         reports_presence = product.reports_presence if product else True
         present = max(_user_active.get(uid, 0.0), started)
         agent = agent_last_active(uid)

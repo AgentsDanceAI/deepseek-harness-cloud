@@ -1514,6 +1514,35 @@ def test_a_closed_tab_is_still_reaped(fake, monkeypatch):
     assert _reap(monkeypatch, key, last_ago=660, started_ago=1800), "标签页关了还不收, 会一直烧机时"
 
 
+def test_tab_grace_is_per_product_not_global(fake, monkeypatch):
+    """宽限期一刀切会替 dsh 用户白烧机时。
+
+    "关掉标签页后多留一会儿"划不划算, 取决于**冷启动有多贵**: ComfyUI 实测约
+    26 秒 (ECI 调度 16s + 建 EIP 4.8s + ComfyUI 启动 5.5s), 关一次页再回来就要
+    重等一遍, 所以宁可多留几分钟。dsh 没这个包袱 —— 把它也拉到 10 分钟, 等于
+    每次关页都多收用户 7 分钟机时, 而他并没有因此少等什么。
+    """
+    monkeypatch.setattr(config, "COMFY_IMAGE", "comfy:test")
+    monkeypatch.setattr(config, "COMFY_DOMAIN", "comfy.test.local")
+    monkeypatch.setattr(config, "WORK_IDLE_STOP_MIN", 10)
+    monkeypatch.setattr(config, "WORK_AGENT_IDLE_STOP_MIN", 3)  # 让宽限期成为决定项
+    monkeypatch.setattr(config, "WORK_TAB_GONE_MIN", 3)         # 全局
+    monkeypatch.setattr(config, "COMFY_TAB_GRACE_MIN", 10)      # ComfyUI 单列
+
+    comfy = products.wskey("u_grace", "comfyui")
+    # 5 分钟无流量: 全局宽限期早过了, 但 ComfyUI 的是 10 分钟 —— 不该收
+    assert not _reap(monkeypatch, comfy, last_ago=300, started_ago=1800), (
+        "ComfyUI 用了全局的 3 分钟宽限期 —— 关页 5 分钟回来又要重等 26 秒"
+    )
+    # 11 分钟: 自己的窗口也过了, 必须收
+    assert _reap(monkeypatch, comfy, last_ago=660, started_ago=1800), "过了自己的宽限期还不收"
+
+    # dsh 保持 3 分钟 —— 没跟着一起放宽
+    assert _reap(monkeypatch, "u_grace", last_ago=300, started_ago=1800), (
+        "dsh 跟着放宽到 10 分钟了 —— 那是在替它的用户白烧 7 分钟机时"
+    )
+
+
 def test_machine_time_and_overdraft_are_read_off_the_person(fake, monkeypatch):
     """uid 是工作台键。拿它查余额永远得 0 —— 欠费用户的 ComfyUI 永远收不掉。"""
     c, uid = _user("overdraft@test.local")

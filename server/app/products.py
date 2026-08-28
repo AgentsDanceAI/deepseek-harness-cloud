@@ -49,6 +49,13 @@ class Product:
     # 上报器, 回收器改用请求流量当在场信号 —— 否则容器起来十分钟就被当成
     # 空闲杀掉, 不管人在不在用。见 workspace.reaper_tick。
     reports_presence: bool = True
+    # 标签页关掉后再留多久 (分钟)。0 = 用全局的 WORK_TAB_GONE_MIN。
+    #
+    # 按产品分开, 因为"多留一会儿"的划算程度取决于**冷启动有多贵**:
+    # ComfyUI 的冷启动实测 ~26 秒 (ECI 调度 16s + 建 EIP 4.8s + ComfyUI 启动 5.5s),
+    # 关一次页再回来就要重等一遍, 所以宁可多留几分钟机时。dsh 没这个包袱,
+    # 保持全局的 3 分钟 —— 一刀切成 10 分钟等于替 dsh 用户白烧机时。
+    tab_grace_min: int = 0
 
 
 def wskey(user_id: str, product_id: str = DEFAULT) -> str:
@@ -85,6 +92,7 @@ def registry() -> dict[str, Product]:
             domain=config.COMFY_DOMAIN,
             # ComfyUI 不认识 /api/work/active, 也不经网关跑模型。
             reports_presence=False,
+            tab_grace_min=config.COMFY_TAB_GRACE_MIN,
         ),
     }
 
