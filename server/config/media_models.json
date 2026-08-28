@@ -11,7 +11,8 @@
         "720p": null,
         "1080p": null
       },
-      "calibrated": false
+      "calibrated": false,
+      "provider": "qianmian"
     },
     {
       "id": "doubao-seedance-2-0-fast-260128",
@@ -21,7 +22,8 @@
         "720p": null,
         "1080p": null
       },
-      "calibrated": false
+      "calibrated": false,
+      "provider": "qianmian"
     },
     {
       "id": "doubao-seedance-2-0-260128",
@@ -31,7 +33,8 @@
         "720p": null,
         "1080p": null
       },
-      "calibrated": false
+      "calibrated": false,
+      "provider": "qianmian"
     },
     {
       "id": "doubao-seedance-2-5-260628",
@@ -41,7 +44,8 @@
         "720p": 26,
         "1080p": 60
       },
-      "calibrated": true
+      "calibrated": true,
+      "provider": "qianmian"
     },
     {
       "id": "kling-v3",
@@ -51,11 +55,58 @@
         "720p": null,
         "1080p": null
       },
-      "calibrated": false
+      "calibrated": false,
+      "provider": "qianmian"
     },
     {
       "id": "sora-2",
       "name": "Sora 2",
+      "credits_per_second": {
+        "480p": null,
+        "720p": null,
+        "1080p": null
+      },
+      "calibrated": false,
+      "provider": "qianmian"
+    },
+    {
+      "id": "wan2.7-t2v",
+      "name": "万相 2.7 文生视频",
+      "provider": "bailian",
+      "credits_per_second": {
+        "480p": null,
+        "720p": null,
+        "1080p": null
+      },
+      "calibrated": false
+    },
+    {
+      "id": "wan2.7-i2v",
+      "name": "万相 2.7 图生视频",
+      "provider": "bailian",
+      "credits_per_second": {
+        "480p": null,
+        "720p": null,
+        "1080p": null
+      },
+      "calibrated": false
+    },
+    {
+      "id": "wanx2.1-vace-plus",
+      "name": "万相 2.1 视频编辑 (VACE)",
+      "provider": "bailian",
+      "kind": "edit",
+      "credits_per_second": {
+        "480p": null,
+        "720p": null,
+        "1080p": null
+      },
+      "calibrated": false
+    },
+    {
+      "id": "wanx2.1-t2v-turbo",
+      "name": "万相 2.1 文生视频 Turbo",
+      "provider": "bailian",
       "credits_per_second": {
         "480p": null,
         "720p": null,
@@ -70,17 +121,46 @@
       "name": "GPT Image 2",
       "usd_per_1m_image_tokens": 30.0,
       "usd_per_1m_text_input_tokens": 5.0,
-      "fallback_credits": 25
+      "fallback_credits": 25,
+      "provider": "qianmian"
     },
     {
       "id": "gpt-image-1.5",
       "name": "GPT Image 1.5",
       "usd_per_1m_image_tokens": 30.0,
       "usd_per_1m_text_input_tokens": 5.0,
-      "fallback_credits": 25
+      "fallback_credits": 25,
+      "provider": "qianmian"
+    },
+    {
+      "id": "qwen-image-edit-max",
+      "name": "Qwen 图像编辑 Max",
+      "provider": "bailian",
+      "kind": "edit",
+      "credits_per_image": null
+    },
+    {
+      "id": "qwen-image-edit-plus",
+      "name": "Qwen 图像编辑 Plus",
+      "provider": "bailian",
+      "kind": "edit",
+      "credits_per_image": null
+    },
+    {
+      "id": "qwen-image-3.0",
+      "name": "Qwen Image 3.0",
+      "provider": "bailian",
+      "credits_per_image": null
+    },
+    {
+      "id": "wan2.7-image",
+      "name": "万相 2.7 图像",
+      "provider": "bailian",
+      "credits_per_image": null
     }
   ],
-  "_note_image": "图像**按 token 计价, 不按张**。上游返回 usage.output_tokens (全是 image_tokens), 而同一个模型低画质与高画质相差 35 倍 (gpt-image-2: $0.006 vs $0.211 一张 1024²) —— 按张收要么坑用户要么亏钱, 而 token 数会如实反映画质与尺寸。口径与聊天完全一致: usd -> credits 走同一个 CREDITS_PER_USD 与 MODEL_PRICE_MARKUP。fallback_credits 是上游没给 usage 时的兜底, 宁可贵也不能免费。",
+  "_note_image": "图像**按 token 计价, 不按张**。上游返回 usage.output_tokens (全是 image_tokens), 而同一个模型低画质与高画质相差 35 倍 (gpt-image-2: $0.006 vs $0.211 一张 1024²) —— 按张收要么坑用户要么亏钱, 而 token 数会如实反映画质与尺寸。口径与聊天完全一致: usd -> credits 走同一个 CREDITS_PER_USD 与 MODEL_PRICE_MARKUP。fallback_credits 是上游没给 usage 时的兜底, 宁可贵也不能免费。 百炼那侧的图像按张计价 (credits_per_image) —— 它的同步生图接口不返回 token 用量。",
   "_note_image_todo": "只留了官方单价可查的两个。Seedream / Gemini Image / Qwen-Image 的 token 单价没核实, **未定价 = 不售卖**, 端点会 404 —— 这比填个猜的数字安全。",
-  "_note_calibration": "⚠️ 这张表**只对 doubao-seedance-2-5-260628 成立**。AgentsDance 2026-08-27 的事故就是这一条: 按 2.5 重定价后默认模型没跟着换, 用户按 2.5 的价拿 2.0 的成品, 7 天无人发现。我们卖 6 个视频模型, 共用一张表就是那个事故的放大版 —— 所以**只给校准过的那个定价**, 其余一律 null (未定价 = 不售卖, 端点 404)。要开某个型号, 先拿它的网关牌价重新算一遍。参考比例: 2.5 牌价 ¥70/M, 2.0 是 ¥23/M (3.04 倍)。"
+  "_note_calibration": "⚠️ 这张表**只对 doubao-seedance-2-5-260628 成立**。AgentsDance 2026-08-27 的事故就是这一条: 按 2.5 重定价后默认模型没跟着换, 用户按 2.5 的价拿 2.0 的成品, 7 天无人发现。我们卖 6 个视频模型, 共用一张表就是那个事故的放大版 —— 所以**只给校准过的那个定价**, 其余一律 null (未定价 = 不售卖, 端点 404)。要开某个型号, 先拿它的网关牌价重新算一遍。参考比例: 2.5 牌价 ¥70/M, 2.0 是 ¥23/M (3.04 倍)。",
+  "_note_provider": "provider 决定走哪个上游: qianmian (经千面网关, 默认) 或 bailian (直连阿里云百炼)。两者的请求/响应形状完全不同, 见 media.py 的适配器。直连百炼涉及向中国境内传输, 隐私政策 1.1 为此提前公告, 2026-09-12 生效 —— 在那之前 BAILIAN_AVAILABLE_FROM 会挡住。"
 }

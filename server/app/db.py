@@ -206,6 +206,7 @@ SCHEMA = [
         resolution TEXT NOT NULL DEFAULT '',
         credits INTEGER NOT NULL DEFAULT 0,
         refunded INTEGER NOT NULL DEFAULT 0,
+        provider TEXT NOT NULL DEFAULT 'qianmian',
         url TEXT NOT NULL DEFAULT '',
         error TEXT NOT NULL DEFAULT '',
         created REAL NOT NULL,
@@ -329,6 +330,9 @@ def query_one(sql: str, params: tuple = ()):
 # IF NOT EXISTS is a no-op once the table is there, so new columns need their own
 # idempotent step. (table, column, DDL type) — applied only when absent.
 MIGRATIONS: list[tuple[str, str, str]] = [
+    # 作业得记住是哪个上游下的单 —— 轮询时才知道问谁。不能靠 model 反查配置:
+    # 型号一旦从 media_models.json 里删掉, 还在跑的作业就永远收不了尾。
+    ("video_jobs", "provider", "TEXT"),
     ("org_members", "credit_cap", "INTEGER"),
     ("org_members", "minute_cap", "INTEGER"),
     ("orgs", "default_credit_cap", "INTEGER"),
