@@ -34,7 +34,7 @@ import httpx
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 
-from . import config, credits, db, plans, security
+from . import config, credits, db, model_catalog, plans, security
 from .accounts import resolve_user
 from .http_limits import read_limited_body
 
@@ -94,7 +94,7 @@ def offered() -> dict:
     image = [
         {"id": m["id"], "name": m.get("name") or m["id"]}
         for m in _image_catalog().values()
-        if m.get("credits_per_image")
+        if m.get("usd_per_1m_image_tokens")
     ]
     return {"video": video, "image": image}
 
@@ -125,6 +125,27 @@ def quote(model: str, resolution: str, duration: int) -> int | None:
     if per_second is None:
         return None
     return max(1, math.ceil(per_second * max(1, duration)))
+
+
+def image_credits(entry: dict, usage: dict | None) -> int:
+    """按 usage 里的真实 token 数计价。
+
+    图像**不按张收**: 同一个模型低画质与高画质相差 35 倍
+    (gpt-image-2 一张 1024²: $0.006 vs $0.211), 按张收要么坑用户要么亏钱, 而
+    token 数会如实反映画质与尺寸。口径与聊天一致 —— 同一个 CREDITS_PER_USD
+    与 MODEL_PRICE_MARKUP, 所以两条线的毛利率天然一致。
+
+    上游没给 usage 时回落到 fallback_credits: 宁可贵也不能免费。
+    """
+    out = int((usage or {}).get("output_tokens") or 0)
+    text_in = int(((usage or {}).get("input_tokens_details") or {}).get("text_tokens") or 0)
+    if not out:
+        return max(1, int(entry.get("fallback_credits") or 0))
+    usd = (
+        out * float(entry.get("usd_per_1m_image_tokens") or 0)
+        + text_in * float(entry.get("usd_per_1m_text_input_tokens") or 0)
+    ) / 1_000_000
+    return max(1, math.ceil(usd * model_catalog.CREDITS_PER_USD * config.MODEL_PRICE_MARKUP))
 
 
 def _client() -> httpx.AsyncClient:
@@ -384,13 +405,13 @@ async def create_image(request: Request, user: dict = Depends(resolve_user)):
         return _error(400, "invalid_request_error", "prompt is required.")
 
     entry = _image_catalog().get(model)
-    per_image = (entry or {}).get("credits_per_image")
-    if not per_image:
+    if not (entry or {}).get("usd_per_1m_image_tokens"):
         return _error(404, "model_not_found", f"Model '{model}' is not offered for images.")
-    amount = int(per_image) * n
 
-    if credits.balance(user["id"]) < amount:
-        return _error(402, "insufficient_credits", f"这组图需要 {amount} 积分，当前余额不足。")
+    # 准入与聊天同口径: 出图前只看"有没有余额", 真实费用出图后按 usage 结算 ——
+    # 出图前算不出价钱, 因为 token 数取决于画质与尺寸。
+    if credits.balance(user["id"]) <= 0:
+        return _error(402, "insufficient_credits", "余额不足。")
 
     payload = {"model": model, "prompt": prompt, "n": n}
     for passthrough in ("size", "quality", "background", "output_format", "image_url"):
@@ -418,8 +439,16 @@ async def create_image(request: Request, user: dict = Depends(resolve_user)):
         return _error(502, "upstream_error", "Upstream returned invalid JSON.")
 
     # 出图了才扣 —— 上游报错的路径上一分不收。
+    amount = image_credits(entry, result.get("usage"))
     request_id = security.new_id("img_")
-    credits.spend(user["id"], amount, kind="image", model=model, request_id=request_id)
+    credits.spend(
+        user["id"],
+        amount,
+        kind="image",
+        model=model,
+        request_id=request_id,
+        output=int((result.get("usage") or {}).get("output_tokens") or 0),
+    )
     result["credits"] = amount
     return JSONResponse(result)
 

@@ -1,26 +1,79 @@
 {
   "_comment": "媒体模型售价。手写 —— 上游单价只在 cloud.qianmian.ai 控制台里, 探过 /pricing、/models/pricing 等一律 404, 没有 API 能取。$1 = 100 积分。",
-  "_WARNING": "下面这些数字是**没有核对过真实账单的占位值**, 纯属拍脑袋。正因如此 MEDIA_ADMIN_ONLY 默认为 1, 只有管理员能调 —— 拿错误的价格对全量用户开卖, 那种错只能靠对账收场。填准价格、确认毛利之后才可以置 0。",
+  "_WARNING": "视频价格是**没有核对过真实账单的占位值**。正因如此 MEDIA_ADMIN_ONLY 默认为 1, 只有管理员能调 —— 拿错误的价格对全量用户开卖, 那种错只能靠对账收场。填准价格、确认毛利之后才可以置 0。图像不在此列: 它按 usage 里的真实 token 数计价, 单价取自厂商公开价目, 见 image[].usd_per_1m_*。",
   "_note_duration": "刻意不做 duration 白名单。实测 doubao-seedance-2-0-mini 拒 3 秒、收 5 秒, 但各模型的合法档位既无文档也无 API, 逐个真调去试要花钱。所以透传上游的 InvalidParameter 原文 —— 厂商原话比我们猜的白名单可靠。",
   "video": [
-    { "id": "doubao-seedance-2-0-mini-260615", "name": "Seedance 2.0 Mini",
-      "credits_per_second": { "480p": 10, "720p": 20, "1080p": 40 } },
-    { "id": "doubao-seedance-2-0-fast-260128", "name": "Seedance 2.0 Fast",
-      "credits_per_second": { "480p": 15, "720p": 30, "1080p": 60 } },
-    { "id": "doubao-seedance-2-0-260128", "name": "Seedance 2.0",
-      "credits_per_second": { "480p": 25, "720p": 50, "1080p": 100 } },
-    { "id": "doubao-seedance-2-5-260628", "name": "Seedance 2.5",
-      "credits_per_second": { "480p": 30, "720p": 60, "1080p": 120 } },
-    { "id": "kling-v3", "name": "Kling v3",
-      "credits_per_second": { "480p": 25, "720p": 50, "1080p": 100 } },
-    { "id": "sora-2", "name": "Sora 2",
-      "credits_per_second": { "480p": 40, "720p": 80, "1080p": 160 } }
+    {
+      "id": "doubao-seedance-2-0-mini-260615",
+      "name": "Seedance 2.0 Mini",
+      "credits_per_second": {
+        "480p": 10,
+        "720p": 20,
+        "1080p": 40
+      }
+    },
+    {
+      "id": "doubao-seedance-2-0-fast-260128",
+      "name": "Seedance 2.0 Fast",
+      "credits_per_second": {
+        "480p": 15,
+        "720p": 30,
+        "1080p": 60
+      }
+    },
+    {
+      "id": "doubao-seedance-2-0-260128",
+      "name": "Seedance 2.0",
+      "credits_per_second": {
+        "480p": 25,
+        "720p": 50,
+        "1080p": 100
+      }
+    },
+    {
+      "id": "doubao-seedance-2-5-260628",
+      "name": "Seedance 2.5",
+      "credits_per_second": {
+        "480p": 30,
+        "720p": 60,
+        "1080p": 120
+      }
+    },
+    {
+      "id": "kling-v3",
+      "name": "Kling v3",
+      "credits_per_second": {
+        "480p": 25,
+        "720p": 50,
+        "1080p": 100
+      }
+    },
+    {
+      "id": "sora-2",
+      "name": "Sora 2",
+      "credits_per_second": {
+        "480p": 40,
+        "720p": 80,
+        "1080p": 160
+      }
+    }
   ],
   "image": [
-    { "id": "gpt-image-2", "name": "GPT Image 2", "credits_per_image": 15 },
-    { "id": "gpt-image-1.5", "name": "GPT Image 1.5", "credits_per_image": 10 },
-    { "id": "doubao-seedream-5-0-260128", "name": "Seedream 5.0", "credits_per_image": 8 },
-    { "id": "gemini-3-pro-image-preview", "name": "Gemini 3 Pro Image", "credits_per_image": 12 },
-    { "id": "Qwen/Qwen-Image", "name": "Qwen Image", "credits_per_image": 5 }
-  ]
+    {
+      "id": "gpt-image-2",
+      "name": "GPT Image 2",
+      "usd_per_1m_image_tokens": 30.0,
+      "usd_per_1m_text_input_tokens": 5.0,
+      "fallback_credits": 25
+    },
+    {
+      "id": "gpt-image-1.5",
+      "name": "GPT Image 1.5",
+      "usd_per_1m_image_tokens": 30.0,
+      "usd_per_1m_text_input_tokens": 5.0,
+      "fallback_credits": 25
+    }
+  ],
+  "_note_image": "图像**按 token 计价, 不按张**。上游返回 usage.output_tokens (全是 image_tokens), 而同一个模型低画质与高画质相差 35 倍 (gpt-image-2: $0.006 vs $0.211 一张 1024²) —— 按张收要么坑用户要么亏钱, 而 token 数会如实反映画质与尺寸。口径与聊天完全一致: usd -> credits 走同一个 CREDITS_PER_USD 与 MODEL_PRICE_MARKUP。fallback_credits 是上游没给 usage 时的兜底, 宁可贵也不能免费。",
+  "_note_image_todo": "只留了官方单价可查的两个。Seedream / Gemini Image / Qwen-Image 的 token 单价没核实, **未定价 = 不售卖**, 端点会 404 —— 这比填个猜的数字安全。"
 }
