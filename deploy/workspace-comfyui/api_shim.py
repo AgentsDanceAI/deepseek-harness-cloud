@@ -13,9 +13,18 @@ ComfyUI 内置了 30+ 个厂商的 API 节点 (Seedance、Kling、Veo、Luma…)
 
 所以在容器里起这个垫片, 让 comfy-api-base 指向它:
 
-    官方节点 -> 127.0.0.1:8199/proxy/byteplus/... -> 加令牌+转译 -> 网关 /llm/v1
+    官方节点 -> 127.0.0.1:8199/proxy/<厂商>/... -> 加令牌+转译 -> 网关 /llm/v1
 
 **网关一行都不用改** —— 它调的还是现有的 /videos/generations 与 /images/generations。
+
+已接通三家 (逐家核过, 为什么只有三家见 README 的对照表):
+
+    byteplus / seedance   Ark 形状          文生视频、图生视频、生图
+    openai                与网关同构        GPT Image 生图 (gpt-image-2 / 1.5)
+    wan                   DashScope 形状    文生视频、图生视频、文生图/图生图
+
+其余 37 家一律回 VendorNotWired —— **不是没写代码, 是网关不卖它们的型号,
+或者节点下拉里写死的名字与我们在售的对不上**。
 
 ⚠️ 这套路径与报文是 comfy.org 与 ComfyUI 之间的**私有约定, 没有文档、版本间会变**。
 升级 ComfyUI 后要跑一遍 verify.sh 的官方节点用例; 断掉的表现是「官方节点报错」
@@ -117,6 +126,61 @@ def _offered() -> dict:
     return _offered_cache
 
 
+# 本地图任务表 (Wan 的图像走异步契约, 而网关的生图是同步的)。
+_IMG_PREFIX = "shimimg-"
+_IMG_TASKS: dict[str, dict] = {}
+
+# DashScope 的 size 是 "1920*1080", 我们按短边定档。
+_RES_BUCKETS = ((1000, "1080p"), (700, "720p"), (0, "480p"))
+
+
+def _resolution_of(params: dict) -> str:
+    """从 DashScope 的 parameters 里定出我们的分辨率档 (480p/720p/1080p)。
+
+    节点有两种写法: 视频类给 resolution="1080P", 图生视频给 size="1920*1080"。
+    """
+    raw = str(params.get("resolution") or "").strip().lower()
+    if raw in ("480p", "720p", "1080p"):
+        return raw
+    size = str(params.get("size") or "")
+    nums = [int(n) for n in size.replace("x", "*").split("*") if n.strip().isdigit()]
+    if len(nums) == 2:
+        short = min(nums)
+        for floor, bucket in _RES_BUCKETS:
+            if short > floor:
+                return bucket
+    return ""
+
+
+def _run_image_task(task_id: str, payload: dict) -> None:
+    """后台跑一次同步生图, 把结果落进本地任务表。"""
+    status, urls, message = "FAILED", [], ""
+    try:
+        out = _gateway("POST", "/images/generations", payload, timeout=300.0)
+        BLOBS.mkdir(parents=True, exist_ok=True)
+        for item in out.get("data") or []:
+            if item.get("url"):
+                urls.append(item["url"])
+                continue
+            b64 = item.get("b64_json")
+            if not b64:
+                continue
+            name = f"{uuid.uuid4().hex}.png"
+            (BLOBS / name).write_bytes(base64.b64decode(b64))
+            urls.append(f"http://127.0.0.1:{PORT}/blob/{name}")
+        status = "SUCCEEDED" if urls else "FAILED"
+        if not urls:
+            message = "网关没有返回图像"
+    except urllib.error.HTTPError as exc:
+        message = exc.read()[:400].decode("utf-8", "replace")
+        print(f"[shim] 后台生图失败 {exc.code}: {message}", flush=True)
+    except Exception as exc:  # noqa: BLE001
+        message = f"{type(exc).__name__}: {exc}"
+        print(f"[shim] 后台生图异常: {message}", flush=True)
+    with _lock:
+        _IMG_TASKS[task_id] = {"task_status": status, "urls": urls, "message": message}
+
+
 def _map_model(name: str) -> str:
     table = _offered()
     if not table:
@@ -178,8 +242,16 @@ class Handler(BaseHTTPRequestHandler):
     # 曾经是 path.endswith("/images/generations") —— 而 ComfyUI 里另有三家的路径
     # 也是这个后缀 (/proxy/openai/…、/proxy/kling/…、/proxy/xai/…)。那样会把它们
     # 的请求误接过来, 用**它们的报文形状**打我们的网关, 产生看不懂的错误。
-    # 官方节点一共用到 207 条代理路径、40 个厂商; 这里只接通了 byteplus 这一家。
-    _WIRED = ("/proxy/byteplus/", "/proxy/byteplus-seedance2/")
+    #
+    # 官方节点一共用到 207 条代理路径、40 个厂商。**接一家的前提是网关真的卖那家
+    # 的型号, 而且节点下拉里的名字对得上** —— 对不上就只能是「未在售」, 接了也白接。
+    # 逐家核过后能接的就下面这三家 (见 README 的对照表)。
+    _WIRED = (
+        "/proxy/byteplus/",
+        "/proxy/byteplus-seedance2/",
+        "/proxy/openai/",
+        "/proxy/wan/",
+    )
 
     def _is_wired(self, path: str) -> bool:
         return path.startswith(self._WIRED)
@@ -188,10 +260,24 @@ class Handler(BaseHTTPRequestHandler):
         path = self.path.split("?")[0]
         if not self._is_wired(path):
             return self._not_wired(path)
-        if path.endswith("/contents/generations/tasks"):
-            return self._create_video()
-        if path.endswith("/images/generations"):
-            return self._create_image()
+        # --- ByteDance / Seedance (Ark 形状) ---
+        if path.startswith(("/proxy/byteplus/", "/proxy/byteplus-seedance2/")):
+            if path.endswith("/contents/generations/tasks"):
+                return self._create_video()
+            if path.endswith("/images/generations"):
+                return self._create_image()
+        # --- OpenAI (报文与网关同源, 近乎直通) ---
+        elif path.startswith("/proxy/openai/"):
+            if path.endswith("/images/generations"):
+                return self._openai_image()
+            if path.endswith("/images/edits"):
+                return self._fail(400, "本平台的图像通道只做「文生图」，不支持 OpenAI 的图像编辑端点。")
+        # --- Wan (DashScope 原生形状) ---
+        elif path.startswith("/proxy/wan/"):
+            if path.endswith("/video-generation/video-synthesis"):
+                return self._wan_video()
+            if path.endswith("/image-synthesis"):
+                return self._wan_image()
         return self._not_wired(path)
 
     def do_GET(self):  # noqa: N802
@@ -200,8 +286,11 @@ class Handler(BaseHTTPRequestHandler):
             return self._blob(path.rsplit("/", 1)[-1])
         if not self._is_wired(path):
             return self._not_wired(path)
-        if "/contents/generations/tasks/" in path:
-            return self._video_status(path.rsplit("/", 1)[-1])
+        if path.startswith(("/proxy/byteplus/", "/proxy/byteplus-seedance2/")):
+            if "/contents/generations/tasks/" in path:
+                return self._video_status(path.rsplit("/", 1)[-1])
+        elif path.startswith("/proxy/wan/") and "/api/v1/tasks/" in path:
+            return self._wan_task(path.rsplit("/", 1)[-1])
         return self._not_wired(path)
 
     def _not_wired(self, path: str) -> None:
@@ -212,7 +301,7 @@ class Handler(BaseHTTPRequestHandler):
             "code": "VendorNotWired",
             "message": (
                 f"「{vendor}」这类官方节点尚未接入本平台。"
-                "目前只有 ByteDance / Seedance 系列的官方节点接通了；"
+                "已接通: ByteDance/Seedance 视频、OpenAI GPT Image、Wan 视频；"
                 "其余能力请用「DSH Cloud 生图 / 生视频」节点。"
             ),
         }})
@@ -305,6 +394,168 @@ class Handler(BaseHTTPRequestHandler):
             "model": payload["model"], "created": int(out.get("created") or 0),
             "data": data, "error": {},
         })
+
+    # ---- OpenAI 官方图像节点 ----
+
+    def _openai_image(self):
+        """OpenAI 的 /images/generations 与我们网关**同一套报文** (网关本身就是
+        OpenAI 兼容的), 所以这里只做三件事: 映射型号、转达错误、把 usage 带回去。
+
+        图也不用落盘 —— 节点的 validate_and_cast_response 优先读 b64_json,
+        网关给的正好就是 b64_json。
+        """
+        body = self._body()
+        model = _map_model(body.get("model") or "")
+        prompt = body.get("prompt") or ""
+        if not prompt:
+            return self._fail(400, "缺少 prompt")
+        payload = {"model": model, "prompt": prompt}
+        for key in ("n", "size", "quality", "background", "output_format"):
+            if body.get(key) is not None:
+                payload[key] = body[key]
+        try:
+            out = _gateway("POST", "/images/generations", payload, timeout=300.0)
+        except urllib.error.HTTPError as exc:
+            detail = exc.read()[:400].decode("utf-8", "replace")
+            print(f"[shim] OpenAI 生图失败 {exc.code}: {detail}", flush=True)
+            if exc.code == 404:
+                return self._unsold(model, "image")
+            return self._send(exc.code, detail.encode(), "application/json")
+        except Exception as exc:  # noqa: BLE001
+            return self._fail(502, f"网关不可达: {type(exc).__name__}: {exc}")
+        data = [
+            {k: v for k, v in item.items() if k in ("b64_json", "url", "revised_prompt")}
+            for item in (out.get("data") or [])
+        ]
+        return self._json(200, {"data": data, "usage": out.get("usage") or {}})
+
+    # ---- Wan 官方节点 (DashScope 原生形状) ----
+
+    def _dashscope_error(self, code: str, message: str):
+        """DashScope 的失败是 **HTTP 200 + 顶层 code/message**, output 缺席。
+
+        节点拿不到 output 时抛的正是 f"{code} - {message}" —— 走这条能让用户看见
+        我们写的中文原话; 回 404 只会变成一句「请求失败」。
+        """
+        print(f"[shim] {code}: {message}", flush=True)
+        return self._json(200, {"request_id": uuid.uuid4().hex, "code": code, "message": message})
+
+    def _unsold_dashscope(self, model: str):
+        table = _offered()
+        avail = sorted(table.values()) if table else []
+        tip = ("当前可用: " + "、".join(avail)) if avail else "当前没有可用型号"
+        return self._dashscope_error(
+            "ModelNotOffered", f"「{model}」当前未开放。{tip}。（在节点的模型下拉里换一个）"
+        )
+
+    def _wan_video(self):
+        """Wan 的文生视频/图生视频。
+
+        Wan 系是百炼通道的原生型号 —— 节点下拉里的 wan2.7-t2v / wan2.7-i2v
+        跟我们在售的 id **一字不差**, 所以型号不用改名, 只是形状要拆。
+        """
+        body = self._body()
+        inp = body.get("input") or {}
+        params = body.get("parameters") or {}
+        prompt = str(inp.get("prompt") or "")
+        if not prompt:
+            return self._dashscope_error("InvalidParameter", "input.prompt 不能为空")
+        model = _map_model(body.get("model") or "")
+        payload = {"model": model, "prompt": prompt}
+        resolution = _resolution_of(params)
+        if resolution:
+            payload["resolution"] = resolution
+        try:
+            duration = int(params.get("duration") or 0)
+        except (TypeError, ValueError):
+            duration = 0
+        if duration:
+            payload["duration"] = duration
+        # 节点把首帧塞成 data:image/png;base64,... 的 img_url, 网关收的是 image_url。
+        img = str(inp.get("img_url") or "")
+        if img:
+            payload["image_url"] = img
+        try:
+            out = _gateway("POST", "/videos/generations", payload, timeout=180.0)
+        except urllib.error.HTTPError as exc:
+            detail = exc.read()[:400].decode("utf-8", "replace")
+            print(f"[shim] Wan 建视频失败 {exc.code}: {detail}", flush=True)
+            if exc.code == 404:
+                return self._unsold_dashscope(model)
+            return self._dashscope_error("UpstreamError", detail)
+        except Exception as exc:  # noqa: BLE001
+            return self._dashscope_error("GatewayUnreachable", f"{type(exc).__name__}: {exc}")
+        return self._json(200, {
+            "request_id": uuid.uuid4().hex,
+            "output": {"task_id": out.get("id") or "", "task_status": "PENDING"},
+        })
+
+    def _wan_image(self):
+        """Wan 的文生图/图生图。
+
+        DashScope 这两条是**异步**的 (建任务 -> 轮询), 而我们网关的生图是同步的
+        (一个请求 ~15 秒出图)。所以这里造一个任务号, 把同步调用甩进后台线程,
+        让节点照常轮询 —— 不这么做就得让 POST 阻塞几十秒, 节点那边的超时行为
+        没有文档, 不赌。
+        """
+        body = self._body()
+        inp = body.get("input") or {}
+        prompt = str(inp.get("prompt") or "")
+        if not prompt:
+            return self._dashscope_error("InvalidParameter", "input.prompt 不能为空")
+        model = _map_model(body.get("model") or "")
+        params = body.get("parameters") or {}
+        payload = {"model": model, "prompt": prompt}
+        if params.get("size"):
+            payload["size"] = str(params["size"]).replace("*", "x")
+        images = inp.get("images") or []
+        if images:
+            payload["image_url"] = images[0]
+        task_id = _IMG_PREFIX + uuid.uuid4().hex
+        with _lock:
+            _IMG_TASKS[task_id] = {"task_status": "RUNNING", "urls": [], "message": ""}
+        threading.Thread(target=_run_image_task, args=(task_id, payload), daemon=True).start()
+        return self._json(200, {
+            "request_id": uuid.uuid4().hex,
+            "output": {"task_id": task_id, "task_status": "PENDING"},
+        })
+
+    def _wan_task(self, task_id: str):
+        """轮询。视频任务号是网关发的 (vjob_...), 图任务号是本地造的 (shimimg-...)。
+
+        返回体同时带上 video_url 与 results —— 视频节点读前者, 图像节点读后者,
+        而这条路径两边共用; 多带一个键对 pydantic 无害, 少带一个就取不到结果。
+        """
+        if task_id.startswith(_IMG_PREFIX):
+            with _lock:
+                task = dict(_IMG_TASKS.get(task_id) or {})
+            if not task:
+                return self._dashscope_error("TaskNotFound", f"没有这个任务: {task_id}")
+            return self._json(200, {"request_id": uuid.uuid4().hex, "output": {
+                "task_id": task_id,
+                "task_status": task["task_status"],
+                "results": [{"url": u} for u in task["urls"]],
+                "message": task["message"],
+            }})
+
+        try:
+            out = _gateway("GET", f"/videos/result/{task_id}", timeout=60.0)
+        except Exception as exc:  # noqa: BLE001
+            # 查询失败不能报终态 —— 节点会当成任务失败, 而它可能马上就好。
+            print(f"[shim] 查 Wan 任务失败, 当作在跑: {type(exc).__name__}: {exc}", flush=True)
+            return self._json(200, {"request_id": uuid.uuid4().hex, "output": {
+                "task_id": task_id, "task_status": "RUNNING"}})
+        raw = str(out.get("task_status") or "").upper()
+        status = {"SUCCESS": "SUCCEEDED", "FAIL": "FAILED"}.get(raw, "RUNNING")
+        items = out.get("video_result") or []
+        url = (items[0] or {}).get("url") if items else ""
+        return self._json(200, {"request_id": uuid.uuid4().hex, "output": {
+            "task_id": task_id,
+            "task_status": status,
+            "video_url": url or "",
+            "results": [{"url": url}] if url else [],
+            "message": str(out.get("error") or ""),
+        }})
 
     def _blob(self, name: str):
         # 只认自己造的文件名, 不接受任何路径成分 —— 这个端口虽然只在回环上,

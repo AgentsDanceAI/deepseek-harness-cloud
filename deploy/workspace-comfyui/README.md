@@ -51,6 +51,48 @@ ComfyUI **只执行通向输出节点的分支**。不标这个的话整张图�
     GET  {base}/videos/result/{id}  -> {"task_status": "SUCCESS",
                                         "video_result": [{"url": ...}]}
 
+## 官方 API 节点接了哪几家 (2026-08-28 逐家核过)
+
+ComfyUI 自带 **40 个厂商**的官方节点, 全部打 `--comfy-api-base` 那个地址,
+路径是 `/proxy/<厂商>/...`。`api_shim.py` 在容器里顶掉这个地址, 把报文转译成
+我们网关的形状。
+
+**接一家的前提有两条, 缺一不可**:
+
+1. 网关真的卖那家的媒体模型 (`media_models.json` 里定过价);
+2. **官方节点下拉里写死的型号名, 和我们在售的 id 对得上** —— 节点的模型下拉是
+   硬编码在节点源码里的, 我们过滤不了它。名字对不上, 接了也只能每次回「未在售」。
+
+第 2 条是大多数厂商接不了的真正原因, 不是工作量。逐家核过的结果:
+
+| 厂商 | 网关有的媒体模型 | 节点下拉里的名字 | 结论 |
+|---|---|---|---|
+| byteplus / seedance | doubao-seedance-2.5 / 2.0 / fast / mini | dreamina-seedance-… | ✅ 已接 (去厂商前缀后匹配) |
+| openai | gpt-image-2 / gpt-image-1.5 | `gpt-image-1 / 1.5 / 2` | ✅ 已接 (名字一字不差) |
+| wan | wan2.7-t2v / i2v、wanx2.1-\* | `wan2.5-… / 2.6-… / 2.7-t2v / 2.7-i2v / 3.0-…` | ✅ 已接 (2.7 两个对得上) |
+| qwen | qwen-image-3.0 / -pro (**未定价**) | `qwen-image-3.0 / -pro` | ⏳ 名字对得上, 差定价 |
+| kling | kling-v3 / v3.0-std / v3.0-pro / v2-6 | `kling-3.0-turbo / v3-omni / video-o1 / v2-5-turbo` | ❌ 名字全对不上 |
+| gemini / vertexai | 无 (只有 gemini 对话模型) | gemini-\*-image | ❌ 网关没有这些图模型 |
+| xai | grok-imagine-video (**未定价**) | grok-… | ❌ 未定价 |
+| 其余 33 家 | 无 | — | ❌ 网关一个型号都没有 |
+
+> Kling 那行别顺手"映射一下": `kling-3.0-turbo` 与 `kling-v3` 是**不同型号、
+> 不同价钱**, 悄悄替换等于按错档计价。要接就先让网关上架 turbo/omni 本身。
+
+各家的形状差异 (转译就是在抹平这个):
+
+| 厂商 | 建任务 | 轮询 | 失败怎么表达 |
+|---|---|---|---|
+| Ark (byteplus) | `content[]` 数组 | `{status, content.video_url}` | HTTP 4xx |
+| OpenAI | 与网关同构, 近乎直通 | 无 (同步) | HTTP 4xx |
+| DashScope (wan/qwen) | `{input:{}, parameters:{}}` | `{output:{task_status, video_url}}` | **HTTP 200 + 顶层 code/message** |
+
+最后一格是坑: DashScope 的节点在 `output` 缺席时才会把 `code - message` 抛给
+用户。回 4xx 只会变成一句「请求失败」, 用户看不到该换哪个型号 —— 所以 Wan 的
+未在售走的是 200。
+
+改完跑 `shim_check.py` (14 项), 它对着 `stub_gateway.py` 走完三家的全部转译路径。
+
 ## 怎么跑验证
 
     docker build -t comfy-orchestrator:spike .
@@ -63,13 +105,11 @@ ComfyUI **只执行通向输出节点的分支**。不标这个的话整张图�
 
 ## 还没证明的 (别当已验证)
 
-1. **网关侧不存在**。`/videos/generations` 与 `/videos/result/{id}` 是
-   `stub_gateway.py` 顶的, `server/app/` 里还没有。
+1. ~~网关侧不存在~~ **已建**: `server/app/media.py` (千面 + 百炼双通道)。
 2. **没打过真厂商**。得先探清上游到底供哪些媒体模型、端点什么形状, 再照真实
    报文写适配器 —— 照文档猜形状必然返工。
-3. **计量路径不存在**。`model_catalog.charge_credits()` 纯按 token 计价, 而
-   媒体模型按件计量 —— `gen_models.py` 的 `SKIP_SUBSTRINGS` 把 `seedance` /
-   `seedream` / `kling-` / `-image` 全跳掉, 正是因为这条路没建。
+3. ~~计量路径不存在~~ **已建**: 视频按秒预扣 + 失败退款, 图像按 image token
+   结算 (`media.py` 的 `quote` / `image_credits` / `_refund_once`)。
 4. **手机上好不好用没测**。ComfyUI 的节点画布在手机上大概率很差, 而"手机能用"
    是这个产品区别于 Gitpod 那批的理由。
 5. **本地模型节点是废的**。901 个节点里只有 22 个 (2%) 硬要模型文件, 但那 22 个
