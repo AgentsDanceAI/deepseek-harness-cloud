@@ -41,6 +41,10 @@ RUN pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu 
 # 宿主目录可挂。节点只认我们自己的网关, 由网关去适配具体厂商。
 COPY custom_nodes/dsh_cloud /opt/ComfyUI/custom_nodes/dsh_cloud
 
+# 让 ComfyUI **自带的官方 API 节点**也能跑我们的模型 —— 启动脚本把
+# --comfy-api-base 指向它。见 api_shim.py 开头的说明。
+COPY api_shim.py /opt/dsh-api-shim.py
+
 EXPOSE 8188
 # 不写 CMD: 应用创建实例时自己下发启动命令 (products.py 的 _comfyui_boot),
 # 那里会把 output/input 指到持久卷上。烤进 CMD 的话改一次要重发镜像。
