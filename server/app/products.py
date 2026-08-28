@@ -31,6 +31,9 @@ _SEP = "~"
 # 预览索引按它生成链接, 对不上就是「产物点开是 502」。
 PREVIEW_STATIC_PORT = 8088
 
+# 官方 API 节点垫片的端口。只在容器回环上, 不经反代 —— 它带着容器的凭据。
+SHIM_PORT = 8199
+
 
 @dataclass(frozen=True)
 class Product:
@@ -213,9 +216,15 @@ def _comfyui_boot() -> str:
         '    cp "$f" "$live"; cp "$f" "$mark"\n'
         "  fi\n"
         "done\n"
+        # 官方 API 节点的垫片 (见镜像里的 /opt/dsh-api-shim.py)。它把 ComfyUI 内置
+        # 那 30+ 个厂商节点的请求转译到我们的网关并补上令牌 —— 于是官方节点和官方
+        # 模板都能跑我们的模型, 用户不必只用我们自己那两个节点。
+        # 只监听回环: 它是拿着容器令牌的, 绝不能对外。
+        "python /opt/dsh-api-shim.py >/tmp/dsh-shim.log 2>&1 &\n"
         "cd /opt/ComfyUI\n"
         "exec python main.py --cpu --listen 0.0.0.0 --port 8188 "
-        "--user-directory /workspace/.comfy-user\n"
+        "--user-directory /workspace/.comfy-user "
+        f"--comfy-api-base http://127.0.0.1:{SHIM_PORT}\n"
     )
 
 

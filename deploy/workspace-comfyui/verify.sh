@@ -167,3 +167,16 @@ done
 echo "=== 图片真的落地了吗 ==="
 docker exec "$NAME" sh -c 'ls -l /opt/ComfyUI/output/*.png 2>/dev/null | head -3' \
   || { echo "✗ 没有 png"; exit 1; }
+
+echo "=== 官方 API 节点的垫片 ==="
+# 让 ComfyUI 自带的 30+ 个官方节点 (Seedance/Kling/Veo…) 跑我们的模型:
+# --comfy-api-base 指向容器内的垫片, 它加令牌并把 comfy.org 那套 /proxy/... 报文
+# 转译到我们的网关。这套路径与报文是 comfy.org 与 ComfyUI 之间的**私有约定**,
+# 升级 ComfyUI 后必须重跑本节 —— 断掉的表现是「官方节点报错」而不是我们报错。
+docker cp "$HERE/shim_check.py" "$NAME":/tmp/shim_check.py >/dev/null
+docker exec "$NAME" python /tmp/shim_check.py || {
+  echo "✗ 垫片不通"; docker exec "$NAME" sh -c 'cat /tmp/dsh-shim.log 2>/dev/null | tail -20'; exit 1; }
+
+echo "=== ComfyUI 确实指向垫片 ==="
+docker exec "$NAME" sh -c 'tr "\0" " " < /proc/1/cmdline' | grep -o -- "--comfy-api-base [^ ]*" | sed "s/^/  ✓ /" \
+  || { echo "  ✗ 启动参数里没有 --comfy-api-base"; exit 1; }

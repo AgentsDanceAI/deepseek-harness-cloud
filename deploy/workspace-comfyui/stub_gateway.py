@@ -119,6 +119,15 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if not self._check_ua():
             return
+        if self.path.endswith("/media/models"):
+            # 垫片靠这份清单把官方节点发来的厂商公开名 (dreamina-…) 映射到我们
+            # 在售的型号 (doubao-…)。返回的 id 刻意用 doubao- 前缀, 好让
+            # shim_check 里那个 dreamina- 的请求真的走一次映射。
+            return self._json(200, {
+                "video": [{"id": "doubao-seedance-2-5-260628", "name": "Seedance 2.5",
+                           "resolutions": ["480p", "720p", "1080p"]}],
+                "image": [{"id": "gpt-image-2", "name": "GPT Image 2"}],
+            })
         if self.path.endswith("/sample.mp4"):
             return self._send(200, SAMPLE.read_bytes(), "video/mp4")
         if "/videos/result/" in self.path:
