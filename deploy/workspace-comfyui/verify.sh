@@ -62,6 +62,18 @@ done
 echo "=== 节点注册了吗 (顺带验证清单取不到时的回落) ==="
 if curl -sf http://localhost:8188/object_info | python3 -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if {"DSHCloudVideo","DSHCloudImage"} <= set(d) else 1)'; then
   echo "✓ DSHCloudVideo / DSHCloudImage 已注册"
+  # 输出类型必须是平台原生类型, 不能只给路径字符串 —— 2026-08-27 实测: 视频生成
+  # 成功、文件也落盘, 但接不上「保存视频」(它要 VIDEO 输入), 界面里也没预览,
+  # 用户拿不到成品。生成对了却拿不到手, 等于没做。
+  curl -sf http://localhost:8188/object_info | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+vid = d["DSHCloudVideo"]["output"]
+img = d["DSHCloudImage"]["output"]
+assert vid[0] == "VIDEO", f"生视频第一个输出应是 VIDEO, 实际 {vid}"
+assert img[0] == "IMAGE", f"生图第一个输出应是 IMAGE, 实际 {img}"
+print(f"  ✓ 输出类型: 生视频 {vid}  生图 {img}")
+' || { echo "✗ 输出类型不对"; exit 1; }
 else
   echo "✗ 节点没加载"; docker logs "$NAME" 2>&1 | grep -i -A5 "dsh_cloud\|error" | tail -30; exit 1
 fi
