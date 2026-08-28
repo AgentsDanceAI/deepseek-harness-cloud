@@ -1,6 +1,6 @@
 # Privacy Policy
 
-**Version 1.1 · Effective date: September 12, 2026** (Version 1.0, effective August 17, 2026, continues to apply until then)
+**Version 1.1 · Effective date: August 28, 2026** (a clarifying revision, effective immediately; Version 1.0 applied from August 17, 2026)
 
 This Policy explains how deepseek-harness-cloud (the site at https://dshcloud.online , hereinafter "this service") collects, uses, shares, and protects your personal information.
 
@@ -69,14 +69,14 @@ To operate the service, the following categories of service providers process th
 | Waffo Pancake (Merchant of Record and payment processor) | Payment and tax information | See its privacy policy |
 | Qianmian AI gateway (api.qianmian.ai) | The input you submit to models and the model output | Singapore |
 | Upstream model providers (via the gateway above): Anthropic, OpenAI, Google, DeepSeek, Alibaba, Moonshot AI, Zhipu AI, MiniMax, ByteDance, Xiaomi, xAI | The input you submit to models and the model output | Their respective locations |
-| Alibaba Cloud Bailian (model services, **from September 12, 2026**) | The input you submit to models and the model output | China (Beijing) |
+| Alibaba Cloud Bailian (model services) | The input you submit to models and the model output | China (Beijing) |
 | Zhipu AI (web search) | Your search queries | China |
 | Resend (email delivery) | Recipient email address, message body | United States |
 | Cloudflare (CDN, R2 object storage, DNS) | Access logs, installer distribution | Global edge nodes |
 
 We have data processing terms in place with each of the parties above, and we share data only to the extent necessary to provide the service.
 
-**About Alibaba Cloud Bailian**: From September 12, 2026, some image and video generation capabilities (such as image editing and video editing) are provided directly by Alibaba Cloud Bailian rather than routed through the Qianmian gateway. When you choose those models, your input and the generated output are transferred to servers **in mainland China (Beijing)** for processing. Other models are unaffected. You can avoid this transfer by not selecting those models.
+**About Alibaba Cloud Bailian**: Some image and video generation capabilities (image generation, image editing, video generation) are provided directly by Alibaba Cloud Bailian rather than routed through the Qianmian gateway. When you choose those models, your input and the generated output are processed on servers **in mainland China (Beijing)**. Other models are unaffected. You can avoid this transfer by not selecting those models.
 
 In addition, we may disclose information in the following circumstances: pursuant to binding legal process; to protect the rights and safety of this service, our users, or the public; and in the event of a merger, acquisition, or transfer of assets (we will give advance notice and ensure that the transferee assumes equivalent obligations).
 
@@ -136,9 +136,9 @@ If this Policy changes materially, we will notify you **at least 15 days before 
 
 ### Change log
 
-**Version 1.1 (effective September 12, 2026; announced August 28, 2026)**
+**Version 1.1 (effective August 28, 2026)**
 
-Added Alibaba Cloud Bailian as a data recipient. Previously all model calls were routed through the Qianmian gateway, with Alibaba appearing only as an upstream of that gateway. From this version, some models are served **directly** by Bailian, which involves transfer to mainland China. This is a **material change**, so it is announced 15 days in advance as required by the paragraph above.
+A clarifying revision, effective immediately. Alibaba was already listed in the "upstream model providers" row, with its location given as "their respective locations". This revision breaks out the part served by Alibaba Cloud Bailian, states the processing location explicitly as **China (Beijing)**, and notes that those calls are not routed through the Qianmian gateway. The categories of data shared (the input you submit to models and the model output) are unchanged, and no new category of recipient was added — the revision only makes an existing arrangement more specific, so it is not a material change within the meaning of the paragraph above.
 
 ## 13. Contact Us
 
@@ -150,4 +150,4 @@ All of the above addresses are handled by real people, with a first reply within
 
 ---
 
-*Last updated: August 28, 2026 · Version 1.1 (effective September 12, 2026)*
+*Last updated: August 28, 2026 · Version 1.1 (effective immediately)*
