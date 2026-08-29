@@ -1254,14 +1254,19 @@ td.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size
 .app-card.is-live:hover .app-enter svg { transform: translateX(3px); }
 .app-enter svg { transition: transform .15s; }
 
-/* 主页上的迷你版: 只报名字与状态, 详情去 /apps */
-.apps-mini { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 26px; }
-@media (max-width: 900px) { .apps-mini { grid-template-columns: repeat(2, 1fr); } }
-.apps-mini a { display: flex; align-items: center; gap: 9px; padding: 11px 14px; border: 1px solid var(--border);
-  border-radius: 10px; background: var(--card); color: inherit; text-decoration: none; font-size: 13.5px; font-weight: 600;
-  transition: border-color .15s, transform .15s; }
-.apps-mini a:hover { border-color: var(--border-strong); transform: translateY(-1px); }
-.apps-mini a.soon { opacity: .55; font-weight: 500; }
-.apps-mini .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); flex: none; }
-.apps-mini .dot.off { background: var(--border-strong); }
-.apps-mini svg { flex: none; color: var(--brand); }
+/* 主页旗舰区块: 左 DSH 深色面板 (composer 是为深色底设计的, 面板沿用 hero 的
+   底色让它原样好看), 右 ComfyUI 浅色卡。 */
+.flag-grid { align-items: stretch; }
+.flag-panel { background: linear-gradient(160deg, #0d1930, #132648 70%, #16305c);
+  border: 1px solid rgba(255,255,255,.08); border-radius: var(--radius-lg);
+  padding: 30px 28px; color: #e8eefb; display: flex; flex-direction: column; }
+.flag-panel h3 { font-size: 21px; margin: 10px 0 8px; color: #fff; }
+.flag-panel > p { color: #b8c7e4; font-size: 14.5px; line-height: 1.65; }
+.flag-panel .composer { margin: 20px 0 0; max-width: none; }
+.flag-panel .chips { justify-content: flex-start; margin: 14px 0 0; max-width: none; }
+.flag-card { display: flex; flex-direction: column; padding: 30px 28px; }
+.flag-card h3 { font-size: 21px; margin: 10px 0 8px; }
+.flag-card > p { color: var(--muted); font-size: 14.5px; line-height: 1.65; }
+.flag-models { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0 22px; }
+.flag-models span { font-size: 12.5px; padding: 4px 11px; border-radius: 999px;
+  border: 1px solid var(--border); color: var(--muted); background: var(--card); }
