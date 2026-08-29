@@ -1765,6 +1765,31 @@ def test_coze_minio_endpoint_must_stay_the_service_name(monkeypatch):
     assert "coze-server" in prod.host_aliases, "nginx 的 proxy_pass 认这个名字"
 
 
+def test_coze_boot_rewrites_object_storage_links_to_https(monkeypatch):
+    """对象存储直链必须被改写成 https。
+
+    后端 presign 出来的是 `http://minio:9000/...` —— scheme 取自 MINIO_USE_SSL,
+    而那个必须是 false (服务端走回环明文连 minio)。STORAGE_UPLOAD_HTTP_SCHEME
+    管不到这里, 它只写进上传令牌的 HostScheme。上游自己的部署是纯 http 的所以
+    碰不到; 我们的站点在 https 上, 页面里出现 http:// 的图片就是**混合内容**,
+    浏览器直接拦 —— 头像和附件一片空白, 而服务端一切正常、日志里一个错都没有。
+    2026-08-29 上线当天实测到: 头像 URL 是 http://coze.dshcloud.online/...,
+    换成 https 同一个地址就是 200 + 2366 字节。
+    """
+    _coze_ready(monkeypatch)
+    boot = products.boot_script("coze")
+    # 上游那份配置照抄进来 (它有 sub_filter 与剥离签名参数的 rewrite, 手抄必错)
+    assert "cp /seed/conf.d/default.conf /etc/nginx/conf.d/default.conf" in boot
+    # 唯一的改动: 直链改写带上 https
+    assert products._COZE_SUBFILTER_TO in boot
+    assert "https://" in products._COZE_SUBFILTER_TO
+    assert "http://minio:9000" in products._COZE_SUBFILTER_TO
+    # sed 的被替换串必须是上游的原样 —— 对不上就是**静默失效**, 什么都不会报。
+    # deploy/workspace-coze/build.sh 在构建期断言上游那行还长这样。
+    assert products._COZE_SUBFILTER_FROM.startswith("sub_filter 'minio:9000'")
+    assert f"s#{products._COZE_SUBFILTER_FROM}#{products._COZE_SUBFILTER_TO}#" in boot
+
+
 def test_coze_wires_our_gateway_so_users_need_no_api_key(monkeypatch):
     """开箱就有模型可选: 模型 key 走网关凭据占位符, create 时换成该用户的令牌。
 
