@@ -5,7 +5,10 @@ httpx boundary so the whole ensure/route/bill flow runs without Docker.
 """
 
 import asyncio
+import json
 import os
+import shutil
+import subprocess
 import tempfile
 import time
 from types import SimpleNamespace
@@ -1654,12 +1657,62 @@ def test_open_design_product_spec(monkeypatch):
     assert "ln -sfn /root/.dsh/profiles/open-design/node_modules/@open-design" in boot
     assert "ln -s /workspace/.od /app/.od" in boot
     assert "exec node apps/daemon/dist/cli.js" in boot
+    # 预置应用偏好 —— 漏了就有第二道 (上游的) 登录墙, 见下一个测试
+    assert "app-config.json" in boot
+    assert "onboardingCompleted" in boot
+    assert "deepseek-harness" in boot
 
     env = products.env_for("open-design", "tok_x")
     assert env["DEEPSEEK_API_KEY"] == "tok_x"
     assert env["DEEPSEEK_BASE_URL"].endswith("/llm/v1")
     assert env["OD_DISABLE_API_AUTH"] == "1"
     assert env["OD_ALLOWED_ORIGINS"] == "https://od.test.local"
+
+
+def test_open_design_app_config_seed_kills_upstream_login_wall(tmp_path):
+    """预置的那段 JS 真跑一遍: 三种起始状态各该落到哪。
+
+    没有它, 用户在**我们的**登录墙之后又撞上 OpenDesign 自己的 onboarding
+    向导 —— 停在"登录 OpenDesign", 点下去报 `vela binary not found`, 因为默认
+    选中的 agent 是它自家的 amr(vela), 而镜像里只有 dsh。用户已经登过一次了,
+    不该再登第三方账号, 何况那条路根本走不通。2026-08-29 线上被用户逮到。
+    """
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("没有 node, 跑不了这段预置脚本")
+
+    js = products._OD_APP_CONFIG_JS
+    # 断言守卫本身在场: 没有 node 的环境至少还能挡住"把条件删了"这种改动
+    assert "c.agentId==='amr'" in js, "卡在 amr 的老用户救不回来"
+    assert "if(!c.telemetry)" in js, "会把用户自己的遥测选择按回去"
+
+    def run(initial: dict | None) -> dict:
+        d = tmp_path / "od"
+        (d / ".od").mkdir(parents=True, exist_ok=True)
+        cfg = d / ".od" / "app-config.json"
+        if initial is not None:
+            cfg.write_text(json.dumps(initial))
+        elif cfg.exists():
+            cfg.unlink()
+        subprocess.run(
+            [node, "-e", js.replace("/app/.od/app-config.json", str(cfg))],
+            check=True, capture_output=True, timeout=30,
+        )
+        return json.loads(cfg.read_text())
+
+    fresh = run(None)
+    assert fresh["onboardingCompleted"] is True, "向导还会弹"
+    assert fresh["agentId"] == "deepseek-harness", "选中的 agent 不是镜像里唯一可用的那个"
+    assert fresh["telemetry"] == {"metrics": False, "content": False}, \
+        "上游默认把设计内容也发给第三方; 我们是托管方, 该替用户默认关掉"
+
+    stuck = run({"onboardingCompleted": True, "agentId": "amr"})
+    assert stuck["agentId"] == "deepseek-harness", "在向导里点过一次的用户仍卡在登录墙"
+
+    chosen = run({"onboardingCompleted": True, "agentId": "claude",
+                  "telemetry": {"metrics": True, "content": True}})
+    assert chosen["agentId"] == "claude", "把用户自己选的 agent 按回去了"
+    assert chosen["telemetry"] == {"metrics": True, "content": True}, "把用户的遥测选择按回去了"
 
 
 def test_open_design_disabled_without_domain_or_image(monkeypatch):
