@@ -173,6 +173,13 @@ KEEP 个。
 只有这样才照得出 "COPY 漏了 / 构建缓存吃了旧层" 这类事。以前每次手动跑, 手动
 就有忘的一天。
 
+ghcr 那边同样会清 (`ghcr_prune.py`, 也可单独跑; 不加 `--apply` 只演练)。
+**这里有个坑**: 推上去的是 OCI 索引, 每个 tag 底下挂着 amd64 镜像与 attestation
+两个**无 tag** 版本 —— 照网上常见的"无 tag 就删"来做, 会把 r15 索引指向的那两块
+删掉, tag 还在却拉不动, 而 GitHub 那边看起来一切正常。所以保护集合是
+`{保留的 tag} ∪ {这些 tag 索引引用的全部子清单}`, 用 `docker manifest inspect`
+问出来; 问不出来就停手不删。需要 token 带 `delete:packages`, 没有就跳过。
+
 删旧那段有单独的自检 (`./build_prune_check.sh`, 不碰 docker): 它造出「生产 tag
 排在 KEEP 之外」那一幕 —— 第一版用 `cut -d: -f3-` 从 .env 取 tag 取到的是空串
 (那行按冒号只有两段), "永不删生产"整条保险失效, 而首次试跑时正好被 KEEP 盖住,
