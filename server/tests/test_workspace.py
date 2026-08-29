@@ -1670,3 +1670,36 @@ def test_penpot_disabled_without_domain(monkeypatch):
     """自部署默认不启用 (与 comfy 同一约定): 域名留空就不在 enabled 里。"""
     monkeypatch.setattr(config, "PENPOT_DOMAIN", "")
     assert "penpot" not in [p.id for p in products.enabled()]
+
+
+def test_open_design_product_spec(monkeypatch):
+    """Open Design: 单容器, 里面跑 dsh。三处一错就整个产品是死的:
+
+    boot 必须装 profile + 打软链 (loader 从 dsh 自己的 node_modules 解析包名,
+    镜像文件系统每次全新, 软链一次性; 漏了 = agent 报 profile incompatible);
+    env 必须带网关凭据 (漏了 = agent 在但每次调用 401); 数据目录必须软链到
+    /workspace (漏了 = 用户的项目随实例回收消失, 不报错)。
+    """
+    monkeypatch.setattr(config, "OPEN_DESIGN_DOMAIN", "od.test.local")
+    monkeypatch.setattr(config, "OPEN_DESIGN_IMAGE_REF", "ghcr.io/x/od-local:t")
+    prod = products.registry()["open-design"]
+    assert prod.id in [p.id for p in products.enabled()]
+    assert prod.port == 7456
+    assert prod.sidecars == (), "它是单容器, 不是栈"
+
+    boot = products.boot_script("open-design")
+    assert "dsh plugin --profile open-design add /opt/od-profile.tgz" in boot
+    assert "ln -sfn /root/.dsh/profiles/open-design/node_modules/@open-design" in boot
+    assert "ln -s /workspace/.od /app/.od" in boot
+    assert "exec node apps/daemon/dist/cli.js" in boot
+
+    env = products.env_for("open-design", "tok_x")
+    assert env["DEEPSEEK_API_KEY"] == "tok_x"
+    assert env["DEEPSEEK_BASE_URL"].endswith("/llm/v1")
+    assert env["OD_DISABLE_API_AUTH"] == "1"
+    assert env["OD_ALLOWED_ORIGINS"] == "https://od.test.local"
+
+
+def test_open_design_disabled_without_domain_or_image(monkeypatch):
+    monkeypatch.setattr(config, "OPEN_DESIGN_DOMAIN", "")
+    assert "open-design" not in [p.id for p in products.enabled()]

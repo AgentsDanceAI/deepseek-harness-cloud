@@ -294,6 +294,11 @@ PENPOT_VERSION = _env("PENPOT_VERSION", "2.17")
 PENPOT_MEM_LIMIT_MB = _env_int("PENPOT_MEM_LIMIT_MB", 4096)
 PENPOT_CPUS = _env_float("PENPOT_CPUS", 2.0)
 PENPOT_TAB_GRACE_MIN = _env_int("PENPOT_TAB_GRACE_MIN", 10)
+# Open Design (nexu-io/open-design) —— 云空间的 AI 设计智能体坑位。
+OPEN_DESIGN_DOMAIN = _env("OPEN_DESIGN_DOMAIN", "")
+OPEN_DESIGN_IMAGE_REF = _env("OPEN_DESIGN_IMAGE_REF", "")
+OPEN_DESIGN_MEM_LIMIT_MB = _env_int("OPEN_DESIGN_MEM_LIMIT_MB", 1024)
+OPEN_DESIGN_CPUS = _env_float("OPEN_DESIGN_CPUS", 1.0)
 # 智能体最后一次调网关之后再等这么久。长任务必须能在关掉标签页之后接着跑完,
 # 所以这一条单独顶着, 与"有没有人在"无关。
 WORK_AGENT_IDLE_STOP_MIN = _env_int("WORK_AGENT_IDLE_STOP_MIN", 30)
