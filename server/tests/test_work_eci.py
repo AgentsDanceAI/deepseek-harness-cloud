@@ -482,3 +482,105 @@ async def test_deleting_an_instance_is_logged_too(eci, caplog):
     with caplog.at_level("INFO", logger="dhc.work"):
         await b.release("u_abc")
     assert "eci-1" in caplog.text
+
+
+# ---- 多容器栈 (Coze/Dify/Penpot 这类 compose 栈产品的底座) ----------------
+
+
+@pytest.mark.asyncio
+async def test_stack_product_emits_sidecar_containers(eci):
+    """伴随容器要真的进 CreateContainerGroup 的参数。
+
+    这里的每一项都是"错了也不会报错"的: 少一个容器就是应用连不上数据库 (一堆
+    500); RestartPolicy 还是 Never 的话, 应用容器在中间件就绪前崩一次就永远
+    躺平 —— ECI 没有 depends_on, 全靠 Always 拉起来。
+    """
+    from app.products import Sidecar
+
+    b, fake = eci
+    await b.create(
+        "u_stack",
+        boot="run-app",
+        env={"A": "1"},
+        boot_fp="fp",
+        image="app:x",
+        image_ref="ghcr.io/x/app:x",
+        mem_mb=4096,
+        cpus=2.0,
+        sidecars=(
+            Sidecar(
+                name="db",
+                image_ref="postgres:15-alpine",
+                env=(("POSTGRES_PASSWORD", "pw"),),
+                mounts=(("dify/pg", "/var/lib/postgresql/data"),),
+            ),
+            Sidecar(name="cache", image_ref="redis:7-alpine", cmd=("redis-server", "--save", "60", "1")),
+        ),
+    )
+    action, p = next(c for c in fake.calls if c[0] == "CreateContainerGroup")
+    # 主容器不动
+    assert p["Container.1.Name"] == "app"
+    # 伴随容器逐个到位
+    assert p["Container.2.Name"] == "db"
+    assert p["Container.2.Image"] == "postgres:15-alpine"
+    assert p["Container.2.EnvironmentVar.1.Key"] == "POSTGRES_PASSWORD"
+    assert p["Container.3.Name"] == "cache"
+    assert p["Container.3.Command.1"] == "redis-server"
+    # 中间件的数据要跟着用户走: NAS 卷 + 用户 hexid 前缀的子路径
+    hexid = cname("u_stack")[len("dshwork-"):]
+    assert p["Container.2.VolumeMount.1.Name"] == "dshwork-nas"
+    assert p["Container.2.VolumeMount.1.SubPath"] == f"{hexid}/dify/pg"
+    assert p["Container.2.VolumeMount.1.MountPath"] == "/var/lib/postgresql/data"
+    # 栈产品必须 Always —— 崩溃重试是唯一的启动顺序机制
+    assert p["RestartPolicy"] == "Always"
+
+
+@pytest.mark.asyncio
+async def test_stack_host_aliases_land_in_etc_hosts(eci):
+    """compose 服务名 -> 127.0.0.1 要真的进 HostAliase 参数。
+
+    少了它, 镜像配置模板里写死的 "http://api:5001" 解析不了, 应用容器起来就
+    连不上兄弟服务 —— 而这在 ECI 侧一个错误都不报, 只有应用日志里一堆
+    connection refused。"""
+    b, fake = eci
+    await b.create(
+        "u_alias", boot="x", env={}, boot_fp="fp", image="a:1", image_ref="r/a:1",
+        mem_mb=4096, cpus=2.0,
+        sidecars=(__import__("app.products", fromlist=["Sidecar"]).Sidecar(
+            name="db", image_ref="postgres:15"),),
+        host_aliases=("mysql", "redis", "api", "web"),
+    )
+    _, p = next(c for c in fake.calls if c[0] == "CreateContainerGroup")
+    assert p["HostAliase.1.Ip"] == "127.0.0.1"
+    assert p["HostAliase.1.Hostname.1"] == "mysql"
+    assert p["HostAliase.1.Hostname.4"] == "web"
+
+
+@pytest.mark.asyncio
+async def test_single_container_products_keep_restart_never(eci):
+    """单容器保持 Never: 它退出就是真的死了, Always 会把一个坏容器变成永动的
+    计费器 —— 用户看着 502, 钱照扣。"""
+    b, fake = eci
+    await b.create(
+        "u_single", boot="x", env={}, boot_fp="fp", image="a:1", image_ref="r/a:1",
+        mem_mb=1024, cpus=0.5,
+    )
+    _, p = next(c for c in fake.calls if c[0] == "CreateContainerGroup")
+    assert p["RestartPolicy"] == "Never"
+    assert "Container.2.Name" not in p, "没有伴随容器却拼出了 Container.2"
+
+
+def test_docker_backend_refuses_stack_products():
+    """docker 后端拼不出共享网络命名空间的容器组 —— 必须明确拒绝。
+    静默忽略伴随容器 = 应用起了连不上库, 一堆 500, 谁也想不到是后端不支持。"""
+    import asyncio
+
+    from app.products import Sidecar
+    from app.workbackend import DockerBackend
+
+    b = DockerBackend.__new__(DockerBackend)  # 不碰 docker socket
+    with pytest.raises(RuntimeError, match="ECI"):
+        asyncio.get_event_loop_policy().new_event_loop().run_until_complete(
+            b.create("u_x", boot="b", env={}, boot_fp="f", image="i",
+                     sidecars=(Sidecar(name="db", image_ref="postgres:15"),))
+        )
