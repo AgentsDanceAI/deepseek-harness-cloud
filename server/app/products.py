@@ -510,8 +510,35 @@ def _comfyui_boot() -> str:
     )
 
 
+# OpenDesign 的应用偏好 (<dataDir>/app-config.json)。**不预置就有一道上游登录墙**:
+# 默认选中的 agent 是它自家的 amr(vela), 镜像里没有那个二进制, 于是 onboarding
+# 向导停在 "登录 OpenDesign" 那一步, 点下去报 `vela binary not found`。
+# 而我们的域早被 forward_auth 挡在自家登录之后 —— 用户已经登过一次了,
+# 再要他登第三方账号既走不通也不该有。
+#
+# 选 deepseek-harness (bin=dsh): 实测它是这个镜像里**唯一** available=true 的
+# agent —— 上游原生就认 dsh, 不是我们硬塞的。
+#
+# 只补缺失的键: 用户之后自己换 agent / 换模型要留得住 (这个文件在 NAS 上),
+# 每次启动强写会把他的选择按回去, 而且不报错。
+_OD_APP_CONFIG_JS = (
+    "const fs=require('fs'),p='/app/.od/app-config.json';"
+    "let c={};try{c=JSON.parse(fs.readFileSync(p,'utf8'))||{}}catch(e){}"
+    "let d=false;"
+    "if(c.onboardingCompleted!==true){c.onboardingCompleted=true;d=true}"
+    # 也把 amr 掰回来: 向导里点过一次的用户, 文件里已经写着 amr, 只判"缺不缺"
+    # 救不回他 —— 而 amr 在这个镜像里永远不可用 (没有 vela, 也不该有)。
+    "if(!c.agentId||c.agentId==='amr'){c.agentId='deepseek-harness';d=true}"
+    # 上游默认 metrics/content 全开, content 会把用户的设计内容发去第三方。
+    # 我们是托管方, 替用户默认关掉; 他想开自己去设置里开。
+    "if(!c.telemetry){c.telemetry={metrics:false,content:false};"
+    "c.privacyDecisionAt=new Date().toISOString();d=true}"
+    "if(d)fs.writeFileSync(p,JSON.stringify(c,null,2));"
+)
+
+
 def _opendesign_boot() -> str:
-    """三步: 数据目录落 NAS、给 dsh 装 OpenDesign profile、拉起 daemon。
+    """四步: 数据目录落 NAS、给 dsh 装 OpenDesign profile、**预置应用偏好**、拉起 daemon。
 
     profile 装在用户的 /root/.dsh (NAS 持久化) —— 只装一次; 但 dsh 的插件
     loader 从 dsh **自己的** node_modules 解析包名, 所以每次启动要把 profile
@@ -528,6 +555,7 @@ def _opendesign_boot() -> str:
         "dsh plugin --profile open-design add /opt/od-profile.tgz\n"
         "ln -sfn /root/.dsh/profiles/open-design/node_modules/@open-design "
         "/usr/local/lib/node_modules/@deepseek-ai/dsh/node_modules/@open-design\n"
+        f"node -e {_OD_APP_CONFIG_JS!r}\n"
         "cd /app\n"
         "exec node apps/daemon/dist/cli.js --no-open\n"
     )
