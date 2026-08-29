@@ -257,13 +257,18 @@ async def _stop(user_id: str) -> None:
 async def _ready(key: str, product: products.Product) -> bool:
     """产品在自己的端口上应答后才算就绪。
 
-    dsh 那道可达性围栏只信回环 Host, 所以探活要伪装成回环; ComfyUI 没有这道
+    dsh 那道可达性围栏只信回环 Host, 所以探活要伪装成回环; 别的产品没有这道
     围栏, 带上也无妨 —— 统一发, 免得每加一个产品就多一条分支。
+
+    判据是「应答了」而不是「回了 200」: 未初始化的 Dify 首页是 307 (跳 /install),
+    要求 200 的话它永远停在 warming —— 容器全 Running、应用真在应答, 而用户对着
+    进度条等到天荒地老, 服务端一个错都不报。2026-08-29 Dify 首次接入时踩到。
+    5xx 才是"起来了但坏了", 那种不算就绪。
     """
     try:
-        async with httpx.AsyncClient(timeout=3.0) as client:
+        async with httpx.AsyncClient(timeout=3.0, follow_redirects=False) as client:
             r = await client.get(f"http://{_upstream(key, product)}/", headers={"host": "127.0.0.1:3080"})
-            return r.status_code == 200
+            return r.status_code < 500
     except httpx.HTTPError:
         return False
 

@@ -1775,3 +1775,39 @@ def test_dify_plugin_daemon_has_every_field_it_validates_at_boot(monkeypatch):
         assert env.get(k), f"plugind 缺必填项 {k} —— 它会启动即崩"
     # 调试端口绑回环: 实例自带 EIP, 0.0.0.0 等于多开一个公网面
     assert env["PLUGIN_REMOTE_INSTALLING_HOST"] == "127.0.0.1"
+
+
+def test_readiness_accepts_any_answer_not_only_200(monkeypatch):
+    """判据是「应答了」, 不是「回了 200」。
+
+    未初始化的 Dify 首页是 307 (跳 /install)。要求 200 的话它永远停在 warming ——
+    10 个容器全 Running、应用真在应答, 而用户对着进度条等到天荒地老, 服务端一个
+    错都不报, 日志里只有一串 302。2026-08-29 Dify 首次接入时踩到。
+    5xx 是"起来了但坏了", 不算就绪。
+    """
+    import httpx
+
+    seen = {}
+
+    class _Resp:
+        def __init__(self, code): self.status_code = code
+
+    def fake_client(*_a, **_kw):
+        class _C:
+            async def __aenter__(self_inner): return self_inner
+            async def __aexit__(self_inner, *_): return False
+            async def get(self_inner, url, headers=None):
+                return _Resp(seen["code"])
+        return _C()
+
+    monkeypatch.setattr(httpx, "AsyncClient", fake_client)
+    monkeypatch.setattr(config, "COMFY_IMAGE", "comfy:test")
+    monkeypatch.setattr(config, "COMFY_DOMAIN", "comfy.test.local")
+    prod = products.registry()["comfyui"]
+    loop = asyncio.get_event_loop_policy().new_event_loop()
+
+    for code, want in ((200, True), (302, True), (307, True), (404, True),
+                       (500, False), (502, False), (503, False)):
+        seen["code"] = code
+        got = loop.run_until_complete(workspace._ready("k", prod))
+        assert got is want, f"HTTP {code} 应当判为 {'就绪' if want else '未就绪'}"
