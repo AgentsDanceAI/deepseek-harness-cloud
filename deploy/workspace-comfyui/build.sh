@@ -22,13 +22,25 @@ IMAGE="${IMAGE:-ghcr.io/agentsdancepro/comfy-local}"
 KEEP="${KEEP:-2}"                       # 保留最近几个本机 tag (含刚建的这个)
 ENVFILE="${ENVFILE:-$repo/deploy/prod/.env}"
 
+# 从 .env 里读出生产在用的 tag。取**最后一个冒号之后**的部分 ——
+# 一行是 COMFY_IMAGE_REF=ghcr.io/…/comfy-local:v0.34.1-r15, 按冒号切只有两段,
+# 早先写的 `cut -d: -f3-` 取到的是空串。空串意味着"没有要保护的 tag", 于是
+# 这段会**把线上正在用的镜像删掉** —— 首次试跑时正好被 KEEP 盖住才没出事。
+prod_tag_of() {
+  local line ref
+  line="$(grep -hoE '^COMFY_IMAGE_REF=.+' "$1" 2>/dev/null | head -1 || true)"
+  ref="${line#COMFY_IMAGE_REF=}"
+  [ "$ref" = "$line" ] && return 0     # 没匹配到就什么都不输出
+  printf '%s' "${ref##*:}"             # 最后一个冒号之后 = tag
+}
+
 # --- 定 tag ------------------------------------------------------------------
 if [ $# -ge 1 ]; then
   TAG="$1"
 else
   # 取现有最大的 rN 加一。只看本机 —— 本机没有就从 ghcr 上那个当前生产 tag 续,
   # 两边都没有才从 r1 起。
-  base="$(grep -hoE '^COMFY_IMAGE_REF=.+' "$ENVFILE" 2>/dev/null | cut -d: -f3- || true)"
+  base="$(prod_tag_of "$ENVFILE")"
   latest="$(docker images "$IMAGE" --format '{{.Tag}}' | grep -oE 'r[0-9]+$' | tr -d r | sort -n | tail -1 || true)"
   cur="$(printf '%s\n' "$base" | grep -oE 'r[0-9]+$' | tr -d r || true)"
   n=$(( ${latest:-0} > ${cur:-0} ? ${latest:-0} : ${cur:-0} ))
@@ -66,8 +78,15 @@ fi
 #   2. 有容器 (含 exited) 在用的不删 —— 那多半是谁正在调试
 #   3. 其余按 rN 倒序留 KEEP 个
 echo "==> 删旧 tag (保留最近 $KEEP 个)"
-prod_tag="$(grep -hoE '^COMFY_IMAGE_REF=.+' "$ENVFILE" 2>/dev/null | cut -d: -f3- || true)"
-[ -n "$prod_tag" ] && echo "    生产在用: $prod_tag (永不删)"
+prod_tag="$(prod_tag_of "$ENVFILE")"
+if [ -n "$prod_tag" ]; then
+  echo "    生产在用: $prod_tag (永不删)"
+else
+  # 读不出来就**一个都不删**。宁可留着占盘, 也不能在"不知道线上用哪个"的情况下
+  # 动手 —— 删错的代价是线上冷启动退回全量拉取, 而且没有任何报错。
+  echo "    !! 读不出生产 tag ($ENVFILE) —— 保险起见跳过删旧" >&2
+  KEEP=999999
+fi
 
 mapfile -t all < <(docker images "$IMAGE" --format '{{.Tag}}' \
   | grep -E 'r[0-9]+$' | sort -t r -k2 -n -r)
