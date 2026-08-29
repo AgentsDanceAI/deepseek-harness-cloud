@@ -109,6 +109,17 @@ for t in "${all[@]}"; do
   docker rmi "$IMAGE:$t" >/dev/null 2>&1 && echo "    删除 $t" || echo "    !! $t 删除失败"
 done
 
+# --- 顺手清 ghcr (需要 delete:packages; 没有就跳过, 不当成失败) ---------------
+# ghcr 不占本机的盘, 但一天十几个 3.85GB 的版本堆着也不像话。演练/真删同一段
+# 代码, 安全条件与上面一致 —— 而且它**只删没被保留 tag 引用的**子清单:
+# 推上去的是 OCI 索引, 每个 tag 底下挂着 amd64 镜像与 attestation 两个无 tag
+# 版本, 照"无 tag 就删"来做会让 tag 还在却拉不动。
+if [ "${SKIP_GHCR_PRUNE:-0}" != "1" ] && [ "${SKIP_PUSH:-0}" != "1" ]; then
+  echo "==> 清 ghcr 旧版本"
+  KEEP="$KEEP" ENVFILE="$ENVFILE" python3 "$here/ghcr_prune.py" --apply \
+    || echo "    (跳过: 需要 token 带 delete:packages 权限)"
+fi
+
 echo
 echo "==> 现存 tag:"
 docker images "$IMAGE" --format '    {{.Tag}}  {{.Size}}  {{.CreatedSince}}'
