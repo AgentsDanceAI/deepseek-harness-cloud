@@ -76,11 +76,15 @@ def _caches() -> list[dict]:
 
 
 def _ref_sets() -> list[tuple[str, tuple[str, ...]]]:
-    """每个**已启用产品**的镜像集合 (主容器 + 伴随容器)。
+    """每个**已启用产品**的镜像集合 (主容器 + 伴随容器 + 初始化容器)。
 
-    栈产品 (Penpot/Coze/Dify) 一次要拉一组镜像 —— 缓存必须整组装下, 只缓存主
-    容器等于没缓存 (冷启动照样全量拉伴随容器)。单容器产品的集合就是一个元素,
+    栈产品 (Coze/Dify) 一次要拉一组镜像 —— 缓存必须整组装下, 只缓存主容器
+    等于没缓存 (冷启动照样全量拉伴随容器)。单容器产品的集合就是一个元素,
     行为与从前一致。
+
+    初始化容器的镜像也要算进来: 它虽小 (Coze 的资产镜像 ~50MB), 但**每个常规
+    容器都要等它跑完**才起 —— 漏了它, 缓存看着是"整组命中", 冷启动却仍要先去
+    registry 拉一次, 而这段等待加在所有容器前面。
 
     另一条旧教训继续有效: rebuild() 只删"哪个产品都不认"的缓存 —— 只按单个
     产品判会顺手删掉别的产品的缓存, 让冷启动退回全量拉取, 不报错只是变慢。
@@ -91,6 +95,7 @@ def _ref_sets() -> list[tuple[str, tuple[str, ...]]]:
     for product in products.enabled():
         refs = [(product.image_ref or product.image).strip()]
         refs += [sc.image_ref.strip() for sc in product.sidecars]
+        refs += [ic.image_ref.strip() for ic in product.init_containers]
         deduped = tuple(dict.fromkeys(r for r in refs if r))
         if deduped:
             sets.append((product.id, deduped))

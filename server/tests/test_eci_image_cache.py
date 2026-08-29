@@ -1,0 +1,50 @@
+"""ECI 镜像缓存的镜像集合。
+
+这里盯的是**只会变慢、不会报错**的一类错: 集合里漏一个镜像, 缓存照样报"命中",
+冷启动却要额外去 registry 拉一次 —— 用户看到的是转圈, 日志里什么都没有。
+2026-08-28 就这么让人「根本启动不了」过一次 (那次漏的是伴随容器)。
+"""
+
+import os
+import sys
+
+_here = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.dirname(_here))
+sys.path.insert(0, os.path.join(os.path.dirname(_here), "scripts"))
+
+import eci_image_cache  # noqa: E402
+from app import config  # noqa: E402
+
+
+def test_ref_set_covers_init_containers_too(monkeypatch):
+    """初始化容器的镜像必须进集合。
+
+    它虽小, 但**每个常规容器都要等它跑完**才起 —— 漏了它, 缓存看着是整组命中,
+    冷启动却仍要先拉一次, 而这段等待加在所有容器前面。
+    """
+    monkeypatch.setattr(config, "COZE_DOMAIN", "coze.test.local")
+    monkeypatch.setattr(config, "COZE_ASSETS_IMAGE_REF", "ghcr.io/x/coze-assets:t")
+    sets = dict(eci_image_cache._ref_sets())
+    assert "coze" in sets, "启用了却没进集合 —— 这个产品的缓存永远建不出来"
+    refs = sets["coze"]
+    assert "ghcr.io/x/coze-assets:t" in refs
+    # 主容器和伴随容器一个都不能少 (整组装不下 = 等于没缓存, 见 _covered)
+    assert "cozedev/coze-studio-web:0.5.1" in refs
+    assert "cozedev/coze-studio-server:0.5.1" in refs
+    assert "milvusdb/milvus:v2.5.10" in refs
+    # 同一个镜像用在两个容器上 (nsqlookupd/nsqd) 只该出现一次
+    assert refs.count("nsqio/nsq:v1.2.1") == 1
+
+
+def test_partial_cache_is_not_covered():
+    """部分命中不算命中。
+
+    缺谁谁就要全量拉, 而栈产品最大的往往正是伴随容器 (向量库/搜索引擎) ——
+    把部分命中当命中, 冷启动就从二十几秒变成几分钟。
+    """
+    refs = ("a:1", "b:2", "c:3")
+    assert eci_image_cache._covered(refs, [{"Status": "Ready", "Images": ["a:1", "b:2"]}]) is None
+    full = {"Status": "Ready", "Images": ["a:1", "b:2", "c:3", "d:4"]}
+    assert eci_image_cache._covered(refs, [full]) is full
+    # 没 Ready 的缓存不能算数 —— 还在建的缓存对冷启动没有任何帮助
+    assert eci_image_cache._covered(refs, [{"Status": "Creating", "Images": list(refs)}]) is None
