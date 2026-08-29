@@ -79,9 +79,11 @@ CATALOG: tuple[AppEntry, ...] = (
         '<path d="M12 19l7-7 3 3-7 7-3-3z"/><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"/>'
         '<path d="M2 2l7.586 7.586"/><circle cx="11" cy="11" r="2"/>',
     ),
+    # Penpot 曾在这个坑位 (还真上线过一天), 老板 2026-08-29 拍板换成 Excalidraw:
+    # 设计坑位归 open-design, 这里补一个白板类, 凑齐 16 格。
     AppEntry(
-        "penpot", "Penpot", "design",
-        '<path d="M12 3 5 13a7 7 0 0 0 14 0L12 3z"/><path d="M12 3v18"/>',
+        "excalidraw", "Excalidraw", "whiteboard",
+        '<path d="M4 20l3.5-1 11-11a2.1 2.1 0 0 0-3-3l-11 11L4 20z"/><path d="M13 6.5 17.5 11"/>',
     ),
     AppEntry(
         "open-webui", "Open WebUI", "chat",
