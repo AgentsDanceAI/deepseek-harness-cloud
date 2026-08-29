@@ -1297,3 +1297,10 @@ td.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size
 .hero-app.soon { opacity: .58; }
 .hero-app.soon:hover { opacity: .8; }
 @media (max-width: 900px) { .hero-apps { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+/* 首屏撑满视口: 高个子屏幕上 hero 内容之后不能露出下一节的白底 —— 深蓝一直
+   铺到折叠线, 内容在其中垂直居中。矮屏上 min-height 不生效, 照常滚动。 */
+.hero-fit .hero-dark-inner.hero-center {
+  min-height: calc(100vh - 64px);
+  display: flex; flex-direction: column; justify-content: center; width: 100%;
+}
