@@ -1720,6 +1720,117 @@ def test_open_design_disabled_without_domain_or_image(monkeypatch):
     assert "open-design" not in [p.id for p in products.enabled()]
 
 
+def _coze_ready(monkeypatch):
+    monkeypatch.setattr(config, "COZE_DOMAIN", "coze.test.local")
+    monkeypatch.setattr(config, "COZE_ASSETS_IMAGE_REF", "ghcr.io/x/coze-assets:0.5.1-r1")
+    return products.registry()["coze"]
+
+
+def test_coze_stack_shape(monkeypatch):
+    """10 个容器 + 1 个初始化容器, 主容器是上游的 nginx 前端。
+
+    容器数是有上限的 (ECI 容器组最多 20), 而漏掉一个中间件的症状散在别处:
+    没有 nsqd 就是工作流不执行、没有 milvus 就是知识库建不了 —— 都不会说
+    "少了个容器"。
+    """
+    prod = _coze_ready(monkeypatch)
+    assert prod.id in [p.id for p in products.enabled()]
+    assert prod.port == 80
+    names = [sc.name for sc in prod.sidecars]
+    assert names == ["coze-server", "mysql", "redis", "elasticsearch", "minio",
+                     "etcd", "milvus", "nsqlookupd", "nsqd"]
+    assert 1 + len(prod.sidecars) <= 20, "ECI 容器组最多 20 个容器"
+    assert len(prod.init_containers) == 1
+    assert prod.init_containers[0].image_ref == "ghcr.io/x/coze-assets:0.5.1-r1"
+    # 主容器要拿到 nginx 配置, coze-server 要拿到后端配置目录
+    assert prod.seeds == (("nginx", "/seed"),)
+    server = next(sc for sc in prod.sidecars if sc.name == "coze-server")
+    assert ("conf", "/app/resources/conf") in server.seeds
+
+
+def test_coze_minio_endpoint_must_stay_the_service_name(monkeypatch):
+    """MINIO_ENDPOINT 必须是 `minio:9000`, 不能"顺手"改成回环。
+
+    上游 nginx 用 `sub_filter 'minio:9000' '$http_host/local_storage'` 把后端
+    返回的对象存储直链改写成同源路径。写成 127.0.0.1:9000 的话改写不匹配 ——
+    **页面上的图片和附件全部打不开**, 而每个容器自己看都正常, 日志里一个错
+    都没有。这是这一栈里最容易被"统一成回环"清理掉的一行。
+    """
+    prod = _coze_ready(monkeypatch)
+    env = dict(next(sc for sc in prod.sidecars if sc.name == "coze-server").env)
+    assert env["MINIO_ENDPOINT"] == "minio:9000"
+    assert env["MINIO_API_HOST"] == "http://minio:9000"
+    # 而 host_aliases 得把这个名字指回环, 否则连都连不上
+    assert "minio" in prod.host_aliases
+    assert "coze-server" in prod.host_aliases, "nginx 的 proxy_pass 认这个名字"
+
+
+def test_coze_wires_our_gateway_so_users_need_no_api_key(monkeypatch):
+    """开箱就有模型可选: 模型 key 走网关凭据占位符, create 时换成该用户的令牌。
+
+    留着占位符没换 = 用户一发消息就是 401, 而错误显示在 Coze 的模型调用里,
+    看不出是我们没替换。
+    """
+    prod = _coze_ready(monkeypatch)
+    raw = dict(next(sc for sc in prod.sidecars if sc.name == "coze-server").env)
+    assert raw["MODEL_API_KEY_0"] == products.GATEWAY_TOKEN_PLACEHOLDER
+    assert raw["MODEL_BASE_URL_0"].endswith("/llm/v1")
+    assert raw["BUILTIN_CM_TYPE"] == "openai"
+
+    resolved = products.resolve_sidecars(prod.sidecars, "s" * 64, "tok_live")
+    env = dict(next(sc for sc in resolved if sc.name == "coze-server").env)
+    assert env["MODEL_API_KEY_0"] == "tok_live"
+    assert env["BUILTIN_CM_OPENAI_API_KEY"] == "tok_live"
+    # 一个占位符都不许漏 —— 漏了是运行期 401, 不是启动期报错
+    leftovers = [
+        (sc.name, k)
+        for sc in resolved
+        for k, v in sc.env
+        if "__DSH_" in v
+    ]
+    assert leftovers == [], f"没换掉的占位符: {leftovers}"
+
+
+def test_coze_plugin_aes_keys_are_16_bytes_and_per_user(monkeypatch):
+    """插件 OAuth 令牌的 AES 密钥: 必须正好 16 字节, 且按用户走。
+
+    长度不对时 Coze 报的错跟密钥无关, 排查方向完全指错; 而所有用户共用一把
+    的话, 加密的是**落库的用户数据** —— 那就等于没加密。
+    """
+    prod = _coze_ready(monkeypatch)
+    a = dict(products.resolve_sidecars(prod.sidecars, "a" * 64, "t")[0].env)
+    b = dict(products.resolve_sidecars(prod.sidecars, "b" * 64, "t")[0].env)
+    for key in ("PLUGIN_AES_AUTH_SECRET", "PLUGIN_AES_STATE_SECRET",
+                "PLUGIN_AES_OAUTH_TOKEN_SECRET"):
+        assert len(a[key].encode()) == 16, f"{key} 不是 16 字节"
+        assert a[key] != b[key], f"{key} 没有按用户区分"
+
+
+def test_coze_bitnami_middleware_runs_as_root(monkeypatch):
+    """bitnami/minio/milvus 那几个要以 root 跑。
+
+    它们镜像里的 USER 是 1001, 而 NAS 挂进来的目录是 root 的 —— 启动脚本里的
+    chown 会失败, 然后进程写不进数据目录。上游 compose 靠 `user: root`,
+    这里是等价物。漏了的症状是容器起来就退出, 日志里一句 Permission denied。
+    """
+    prod = _coze_ready(monkeypatch)
+    as_root = {sc.name for sc in prod.sidecars if sc.run_as_user == 0}
+    assert as_root == {"mysql", "redis", "elasticsearch", "minio", "etcd", "milvus"}
+
+
+def test_coze_disabled_without_domain_or_assets_image(monkeypatch):
+    """资产镜像没配就别出现在目录里。
+
+    空着的话容器组会被阿里云拒掉, 而用户看到的是一直转圈 —— 服务端不报错。
+    """
+    monkeypatch.setattr(config, "COZE_DOMAIN", "coze.test.local")
+    monkeypatch.setattr(config, "COZE_ASSETS_IMAGE_REF", "")
+    assert "coze" not in [p.id for p in products.enabled()]
+    monkeypatch.setattr(config, "COZE_DOMAIN", "")
+    monkeypatch.setattr(config, "COZE_ASSETS_IMAGE_REF", "ghcr.io/x/a:t")
+    assert "coze" not in [p.id for p in products.enabled()]
+
+
 def _dify_env(sidecars, name):
     return dict(next(s for s in sidecars if s.name == name).env)
 

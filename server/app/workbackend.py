@@ -34,6 +34,12 @@ from . import config
 log = logging.getLogger("dhc.work")
 
 
+#: 组内共享的种子卷名 (EmptyDir)。初始化容器往这里铺资产, 常规容器从这里取 ——
+#: 见 products.InitContainer。每次冷启动重铺, 所以换资产镜像就是换资产, 不会
+#: 留下"NAS 上还是上一版"这种半新半旧的状态。
+_SEED_VOLUME = "dshwork-seed"
+
+
 def cname(user_id: str) -> str:
     """Workspace name. Doubles as a docker-DNS hostname for Caddy's dynamic
     upstream, and as the ECI ContainerGroupName — both want the same charset."""
@@ -80,6 +86,8 @@ class Backend(abc.ABC):
         cpus: float = 0.0,
         sidecars: tuple = (),
         host_aliases: tuple = (),
+        init_containers: tuple = (),
+        seeds: tuple = (),
     ) -> None: ...
 
     @abc.abstractmethod
@@ -183,11 +191,13 @@ class DockerBackend(Backend):
         cpus: float = 0.0,
         sidecars: tuple = (),
         host_aliases: tuple = (),
+        init_containers: tuple = (),
+        seeds: tuple = (),
     ) -> None:
-        if sidecars:
-            # docker 后端一个容器就是一个容器, 拼不出共享网络命名空间的容器组。
-            # 明确拒绝 —— 静默忽略伴随容器的结果是应用起了但连不上数据库,
-            # 表现为一堆 500, 谁也想不到是后端不支持。
+        if sidecars or init_containers:
+            # docker 后端一个容器就是一个容器, 拼不出共享网络命名空间的容器组,
+            # 也没有初始化容器与组内共享卷。明确拒绝 —— 静默忽略的结果是应用起了
+            # 但连不上数据库/读不到配置, 表现为一堆 500, 谁也想不到是后端不支持。
             raise RuntimeError("多容器栈产品只有 ECI 后端能跑 (WORK_BACKEND=eci)")
         hexid = cname(user_id)[len("dshwork-") :]
         body = {
@@ -502,6 +512,8 @@ class EciBackend(Backend):
         cpus: float = 0.0,
         sidecars: tuple = (),
         host_aliases: tuple = (),
+        init_containers: tuple = (),
+        seeds: tuple = (),
     ) -> None:
         p = {
             "ContainerGroupName": cname(user_id),
@@ -534,7 +546,29 @@ class EciBackend(Backend):
         for i, (k, v) in enumerate(env.items(), start=1):
             p[f"Container.1.EnvironmentVar.{i}.Key"] = k
             p[f"Container.1.EnvironmentVar.{i}.Value"] = v
-        p.update(self._volume_params(user_id))
+        nas = self._volume_params(user_id)
+        p.update(nas)
+        # 种子卷: 初始化容器把资产镜像的内容铺进来, 常规容器再从这里取 ——
+        # compose 的 bind mount 在 ECI 上的等价物 (见 products.InitContainer)。
+        # 初始化容器**跑完**常规容器才起, 所以不需要任何等待循环。
+        if init_containers:
+            vi = 2 if nas else 1
+            p[f"Volume.{vi}.Name"] = _SEED_VOLUME
+            p[f"Volume.{vi}.Type"] = "EmptyDirVolume"
+            for k, ic in enumerate(init_containers, start=1):
+                p[f"InitContainer.{k}.Name"] = ic.name
+                p[f"InitContainer.{k}.Image"] = ic.image_ref
+                for j, arg in enumerate(ic.cmd, start=1):
+                    p[f"InitContainer.{k}.Command.{j}"] = arg
+                p[f"InitContainer.{k}.VolumeMount.1.Name"] = _SEED_VOLUME
+                p[f"InitContainer.{k}.VolumeMount.1.MountPath"] = ic.seed_mount
+        # 主容器的种子挂载接在 NAS 那两个之后 —— 编号是连续的, 空一格整个
+        # 请求就被阿里云按"到此为止"截断, 后面的挂载静默消失。
+        for j, (sub, path) in enumerate(seeds, start=(2 if nas else 0) + 1):
+            p[f"Container.1.VolumeMount.{j}.Name"] = _SEED_VOLUME
+            p[f"Container.1.VolumeMount.{j}.MountPath"] = path
+            if sub:
+                p[f"Container.1.VolumeMount.{j}.SubPath"] = sub
         # compose 服务名 -> 回环。写进组的 /etc/hosts, 于是镜像里写死的
         # "http://api:5001" 这类地址不用改就能通。
         if host_aliases:
@@ -547,6 +581,8 @@ class EciBackend(Backend):
         for ci, sc in enumerate(sidecars, start=2):
             p[f"Container.{ci}.Name"] = sc.name
             p[f"Container.{ci}.Image"] = sc.image_ref
+            if sc.run_as_user is not None:
+                p[f"Container.{ci}.SecurityContext.RunAsUser"] = str(sc.run_as_user)
             for j, arg in enumerate(sc.cmd, start=1):
                 p[f"Container.{ci}.Command.{j}"] = arg
             for j, (k, v) in enumerate(sc.env, start=1):
@@ -556,6 +592,11 @@ class EciBackend(Backend):
                 p[f"Container.{ci}.VolumeMount.{j}.Name"] = "dshwork-nas"
                 p[f"Container.{ci}.VolumeMount.{j}.MountPath"] = path
                 p[f"Container.{ci}.VolumeMount.{j}.SubPath"] = f"{hexid}/{subdir}"
+            for j, (sub, path) in enumerate(sc.seeds, start=len(sc.mounts) + 1):
+                p[f"Container.{ci}.VolumeMount.{j}.Name"] = _SEED_VOLUME
+                p[f"Container.{ci}.VolumeMount.{j}.MountPath"] = path
+                if sub:
+                    p[f"Container.{ci}.VolumeMount.{j}.SubPath"] = sub
         body = await self._call("CreateContainerGroup", p)
         # 每台实例都自动创建一个 EIP, 所以这一行就是"谁在什么时候占了一个 EIP"的
         # 唯一自有记录。没有它, 想回答"最近这些 EIP 都是谁申请的"只能去翻操作审计
