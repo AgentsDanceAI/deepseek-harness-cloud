@@ -72,10 +72,12 @@ CATALOG: tuple[AppEntry, ...] = (
         '<circle cx="5" cy="12" r="2.5"/><circle cx="19" cy="6" r="2.5"/><circle cx="19" cy="18" r="2.5"/>'
         '<path d="M7.5 12h4M16.6 6.8 11 10.7M16.6 17.2 11 13.3"/>',
     ),
+    # Open Design 顶替 SD WebUI: 生图已被 ComfyUI 覆盖, 而 open-design 是老板
+    # 点名的 (nexu-io/open-design —— AI 设计智能体, 里面跑的就是我们的 dsh)。
     AppEntry(
-        "sd-webui", "SD WebUI", "media",
-        '<rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="9" cy="9" r="2"/>'
-        '<path d="m3 17 5-5 4 4 3-3 6 6"/>',
+        "open-design", "Open Design", "design",
+        '<path d="M12 19l7-7 3 3-7 7-3-3z"/><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"/>'
+        '<path d="M2 2l7.586 7.586"/><circle cx="11" cy="11" r="2"/>',
     ),
     AppEntry(
         "penpot", "Penpot", "design",

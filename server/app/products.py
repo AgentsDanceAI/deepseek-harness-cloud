@@ -208,7 +208,22 @@ def registry() -> dict[str, Product]:
             reports_presence=False,
             tab_grace_min=config.COMFY_TAB_GRACE_MIN,
         ),
-        # 云空间的 open-design 坑位。第一个多容器栈产品 —— 它证明的是整条轨道
+        # Open Design: 智能体编排壳 (上游官方镜像**不带任何 agent CLI**, 托管
+        # 环境里干不了活 —— 衍生镜像 od-local 烤进了我们的 dsh, 见
+        # deploy/workspace-opendesign)。单容器, 比 dsh 还轻 (实测空载 166MB)。
+        "open-design": Product(
+            id="open-design",
+            name="Open Design",
+            image=config.OPEN_DESIGN_IMAGE_REF,
+            image_ref=config.OPEN_DESIGN_IMAGE_REF,
+            port=7456,
+            mem_mb=config.OPEN_DESIGN_MEM_LIMIT_MB,
+            cpus=config.OPEN_DESIGN_CPUS,
+            domain=config.OPEN_DESIGN_DOMAIN,
+            reports_presence=False,
+            tab_grace_min=config.PENPOT_TAB_GRACE_MIN,
+        ),
+        # Penpot: 传统设计工具坑位。第一个多容器栈产品 —— 它证明的是整条轨道
         # (sidecars/host_aliases/RestartPolicy=Always), Coze/Dify 沿用同一条。
         "penpot": Product(
             id="penpot",
@@ -379,7 +394,35 @@ def _penpot_boot() -> str:
     return 'exec /bin/bash /entrypoint.sh nginx -g "daemon off;"\n'
 
 
-_BOOTS = {DEFAULT: _dsh_boot, "comfyui": _comfyui_boot, "penpot": _penpot_boot}
+def _opendesign_boot() -> str:
+    """三步: 数据目录落 NAS、给 dsh 装 OpenDesign profile、拉起 daemon。
+
+    profile 装在用户的 /root/.dsh (NAS 持久化) —— 只装一次; 但 dsh 的插件
+    loader 从 dsh **自己的** node_modules 解析包名, 所以每次启动要把 profile
+    里的 @open-design 作用域软链过去 (镜像文件系统每次都是新的)。
+    没有这条软链的症状: probe 报 Cannot find package '@open-design/dsh-runtime',
+    UI 里 agent 显示 profile incompatible —— spike 时逐条踩过。
+    """
+    return (
+        "set -e\n"
+        "mkdir -p /workspace/.od\n"
+        "rm -rf /app/.od\n"
+        "ln -s /workspace/.od /app/.od\n"
+        "[ -f /root/.dsh/profiles/open-design/package.json ] || "
+        "dsh plugin --profile open-design add /opt/od-profile.tgz\n"
+        "ln -sfn /root/.dsh/profiles/open-design/node_modules/@open-design "
+        "/usr/local/lib/node_modules/@deepseek-ai/dsh/node_modules/@open-design\n"
+        "cd /app\n"
+        "exec node apps/daemon/dist/cli.js --no-open\n"
+    )
+
+
+_BOOTS = {
+    DEFAULT: _dsh_boot,
+    "comfyui": _comfyui_boot,
+    "penpot": _penpot_boot,
+    "open-design": _opendesign_boot,
+}
 
 
 def boot_script(product_id: str) -> str:
@@ -391,6 +434,24 @@ def boot_script(product_id: str) -> str:
 
 def env_for(product_id: str, token: str) -> dict[str, str]:
     gateway = config.PUBLIC_BASE.rstrip("/")
+    if product_id == "open-design":
+        return {
+            # daemon 自身
+            "NODE_ENV": "production",
+            "OD_BIND_HOST": "0.0.0.0",
+            "OD_PORT": "7456",
+            # 它的 API 鉴权是给公网裸奔场景准备的; 我们的 forward_auth 已经把
+            # 整个域挡在登录后面, 双层鉴权只会让前端配不上令牌而全挂。
+            "OD_DISABLE_API_AUTH": "1",
+            "OD_ALLOWED_ORIGINS": f"https://{config.OPEN_DESIGN_DOMAIN}" if config.OPEN_DESIGN_DOMAIN else "",
+            # 里面跑的 agent 是 dsh —— 与 dsh 工作台同一套网关凭据
+            "DSH_CLOUD_TOKEN": token,
+            "DEEPSEEK_API_KEY": token,
+            "DEEPSEEK_BASE_URL": f"{gateway}/llm/v1",
+            "DEEPSEEK_SEARCH_BASE_URL": f"{gateway}/llm/anthropic/v1",
+            "DSH_TELEMETRY_DISABLED": "1",
+            "DSH_PERMISSION_MODE": "danger-full-access",
+        }
     if product_id == "penpot":
         uri = f"https://{config.PENPOT_DOMAIN}" if config.PENPOT_DOMAIN else "http://127.0.0.1:8080"
         return {
