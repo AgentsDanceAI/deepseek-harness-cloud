@@ -217,6 +217,28 @@ def _dify_stack() -> tuple[Sidecar, ...]:
                     ("FORCE_VERIFYING_SIGNATURE", "true"),
                     ("PYTHON_ENV_INIT_TIMEOUT", "120"),
                     ("PLUGIN_MAX_EXECUTION_TIMEOUT", "600"),
+                    # 下面这些**不是可选项**: plugin daemon 在启动时逐个校验,
+                    # 缺一个就 exit 1 并 CrashLoopBackOff。2026-08-29 首次上
+                    # ECI 就栽在 PLUGIN_REMOTE_INSTALLING_HOST 上 —— 日志只有
+                    # 一句 "plugin remote installing host is empty"。
+                    # 教训: 这个容器的 env 要照抄验证过的那套, 不能凭"看起来
+                    # 像默认值"精简。
+                    ("DB_TYPE", "postgresql"),
+                    # 远程装插件是调试功能, 绑回环即可 —— 实例自带 EIP,
+                    # 绑 0.0.0.0 等于把它摆到公网上 (安全组是最后一道, 但没有
+                    # 理由多开一个面)。
+                    ("PLUGIN_REMOTE_INSTALLING_HOST", "127.0.0.1"),
+                    ("PLUGIN_REMOTE_INSTALLING_PORT", "5003"),
+                    ("PLUGIN_MEDIA_CACHE_PATH", "assets"),
+                    ("PLUGIN_PACKAGE_CACHE_PATH", "plugin_packages"),
+                    ("PLUGIN_MAX_FILE_SIZE", "52428800"),
+                    ("PLUGIN_STDIO_BUFFER_SIZE", "1024"),
+                    ("PLUGIN_STDIO_MAX_BUFFER_SIZE", "5242880"),
+                    ("PLUGIN_MODEL_SCHEMA_CACHE_TTL", "3600"),
+                    ("PLUGIN_PPROF_ENABLED", "false"),
+                    ("PLUGIN_SENTRY_ENABLED", "false"),
+                    ("PYTHONIOENCODING", "utf-8"),
+                    ("UV_CACHE_DIR", "/tmp/.uv-cache"),
                 ),
                 mounts=(("dify/plugin", "/app/storage"),)),
         Sidecar(name="sandbox", image_ref=f"langgenius/dify-sandbox:{config.DIFY_SANDBOX_VERSION}", env=(

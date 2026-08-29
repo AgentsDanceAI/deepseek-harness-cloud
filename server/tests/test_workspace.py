@@ -1758,3 +1758,20 @@ def test_dify_ssrf_proxy_is_blank_not_a_dead_address(monkeypatch):
 def test_dify_disabled_without_domain(monkeypatch):
     monkeypatch.setattr(config, "DIFY_DOMAIN", "")
     assert "dify" not in [p.id for p in products.enabled()]
+
+
+def test_dify_plugin_daemon_has_every_field_it_validates_at_boot(monkeypatch):
+    """plugin daemon 启动时逐个校验配置, 缺一个就 exit 1 -> CrashLoopBackOff。
+
+    2026-08-29 首次上 ECI 栽在 PLUGIN_REMOTE_INSTALLING_HOST 上 —— 日志只有
+    一句 "plugin remote installing host is empty", 而整个 Dify 的 UI/API 看起来
+    都正常 (插件市场用不了才会发现)。这些不是"看起来像默认值"的可选项。
+    """
+    monkeypatch.setattr(config, "DIFY_DOMAIN", "dify.test.local")
+    env = _dify_env(products.registry()["dify"].sidecars, "plugind")
+    for k in ("DB_TYPE", "PLUGIN_REMOTE_INSTALLING_HOST", "PLUGIN_REMOTE_INSTALLING_PORT",
+              "PLUGIN_MEDIA_CACHE_PATH", "PLUGIN_PACKAGE_CACHE_PATH", "SERVER_PORT",
+              "SERVER_KEY", "PLUGIN_STORAGE_LOCAL_ROOT", "PLUGIN_WORKING_PATH"):
+        assert env.get(k), f"plugind 缺必填项 {k} —— 它会启动即崩"
+    # 调试端口绑回环: 实例自带 EIP, 0.0.0.0 等于多开一个公网面
+    assert env["PLUGIN_REMOTE_INSTALLING_HOST"] == "127.0.0.1"
