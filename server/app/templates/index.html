@@ -3,7 +3,7 @@
 {% block head %}<script src="/static/hero-waves.js?v={{ asset_v }}" defer></script>{% endblock %}
 {% block content %}
 {# ============ Hero: 平台叙事。一个主张、一个主动作 (打开云空间)。 ============ #}
-<section class="hero-dark">
+<section class="hero-dark hero-fit">
   <canvas id="hero-waves" aria-hidden="true"></canvas>
   <div class="hero-grid" aria-hidden="true"></div>
   <div class="hero-dots" aria-hidden="true"></div>
@@ -17,7 +17,24 @@
       {{ t("home.sub") }}
     </p>
 
-    <div class="hero-actions-sub" style="justify-content:center;margin-top:26px">
+    {# 首屏即货架: 16 个产品一屏装完。瓦片是紧凑版 (名字 + 类目 + 状态灯),
+       详情与描述在 /apps —— 富卡片一张 260px 高, 4 行塞不进任何屏幕。
+       已上线的直达工作台; 没上线的去 /apps 看全景, 不是死链接。 #}
+    <div class="hero-apps">
+      {% for app in apps %}
+      {% if app.live and apps_clickable %}
+      <a class="hero-app is-live" href="{{ apps_base }}{{ '/work' if app.id == 'dsh' else '/work?product_id=' + app.id }}">
+      {% else %}
+      <a class="hero-app soon" href="/apps">
+      {% endif %}
+        <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{{ app.icon | safe }}</svg>
+        <span class="ha-txt"><b>{{ app.name }}</b><i>{{ t("apps.cat." + app.cat) }}</i></span>
+        <span class="ha-dot {{ 'on' if app.live }}" aria-hidden="true"></span>
+      </a>
+      {% endfor %}
+    </div>
+
+    <div class="hero-actions-sub" style="justify-content:center;margin-top:24px">
       <a class="btn btn-primary" href="/apps">
         <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7.5" height="7.5" rx="1.6"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="1.6"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="1.6"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.6"/></svg>
         {{ t("home.hero.cta_apps") }}
@@ -39,25 +56,8 @@
   </div>
 </section>
 
-{# ============ 门面: 16 张产品卡。主页即货架, 与 /apps 共用同一张卡。 ============ #}
-<section class="section">
-  <div class="container">
-    <div class="center">
-      <span class="eyebrow">{{ t("home.apps.eyebrow") }}</span>
-      <h2 class="section-title">{{ t("home.apps.title") }}</h2>
-      <p class="section-lede">{{ t("home.apps.lede") }}</p>
-    </div>
-    <div class="grid-4 apps-grid" style="margin-top:28px">
-      {% for app in apps %}
-      {% include "_app_card.html" %}
-      {% endfor %}
-    </div>
-    <p class="muted small center" style="margin-top:22px">{{ t("apps.count_live", live=live_count) }} · <a href="/apps">{{ t("home.apps.cta") }}</a></p>
-  </div>
-</section>
-
 {# ============ 旗舰: 左 DSH (composer 保留原 id/行为), 右 ComfyUI。 ============ #}
-<section class="section" style="padding-top:0">
+<section class="section">
   <div class="container">
     <div class="center">
       <span class="eyebrow">{{ t("home.flag.eyebrow") }}</span>

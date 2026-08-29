@@ -1270,3 +1270,30 @@ td.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size
 .flag-models { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0 22px; }
 .flag-models span { font-size: 12.5px; padding: 4px 11px; border-radius: 999px;
   border: 1px solid var(--border); color: var(--muted); background: var(--card); }
+
+/* ---------- 首屏即货架: hero 里的 16 格紧凑瓦片, 一屏装完 ---------- */
+.hero-fit .hero-dark-inner.hero-center { max-width: 1120px; padding-top: 44px; padding-bottom: 40px; }
+.hero-fit .hero-center h1 { font-size: clamp(28px, 3.6vw, 42px); letter-spacing: -.8px; }
+.hero-fit .hero-center .hero-sub-dark { max-width: 780px; font-size: clamp(14px, 1.35vw, 15.5px); margin-top: 12px; }
+.hero-fit .hero-checks { margin-top: 18px; font-size: 12.5px; gap: 6px 22px; }
+.hero-fit .hero-note-dark { font-size: 12px; }
+.hero-apps {
+  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px;
+  margin: 26px auto 0; text-align: left;
+}
+.hero-app {
+  display: flex; align-items: center; gap: 11px; padding: 12px 14px; border-radius: 12px;
+  background: rgba(255, 255, 255, .06); border: 1px solid rgba(255, 255, 255, .10);
+  color: #eaf0fb; text-decoration: none;
+  transition: background .15s, border-color .15s, transform .15s;
+}
+.hero-app svg { flex: none; color: #8fb0e8; }
+.hero-app .ha-txt { display: flex; flex-direction: column; min-width: 0; line-height: 1.3; }
+.hero-app .ha-txt b { font-size: 14px; font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hero-app .ha-txt i { font-style: normal; font-size: 11px; color: #93a7cc; }
+.hero-app .ha-dot { width: 7px; height: 7px; border-radius: 50%; background: rgba(255, 255, 255, .22); margin-left: auto; flex: none; }
+.hero-app .ha-dot.on { background: #5fd39a; box-shadow: 0 0 8px rgba(95, 211, 154, .75); }
+.hero-app:hover { background: rgba(255, 255, 255, .11); border-color: rgba(255, 255, 255, .24); transform: translateY(-1px); }
+.hero-app.soon { opacity: .58; }
+.hero-app.soon:hover { opacity: .8; }
+@media (max-width: 900px) { .hero-apps { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
