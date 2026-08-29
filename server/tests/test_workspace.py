@@ -1634,44 +1634,6 @@ def test_preset_workflows_update_only_when_untouched():
     assert 'cp "$f" "$mark"' in boot, "更新后必须同步标记, 否则下次又判成被改过"
 
 
-def test_penpot_stack_spec(monkeypatch):
-    """Penpot 是第一个多容器栈产品 —— 它的规格错了, 整条轨道等于白铺。
-
-    钉三件事: 密钥占位符**必须被替换掉** (漏替换 = 每个用户的 Penpot 用同一个
-    公开字符串签会话); 同一用户两次解析得到同一个密钥 (实例重建后会话不作废);
-    不同用户不同密钥。
-    """
-    monkeypatch.setattr(config, "PENPOT_DOMAIN", "design.test.local")
-    prod = products.registry()["penpot"]
-    assert prod.id in [p.id for p in products.enabled()]
-    assert prod.port == 8080
-    assert len(prod.sidecars) == 4
-    assert {sc.name for sc in prod.sidecars} == {"backend", "exporter", "postgres", "valkey"}
-    for name in ("penpot-backend", "penpot-postgres", "penpot-valkey"):
-        assert name in prod.host_aliases
-
-    s1 = security.stack_secret("u_a")
-    resolved = products.resolve_sidecars(prod.sidecars, s1)
-    flat = str([sc.env for sc in resolved])
-    assert products.STACK_SECRET_PLACEHOLDER not in flat, "占位符漏替换 = 公开密钥"
-    assert s1 in flat, "后端没拿到密钥"
-    assert security.stack_secret("u_a") == s1, "同一用户必须确定性 —— 重建后会话不作废"
-    assert security.stack_secret("u_b") != s1, "不同用户不能共用密钥"
-
-    # 主容器 env: 前端把后端/导出器指到回环
-    env = products.env_for("penpot", "tok_x")
-    assert env["PENPOT_BACKEND_URI"] == "http://127.0.0.1:6060"
-    assert env["PENPOT_PUBLIC_URI"] == "https://design.test.local"
-    # boot 必须复刻前端镜像自己的 entrypoint —— create 会顶掉镜像 Cmd
-    assert "entrypoint.sh" in products.boot_script("penpot")
-
-
-def test_penpot_disabled_without_domain(monkeypatch):
-    """自部署默认不启用 (与 comfy 同一约定): 域名留空就不在 enabled 里。"""
-    monkeypatch.setattr(config, "PENPOT_DOMAIN", "")
-    assert "penpot" not in [p.id for p in products.enabled()]
-
-
 def test_open_design_product_spec(monkeypatch):
     """Open Design: 单容器, 里面跑 dsh。三处一错就整个产品是死的:
 
