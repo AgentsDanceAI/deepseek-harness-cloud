@@ -1665,3 +1665,96 @@ def test_open_design_product_spec(monkeypatch):
 def test_open_design_disabled_without_domain_or_image(monkeypatch):
     monkeypatch.setattr(config, "OPEN_DESIGN_DOMAIN", "")
     assert "open-design" not in [p.id for p in products.enabled()]
+
+
+def _dify_env(sidecars, name):
+    return dict(next(s for s in sidecars if s.name == name).env)
+
+
+def test_dify_stack_avoids_the_shared_namespace_port_collisions(monkeypatch):
+    """ECI 容器组共享网络命名空间 —— compose 里各有 IP 所以能撞的端口, 在这里
+    会真撞。2026-08-29 spike 里逐个跑出来的三处, 每处都不会在 ECI 侧报错。
+
+    api 与 api_websocket 都默认 5001: 后起的那个绑不上, 容器反复重启。
+    """
+    monkeypatch.setattr(config, "DIFY_DOMAIN", "dify.test.local")
+    prod = products.registry()["dify"]
+    assert len(prod.sidecars) == 9, "主容器 nginx + 9 个伴随 = 10"
+
+    used = {}
+    for sc in prod.sidecars:
+        for k, v in sc.env:
+            if k in ("DIFY_PORT", "SERVER_PORT", "SANDBOX_PORT", "PORT"):
+                used.setdefault(v, []).append(sc.name)
+    dupes = {p: n for p, n in used.items() if len(n) > 1}
+    assert not dupes, f"共享命名空间里端口撞了: {dupes}"
+    assert _dify_env(prod.sidecars, "api")["DIFY_PORT"] == "5001"
+    assert _dify_env(prod.sidecars, "api-ws")["DIFY_PORT"] == "5011"
+
+
+def test_dify_web_binds_all_interfaces(monkeypatch):
+    """Next.js standalone 不设 HOSTNAME 就绑容器 IP 而不是 0.0.0.0 ——
+    回环够不着, 症状是 nginx 回 502 而 web 容器一切正常。"""
+    monkeypatch.setattr(config, "DIFY_DOMAIN", "dify.test.local")
+    web = _dify_env(products.registry()["dify"].sidecars, "web")
+    assert web["HOSTNAME"] == "0.0.0.0", "不绑 0.0.0.0 -> 502"
+
+
+def test_dify_secret_key_is_per_user_and_not_a_placeholder(monkeypatch):
+    """compose 的 .env.example 把 SECRET_KEY 留空。空着**不影响启动**, 但注册
+    成功之后登录报 Invalid encrypted data —— 加密解密对不上, 而且没有堆栈。
+
+    必须按用户确定性推导: 换一个值, 用户已有的账号与凭据全部作废。
+    """
+    monkeypatch.setattr(config, "DIFY_DOMAIN", "dify.test.local")
+    prod = products.registry()["dify"]
+    raw = _dify_env(prod.sidecars, "api")["SECRET_KEY"]
+    assert raw == products.STACK_SECRET_PLACEHOLDER, "SECRET_KEY 该是占位符"
+
+    s1 = security.stack_secret("u_a")
+    resolved = products.resolve_sidecars(prod.sidecars, s1)
+    for name in ("api", "api-ws", "worker"):
+        got = _dify_env(resolved, name)["SECRET_KEY"]
+        assert got == s1, f"{name} 的 SECRET_KEY 没被替换"
+    assert products.STACK_SECRET_PLACEHOLDER not in str([sc.env for sc in resolved])
+    assert security.stack_secret("u_a") == s1
+    assert security.stack_secret("u_b") != s1
+
+
+def test_dify_celery_backend_is_a_type_not_a_host(monkeypatch):
+    """CELERY_BACKEND=redis 是**后端类型**, CELERY_BROKER_URL 的 redis:// 是
+    **scheme** —— 都不是主机名。做主机改写时把它俩一起换成回环, celery 会报
+    `No such transport: ''`, 那句话完全不指向根因 (spike 里栽过)。
+    """
+    monkeypatch.setattr(config, "DIFY_DOMAIN", "dify.test.local")
+    api = _dify_env(products.registry()["dify"].sidecars, "api")
+    assert api["CELERY_BACKEND"] == "redis", "后端类型被当成主机名换掉了"
+    assert api["CELERY_BROKER_URL"].startswith("redis://"), "scheme 被换掉了"
+    assert "@127.0.0.1:6379" in api["CELERY_BROKER_URL"], "主机没指回环"
+
+
+def test_dify_nginx_conf_is_generated_with_literal_loopback(monkeypatch):
+    """官方 nginx 配置用 `set $up api:5001` + `resolver 127.0.0.11` (Docker
+    内嵌 DNS)。nginx 的 resolver **不读 /etc/hosts** —— host_aliases 兜不住,
+    所以 conf 由启动脚本自己生成, upstream 写死回环。
+    """
+    boot = products.boot_script("dify")
+    assert "resolver" not in boot, "别把 docker DNS resolver 抄进来"
+    assert "proxy_pass http://127.0.0.1:5001" in boot
+    assert "proxy_pass http://127.0.0.1:3000" in boot
+    assert "location /socket.io/" in boot and "127.0.0.1:5011" in boot
+    assert "exec nginx" in boot
+
+
+def test_dify_ssrf_proxy_is_blank_not_a_dead_address(monkeypatch):
+    """我们不跑 squid (它要挂配置文件)。留着指向不存在的 3128 的话,
+    HTTP 请求节点会全部超时失败 —— 留空 = 直出。"""
+    monkeypatch.setattr(config, "DIFY_DOMAIN", "dify.test.local")
+    api = _dify_env(products.registry()["dify"].sidecars, "api")
+    assert api["SSRF_PROXY_HTTP_URL"] == ""
+    assert api["SSRF_PROXY_HTTPS_URL"] == ""
+
+
+def test_dify_disabled_without_domain(monkeypatch):
+    monkeypatch.setattr(config, "DIFY_DOMAIN", "")
+    assert "dify" not in [p.id for p in products.enabled()]

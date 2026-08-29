@@ -79,7 +79,7 @@
   "apps.d.code-server": "Full VS Code in the browser — extensions, terminal, debugging included.",
   "apps.d.comfyui": "Node-graph canvas for image & video generation — Seedance, Wan and Qwen-Image ready to pick.",
   "apps.d.coze": "ByteDance's open-source agent platform: agents, knowledge bases, workflows and plugins — build and publish in one place.",
-  "apps.d.dify": "Visual LLM app platform: workflows, knowledge bases and agents in one place.",
+  "apps.d.dify": "Visual LLM app platform: workflows, knowledge bases and agents, with models through the platform gateway.",
   "apps.d.dsh": "The general agent: writes code, researches, runs commands, ships results. Our flagship.",
   "apps.d.excalidraw": "A hand-drawn style whiteboard: architecture diagrams, flows and sketches, with live collaboration.",
   "apps.d.jupyter": "Notebooks for analysis and visualization, Python environment ready to go.",

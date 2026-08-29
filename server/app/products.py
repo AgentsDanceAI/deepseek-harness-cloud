@@ -116,6 +116,175 @@ def resolve_sidecars(sidecars: tuple[Sidecar, ...], secret: str) -> tuple[Sideca
     )
 
 
+# ---- Dify (LLM 应用搭建, 10 容器栈) ----------------------------------------
+#
+# 组内所有容器共享网络命名空间, 全部走 127.0.0.1。三个坑是 2026-08-29 用
+# `docker run --network=container:` (与 ECI 容器组同款语义) 逐个跑出来的:
+#
+#   1. api 与 api_websocket 都默认监听 5001 —— compose 里各有 IP 所以不冲突,
+#      共享命名空间里会撞。给 websocket 那个 DIFY_PORT=5011。
+#      (同理 sandbox/local_sandbox、两个 ssrf_proxy 也撞, 各只保留一个。)
+#   2. web 是 Next.js standalone, 不设 HOSTNAME 就绑容器 IP 而不是 0.0.0.0 ——
+#      回环够不着, nginx 侧表现为 502。
+#   3. 官方 nginx 配置用 `set $up api:5001; proxy_pass http://$up;` +
+#      `resolver 127.0.0.11` (Docker 内嵌 DNS)。nginx 的 resolver **不读
+#      /etc/hosts**, 所以 host_aliases 兜不住它 —— 我们自己生成 conf, upstream
+#      写死回环, 绕开 resolver。
+#
+# 还有一个不报错的坑: compose 的 .env.example 把 SECRET_KEY 留空等运维填。
+# 空着不影响启动, 但**注册成功、登录报 Invalid encrypted data** —— 所以它走
+# STACK_SECRET_PLACEHOLDER, 按用户确定性推导 (实例重建后账号还能登)。
+_DIFY_DB_PASSWORD = "difyai123456"
+_DIFY_REDIS_PASSWORD = "difyai123456"
+_DIFY_WEAVIATE_KEY = "WVF5YThaHlkYwhGUSmCRgsX3tD5ngdN8pkih"
+_DIFY_SANDBOX_KEY = "dify-sandbox"
+_DIFY_INNER_KEY = "QaHbTe77CtuXmsfyhR7+vRjI/+XbV1AaFy691iy+kGDv2Jvy0/eAh8Y1"
+_DIFY_PLUGIN_KEY = "lYkiYYT6owG+71oLerGzA7GXCgOT++6ovaezWAjpCjf+Sjc3ZtU+qUEi"
+# 上面这些是**组内回环**上的凭据: 库、缓存、向量库、沙箱都只在容器组内可达,
+# 跨用户隔离靠网络边界与 NAS 子路径, 不靠这几个常量 (与 Penpot 同一判断)。
+# 只有 SECRET_KEY 加密的是**落库的用户数据**, 所以它必须按用户走。
+
+_DIFY_DB_ENV = (
+    ("DB_HOST", "127.0.0.1"), ("DB_PORT", "5432"), ("DB_USERNAME", "postgres"),
+    ("DB_PASSWORD", _DIFY_DB_PASSWORD), ("DB_DATABASE", "dify"),
+    ("REDIS_HOST", "127.0.0.1"), ("REDIS_PORT", "6379"),
+    ("REDIS_PASSWORD", _DIFY_REDIS_PASSWORD), ("REDIS_DB", "0"), ("REDIS_USE_SSL", "false"),
+    ("CELERY_BROKER_URL", f"redis://:{_DIFY_REDIS_PASSWORD}@127.0.0.1:6379/1"),
+    # CELERY_BACKEND 是**后端类型**不是主机名 —— 早先做文本改写时把它连同
+    # `redis://` 的 scheme 一起换成了 127.0.0.1, celery 报 `No such transport: ''`。
+    ("CELERY_BACKEND", "redis"),
+)
+
+_DIFY_APP_ENV = _DIFY_DB_ENV + (
+    ("SECRET_KEY", STACK_SECRET_PLACEHOLDER),
+    ("VECTOR_STORE", "weaviate"),
+    ("WEAVIATE_ENDPOINT", "http://127.0.0.1:8080"),
+    ("WEAVIATE_API_KEY", _DIFY_WEAVIATE_KEY),
+    ("STORAGE_TYPE", "opendal"), ("OPENDAL_SCHEME", "fs"), ("OPENDAL_FS_ROOT", "storage"),
+    ("MIGRATION_ENABLED", "true"),
+    ("PLUGIN_DAEMON_URL", "http://127.0.0.1:5002"),
+    ("PLUGIN_DAEMON_KEY", _DIFY_PLUGIN_KEY),
+    ("INNER_API_KEY_FOR_PLUGIN", _DIFY_INNER_KEY),
+    ("PLUGIN_MAX_PACKAGE_SIZE", "52428800"),
+    ("CODE_EXECUTION_ENDPOINT", "http://127.0.0.1:8194"),
+    ("CODE_EXECUTION_API_KEY", _DIFY_SANDBOX_KEY),
+    ("LOG_LEVEL", "INFO"), ("DEPLOY_ENV", "PRODUCTION"),
+    # 不跑 squid: 它要挂配置文件, 而我们的每用户容器组本来就是隔离边界。
+    # 留空 = 不经代理直出; 留着指向不存在的 3128 会让 HTTP 请求节点全挂。
+    ("SSRF_PROXY_HTTP_URL", ""), ("SSRF_PROXY_HTTPS_URL", ""),
+    ("MARKETPLACE_ENABLED", "true"),
+    ("MARKETPLACE_API_URL", "https://marketplace.dify.ai"),
+)
+
+
+def _dify_stack() -> tuple[Sidecar, ...]:
+    v = config.DIFY_VERSION
+    api_img = f"langgenius/dify-api:{v}"
+    return (
+        Sidecar(name="api", image_ref=api_img,
+                env=_DIFY_APP_ENV + (("MODE", "api"), ("DIFY_PORT", "5001")),
+                mounts=(("dify/storage", "/app/api/storage"),)),
+        # 同一个镜像的第二份, 只为 websocket —— 必须换端口, 否则与 api 撞 5001
+        Sidecar(name="api-ws", image_ref=api_img,
+                env=_DIFY_APP_ENV + (("MODE", "api"), ("DIFY_PORT", "5011")),
+                mounts=(("dify/storage", "/app/api/storage"),)),
+        Sidecar(name="worker", image_ref=api_img,
+                env=_DIFY_APP_ENV + (("MODE", "worker"),),
+                mounts=(("dify/storage", "/app/api/storage"),)),
+        Sidecar(name="web", image_ref=f"langgenius/dify-web:{v}", env=(
+            # 空 URL = 同源。整站在一个域上, 前端拼相对路径即可。
+            ("CONSOLE_API_URL", ""), ("APP_API_URL", ""),
+            ("SERVER_CONSOLE_API_URL", "http://127.0.0.1:5001"),
+            ("MARKETPLACE_API_URL", "https://marketplace.dify.ai"),
+            ("MARKETPLACE_URL", "https://marketplace.dify.ai"),
+            ("NEXT_TELEMETRY_DISABLED", "1"),
+            ("TEXT_GENERATION_TIMEOUT_MS", "60000"),
+            # Next.js standalone 不设这个就绑容器 IP, 回环打不进去 -> 502
+            ("HOSTNAME", "0.0.0.0"), ("PORT", "3000"),
+        )),
+        Sidecar(name="plugind", image_ref=f"langgenius/dify-plugin-daemon:{config.DIFY_PLUGIN_DAEMON_VERSION}",
+                env=_DIFY_DB_ENV + (
+                    # 它自己另建一个库 (不需要 initdb 脚本, 实测会自建)
+                    ("DB_DATABASE", "dify_plugin"), ("DB_SSL_MODE", "disable"),
+                    ("SERVER_PORT", "5002"), ("SERVER_KEY", _DIFY_PLUGIN_KEY),
+                    ("DIFY_INNER_API_URL", "http://127.0.0.1:5001"),
+                    ("DIFY_INNER_API_KEY", _DIFY_INNER_KEY),
+                    ("MAX_PLUGIN_PACKAGE_SIZE", "52428800"),
+                    ("PLUGIN_STORAGE_TYPE", "local"),
+                    ("PLUGIN_STORAGE_LOCAL_ROOT", "/app/storage"),
+                    ("PLUGIN_WORKING_PATH", "/app/storage/cwd"),
+                    ("PLUGIN_INSTALLED_PATH", "plugin"),
+                    ("FORCE_VERIFYING_SIGNATURE", "true"),
+                    ("PYTHON_ENV_INIT_TIMEOUT", "120"),
+                    ("PLUGIN_MAX_EXECUTION_TIMEOUT", "600"),
+                ),
+                mounts=(("dify/plugin", "/app/storage"),)),
+        Sidecar(name="sandbox", image_ref=f"langgenius/dify-sandbox:{config.DIFY_SANDBOX_VERSION}", env=(
+            ("API_KEY", _DIFY_SANDBOX_KEY), ("GIN_MODE", "release"),
+            ("WORKER_TIMEOUT", "15"), ("ENABLE_NETWORK", "true"), ("SANDBOX_PORT", "8194"),
+        )),
+        Sidecar(name="postgres", image_ref="postgres:15-alpine", env=(
+            ("POSTGRES_USER", "postgres"), ("POSTGRES_PASSWORD", _DIFY_DB_PASSWORD),
+            ("POSTGRES_DB", "dify"),
+            # 数据放子目录: NAS 子路径上可能有 lost+found 之类, initdb 拒绝非空目录
+            ("PGDATA", "/var/lib/postgresql/data/pgdata"),
+        ), mounts=(("dify/pg", "/var/lib/postgresql/data"),)),
+        Sidecar(name="redis", image_ref="redis:6-alpine",
+                cmd=("redis-server", "--requirepass", _DIFY_REDIS_PASSWORD),
+                mounts=(("dify/redis", "/data"),)),
+        Sidecar(name="weaviate", image_ref="semitechnologies/weaviate:1.27.0", env=(
+            ("PERSISTENCE_DATA_PATH", "/var/lib/weaviate"),
+            ("QUERY_DEFAULTS_LIMIT", "25"),
+            ("AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED", "true"),
+            ("DEFAULT_VECTORIZER_MODULE", "none"),
+            ("CLUSTER_HOSTNAME", "node1"),
+            ("AUTHENTICATION_APIKEY_ENABLED", "true"),
+            ("AUTHENTICATION_APIKEY_ALLOWED_KEYS", _DIFY_WEAVIATE_KEY),
+            ("AUTHENTICATION_APIKEY_USERS", "dsh@dshcloud.online"),
+            ("AUTHORIZATION_ADMINLIST_ENABLED", "true"),
+            ("AUTHORIZATION_ADMINLIST_USERS", "dsh@dshcloud.online"),
+        ), mounts=(("dify/weaviate", "/var/lib/weaviate"),)),
+    )
+
+
+def _dify_boot() -> str:
+    """主容器是 nginx。**配置我们自己生成** —— 官方那份用 `set $up api:5001` +
+    `resolver 127.0.0.11` (Docker 内嵌 DNS), 而 nginx 的 resolver 不读
+    /etc/hosts, host_aliases 兜不住; upstream 写死回环就绕开了整个解析环节。
+    """
+    return (
+        "set -e\n"
+        "cat > /etc/nginx/conf.d/default.conf <<'NGINXCONF'\n"
+        "server {\n"
+        "  listen 80;\n"
+        "  server_name _;\n"
+        "  client_max_body_size 100m;\n"
+        "  proxy_set_header Host $host;\n"
+        "  proxy_set_header X-Real-IP $remote_addr;\n"
+        "  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n"
+        "  proxy_set_header X-Forwarded-Proto $scheme;\n"
+        "  proxy_http_version 1.1;\n"
+        "  proxy_read_timeout 3600s;\n"
+        "  proxy_send_timeout 3600s;\n"
+        "  location /console/api { proxy_pass http://127.0.0.1:5001; }\n"
+        "  location /api         { proxy_pass http://127.0.0.1:5001; }\n"
+        "  location /v1          { proxy_pass http://127.0.0.1:5001; }\n"
+        "  location /openapi     { proxy_pass http://127.0.0.1:5001; }\n"
+        "  location /files       { proxy_pass http://127.0.0.1:5001; }\n"
+        "  location /mcp         { proxy_pass http://127.0.0.1:5001; }\n"
+        "  location /triggers    { proxy_pass http://127.0.0.1:5001; }\n"
+        "  location /e/ { proxy_pass http://127.0.0.1:5002; "
+        "proxy_set_header Dify-Hook-Url $scheme://$host$request_uri; }\n"
+        "  location /socket.io/ { proxy_pass http://127.0.0.1:5011; "
+        'proxy_set_header Upgrade $http_upgrade; proxy_set_header Connection "upgrade"; }\n'
+        "  location /explore { proxy_pass http://127.0.0.1:3000; }\n"
+        "  location / { proxy_pass http://127.0.0.1:3000; }\n"
+        "}\n"
+        "NGINXCONF\n"
+        "exec nginx -g 'daemon off;'\n"
+    )
+
+
 def registry() -> dict[str, Product]:
     return {
         DEFAULT: Product(
@@ -140,6 +309,24 @@ def registry() -> dict[str, Product]:
             # ComfyUI 不认识 /api/work/active, 也不经网关跑模型。
             reports_presence=False,
             tab_grace_min=config.COMFY_TAB_GRACE_MIN,
+        ),
+        # Dify: LLM 应用搭建。10 容器栈 —— 走 Sidecar 那条轨道, 伴随容器全部
+        # 上游原生镜像。实测空载约 1.9GB (4 个 Python 进程是大头), 4G 组够用。
+        "dify": Product(
+            id="dify",
+            name="Dify",
+            image=f"nginx:1.27-alpine",
+            image_ref="nginx:1.27-alpine",
+            port=80,
+            mem_mb=config.DIFY_MEM_LIMIT_MB,
+            cpus=config.DIFY_CPUS,
+            domain=config.DIFY_DOMAIN,
+            reports_presence=False,
+            tab_grace_min=config.DIFY_TAB_GRACE_MIN,
+            sidecars=_dify_stack(),
+            # 栈内互相用回环, 这里只兜住万一漏改的服务名引用。
+            host_aliases=("api", "api_websocket", "web", "db_postgres", "redis",
+                          "weaviate", "plugin_daemon", "sandbox", "nginx"),
         ),
         # Open Design: 智能体编排壳 (上游官方镜像**不带任何 agent CLI**, 托管
         # 环境里干不了活 —— 衍生镜像 od-local 烤进了我们的 dsh, 见
@@ -328,6 +515,7 @@ _BOOTS = {
     DEFAULT: _dsh_boot,
     "comfyui": _comfyui_boot,
     "open-design": _opendesign_boot,
+    "dify": _dify_boot,
 }
 
 
@@ -340,6 +528,9 @@ def boot_script(product_id: str) -> str:
 
 def env_for(product_id: str, token: str) -> dict[str, str]:
     gateway = config.PUBLIC_BASE.rstrip("/")
+    if product_id == "dify":
+        # 主容器只是 nginx —— 业务 env 全在伴随容器上 (见 _dify_stack)。
+        return {}
     if product_id == "open-design":
         return {
             # daemon 自身
