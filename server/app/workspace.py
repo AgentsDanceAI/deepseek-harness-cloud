@@ -227,7 +227,9 @@ async def _create(user: dict, product: products.Product) -> None:
     boot = products.boot_script(product.id)
     # 栈产品 env 里的密钥占位符在这里换成该用户的确定性密钥 —— 产品定义是静态
     # 数据, 而密钥按用户走; 确定性是为了实例重建后应用内会话不作废。
-    sidecars = products.resolve_sidecars(product.sidecars, security.stack_secret(user["id"]))
+    sidecars = products.resolve_sidecars(
+        product.sidecars, security.stack_secret(user["id"]), token
+    )
     await backend().create(
         products.wskey(user["id"], product.id),
         boot=boot,
@@ -239,6 +241,8 @@ async def _create(user: dict, product: products.Product) -> None:
         cpus=product.cpus,
         sidecars=sidecars,
         host_aliases=product.host_aliases,
+        init_containers=product.init_containers,
+        seeds=product.seeds,
     )
 
 

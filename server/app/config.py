@@ -303,6 +303,19 @@ DIFY_SANDBOX_VERSION = _env("DIFY_SANDBOX_VERSION", "0.2.15")
 DIFY_MEM_LIMIT_MB = _env_int("DIFY_MEM_LIMIT_MB", 4096)
 DIFY_CPUS = _env_float("DIFY_CPUS", 2.0)
 DIFY_TAB_GRACE_MIN = _env_int("DIFY_TAB_GRACE_MIN", 10)
+
+# Coze Studio (10 容器栈)。COZE_VERSION 同时钉 server 与 web 两个镜像;
+# COZE_ASSETS_IMAGE_REF 是我们自建的资产镜像 (deploy/workspace-coze), 它的
+# tag 里带着同一个版本号 —— **两者必须同源**, 错位就是库 schema 与二进制对不上。
+COZE_DOMAIN = _env("COZE_DOMAIN", "")
+COZE_VERSION = _env("COZE_VERSION", "0.5.1")
+COZE_ASSETS_IMAGE_REF = _env("COZE_ASSETS_IMAGE_REF", "")
+# 这一栈里有 Elasticsearch + Milvus + MySQL, 是目前最重的产品。
+# 4 vCPU / 12 GiB 是实测能起来的下限 (ES 堆 1G, Milvus ~2G)。
+COZE_MEM_LIMIT_MB = _env_int("COZE_MEM_LIMIT_MB", 12288)
+COZE_CPUS = _env_float("COZE_CPUS", 4.0)
+# 冷启动最贵的一个 (ES 装分词器 + Milvus 起 standalone), 多留一会儿。
+COZE_TAB_GRACE_MIN = _env_int("COZE_TAB_GRACE_MIN", 15)
 # 智能体最后一次调网关之后再等这么久。长任务必须能在关掉标签页之后接着跑完,
 # 所以这一条单独顶着, 与"有没有人在"无关。
 WORK_AGENT_IDLE_STOP_MIN = _env_int("WORK_AGENT_IDLE_STOP_MIN", 30)

@@ -536,6 +536,83 @@ async def test_stack_product_emits_sidecar_containers(eci):
 
 
 @pytest.mark.asyncio
+async def test_init_container_seeds_a_shared_volume_for_the_whole_group(eci, monkeypatch):
+    """初始化容器 + EmptyDir 种子卷要真的进参数, 编号还要跟 NAS 的挂载接得上。
+
+    这是把 compose 的 bind mount 搬进 ECI 的那条路 (见 products.InitContainer)。
+    每一项都是"错了也不报错"的:
+
+      · 少了 InitContainer -> 卷是空的, 各容器读不到配置。症状散在别处:
+        mysql 没有建库 SQL、ES 没有分词器、nginx 起不来 —— 没有一条指向种子卷。
+      · VolumeMount 编号跳号 -> 阿里云按"到此为止"截断, 后面的挂载**静默消失**。
+        所以这里钉死: 配了 NAS 时主容器的种子挂载从 3 开始 (1、2 是 NAS 的两个),
+        没配 NAS 时从 1 开始。
+    """
+    from app.products import InitContainer, Sidecar
+
+    b, fake = eci
+    monkeypatch.setattr(config, "WORK_NAS_SERVER", "nas.example.com")
+    monkeypatch.setattr(config, "WORK_NAS_PATH", "/dshwork")
+    await b.create(
+        "u_seed",
+        boot="run-app", env={}, boot_fp="fp", image="web:x", image_ref="web:x",
+        init_containers=(InitContainer(
+            name="seed", image_ref="ghcr.io/x/coze-assets:t",
+            cmd=("sh", "-c", "cp -a /assets/. /seed/"),
+        ),),
+        seeds=(("nginx", "/seed"),),
+        sidecars=(Sidecar(name="db", image_ref="mysql:8.4.5",
+                          mounts=(("coze/mysql", "/var/lib/mysql"),),
+                          seeds=(("", "/seed"), ("conf", "/app/resources/conf"))),),
+    )
+    _, p = next(c for c in fake.calls if c[0] == "CreateContainerGroup")
+
+    # NAS 是 Volume.1, 种子卷接在它后面
+    assert p["Volume.1.Type"] == "NFSVolume"
+    assert p["Volume.2.Name"] == "dshwork-seed"
+    assert p["Volume.2.Type"] == "EmptyDirVolume"
+
+    assert p["InitContainer.1.Name"] == "seed"
+    assert p["InitContainer.1.Image"] == "ghcr.io/x/coze-assets:t"
+    assert p["InitContainer.1.Command.3"] == "cp -a /assets/. /seed/"
+    assert p["InitContainer.1.VolumeMount.1.Name"] == "dshwork-seed"
+    assert p["InitContainer.1.VolumeMount.1.MountPath"] == "/seed"
+
+    # 主容器: NAS 占了 1、2, 种子接 3 —— 不能跳号
+    assert p["Container.1.VolumeMount.3.Name"] == "dshwork-seed"
+    assert p["Container.1.VolumeMount.3.MountPath"] == "/seed"
+    assert p["Container.1.VolumeMount.3.SubPath"] == "nginx"
+
+    # 伴随容器: 它自己的 NAS 挂载占 1, 两个种子挂载接 2、3
+    assert p["Container.2.VolumeMount.1.Name"] == "dshwork-nas"
+    assert p["Container.2.VolumeMount.2.Name"] == "dshwork-seed"
+    assert "Container.2.VolumeMount.2.SubPath" not in p, "子路径为空 = 挂整卷, 不该发 SubPath"
+    assert p["Container.2.VolumeMount.3.SubPath"] == "conf"
+    assert p["Container.2.VolumeMount.3.MountPath"] == "/app/resources/conf"
+
+
+@pytest.mark.asyncio
+async def test_seed_volume_takes_slot_one_when_there_is_no_nas(eci):
+    """没配 NAS 时种子卷就是 Volume.1, 主容器的种子挂载从 1 开始。
+
+    留空号 (跳到 Volume.2 / VolumeMount.3) 的后果是整组参数被截断, 而阿里云
+    照样返回成功 —— 实例起来了, 卷是空的。"""
+    from app.products import InitContainer
+
+    b, fake = eci  # 这个 fixture 里 WORK_NAS_SERVER 是空的
+    await b.create(
+        "u_nonas", boot="run", env={}, boot_fp="fp", image="web:x", image_ref="web:x",
+        init_containers=(InitContainer(name="seed", image_ref="a:t", cmd=("sh",)),),
+        seeds=(("nginx", "/seed"),),
+    )
+    _, p = next(c for c in fake.calls if c[0] == "CreateContainerGroup")
+    assert "Volume.2.Name" not in p
+    assert p["Volume.1.Name"] == "dshwork-seed"
+    assert p["Volume.1.Type"] == "EmptyDirVolume"
+    assert p["Container.1.VolumeMount.1.Name"] == "dshwork-seed"
+
+
+@pytest.mark.asyncio
 async def test_stack_host_aliases_land_in_etc_hosts(eci):
     """compose 服务名 -> 127.0.0.1 要真的进 HostAliase 参数。
 
