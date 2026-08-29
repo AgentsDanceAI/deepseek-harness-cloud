@@ -66,6 +66,19 @@ echo "    资产 $(du -sh assets | cut -f1)"
 # 启动时解析一次, 走 /etc/hosts —— 于是 ECI 的 HostAliase 兜得住, 配置原样可用。
 # 一旦上游改成 `resolver` + 变量式 proxy_pass, HostAliase 就**不再生效**
 # (nginx 的 resolver 不读 /etc/hosts, Dify 那边栽过), 必须改成写死回环。
+# 对象存储直链的改写规则: 启动脚本 (products._coze_boot) 会把它 sed 成 https 版,
+# 否则 https 页面里出现 http:// 的图片就是混合内容, 浏览器直接拦 —— 表现是头像和
+# 附件一片空白, 服务端一切正常。sed 匹配不上就是**静默失效**, 所以在这里断言:
+# 上游哪天改了这一行, 构建就红, 而不是等用户看到碎图。
+# 这个字面量必须与 server/app/products.py 的 _COZE_SUBFILTER_FROM 一致。
+if ! grep -qF "sub_filter 'minio:9000' '\$http_host/local_storage';" assets/nginx/conf.d/default.conf; then
+  echo "!! 上游改了对象存储直链的 sub_filter 规则 —— products._COZE_SUBFILTER_FROM 要跟着改," >&2
+  echo "   否则启动脚本那条 sed 静默失效, 线上头像/附件会因混合内容被浏览器拦掉。" >&2
+  echo "   当前 conf 里的相关行:" >&2
+  grep -n 'sub_filter' assets/nginx/conf.d/default.conf | sed 's/^/     /' >&2
+  exit 1
+fi
+
 if grep -qE '^\s*resolver\s' assets/nginx/nginx.conf assets/nginx/conf.d/default.conf; then
   echo "!! 上游 nginx 配置改用 resolver 了 —— HostAliase 兜不住 (见 products._dify_boot)," >&2
   echo "   要么在这里把 upstream 改写成 127.0.0.1, 要么自己生成 conf。" >&2

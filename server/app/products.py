@@ -632,6 +632,15 @@ def _coze_stack() -> tuple[Sidecar, ...]:
     )
 
 
+#: 上游 nginx 配置里那条把对象存储直链改写成同源路径的规则, 以及我们要换成的
+#: 版本 (带 https)。放在这里而不是内联进启动脚本, 是为了 deploy/workspace-coze/
+#: build.sh 能在**构建期**断言上游那行还长这样 —— 上游一改, 构建就红, 而不是
+#: 等用户看到一片碎图。`\$http_host` 的反斜杠是给 shell 的: 启动脚本经 sh -c
+#: 执行, 不转义会被当成空变量展开掉。
+_COZE_SUBFILTER_FROM = "sub_filter 'minio:9000' '\\$http_host/local_storage';"
+_COZE_SUBFILTER_TO = "sub_filter 'http://minio:9000' 'https://\\$http_host/local_storage';"
+
+
 def _coze_boot() -> str:
     """主容器是上游的 coze-web (nginx + 打好的前端静态资源)。
 
@@ -651,6 +660,17 @@ def _coze_boot() -> str:
         "cp /seed/nginx.conf /etc/nginx/nginx.conf\n"
         "mkdir -p /etc/nginx/conf.d\n"
         "cp /seed/conf.d/default.conf /etc/nginx/conf.d/default.conf\n"
+        # 唯一一处改上游配置: 对象存储直链要改写成 **https**。
+        #
+        # 后端 presign 出来的地址是 `http://minio:9000/...` —— scheme 取自
+        # MINIO_USE_SSL, 而那个必须是 false (服务端走回环明文连 minio)。
+        # STORAGE_UPLOAD_HTTP_SCHEME 管不到这里, 它只写进上传令牌的 HostScheme
+        # (backend/infra/storage/impl/minio/minio_imagex.go 的 GetUploadAuth)。
+        # 上游自己的部署是纯 http 的, 所以他们碰不到; 我们的站点在 https 上,
+        # 页面里出现 http:// 的图片就是**混合内容**, 浏览器直接拦 —— 表现是
+        # 头像和附件一片空白, 而服务端一切正常、控制台里才有一行 blocked。
+        f"sed -i \"s#{_COZE_SUBFILTER_FROM}#{_COZE_SUBFILTER_TO}#\" "
+        "/etc/nginx/conf.d/default.conf\n"
         "exec nginx -g 'daemon off;'\n"
     )
 
