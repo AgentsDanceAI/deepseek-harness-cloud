@@ -310,9 +310,11 @@ DIFY_TAB_GRACE_MIN = _env_int("DIFY_TAB_GRACE_MIN", 10)
 COZE_DOMAIN = _env("COZE_DOMAIN", "")
 COZE_VERSION = _env("COZE_VERSION", "0.5.1")
 COZE_ASSETS_IMAGE_REF = _env("COZE_ASSETS_IMAGE_REF", "")
-# 这一栈里有 Elasticsearch + Milvus + MySQL, 是目前最重的产品。
-# 4 vCPU / 12 GiB 是实测能起来的下限 (ES 堆 1G, Milvus ~2G)。
-COZE_MEM_LIMIT_MB = _env_int("COZE_MEM_LIMIT_MB", 12288)
+# 这一栈里有 Elasticsearch + Milvus + MySQL, 是目前最重的产品 (实测占用 ~9GiB:
+# ES 堆 1G + Milvus ~3G + MySQL ~1G + Go 服务 ~0.5G + 其余)。
+# 取 4c16g 而不是更省的 4c12g: ECI 的规格要落在合法的 vCPU:内存 比例上 (1/2/4/8),
+# 12/4=3 不是 —— 会被拒或悄悄抬价, 而报错里不会提比例两个字。
+COZE_MEM_LIMIT_MB = _env_int("COZE_MEM_LIMIT_MB", 16384)
 COZE_CPUS = _env_float("COZE_CPUS", 4.0)
 # 冷启动最贵的一个 (ES 装分词器 + Milvus 起 standalone), 多留一会儿。
 COZE_TAB_GRACE_MIN = _env_int("COZE_TAB_GRACE_MIN", 15)
