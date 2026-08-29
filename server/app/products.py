@@ -101,6 +101,88 @@ def split_key(key: str) -> tuple[str, str]:
     return user_id, product_id
 
 
+# 栈产品 env 里的占位符: create 时替换成该用户的确定性密钥 (security.stack_secret)。
+# Sidecar 是静态数据, 而密钥按用户走 —— 不能把密钥写死在产品定义里。
+STACK_SECRET_PLACEHOLDER = "__DSH_STACK_SECRET__"
+
+
+def resolve_sidecars(sidecars: tuple[Sidecar, ...], secret: str) -> tuple[Sidecar, ...]:
+    """把伴随容器 env 里的密钥占位符换成真值。"""
+    from dataclasses import replace
+
+    return tuple(
+        replace(sc, env=tuple((k, v.replace(STACK_SECRET_PLACEHOLDER, secret)) for k, v in sc.env))
+        for sc in sidecars
+    )
+
+
+def _penpot_stack() -> tuple[Sidecar, ...]:
+    """Penpot 的四个伴随容器。全部上游原生镜像, 服务发现靠 host_aliases 指回环。
+
+    实测 (2026-08-28, 144, penpot 2.17): backend JVM 是大头 (4G 组里自缚到 ~1G),
+    exporter ~360M (带 headless chromium), pg/valkey 零头, 合计 ~1.9G。
+    与官方 compose 的差异: 去掉 mailcatcher (无邮件, 注册免验证) 与 mcp (用不上);
+    postgres 官方镜像入口以 root 自 chown 数据目录再降权, 所以 NAS 子路径的
+    属主问题它自己解决。
+    """
+    v = config.PENPOT_VERSION
+    uri = f"https://{config.PENPOT_DOMAIN}" if config.PENPOT_DOMAIN else "http://127.0.0.1:8080"
+    flags = "enable-registration enable-login-with-password disable-email-verification"
+    return (
+        Sidecar(
+            name="backend",
+            image_ref=f"penpotapp/backend:{v}",
+            env=(
+                ("PENPOT_PUBLIC_URI", uri),
+                ("PENPOT_FLAGS", flags),
+                ("PENPOT_SECRET_KEY", STACK_SECRET_PLACEHOLDER),
+                ("PENPOT_DATABASE_URI", "postgresql://penpot-postgres/penpot"),
+                ("PENPOT_DATABASE_USERNAME", "penpot"),
+                # 库只在容器组回环上可达, 数据目录按用户隔离在 NAS 子路径 ——
+                # 这个口令挡的是"顺手连上", 不承担跨用户隔离 (隔离靠网络边界)。
+                ("PENPOT_DATABASE_PASSWORD", "penpot"),
+                ("PENPOT_REDIS_URI", "redis://penpot-valkey/0"),
+                ("PENPOT_OBJECTS_STORAGE_BACKEND", "fs"),
+                ("PENPOT_OBJECTS_STORAGE_FS_DIRECTORY", "/opt/data/assets"),
+                ("PENPOT_TELEMETRY_ENABLED", "false"),
+                ("PENPOT_HTTP_SERVER_MAX_BODY_SIZE", "367001600"),
+                ("PENPOT_HTTP_SERVER_MAX_MULTIPART_BODY_SIZE", "367001600"),
+            ),
+            mounts=(("penpot/assets", "/opt/data/assets"),),
+        ),
+        Sidecar(
+            name="exporter",
+            image_ref=f"penpotapp/exporter:{v}",
+            env=(
+                ("PENPOT_PUBLIC_URI", uri),
+                ("PENPOT_SECRET_KEY", STACK_SECRET_PLACEHOLDER),
+                # exporter 回头找前端拿渲染页面; 前端在组内 8080
+                ("PENPOT_INTERNAL_URI", "http://penpot-frontend:8080"),
+                ("PENPOT_REDIS_URI", "redis://penpot-valkey/0"),
+            ),
+        ),
+        Sidecar(
+            name="postgres",
+            image_ref="postgres:15",
+            env=(
+                ("POSTGRES_DB", "penpot"),
+                ("POSTGRES_USER", "penpot"),
+                ("POSTGRES_PASSWORD", "penpot"),
+                # NFS 上跳过 initdb 的 fsync 探测抖动, 数据目录放子目录避免
+                # lost+found 之类的非空判定
+                ("PGDATA", "/var/lib/postgresql/data/pgdata"),
+            ),
+            mounts=(("penpot/pg", "/var/lib/postgresql/data"),),
+        ),
+        Sidecar(
+            name="valkey",
+            image_ref="valkey/valkey:8.1",
+            # 只做 websocket 通知与任务队列的 pubsub, 不持久化 —— 回收即弃,
+            # 官方 compose 同样不给它挂卷
+        ),
+    )
+
+
 def registry() -> dict[str, Product]:
     return {
         DEFAULT: Product(
@@ -125,6 +207,25 @@ def registry() -> dict[str, Product]:
             # ComfyUI 不认识 /api/work/active, 也不经网关跑模型。
             reports_presence=False,
             tab_grace_min=config.COMFY_TAB_GRACE_MIN,
+        ),
+        # 云空间的 open-design 坑位。第一个多容器栈产品 —— 它证明的是整条轨道
+        # (sidecars/host_aliases/RestartPolicy=Always), Coze/Dify 沿用同一条。
+        "penpot": Product(
+            id="penpot",
+            name="Penpot",
+            image=f"penpotapp/frontend:{config.PENPOT_VERSION}",
+            image_ref=f"penpotapp/frontend:{config.PENPOT_VERSION}",
+            port=8080,
+            mem_mb=config.PENPOT_MEM_LIMIT_MB,
+            cpus=config.PENPOT_CPUS,
+            domain=config.PENPOT_DOMAIN,
+            reports_presence=False,
+            tab_grace_min=config.PENPOT_TAB_GRACE_MIN,
+            sidecars=_penpot_stack(),
+            host_aliases=(
+                "penpot-frontend", "penpot-backend", "penpot-exporter",
+                "penpot-postgres", "penpot-valkey",
+            ),
         ),
     }
 
@@ -271,7 +372,14 @@ def _comfyui_boot() -> str:
     )
 
 
-_BOOTS = {DEFAULT: _dsh_boot, "comfyui": _comfyui_boot}
+def _penpot_boot() -> str:
+    """主容器是前端 (nginx)。照抄镜像自己的 entrypoint+cmd —— 我们的 create 会用
+    boot 顶掉镜像的 Cmd, 不这么做 nginx 根本不会起。entrypoint.sh 按 env 生成
+    nginx 配置 (PENPOT_BACKEND_URI 这些), 然后 exec 我们给的命令。"""
+    return 'exec /bin/bash /entrypoint.sh nginx -g "daemon off;"\n'
+
+
+_BOOTS = {DEFAULT: _dsh_boot, "comfyui": _comfyui_boot, "penpot": _penpot_boot}
 
 
 def boot_script(product_id: str) -> str:
@@ -283,6 +391,18 @@ def boot_script(product_id: str) -> str:
 
 def env_for(product_id: str, token: str) -> dict[str, str]:
     gateway = config.PUBLIC_BASE.rstrip("/")
+    if product_id == "penpot":
+        uri = f"https://{config.PENPOT_DOMAIN}" if config.PENPOT_DOMAIN else "http://127.0.0.1:8080"
+        return {
+            # 前端 entrypoint 认这些 env 生成 nginx 配置。后端/导出器指回环 ——
+            # host_aliases 也能兜住, 但显式写死少一层依赖。
+            "PENPOT_PUBLIC_URI": uri,
+            "PENPOT_BACKEND_URI": "http://127.0.0.1:6060",
+            "PENPOT_EXPORTER_URI": "http://127.0.0.1:6061",
+            "PENPOT_FLAGS": "enable-registration enable-login-with-password disable-email-verification",
+            "PENPOT_HTTP_SERVER_MAX_BODY_SIZE": "367001600",
+            "PENPOT_HTTP_SERVER_MAX_MULTIPART_BODY_SIZE": "367001600",
+        }
     if product_id == "comfyui":
         return {
             # 自有节点只认这两个 —— 它不认识任何一家厂商, 由网关去适配。

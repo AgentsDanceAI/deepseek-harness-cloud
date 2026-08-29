@@ -87,6 +87,16 @@ def new_id(prefix: str = "") -> str:
     return prefix + secrets.token_hex(12)
 
 
+def stack_secret(user_id: str) -> str:
+    """某用户的栈产品 (Penpot 这类) 内部签名密钥。
+
+    **确定性**推导而不是随机生成: 这个密钥要写进 ECI 容器组的 env, 而实例会被
+    回收重建 —— 随机的话每次重建, 用户在应用里的会话与加密数据全部作废。
+    从 AUTH_SECRET 推导, 不落库。
+    """
+    return hmac.new(_secret(), f"stack-secret:{user_id}".encode(), hashlib.sha256).hexdigest()
+
+
 def user_code() -> str:
     """Human-typable device activation code, e.g. 7GK4-XQ2M (no 0/O/1/I)."""
     alphabet = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"
