@@ -78,6 +78,8 @@ class Backend(abc.ABC):
         image_ref: str = "",
         mem_mb: int = 0,
         cpus: float = 0.0,
+        sidecars: tuple = (),
+        host_aliases: tuple = (),
     ) -> None: ...
 
     @abc.abstractmethod
@@ -179,7 +181,14 @@ class DockerBackend(Backend):
         image_ref: str = "",
         mem_mb: int = 0,
         cpus: float = 0.0,
+        sidecars: tuple = (),
+        host_aliases: tuple = (),
     ) -> None:
+        if sidecars:
+            # docker 后端一个容器就是一个容器, 拼不出共享网络命名空间的容器组。
+            # 明确拒绝 —— 静默忽略伴随容器的结果是应用起了但连不上数据库,
+            # 表现为一堆 500, 谁也想不到是后端不支持。
+            raise RuntimeError("多容器栈产品只有 ECI 后端能跑 (WORK_BACKEND=eci)")
         hexid = cname(user_id)[len("dshwork-") :]
         body = {
             "Image": image,
@@ -491,6 +500,8 @@ class EciBackend(Backend):
         image_ref: str = "",
         mem_mb: int = 0,
         cpus: float = 0.0,
+        sidecars: tuple = (),
+        host_aliases: tuple = (),
     ) -> None:
         p = {
             "ContainerGroupName": cname(user_id),
@@ -500,7 +511,10 @@ class EciBackend(Backend):
             "Cpu": cpus or config.WORK_CPUS,
             "Memory": round((mem_mb or config.WORK_MEM_LIMIT_MB) / 1024, 2),
             "ComputeCategory.1": config.ECI_COMPUTE_CATEGORY or None,
-            "RestartPolicy": "Never",
+            # 栈产品 (带伴随容器) 用 Always: ECI 没有 depends_on, 应用容器在
+            # 中间件就绪前会崩溃退出, 靠重启拉起来。单容器保持 Never —— 它退出
+            # 就是真的死了, Always 会把一个坏容器变成永动的计费器。
+            "RestartPolicy": "Always" if sidecars else "Never",
             # Rebuild the cache for each immutable image release. A cache miss
             # falls back to a full image pull and must be monitored separately.
             "AutoMatchImageCache": "true",
@@ -521,6 +535,27 @@ class EciBackend(Backend):
             p[f"Container.1.EnvironmentVar.{i}.Key"] = k
             p[f"Container.1.EnvironmentVar.{i}.Value"] = v
         p.update(self._volume_params(user_id))
+        # compose 服务名 -> 回环。写进组的 /etc/hosts, 于是镜像里写死的
+        # "http://api:5001" 这类地址不用改就能通。
+        if host_aliases:
+            p["HostAliase.1.Ip"] = "127.0.0.1"
+            for j, name in enumerate(host_aliases, start=1):
+                p[f"HostAliase.1.Hostname.{j}"] = name
+        # 伴随容器: 用上游原生镜像, 与主容器共享网络命名空间 (互相 127.0.0.1)。
+        # 不给容器级 cpu/mem —— 组给总量, 容器之间自己挤, 与 compose 默认一致。
+        hexid = cname(user_id)[len("dshwork-") :]
+        for ci, sc in enumerate(sidecars, start=2):
+            p[f"Container.{ci}.Name"] = sc.name
+            p[f"Container.{ci}.Image"] = sc.image_ref
+            for j, arg in enumerate(sc.cmd, start=1):
+                p[f"Container.{ci}.Command.{j}"] = arg
+            for j, (k, v) in enumerate(sc.env, start=1):
+                p[f"Container.{ci}.EnvironmentVar.{j}.Key"] = k
+                p[f"Container.{ci}.EnvironmentVar.{j}.Value"] = v
+            for j, (subdir, path) in enumerate(sc.mounts, start=1):
+                p[f"Container.{ci}.VolumeMount.{j}.Name"] = "dshwork-nas"
+                p[f"Container.{ci}.VolumeMount.{j}.MountPath"] = path
+                p[f"Container.{ci}.VolumeMount.{j}.SubPath"] = f"{hexid}/{subdir}"
         body = await self._call("CreateContainerGroup", p)
         # 每台实例都自动创建一个 EIP, 所以这一行就是"谁在什么时候占了一个 EIP"的
         # 唯一自有记录。没有它, 想回答"最近这些 EIP 都是谁申请的"只能去翻操作审计

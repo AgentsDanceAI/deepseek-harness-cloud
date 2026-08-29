@@ -60,10 +60,12 @@ CATALOG: tuple[AppEntry, ...] = (
         '<rect x="3" y="3" width="8" height="8" rx="2"/><rect x="13" y="13" width="8" height="8" rx="2"/>'
         '<path d="M11 17H8a3 3 0 0 1-3-3v-3M13 7h3a3 3 0 0 1 3 3v3"/>',
     ),
+    # Coze Studio 顶替了 Langflow: 同为 LLM 流程编排, Coze 的覆盖面 (Agent/知识库/
+    # 工作流/发布渠道) 是它的超集, 老板 2026-08-28 点名要接。
     AppEntry(
-        "langflow", "Langflow", "builder",
-        '<circle cx="6" cy="6" r="3"/><circle cx="18" cy="12" r="3"/><circle cx="6" cy="18" r="3"/>'
-        '<path d="M9 6h3a3 3 0 0 1 3 3v0M9 18h3a3 3 0 0 0 3-3v0"/>',
+        "coze", "Coze Studio", "builder",
+        '<circle cx="12" cy="11" r="7.5"/><path d="M9 10h.01M15 10h.01M9.5 13.5a3.5 3.5 0 0 0 5 0"/>'
+        '<path d="M12 18.5V21M8 20l1-1.8M16 20l-1-1.8"/>',
     ),
     AppEntry(
         "n8n", "n8n", "flow",

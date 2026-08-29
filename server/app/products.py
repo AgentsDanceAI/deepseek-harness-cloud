@@ -36,6 +36,28 @@ SHIM_PORT = 8199
 
 
 @dataclass(frozen=True)
+class Sidecar:
+    """主容器旁边的一个伴随容器 (中间件): 数据库、缓存、向量库这类。
+
+    Coze/Dify/Penpot 都是 compose 栈, 不是 ComfyUI 那种单容器。塞进一个
+    all-in-one 镜像意味着**每次上游发版都要重打包维护** —— 所以走 ECI 容器组的
+    多容器: 伴随容器用**上游原生镜像**, 我们只写编排, 一个镜像都不自己维护。
+
+    组内所有容器共享网络命名空间 (k8s pod 语义), 互相用 127.0.0.1 访问 ——
+    所以栈里的服务发现全部改成回环地址, 不存在 compose 的服务名 DNS。
+    资源不按容器划分: 组给总的 cpu/mem, 容器之间自己挤 (与 compose 默认一致)。
+    """
+
+    name: str                                # 组内容器名
+    image_ref: str                           # 上游原生镜像的完整地址
+    cmd: tuple[str, ...] = ()                # 空 = 用镜像默认 entrypoint
+    env: tuple[tuple[str, str], ...] = ()
+    # NAS 卷上的挂载: (用户子目录下的相对路径, 容器内路径)。中间件的数据要
+    # 跟着用户走 —— 实例回收重建后, 库还在。
+    mounts: tuple[tuple[str, str], ...] = ()
+
+
+@dataclass(frozen=True)
 class Product:
     id: str
     name: str
@@ -56,6 +78,16 @@ class Product:
     # 关一次页再回来就要重等一遍, 所以宁可多留几分钟机时。dsh 没这个包袱,
     # 保持全局的 3 分钟 —— 一刀切成 10 分钟等于替 dsh 用户白烧机时。
     tab_grace_min: int = 0
+    # 伴随容器 (中间件)。非空 = 这是一个多容器栈产品:
+    #   · 只有 ECI 后端能跑 (容器组多容器); docker 后端遇到会直接报错, 不静默降级
+    #   · 组的 RestartPolicy 用 Always —— ECI 没有 depends_on, 应用容器在中间件
+    #     就绪前会崩溃退出, 靠重启拉起来 (k8s 的标准做法)
+    sidecars: tuple[Sidecar, ...] = ()
+    # 这些主机名全部解析到 127.0.0.1 (ECI 的 HostAliase, 即写 /etc/hosts)。
+    # compose 栈里的服务互相用服务名找对方 (proxy_pass http://api:5001 这类,
+    # 往往写死在镜像的配置模板里改不了) —— 把服务名指回环, **上游镜像一个都
+    # 不用改**就能在共享网络命名空间里跑。
+    host_aliases: tuple[str, ...] = ()
 
 
 def wskey(user_id: str, product_id: str = DEFAULT) -> str:

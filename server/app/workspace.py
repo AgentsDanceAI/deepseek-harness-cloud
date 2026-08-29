@@ -234,6 +234,8 @@ async def _create(user: dict, product: products.Product) -> None:
         image_ref=product.image_ref,
         mem_mb=product.mem_mb,
         cpus=product.cpus,
+        sidecars=product.sidecars,
+        host_aliases=product.host_aliases,
     )
 
 
