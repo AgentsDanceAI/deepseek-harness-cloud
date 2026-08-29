@@ -50,8 +50,8 @@ def test_landing_renders(client):
     r = client.get("/")
     assert r.status_code == 200
     body = r.text
-    assert "deepseek-harness-cloud" in body
-    assert "桌面 AI 编程助手" in body
+    assert "DSH Cloud" in body
+    assert "AI 原生云空间" in body
     assert "/static/app.css" in body
     assert "/download" in body
     assert "/legal/terms" in body
@@ -96,14 +96,23 @@ def test_apps_page_without_workspace_has_no_dead_links(client, monkeypatch):
     assert 'href="/work"' not in body
 
 
-def test_landing_shows_the_apps_mini_grid(client, monkeypatch):
-    """主页要体现「16 合一」: 迷你网格 + 去 /apps 的 CTA。"""
-    from app import config
+def test_landing_is_the_storefront(client, monkeypatch):
+    """转型后主页即货架: 16 张产品卡上主页, 与 /apps 共用同一张卡 (include)。
+
+    另外钉两条: 旗舰区的 composer 必须还在 (它是 dsh 的转化入口, 挪位置不能
+    挪没); ComfyUI 旗舰卡直达工作台。
+    """
+    from app import apps_catalog, config
 
     monkeypatch.setattr(config, "WORK_ENABLED", True)
+    monkeypatch.setattr(config, "COMFY_IMAGE", "comfy:test")
+    monkeypatch.setattr(config, "COMFY_DOMAIN", "comfy.test.local")
     body = client.get("/").text
     assert 'href="/apps"' in body, "主页没有云空间入口"
-    assert "ComfyUI" in body and "Penpot" in body, "迷你网格没渲染出来"
+    for a in apps_catalog.CATALOG:
+        assert a.name in body, f"{a.name} 没上主页货架"
+    assert "hero-composer" in body, "composer 挪没了 —— 那是 dsh 的转化入口"
+    assert '/work?product_id=comfyui' in body, "ComfyUI 旗舰卡没直达工作台"
 
 
 def test_landing_no_icp_when_unset(client):

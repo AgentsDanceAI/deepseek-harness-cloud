@@ -16,36 +16,7 @@
   <div class="container">
     <div class="grid-4 apps-grid">
       {% for app in apps %}
-      {# 上线的整卡可点; 没上线的不是链接 —— 一张点了没反应的"假链接卡"比一个
-         明确的"即将上线"徽标更伤信任。 #}
-      {% if app.live and apps_clickable %}
-      <a class="card feature app-card is-live" href="{{ apps_base }}{{ '/work' if app.id == 'dsh' else '/work?product_id=' + app.id }}">
-      {% else %}
-      <div class="card feature app-card {{ 'is-live' if app.live else 'is-soon' }}">
-      {% endif %}
-        <div class="app-card-top">
-          <span class="feature-icon app-icon">
-            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{{ app.icon | safe }}</svg>
-          </span>
-          {% if app.live %}
-          <span class="app-badge live"><i></i>{{ t("apps.badge.live") }}</span>
-          {% else %}
-          <span class="app-badge soon">{{ t("apps.badge.soon") }}</span>
-          {% endif %}
-        </div>
-        <h3>{{ app.name }}</h3>
-        <span class="app-cat">{{ t("apps.cat." + app.cat) }}</span>
-        <p>{{ t("apps.d." + app.id) }}</p>
-        {% if app.live and apps_clickable %}
-        <span class="app-enter">{{ t("apps.enter") }}
-          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
-        </span>
-        {% endif %}
-      {% if app.live and apps_clickable %}
-      </a>
-      {% else %}
-      </div>
-      {% endif %}
+      {% include "_app_card.html" %}
       {% endfor %}
     </div>
 

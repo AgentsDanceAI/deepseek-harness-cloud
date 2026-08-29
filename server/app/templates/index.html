@@ -2,6 +2,7 @@
 {% block title %}{{ t("home.title") }}{% endblock %}
 {% block head %}<script src="/static/hero-waves.js?v={{ asset_v }}" defer></script>{% endblock %}
 {% block content %}
+{# ============ Hero: 平台叙事。一个主张、一个主动作 (打开云空间)。 ============ #}
 <section class="hero-dark">
   <canvas id="hero-waves" aria-hidden="true"></canvas>
   <div class="hero-grid" aria-hidden="true"></div>
@@ -16,97 +17,19 @@
       {{ t("home.sub") }}
     </p>
 
-    {% if work_enabled or hosted_site %}
-    {# 工作台关着时 (自部署默认), 这个输入框的去处是官方托管版 —— 否则回车会
-       落进 /work → /download 的死胡同, 而它是首页最显眼的元素。去处写进
-       data-target, 提示文案也跟着换, 不让人以为任务会在本机执行。 #}
-    <form id="hero-composer" class="composer" data-authed="{{ '1' if user else '0' }}"
-          data-target="{% if not work_enabled and hosted_site %}{{ hosted_site }}{% endif %}">
-      <label class="sr-only" for="hero-task">{{ t("home.a11y.task_label") }}</label>
-      <textarea id="hero-task" rows="2" placeholder="{{ t('home.composer_placeholder') }}"></textarea>
-      <div class="composer-row">
-        <span class="composer-hint">{% if not work_enabled and hosted_site %}{{ t("home.composer_hint_hosted") }}{% elif user %}{{ t("home.composer_hint_in") }}{% else %}{{ t("home.composer_hint_out") }}{% endif %}</span>
-        <button type="button" class="composer-send" aria-label="{{ t('home.a11y.send') }}">
-          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5"/><path d="m5 12 7-7 7 7"/></svg>
-        </button>
-      </div>
-    </form>
-    {% endif %}
-
-    {# icons are inline SVG, not emoji: emoji fall back to tofu boxes wherever
-       the platform ships no colour font, which is exactly where our users are #}
-    <div class="chips">
-      <button type="button" class="chip" data-chip="{{ t('home.prompt.game') }}">
-        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="7" width="20" height="12" rx="4"/><path d="M7 11v4M5 13h4M15.5 12.5h.01M18 15h.01"/></svg>
-        {{ t("home.chip.game") }}
-      </button>
-      <button type="button" class="chip" data-chip="{{ t('home.prompt.research') }}">
-        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
-        {{ t("home.chip.research") }}
-      </button>
-      <button type="button" class="chip" data-chip="{{ t('home.prompt.data') }}">
-        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>
-        {{ t("home.chip.data") }}
-      </button>
-      <button type="button" class="chip" data-chip="{{ t('home.prompt.site') }}">
-        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a15 15 0 0 1 0 18a15 15 0 0 1 0-18"/></svg>
-        {{ t("home.chip.site") }}
-      </button>
-      <button type="button" class="chip" data-chip="{{ t('home.prompt.code') }}">
-        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m8 8-4 4 4 4M16 8l4 4-4 4"/></svg>
-        {{ t("home.chip.code") }}
-      </button>
+    <div class="hero-actions-sub" style="justify-content:center;margin-top:26px">
+      <a class="btn btn-primary" href="/apps">
+        <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7.5" height="7.5" rx="1.6"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="1.6"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="1.6"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.6"/></svg>
+        {{ t("home.hero.cta_apps") }}
+      </a>
+      <a class="btn btn-ghost" href="/pricing">{{ t("home.hero.cta_pricing") }}</a>
     </div>
 
     <div class="hero-checks">
-      <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 13 4 4L19 7"/></svg>{{ t("home.check.nokey") }}</span>
-      <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 13 4 4L19 7"/></svg>{{ t("home.check.browser") }}</span>
+      <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 13 4 4L19 7"/></svg>{{ t("home.check.products", live=live_count) }}</span>
       <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 13 4 4L19 7"/></svg>{{ t("home.check.free_hours", hours=(work_free_minutes // 60)) }}</span>
+      <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 13 4 4L19 7"/></svg>{{ t("home.check.nokey") }}</span>
       <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 13 4 4L19 7"/></svg>{{ t("home.check.oss") }}</span>
-    </div>
-
-    {# The desktop app is the other half of the product, and the one that still
-       works when cloud capacity runs out — so every build gets a real button
-       here rather than being buried one nav level down. Links go through
-       /dl/<key> so the counter below is a fact, not a decoration. #}
-    <div class="hero-dl">
-      <div class="hero-dl-row">
-        {% if has_mac_arm64 %}
-        <a class="dl-btn" href="/dl/mac-arm64">
-          <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16.7 12.9c0-2.4 2-3.6 2-3.6a4.6 4.6 0 0 0-3.6-1.9c-1.5-.2-3 .9-3.7.9-.8 0-2-.9-3.3-.9A4.9 4.9 0 0 0 4 9.9c-1.8 3-.5 7.5 1.2 10 .8 1.2 1.8 2.5 3.1 2.5 1.3-.1 1.8-.8 3.3-.8s2 .8 3.3.8 2.2-1.2 3-2.4a10 10 0 0 0 1.4-2.8 4.4 4.4 0 0 1-2.6-4.3ZM14.2 5.6A4.5 4.5 0 0 0 15.3 2a4.6 4.6 0 0 0-3 1.5A4.3 4.3 0 0 0 11.2 7a3.8 3.8 0 0 0 3-1.4Z"/></svg>
-          <span><b>{{ t("home.dl.mac") }}</b><i>{{ t("home.dl.apple_silicon") }}</i></span>
-        </a>
-        {% endif %}
-        {% if has_mac_x64 %}
-        <a class="dl-btn" href="/dl/mac-x64">
-          <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16.7 12.9c0-2.4 2-3.6 2-3.6a4.6 4.6 0 0 0-3.6-1.9c-1.5-.2-3 .9-3.7.9-.8 0-2-.9-3.3-.9A4.9 4.9 0 0 0 4 9.9c-1.8 3-.5 7.5 1.2 10 .8 1.2 1.8 2.5 3.1 2.5 1.3-.1 1.8-.8 3.3-.8s2 .8 3.3.8 2.2-1.2 3-2.4a10 10 0 0 0 1.4-2.8 4.4 4.4 0 0 1-2.6-4.3ZM14.2 5.6A4.5 4.5 0 0 0 15.3 2a4.6 4.6 0 0 0-3 1.5A4.3 4.3 0 0 0 11.2 7a3.8 3.8 0 0 0 3-1.4Z"/></svg>
-          <span><b>{{ t("home.dl.mac") }}</b><i>{{ t("home.dl.intel") }}</i></span>
-        </a>
-        {% endif %}
-        {% if has_win_x64 %}
-        <a class="dl-btn" href="/dl/win-x64">
-          <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M3 5.5 10.5 4.4v7.1H3zM12 4.2 21 3v8.5h-9zM3 13.5h7.5v7.1L3 19.5zM12 13.5h9V21l-9-1.3z"/></svg>
-          <span><b>{{ t("home.dl.win") }}</b><i>x64</i></span>
-        </a>
-        {% endif %}
-        {% if has_win_arm64 %}
-        <a class="dl-btn" href="/dl/win-arm64">
-          <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M3 5.5 10.5 4.4v7.1H3zM12 4.2 21 3v8.5h-9zM3 13.5h7.5v7.1L3 19.5zM12 13.5h9V21l-9-1.3z"/></svg>
-          <span><b>{{ t("home.dl.win") }}</b><i>ARM64</i></span>
-        </a>
-        {% endif %}
-      </div>
-      <div class="hero-dl-foot">
-        <a class="dl-link" href="https://github.com/AgentsDanceAI/deepseek-harness-cloud" target="_blank" rel="noopener">
-          <svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor" aria-hidden="true"><path d="M12 2a10 10 0 0 0-3.16 19.49c.5.09.68-.22.68-.48l-.01-1.7c-2.78.6-3.37-1.34-3.37-1.34-.45-1.16-1.11-1.47-1.11-1.47-.91-.62.07-.6.07-.6 1 .07 1.53 1.03 1.53 1.03.89 1.53 2.34 1.09 2.91.83.09-.65.35-1.09.63-1.34-2.22-.25-4.56-1.11-4.56-4.94 0-1.09.39-1.98 1.03-2.68-.1-.25-.45-1.27.1-2.65 0 0 .84-.27 2.75 1.02a9.5 9.5 0 0 1 5 0c1.91-1.29 2.75-1.02 2.75-1.02.55 1.38.2 2.4.1 2.65.64.7 1.03 1.59 1.03 2.68 0 3.84-2.34 4.68-4.57 4.93.36.31.68.92.68 1.85l-.01 2.75c0 .27.18.58.69.48A10 10 0 0 0 12 2Z"/></svg>
-          {{ t("home.dl.github") }}
-        </a>
-        <span class="dl-count">
-          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7.5 10.5 12 15l4.5-4.5M4 20h16"/></svg>
-          {{ t("home.dl.count") }} <b class="num" id="stat-downloads">—</b> {{ t("home.dl.times") }}
-        </span>
-        <a class="dl-link" href="/download">{{ t("home.dl.all_platforms") }}</a>
-      </div>
     </div>
 
     <p class="hero-note-dark" style="justify-content:center;margin-top:22px">
@@ -116,28 +39,100 @@
   </div>
 </section>
 
+{# ============ 门面: 16 张产品卡。主页即货架, 与 /apps 共用同一张卡。 ============ #}
 <section class="section">
-  <div class="container center">
-    <span class="eyebrow">{{ t("home.apps.eyebrow") }}</span>
-    <h2 class="section-title">{{ t("home.apps.title") }}</h2>
-    <p class="section-lede">{{ t("home.apps.lede") }}</p>
-    <div class="apps-mini">
+  <div class="container">
+    <div class="center">
+      <span class="eyebrow">{{ t("home.apps.eyebrow") }}</span>
+      <h2 class="section-title">{{ t("home.apps.title") }}</h2>
+      <p class="section-lede">{{ t("home.apps.lede") }}</p>
+    </div>
+    <div class="grid-4 apps-grid" style="margin-top:28px">
       {% for app in apps %}
-      {# 上线的直达工作台, 没上线的去 /apps 看全景 —— 主页不摆死链接。 #}
-      <a href="{% if app.live and work_enabled %}{{ '/work' if app.id == 'dsh' else '/work?product_id=' + app.id }}{% else %}/apps{% endif %}"
-         {% if not app.live %}class="soon"{% endif %}>
-        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{{ app.icon | safe }}</svg>
-        {{ app.name }}
-        <span class="dot {{ '' if app.live else 'off' }}" style="margin-left:auto" aria-hidden="true"></span>
-      </a>
+      {% include "_app_card.html" %}
       {% endfor %}
     </div>
-    <div class="hero-actions-sub" style="justify-content:center;margin-top:24px">
-      <a class="btn btn-primary" href="/apps">{{ t("home.apps.cta") }}</a>
+    <p class="muted small center" style="margin-top:22px">{{ t("apps.count_live", live=live_count) }} · <a href="/apps">{{ t("home.apps.cta") }}</a></p>
+  </div>
+</section>
+
+{# ============ 旗舰: 左 DSH (composer 保留原 id/行为), 右 ComfyUI。 ============ #}
+<section class="section" style="padding-top:0">
+  <div class="container">
+    <div class="center">
+      <span class="eyebrow">{{ t("home.flag.eyebrow") }}</span>
+      <h2 class="section-title">{{ t("home.flag.title") }}</h2>
+    </div>
+    <div class="grid grid-2 flag-grid" style="margin-top:28px">
+
+      <div class="flag-panel">
+        <span class="eyebrow" style="color:#9db8e8">DSH Agent</span>
+        <h3>{{ t("home.flag.dsh_title") }}</h3>
+        <p>{{ t("home.flag.dsh_body") }}</p>
+        {% if work_enabled or hosted_site %}
+        {# 工作台关着时 (自部署默认), 输入框的去处是官方托管版 —— 否则回车会
+           落进 /work → /download 的死胡同。去处写进 data-target, 提示文案也
+           跟着换, 不让人以为任务会在本机执行。 #}
+        <form id="hero-composer" class="composer" data-authed="{{ '1' if user else '0' }}"
+              data-target="{% if not work_enabled and hosted_site %}{{ hosted_site }}{% endif %}">
+          <label class="sr-only" for="hero-task">{{ t("home.a11y.task_label") }}</label>
+          <textarea id="hero-task" rows="2" placeholder="{{ t('home.composer_placeholder') }}"></textarea>
+          <div class="composer-row">
+            <span class="composer-hint">{% if not work_enabled and hosted_site %}{{ t("home.composer_hint_hosted") }}{% elif user %}{{ t("home.composer_hint_in") }}{% else %}{{ t("home.composer_hint_out") }}{% endif %}</span>
+            <button type="button" class="composer-send" aria-label="{{ t('home.a11y.send') }}">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5"/><path d="m5 12 7-7 7 7"/></svg>
+            </button>
+          </div>
+        </form>
+        {# icons are inline SVG, not emoji: emoji fall back to tofu boxes wherever
+           the platform ships no colour font, which is exactly where our users are #}
+        <div class="chips">
+          <button type="button" class="chip" data-chip="{{ t('home.prompt.game') }}">
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="7" width="20" height="12" rx="4"/><path d="M7 11v4M5 13h4M15.5 12.5h.01M18 15h.01"/></svg>
+            {{ t("home.chip.game") }}
+          </button>
+          <button type="button" class="chip" data-chip="{{ t('home.prompt.research') }}">
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+            {{ t("home.chip.research") }}
+          </button>
+          <button type="button" class="chip" data-chip="{{ t('home.prompt.data') }}">
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>
+            {{ t("home.chip.data") }}
+          </button>
+          <button type="button" class="chip" data-chip="{{ t('home.prompt.site') }}">
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a15 15 0 0 1 0 18a15 15 0 0 1 0-18"/></svg>
+            {{ t("home.chip.site") }}
+          </button>
+          <button type="button" class="chip" data-chip="{{ t('home.prompt.code') }}">
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m8 8-4 4 4 4M16 8l4 4-4 4"/></svg>
+            {{ t("home.chip.code") }}
+          </button>
+        </div>
+        {% else %}
+        {# 没有任何地方能执行任务 (工作台关 + 没配托管地址): 不摆输入框。 #}
+        <a class="btn btn-ghost" href="/download" style="margin-top:16px">{{ t("home.two.desktop_cta") }}</a>
+        {% endif %}
+      </div>
+
+      <div class="card feature flag-card">
+        <span class="eyebrow">ComfyUI</span>
+        <h3>{{ t("home.flag.comfy_title") }}</h3>
+        <p>{{ t("home.flag.comfy_body") }}</p>
+        <div class="flag-models">
+          <span>Seedance 2.5</span><span>Wan 3.0</span><span>Qwen-Image</span><span>GPT-Image</span>
+        </div>
+        {% if apps_clickable %}
+        <a class="btn btn-primary" href="{{ apps_base }}/work?product_id=comfyui" style="margin-top:auto">{{ t("home.flag.comfy_cta") }}</a>
+        {% else %}
+        <a class="btn btn-ghost" href="/apps" style="margin-top:auto">{{ t("home.apps.cta") }}</a>
+        {% endif %}
+      </div>
+
     </div>
   </div>
 </section>
 
+{# ============ 两种用法 (云 / 桌面) ============ #}
 <section class="section">
   <div class="container">
     <span class="eyebrow">{{ t("home.two.eyebrow") }}</span>
@@ -155,7 +150,7 @@
         <p>
           {{ t("home.two.cloud_body", hours=(work_free_minutes // 60)) }}
         </p>
-        <a class="btn btn-primary" href="/work" style="margin-top:14px">{{ t("home.two.cloud_cta") }}</a>
+        <a class="btn btn-primary" href="/apps" style="margin-top:14px">{{ t("home.two.cloud_cta") }}</a>
       </div>
       {% endif %}
       <div class="card feature">
@@ -170,7 +165,7 @@
   </div>
 </section>
 
-
+{# ============ 开源 ============ #}
 <section class="section">
   <div class="container center">
     <h2 class="section-title">{{ t("home.oss.title") }}</h2>
