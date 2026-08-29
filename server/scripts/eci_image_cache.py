@@ -75,24 +75,28 @@ def _caches() -> list[dict]:
     return _call("eci", "2018-08-08", "DescribeImageCaches").get("ImageCaches", [])
 
 
-def _refs() -> list[str]:
-    """所有**已启用产品**的镜像引用。
+def _ref_sets() -> list[tuple[str, tuple[str, ...]]]:
+    """每个**已启用产品**的镜像集合 (主容器 + 伴随容器)。
 
-    云工作台不再只有 dsh 一种 —— 每个产品一个镜像, 各自都要有缓存。
-    以前这里只返回 WORK_IMAGE_REF 一个值, 而 rebuild() 会把"Images 里没有它"的
-    缓存全部删掉: 拿 ComfyUI 的引用跑一次, 就会顺手删掉 dsh 的缓存, 让所有 dsh
-    工作台的冷启动退回全量拉取 —— 不报错, 只是从此每次都多等半分钟。
+    栈产品 (Penpot/Coze/Dify) 一次要拉一组镜像 —— 缓存必须整组装下, 只缓存主
+    容器等于没缓存 (冷启动照样全量拉伴随容器)。单容器产品的集合就是一个元素,
+    行为与从前一致。
+
+    另一条旧教训继续有效: rebuild() 只删"哪个产品都不认"的缓存 —— 只按单个
+    产品判会顺手删掉别的产品的缓存, 让冷启动退回全量拉取, 不报错只是变慢。
     """
     from app import products
 
-    refs = []
+    sets = []
     for product in products.enabled():
-        ref = (product.image_ref or product.image).strip()
-        if ref and ref not in refs:
-            refs.append(ref)
-    if not refs:
+        refs = [(product.image_ref or product.image).strip()]
+        refs += [sc.image_ref.strip() for sc in product.sidecars]
+        deduped = tuple(dict.fromkeys(r for r in refs if r))
+        if deduped:
+            sets.append((product.id, deduped))
+    if not sets:
         raise SystemExit("没有已启用的工作台产品 —— 没有可对照的镜像引用")
-    return refs
+    return sets
 
 
 def eip_headroom() -> int | None:
@@ -117,14 +121,20 @@ def eip_headroom() -> int | None:
     return None
 
 
+def _covered(refs: tuple[str, ...], caches: list[dict]) -> dict | None:
+    """这组镜像有没有被某个 Ready 缓存**整组**装下。部分命中不算 —— 缺谁谁就
+    要全量拉, 而栈产品最大的往往正是伴随容器 (数据库/向量库)。"""
+    want = set(refs)
+    for c in caches:
+        if c.get("Status") == "Ready" and want <= set(c.get("Images") or []):
+            return c
+    return None
+
+
 def check() -> int:
-    refs = _refs()
+    sets = _ref_sets()
     caches = _caches()
-    missing = [
-        r
-        for r in refs
-        if not [c for c in caches if c.get("Status") == "Ready" and r in (c.get("Images") or [])]
-    ]
+    missing = [(pid, refs) for pid, refs in sets if _covered(refs, caches) is None]
     rc = 0
     # 至少留几个 EIP 给"重建镜像缓存"和人工排查 —— 前者恰好在升级镜像版本时跑,
     # 是最不该因为抢不到 EIP 而失败的时刻。
@@ -149,15 +159,15 @@ def check() -> int:
         )
         rc = 1
     if not missing:
-        print(f"✓ {len(refs)} 个产品镜像都有 Ready 缓存:")
-        for r in refs:
-            hit = [c for c in caches if c.get("Status") == "Ready" and r in (c.get("Images") or [])]
-            print(f"  {r}  ->  {hit[0].get('ImageCacheId')} ({hit[0].get('ImageCacheName')})")
+        print(f"✓ {len(sets)} 个产品的镜像组都有 Ready 缓存:")
+        for pid, refs in sets:
+            hit = _covered(refs, caches)
+            print(f"  {pid} ({len(refs)} 镜像)  ->  {hit.get('ImageCacheId')} ({hit.get('ImageCacheName')})")
         if head is not None and head >= 5:
             print(f"✓ EIP 余量 {head} 个 (配额 - WORK_MAX_CONCURRENT)")
         return rc
-    for r in missing:
-        print(f"✗ 没有对应 {r} 的 Ready 镜像缓存。", file=sys.stderr)
+    for pid, refs in missing:
+        print(f"✗ 产品 {pid} 的镜像组 ({len(refs)} 个) 没有整组 Ready 的缓存。", file=sys.stderr)
     print("  缓存未命中会回退到完整镜像拉取并增加冷启动时间。", file=sys.stderr)
     for c in caches:
         print(f"  现有: {c.get('ImageCacheId')} {c.get('Status')} {c.get('Images')}", file=sys.stderr)
@@ -206,43 +216,49 @@ def _await_ready(cache_id: str, ref: str, timeout: float = 900.0) -> bool:
 
 
 def rebuild() -> int:
-    refs = _refs()
+    sets = _ref_sets()
     caches = _caches()
-    # 陈旧 = **哪个产品的镜像都不匹配**。只按单个 ref 判的话, 建 ComfyUI 缓存
-    # 会顺手删掉 dsh 的 (见 _refs 的说明)。
+    all_refs = {r for _, refs in sets for r in refs}
+    # 陈旧 = **哪个产品的镜像都不沾**。只按单个产品判会顺手删掉别的产品的缓存
+    # (见 _ref_sets 的说明)。
     stale = [
         c["ImageCacheId"]
         for c in caches
-        if not (set(c.get("Images") or []) & set(refs))
+        if not (set(c.get("Images") or []) & all_refs)
         or c.get("Status") not in ("Ready", "Creating", "Preparing")
     ]
 
     todo = []
-    for ref in refs:
-        mine = [c for c in caches if ref in (c.get("Images") or [])]
-        if any(c.get("Status") == "Ready" for c in mine):
+    for pid, refs in sets:
+        if _covered(refs, caches):
             continue
-        # 只有 Ready 才算数。在建的要**等出结果**, 不能当成已经有了 —— 见
-        # _await_ready 的说明。
-        building = [c for c in mine if c.get("Status") in ("Creating", "Preparing")]
-        if building and _await_ready(building[0]["ImageCacheId"], ref):
+        # 在建的要**等出结果**, 不能当成已经有了 —— 见 _await_ready 的说明。
+        building = [
+            c for c in caches
+            if c.get("Status") in ("Creating", "Preparing") and set(refs) <= set(c.get("Images") or [])
+        ]
+        if building and _await_ready(building[0]["ImageCacheId"], refs[0]):
             continue
-        todo.append(ref)
+        todo.append((pid, refs))
 
     if not todo:
-        print(f"==> {len(refs)} 个产品镜像都已有 Ready 缓存")
+        print(f"==> {len(sets)} 个产品的镜像组都已有 Ready 缓存")
         for old in stale:
             print(f"==> 删旧缓存 {old}")
             _drop(old)
         return check()
     rc = 0
-    for ref in todo:
-        rc |= _build_one(ref, stale if ref == todo[-1] else [])
+    for i, (pid, refs) in enumerate(todo):
+        rc |= _build_one(refs, stale if i == len(todo) - 1 else [])
     return rc or check()
 
 
-def _build_one(ref: str, stale: list[str]) -> int:
-    print(f"==> 目标镜像: {ref}")
+def _build_one(refs, stale: list[str]) -> int:
+    if isinstance(refs, str):
+        refs = (refs,)   # prepare 的单镜像路径继续可用
+    print(f"==> 目标镜像组 ({len(refs)} 个):")
+    for r in refs:
+        print(f"      {r}")
 
     print("==> 申请临时 EIP (构建任务不共享业务实例的 EIP, 自己没有出网能力)")
     eip = _call(
@@ -255,7 +271,7 @@ def _build_one(ref: str, stale: list[str]) -> int:
     print(f"    {alloc}  {addr}")
 
     try:
-        name = "dsh-" + hashlib.sha256(ref.encode()).hexdigest()[:10]
+        name = "dsh-" + hashlib.sha256("|".join(refs).encode()).hexdigest()[:10]
         print(f"==> 建缓存 {name}")
         made = _call(
             "eci",
@@ -263,7 +279,7 @@ def _build_one(ref: str, stale: list[str]) -> int:
             "CreateImageCache",
             {
                 "ImageCacheName": name,
-                "Image.1": ref,
+                **{f"Image.{i}": r for i, r in enumerate(refs, start=1)},
                 "VSwitchId": config.ECI_VSWITCH_ID,
                 "SecurityGroupId": config.ECI_SECURITY_GROUP_ID,
                 "ZoneId": config.ECI_ZONE_ID or None,
@@ -280,6 +296,8 @@ def _build_one(ref: str, stale: list[str]) -> int:
             if st == "Ready":
                 print(f"    Ready @ {int(time.time() - t0)}s")
                 break
+            if st == "?":
+                pass
             if st == "Failed":
                 raise RuntimeError(
                     f"缓存构建失败 ({cid}) —— 多半是构建任务没有出网能力, 检查 EIP 是否真的绑上了"
