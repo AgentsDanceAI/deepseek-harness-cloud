@@ -1223,7 +1223,15 @@ map \$sent_http_content_type \$hm_c1 { ~*^text/html "$C1"; default ""; }
 map \$sent_http_content_type \$hm_c2 { ~*^text/html "$C2"; default ""; }
 map \$sent_http_content_type \$hm_c3 { ~*^text/html "$C3"; default ""; }
 EOF
-  nginx -s reload
+  # 先验再 reload, 并把结果记下来 —— 上一版无论成败都报"已下发", 于是配置没换
+  # 也看不出来。
+  if nginx -t >/tmp/.nginxt 2>&1; then
+    nginx -s reload && return 0
+    log "reload 失败: $(tail -2 /tmp/.nginxt | tr '\n' ' ')"
+    return 1
+  fi
+  log "配置语法错, 没敢 reload: $(tail -2 /tmp/.nginxt | tr '\n' ' ')"
+  return 1
 }
 
 n=0
@@ -1233,11 +1241,15 @@ while [ "$n" -lt 120 ]; do
       -H "Host: 127.0.0.1:9119" \
       -d "{\"provider\":\"basic\",\"username\":\"$U\",\"password\":\"$P\",\"next\":\"/\"}" \
       "$API/auth/password-login")
-  C1=$(echo "$H" | grep -i '^set-cookie: hermes_session_at=' | head -1 | sed 's/^[Ss]et-[Cc]ookie: //' | tr -d '\r')
-  C2=$(echo "$H" | grep -i '^set-cookie: hermes_session_rt=' | head -1 | sed 's/^[Ss]et-[Cc]ookie: //' | tr -d '\r')
-  C3=$(echo "$H" | grep -i '^set-cookie: hermes_session_provider=' | head -1 | sed 's/^[Ss]et-[Cc]ookie: //' | tr -d '\r')
+  # **必须转义双引号**: hermes_session_rt 的值本身是带引号的 (rt="eyJ...=="),
+  # 原样塞进 nginx 的 "..." 里就是语法错误 -> reload 失败 -> 配置根本没换,
+  # 而脚本这边什么都察觉不到。2026-08-30 上线当天栽在这里。
+  pick() { echo "$H" | grep -i "^set-cookie: $1=" | head -1 | sed 's/^[Ss]et-[Cc]ookie: //' | tr -d '\r' | sed 's/"/\\"/g'; }
+  C1=$(pick hermes_session_at)
+  C2=$(pick hermes_session_rt)
+  C3=$(pick hermes_session_provider)
   if [ -n "$C1" ] && [ -n "$C2" ] && [ -n "$C3" ]; then
-    write_conf
+    write_conf || { sleep 10; continue; }
     log "会话已下发 (第 $n 轮)"
     # 会话有寿命, 而容器能连着跑很久 —— 定期重登刷新。
     sleep 1200
