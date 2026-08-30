@@ -561,14 +561,37 @@ def test_boot_fingerprint_tracks_configuration_not_the_user():
     (or per call) every workspace would be rebuilt on every visit."""
     from app import workspace
 
-    a = workspace._boot_fingerprint(products.boot_script(products.DEFAULT))
-    b = workspace._boot_fingerprint(products.boot_script(products.DEFAULT))
+    prod = products.registry()[products.DEFAULT]
+    a = workspace._spec_fingerprint(prod)
+    b = workspace._spec_fingerprint(prod)
     assert a == b
     from app.workbackend import WorkInfo
 
     blank = WorkInfo(running=True, boot_fp="", image_id="i", host="h")
     assert workspace._boot_is_stale(blank, products.DEFAULT) is True  # 没盖过戳 = 早于这套机制
     assert workspace._boot_is_stale(WorkInfo(True, a, "i", "h"), products.DEFAULT) is False
+
+
+def test_spec_fingerprint_covers_more_than_the_boot_script():
+    """指纹要覆盖**整份容器规格**, 不只是启动脚本。
+
+    早先只按启动脚本算, 于是改伴随容器的 env / 参数 / 初始化容器**不会**触发
+    重建 —— 部署过去了、测试全绿, 而线上还跑着旧规格, 一点提示都没有。
+    2026-08-30 给 Hermes 加一个 env 时踩到: 改完部署完, 症状一模一样。
+    """
+    import dataclasses
+
+    from app import workspace
+
+    prod = products.registry()[products.DEFAULT]
+    base = workspace._spec_fingerprint(prod)
+    # 只动伴随容器的 env, 启动脚本一个字不变
+    sc = products.Sidecar(name="x", image_ref="busybox:1", env=(("A", "1"),))
+    moved = workspace._spec_fingerprint(dataclasses.replace(prod, sidecars=(sc,)))
+    assert moved != base, "改伴随容器不触发重建 -> 线上会静默跑着旧规格"
+    # 换初始化容器同理
+    ic = products.InitContainer(name="s", image_ref="busybox:1", cmd=("true",))
+    assert workspace._spec_fingerprint(dataclasses.replace(prod, init_containers=(ic,))) != base
 
 
 def test_smtp_rejection_is_a_client_error_not_a_500():

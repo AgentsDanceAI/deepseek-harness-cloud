@@ -231,7 +231,7 @@ async def _create(user: dict, product: products.Product) -> None:
         products.wskey(user["id"], product.id),
         boot=boot,
         env=products.env_for(product.id, token, security.stack_secret(user["id"])),
-        boot_fp=_boot_fingerprint(boot),
+        boot_fp=_spec_fingerprint(product),
         image=product.image,
         image_ref=product.image_ref,
         mem_mb=product.mem_mb,
@@ -284,13 +284,42 @@ async def _ready(key: str, product: products.Product) -> bool:
         return False
 
 
+def _spec_fingerprint(product: products.Product) -> str:
+    """这个产品**整份容器规格**的指纹, 不只是启动脚本。
+
+    早先只按启动脚本算。于是改伴随容器的 env / 参数 / 初始化容器**不会**触发
+    重建 —— 部署过去了、测试全绿, 而线上还跑着旧规格, 一点提示都没有。
+    2026-08-30 给 Hermes 加一个 env 时踩到: 改完部署完, 症状一模一样, 白查了
+    十分钟才想到实例根本没重建。
+
+    密钥/令牌这类每用户的东西不在这里 (它们是占位符, 到 create 时才替换),
+    所以同一份规格对所有用户得到同一个指纹。
+    """
+    import dataclasses
+
+    spec = (
+        products.boot_script(product.id),
+        product.image_ref or product.image,
+        product.port,
+        [dataclasses.astuple(sc) for sc in product.sidecars],
+        [dataclasses.astuple(ic) for ic in product.init_containers],
+        product.host_aliases,
+        product.seeds,
+        product.run_as_user,
+    )
+    return hashlib.sha256(repr(spec).encode()).hexdigest()[:16]
+
+
 def _boot_is_stale(info: workbackend.WorkInfo, product_id: str) -> bool:
     """True when the workspace was built from a different boot configuration.
 
     A workspace without a stamp predates the mechanism and is stale by
     definition.
     """
-    return info.boot_fp != _boot_fingerprint(products.boot_script(product_id))
+    prod = products.get(product_id)
+    return info.boot_fp != (
+        _spec_fingerprint(prod) if prod else _boot_fingerprint(products.boot_script(product_id))
+    )
 
 
 async def _image_is_stale(info: workbackend.WorkInfo, product: products.Product) -> bool:
