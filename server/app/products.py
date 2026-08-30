@@ -179,6 +179,10 @@ GATEWAY_TOKEN_PLACEHOLDER = "__DSH_GATEWAY_TOKEN__"
 #: 的十六进制串进去会在应用侧报一个跟密钥毫无关系的错 (Coze 的插件 OAuth 就
 #: 要这个长度)。
 STACK_SECRET16_PLACEHOLDER = "__DSH_STACK_SECRET16__"
+#: 同一把密钥推成**口令形状**的那个值 (见 autologin_password)。伴随容器 env 里
+#: 用它, 主容器那边直接调函数 —— 两边必须是同一个值, 否则替用户登录永远失败,
+#: 而症状只是"页面能开、接口全 401", 看不出是口令对不上。
+STACK_PASSWORD_PLACEHOLDER = "__DSH_STACK_PASSWORD__"
 
 
 def resolve_sidecars(sidecars: tuple[Sidecar, ...], secret: str, token: str = "") -> tuple[Sidecar, ...]:
@@ -187,7 +191,8 @@ def resolve_sidecars(sidecars: tuple[Sidecar, ...], secret: str, token: str = ""
 
     def sub(v: str) -> str:
         return (
-            v.replace(STACK_SECRET16_PLACEHOLDER, secret[:16])
+            v.replace(STACK_PASSWORD_PLACEHOLDER, autologin_password(secret))
+            .replace(STACK_SECRET16_PLACEHOLDER, secret[:16])
             .replace(STACK_SECRET_PLACEHOLDER, secret)
             .replace(GATEWAY_TOKEN_PLACEHOLDER, token)
         )
@@ -208,7 +213,8 @@ def resolve_init_containers(
 
     def sub(v: str) -> str:
         return (
-            v.replace(STACK_SECRET16_PLACEHOLDER, secret[:16])
+            v.replace(STACK_PASSWORD_PLACEHOLDER, autologin_password(secret))
+            .replace(STACK_SECRET16_PLACEHOLDER, secret[:16])
             .replace(STACK_SECRET_PLACEHOLDER, secret)
             .replace(GATEWAY_TOKEN_PLACEHOLDER, token)
         )
@@ -398,8 +404,8 @@ def _dify_embedding_model() -> str:
         return ""
 
 
-def dify_autologin_password(secret: str) -> str:
-    """Dify 免登录账号的密码, 从该用户的栈密钥推导。
+def autologin_password(secret: str) -> str:
+    """免登录账号的密码, 从该用户的栈密钥推导。
 
     定长小写十六进制不一定过得了口令强度校验, 所以前后各补一段, 保证同时含
     大写、小写、数字。secret 为空时返回空串 —— 上层据此跳过免登录 (而不是用一个
@@ -1188,6 +1194,62 @@ def _openclaw_boot() -> str:
 HERMES_PORT = 9119
 
 
+#: 工作台自己登一次 Hermes 控制台, 用户不再面对它的登录/连接界面。
+#: 它即使绑回环, /api/* 仍然要会话 —— 页面能打开而接口一律 401, SPA 就停在
+#: 未登录态。这一点我在 spike 里看到过却当成无关, 上线后才暴露。
+_HERMES_AUTOLOGIN = r"""#!/bin/sh
+# 由 products.py 下发。工作台自己登一次 Hermes 控制台, 把会话发给浏览器。
+#
+# 它即使绑回环, /api/* 仍然要会话 (页面能打开, 接口一律 401, 于是 SPA 停在
+# 未登录态)。登录是表单式的: POST /auth/password-login, 成功后下发三个 cookie。
+# 所以只能像 Dify 那样替用户登一次 —— 凭据是我们生成的, 用户不可能知道。
+U="$HERMES_USER"
+P="$HERMES_PASS"
+[ -n "$U" ] && [ -n "$P" ] || exit 0
+API=http://127.0.0.1:9119
+LOGF=/root/.hermes-autologin.log
+log() {
+  printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" >> "$LOGF" 2>/dev/null
+  tail -n 200 "$LOGF" > "$LOGF.t" 2>/dev/null && mv "$LOGF.t" "$LOGF" 2>/dev/null
+}
+
+write_conf() {
+  cat > /etc/nginx/conf.d/00-autologin.conf <<EOF
+# **每次页面加载都补发**, 不看浏览器有没有 —— 手里那份一旦失效 (实例重建换了
+# 密码) 它仍然"存在", 只在缺失时补的话用户就被永久钉在未登录态。
+# 工作台只有一个账号, 不存在"别人的会话"要保住。
+# 按响应类型收窄到 HTML 文档: 静态资源和接口响应不必背这些头。
+map \$sent_http_content_type \$hm_c1 { ~*^text/html "$C1"; default ""; }
+map \$sent_http_content_type \$hm_c2 { ~*^text/html "$C2"; default ""; }
+map \$sent_http_content_type \$hm_c3 { ~*^text/html "$C3"; default ""; }
+EOF
+  nginx -s reload
+}
+
+n=0
+while [ "$n" -lt 120 ]; do
+  n=$((n + 1))
+  H=$(curl -s -D- -o /dev/null -m 10 -X POST -H 'Content-Type: application/json' \
+      -H "Host: 127.0.0.1:9119" \
+      -d "{\"provider\":\"basic\",\"username\":\"$U\",\"password\":\"$P\",\"next\":\"/\"}" \
+      "$API/auth/password-login")
+  C1=$(echo "$H" | grep -i '^set-cookie: hermes_session_at=' | head -1 | sed 's/^[Ss]et-[Cc]ookie: //' | tr -d '\r')
+  C2=$(echo "$H" | grep -i '^set-cookie: hermes_session_rt=' | head -1 | sed 's/^[Ss]et-[Cc]ookie: //' | tr -d '\r')
+  C3=$(echo "$H" | grep -i '^set-cookie: hermes_session_provider=' | head -1 | sed 's/^[Ss]et-[Cc]ookie: //' | tr -d '\r')
+  if [ -n "$C1" ] && [ -n "$C2" ] && [ -n "$C3" ]; then
+    write_conf
+    log "会话已下发 (第 $n 轮)"
+    # 会话有寿命, 而容器能连着跑很久 —— 定期重登刷新。
+    sleep 1200
+    n=0
+    continue
+  fi
+  sleep 5
+done
+log "登不上, 放弃"
+"""
+
+
 def _hermes_stack() -> tuple[Sidecar, ...]:
     """Hermes 本体作为伴随容器, **绑回环**。
 
@@ -1215,6 +1277,13 @@ def _hermes_stack() -> tuple[Sidecar, ...]:
             # unset")。而那正是我们不要的第二道登录墙。
             # 它文档给的本地用法就是"绑回环 + 隧道", 于是 Host 由 nginx 用**绑定
             # 主机名**送过去 (见 _hermes_boot) —— SSH 隧道本来也是这个效果。
+            #
+            # 控制台账号: 绑回环也挡不住 /api/* 要会话, 所以配一副凭据, 由主容器
+            # 替用户登一次 (见 _HERMES_AUTOLOGIN)。密码按用户推导。
+            env=(
+                ("HERMES_DASHBOARD_BASIC_AUTH_USERNAME", "owner"),
+                ("HERMES_DASHBOARD_BASIC_AUTH_PASSWORD", STACK_PASSWORD_PLACEHOLDER),
+            ),
             mounts=(("hermes/data", "/opt/data"),),
             run_as_user=0,
         ),
@@ -1252,11 +1321,26 @@ def _hermes_boot() -> str:
     """主容器是 nginx, 把流量送进同组的 Hermes 回环端口 (见 _hermes_stack)。"""
     return (
         "set -e\n"
+        # 免登录 (见 _HERMES_AUTOLOGIN)。先落空默认值 —— 会话要等 hermes 起来
+        # 才拿得到, 而 nginx 现在就要能起; 引用未定义变量它会直接启动失败。
+        "cat > /etc/nginx/conf.d/00-autologin.conf <<'AUTOCONF'\n"
+        "map $sent_http_content_type $hm_c1 { default \"\"; }\n"
+        "map $sent_http_content_type $hm_c2 { default \"\"; }\n"
+        "map $sent_http_content_type $hm_c3 { default \"\"; }\n"
+        "AUTOCONF\n"
+        "cat > /usr/local/bin/dsh-hermes-autologin <<'AUTOLOGIN'\n"
+        + _HERMES_AUTOLOGIN
+        + "AUTOLOGIN\n"
+        "chmod +x /usr/local/bin/dsh-hermes-autologin\n"
+        "/usr/local/bin/dsh-hermes-autologin >/dev/null 2>&1 &\n"
         "cat > /etc/nginx/conf.d/default.conf <<'NGINXCONF'\n"
         "server {\n"
         "  listen 80;\n"
         "  server_name _;\n"
         "  client_max_body_size 512m;\n"
+        "  add_header Set-Cookie $hm_c1 always;\n"
+        "  add_header Set-Cookie $hm_c2 always;\n"
+        "  add_header Set-Cookie $hm_c3 always;\n"
         "  location / {\n"
         f"    proxy_pass http://127.0.0.1:{HERMES_PORT};\n"
         # Host 必须是它**绑定的**主机名。它有 Host 白名单, 只认绑定主机名或
@@ -1672,8 +1756,12 @@ def boot_script(product_id: str) -> str:
 def env_for(product_id: str, token: str, secret: str = "") -> dict[str, str]:
     gateway = config.PUBLIC_BASE.rstrip("/")
     if product_id == "hermes":
-        # 主容器只是 nginx; 模型配置由初始化容器写进 NAS (见 _hermes_init)。
-        return {}
+        # 模型配置由初始化容器写进 NAS (见 _hermes_init); 这里给主容器免登录用的
+        # 凭据 —— 它要替用户登一次控制台 (见 _HERMES_AUTOLOGIN)。
+        return {
+            "HERMES_USER": "owner",
+            "HERMES_PASS": autologin_password(secret),
+        }
     if product_id == "coze":
         # 主容器只是 nginx —— 业务 env 全在伴随容器上 (见 _coze_stack)。
         # 免登录的账号密码由容器自己随机生成并存在 NAS 上 (Coze 可以随便建账号)。
@@ -1686,7 +1774,7 @@ def env_for(product_id: str, token: str, secret: str = "") -> dict[str, str]:
             # 用 admin@ 而不是 Coze 那边的 owner@: Dify 单租户, setup 建的就是这个
             # 账号, 没有第二个可建 —— 所以这里必须与既有账号对齐, 不能另起一个。
             "DSH_AUTOLOGIN_EMAIL": "admin@dshcloud.online",
-            "DSH_AUTOLOGIN_PASSWORD": dify_autologin_password(secret),
+            "DSH_AUTOLOGIN_PASSWORD": autologin_password(secret),
             # 用来清掉 Dify 那把 24 小时的登录锁 (见 _DIFY_AUTOLOGIN 的 unlock)。
             "DSH_REDIS_PASSWORD": _DIFY_REDIS_PASSWORD,
             # 预置模型用 (见 _DIFY_AUTOLOGIN 的 provision)。Dify 的模型供应商是

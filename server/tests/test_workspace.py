@@ -2332,18 +2332,27 @@ def test_dify_autologin_backs_off_instead_of_locking_the_account(monkeypatch):
 
 def test_dify_autologin_password_is_derived_not_stored(monkeypatch):
     """密码按用户推导, 且不同用户不同; 没有密钥时**不给**弱口令兜底。"""
-    a = products.dify_autologin_password("a" * 64)
-    b = products.dify_autologin_password("b" * 64)
+    a = products.autologin_password("a" * 64)
+    b = products.autologin_password("b" * 64)
     assert a != b, "所有用户共用一个口令等于没有口令"
     assert len(a) >= 12
     assert any(c.isupper() for c in a) and any(c.isdigit() for c in a), "过不了口令强度校验"
-    assert products.dify_autologin_password("") == "", (
+    assert products.autologin_password("") == "", (
         "没有密钥时该跳过免登录, 而不是退回一个人人都知道的口令"
     )
 
     monkeypatch.setattr(config, "DIFY_DOMAIN", "dify.test.local")
     env = products.env_for("dify", "tok", "s" * 64)
-    assert env["DSH_AUTOLOGIN_PASSWORD"] == products.dify_autologin_password("s" * 64)
+    assert env["DSH_AUTOLOGIN_PASSWORD"] == products.autologin_password("s" * 64)
+    # 同一个推导也给 Hermes 的伴随容器用 (占位符), 两边必须是同一个值 ——
+    # 对不上的症状只是"页面能开、接口全 401", 看不出是口令的问题。
+    monkeypatch.setattr(config, "HERMES_DOMAIN", "hermes.test.local")
+    hm = products.resolve_sidecars(
+        products.registry()["hermes"].sidecars, "s" * 64, "t"
+    )[0]
+    assert dict(hm.env)["HERMES_DASHBOARD_BASIC_AUTH_PASSWORD"] == products.env_for(
+        "hermes", "t", "s" * 64
+    )["HERMES_PASS"]
     # 邮箱必须与 setup 建的那个一致 —— 单租户, 没有第二个账号可用
     assert env["DSH_AUTOLOGIN_EMAIL"] == "admin@dshcloud.online"
 
