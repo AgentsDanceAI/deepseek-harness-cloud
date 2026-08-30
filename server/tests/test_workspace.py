@@ -1811,7 +1811,7 @@ def test_hermes_binds_loopback_so_there_is_no_second_login_wall(monkeypatch):
     # 免登录: cookie 值里带双引号 (rt="eyJ..."), 不转义就是 nginx 语法错 ->
     # reload 静默失败 -> 配置根本没换。而且要先验再 reload, 否则报了成功也没用。
     sh = products._HERMES_AUTOLOGIN
-    assert r"sed 's/\"/\\\\\"/g'" in sh or 's/"/' in sh, "cookie 里的双引号没转义"
+    assert r"""tr -d '\r"'""" in sh, "cookie 值里的双引号没去掉 -> 要么 nginx 语法错, 要么引号留在值里"
     assert "nginx -t" in sh, "不先验就 reload, 失败了也不知道"
     assert "reload 失败" in sh
 

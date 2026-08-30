@@ -1241,10 +1241,14 @@ while [ "$n" -lt 120 ]; do
       -H "Host: 127.0.0.1:9119" \
       -d "{\"provider\":\"basic\",\"username\":\"$U\",\"password\":\"$P\",\"next\":\"/\"}" \
       "$API/auth/password-login")
-  # **必须转义双引号**: hermes_session_rt 的值本身是带引号的 (rt="eyJ...=="),
-  # 原样塞进 nginx 的 "..." 里就是语法错误 -> reload 失败 -> 配置根本没换,
-  # 而脚本这边什么都察觉不到。2026-08-30 上线当天栽在这里。
-  pick() { echo "$H" | grep -i "^set-cookie: $1=" | head -1 | sed 's/^[Ss]et-[Cc]ookie: //' | tr -d '\r' | sed 's/"/\\"/g'; }
+  # **把双引号去掉**, 不是转义。base64 结尾带 = 时 Hermes 会给 cookie 值加引号
+  # (at="eyJ...="), 而:
+  #   · 原样塞进 nginx 的 "..." 里是语法错误 -> reload 失败 -> 配置没换, 而脚本
+  #     这边什么都察觉不到;
+  #   · 转义成 \" 又会让引号**留在值里**发给浏览器, 服务端不认, 接口照样 401。
+  # 去掉引号最省事: 带 = 的 base64 本来就是合法的 cookie 值。
+  # 2026-08-30 上线当天两种写法都踩了一遍。
+  pick() { echo "$H" | grep -i "^set-cookie: $1=" | head -1 | sed 's/^[Ss]et-[Cc]ookie: //' | tr -d '\r"'; }
   C1=$(pick hermes_session_at)
   C2=$(pick hermes_session_rt)
   C3=$(pick hermes_session_provider)
