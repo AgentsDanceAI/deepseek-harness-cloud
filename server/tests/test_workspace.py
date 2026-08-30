@@ -186,6 +186,26 @@ def test_route_creates_and_serves_container(fake):
     assert fake.creates == 1 and fake.starts >= 1
 
 
+def test_route_ignores_the_products_own_authorization_header(fake):
+    """产品自带的 Authorization 头不能把用户从我们这层踢出去。
+
+    云空间里的产品普遍自带 Authorization: Dify 的前端从 cookie 里读出它自家的
+    JWT, 再放进 Authorization 发出来。那个头会一路带进 Caddy 的 forward_auth
+    子请求, 我们要是拿它当 DSH 令牌验, 验不过就 302 去登录页 —— 于是**产品
+    控制台的每个请求都被我们弹回登录**, 而用户明明已经登录了, 服务端也一个错
+    都不报。2026-08-30 拆 Dify 登录墙时发现, 在此之前 Dify 的控制台是用不了的。
+    """
+    c, uid = _user("bearer@test.local")
+    foreign = {"Authorization": "Bearer eyJhbGciOiJIUzI1NiJ9.not-ours.sig"}
+    c.get("/api/work/route", headers=foreign, follow_redirects=False)
+    r = c.get("/api/work/route", headers=foreign, follow_redirects=False)
+    assert r.status_code == 200, "被产品自己的令牌顶掉了 —— 控制台会整个弹回登录"
+    assert r.headers["X-Work-Upstream"] == f"{workspace._cname(uid)}:3081"
+    # 没有 cookie 时仍该拒绝: 只是"不看 Authorization", 不是"放行"
+    bare = TestClient(app).get("/api/work/route", headers=foreign, follow_redirects=False)
+    assert bare.status_code == 302 and "/login" in bare.headers["location"]
+
+
 def test_route_blocks_when_no_credits(fake):
     c, uid = _user("broke@test.local")
     credits.spend(uid, 500, kind="llm", model="m")  # burn signup grant
