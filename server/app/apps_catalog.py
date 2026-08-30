@@ -57,9 +57,12 @@ CATALOG: tuple[AppEntry, ...] = (
         "jupyter", "JupyterLab", "data",
         '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
     ),
+    # Hermes 顶掉了 Bolt.diy: 搭应用这一格 Dify 和 Coze 已经占满, 而 Hermes 是
+    # "会自己攒技能、带持久记忆"的常驻 agent, 与 OpenClaw 各占一端。
     AppEntry(
-        "bolt-diy", "Bolt.diy", "builder",
-        '<path d="M13 2 4 14h6l-1 8 9-12h-6l1-8z"/>',
+        "hermes", "Hermes Agent", "agent",
+        '<path d="M12 3v6M9 6h6M6.5 9h11l-1.2 5.5a4.5 4.5 0 0 1-8.6 0L6.5 9z"/>'
+        '<path d="M12 19v2M9 21h6M4 6.5 6.5 9M20 6.5 17.5 9"/>',
     ),
     AppEntry(
         "dify", "Dify", "builder",

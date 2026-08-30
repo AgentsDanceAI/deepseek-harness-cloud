@@ -54,6 +54,10 @@ class Sidecar:
     name: str  # 组内容器名
     image_ref: str  # 上游原生镜像的完整地址
     cmd: tuple[str, ...] = ()  # 空 = 用镜像默认 entrypoint
+    # 传给 entrypoint 的参数。**cmd 会顶掉 entrypoint, args 不会** —— 有些镜像的
+    # entrypoint 是一整套初始化 (Hermes 是 s6 监督树), 顶掉它服务就起不来, 而它
+    # 只在 stderr 抱怨一句、进程照常跑, 于是"起来了但什么都不工作"。
+    args: tuple[str, ...] = ()
     env: tuple[tuple[str, str], ...] = ()
     # NAS 卷上的挂载: (用户子目录下的相对路径, 容器内路径)。中间件的数据要
     # 跟着用户走 —— 实例回收重建后, 库还在。
@@ -91,6 +95,10 @@ class InitContainer:
     cmd: tuple[str, ...] = ()
     # 种子卷挂在初始化容器内的哪个路径 (它要往这里写)。
     seed_mount: str = "/seed"
+    # NAS 上的挂载: (用户子目录下的相对路径, 容器内路径)。用来在常规容器起来
+    # **之前**往用户的持久目录里写东西 —— 比如给一个 entrypoint 顶不得的产品
+    # 预置配置 (见 Sidecar.args)。
+    mounts: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -170,6 +178,27 @@ def resolve_sidecars(sidecars: tuple[Sidecar, ...], secret: str, token: str = ""
         )
 
     return tuple(replace(sc, env=tuple((k, sub(v)) for k, v in sc.env)) for sc in sidecars)
+
+
+def resolve_init_containers(
+    ics: tuple[InitContainer, ...], secret: str = "", token: str = ""
+) -> tuple[InitContainer, ...]:
+    """初始化容器的**命令行**里也可能带占位符。
+
+    Hermes 就是: 它的模型配置由初始化容器用 `hermes config set` 写进 NAS, 而
+    api_key 要换成该用户的网关令牌。不替换的话会把字面量 `__DSH_GATEWAY_TOKEN__`
+    原样写进 config.yaml —— 配置文件看着好好的, 一发消息就 401。
+    """
+    from dataclasses import replace
+
+    def sub(v: str) -> str:
+        return (
+            v.replace(STACK_SECRET16_PLACEHOLDER, secret[:16])
+            .replace(STACK_SECRET_PLACEHOLDER, secret)
+            .replace(GATEWAY_TOKEN_PLACEHOLDER, token)
+        )
+
+    return tuple(replace(ic, cmd=tuple(sub(a) for a in ic.cmd)) for ic in ics)
 
 
 # ---- Dify (LLM 应用搭建, 10 容器栈) ----------------------------------------
@@ -1128,6 +1157,91 @@ def _openclaw_boot() -> str:
     )
 
 
+#: Hermes 的控制台端口。它只绑回环 —— 见 _hermes_stack。
+HERMES_PORT = 9119
+
+
+def _hermes_stack() -> tuple[Sidecar, ...]:
+    """Hermes 本体作为伴随容器, **绑回环**。
+
+    它自己的规矩: 非回环绑定强制要鉴权 (`--insecure` 从 2026-06 起是 no-op),
+    而它没有 OpenClaw 那种 trusted-proxy 模式, 只有表单密码或 OAuth —— 两条都
+    是第二道登录墙。文档给的建议是"绑 127.0.0.1 + 隧道"。
+    容器组共享网络命名空间, 所以**主容器那个 nginx 就是那条隧道**: Hermes 绑
+    回环 (于是免鉴权, 完全按它自己推荐的姿势), 只有同组的 nginx 够得着, 而
+    nginx 前面是我们的 forward_auth。既没绕开它的安全控制, 也没有第二道墙。
+
+    **不覆盖 entrypoint, 只传 args**: 它的 entrypoint 是 s6 监督树, 顶掉之后
+    脚本自己会在 stderr 抱怨一句"supervised services are unavailable"然后照常
+    跑 —— 起来了但什么都不工作。
+    """
+    return (
+        Sidecar(
+            name="hermes",
+            image_ref=config.HERMES_IMAGE_REF,
+            args=("dashboard", "--host", "127.0.0.1", "--port", str(HERMES_PORT),
+                  "--no-open", "--skip-build"),
+            mounts=(("hermes/data", "/opt/data"),),
+            run_as_user=0,
+        ),
+    )
+
+
+def _hermes_init(secret: str = "", token: str = "") -> tuple[InitContainer, ...]:
+    """在 Hermes 起来之前把模型指到我们的网关。
+
+    用它自己的 `config set` 而不是整份写 config.yaml —— 那个文件里还有用户自己
+    调的东西 (人格、技能、渠道), 重写一遍等于抹掉。
+    """
+    gateway = config.PUBLIC_BASE.rstrip("/")
+    sets = " && ".join(
+        f"hermes config set {k} {v}"
+        for k, v in (
+            ("model.provider", "custom"),
+            ("model.base_url", f"{gateway}/llm/v1"),
+            ("model.model", model_catalog.default_model()),
+            ("model.api_key", GATEWAY_TOKEN_PLACEHOLDER),
+        )
+    )
+    return (
+        InitContainer(
+            name="seed",
+            image_ref=config.HERMES_IMAGE_REF,
+            # 这里可以顶掉 entrypoint: 一次性写配置不需要那套监督树。
+            cmd=("sh", "-c", f"mkdir -p /opt/data && ({sets}) || true"),
+            mounts=(("hermes/data", "/opt/data"),),
+        ),
+    )
+
+
+def _hermes_boot() -> str:
+    """主容器是 nginx, 把流量送进同组的 Hermes 回环端口 (见 _hermes_stack)。"""
+    return (
+        "set -e\n"
+        "cat > /etc/nginx/conf.d/default.conf <<'NGINXCONF'\n"
+        "server {\n"
+        "  listen 80;\n"
+        "  server_name _;\n"
+        "  client_max_body_size 512m;\n"
+        "  location / {\n"
+        f"    proxy_pass http://127.0.0.1:{HERMES_PORT};\n"
+        "    proxy_set_header Host $host;\n"
+        "    proxy_set_header X-Real-IP $remote_addr;\n"
+        "    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n"
+        "    proxy_set_header X-Forwarded-Proto $scheme;\n"
+        "    proxy_http_version 1.1;\n"
+        "    proxy_set_header Upgrade $http_upgrade;\n"
+        '    proxy_set_header Connection "upgrade";\n'
+        "    proxy_read_timeout 3600s;\n"
+        "    proxy_send_timeout 3600s;\n"
+        "    proxy_buffering off;\n"
+        "  }\n"
+        "}\n"
+        "NGINXCONF\n"
+        "exec nginx -g 'daemon off;'\n"
+    )
+
+
 def registry() -> dict[str, Product]:
     return {
         DEFAULT: Product(
@@ -1213,6 +1327,22 @@ def registry() -> dict[str, Product]:
             # 镜像里 USER 是 node, 写不进 NAS 挂进来的目录 —— 而它只会在日志里
             # 抱怨一句数据库打不开, 照常起来, 于是用户的东西一回收就没了。
             run_as_user=0,
+        ),
+        # Hermes Agent (Nous Research): 会自己攒技能、带持久记忆的常驻 agent。
+        # 两容器: nginx 主容器 + 绑回环的 hermes (见 _hermes_stack)。
+        "hermes": Product(
+            id="hermes",
+            name="Hermes Agent",
+            image="nginx:1.27-alpine",
+            image_ref="nginx:1.27-alpine",
+            port=80,
+            mem_mb=config.HERMES_MEM_LIMIT_MB,
+            cpus=config.HERMES_CPUS,
+            domain=config.HERMES_DOMAIN,
+            reports_presence=False,
+            tab_grace_min=config.HERMES_TAB_GRACE_MIN,
+            sidecars=_hermes_stack(),
+            init_containers=_hermes_init(),
         ),
         # Open Design: 智能体编排壳 (上游官方镜像**不带任何 agent CLI**, 托管
         # 环境里干不了活 —— 衍生镜像 od-local 烤进了我们的 dsh, 见
@@ -1485,6 +1615,7 @@ _BOOTS = {
     "dify": _dify_boot,
     "coze": _coze_boot,
     "openclaw": _openclaw_boot,
+    "hermes": _hermes_boot,
 }
 
 
@@ -1497,6 +1628,9 @@ def boot_script(product_id: str) -> str:
 
 def env_for(product_id: str, token: str, secret: str = "") -> dict[str, str]:
     gateway = config.PUBLIC_BASE.rstrip("/")
+    if product_id == "hermes":
+        # 主容器只是 nginx; 模型配置由初始化容器写进 NAS (见 _hermes_init)。
+        return {}
     if product_id == "coze":
         # 主容器只是 nginx —— 业务 env 全在伴随容器上 (见 _coze_stack)。
         # 免登录的账号密码由容器自己随机生成并存在 NAS 上 (Coze 可以随便建账号)。

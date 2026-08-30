@@ -556,6 +556,7 @@ class EciBackend(Backend):
         # 种子卷: 初始化容器把资产镜像的内容铺进来, 常规容器再从这里取 ——
         # compose 的 bind mount 在 ECI 上的等价物 (见 products.InitContainer)。
         # 初始化容器**跑完**常规容器才起, 所以不需要任何等待循环。
+        hexid = cname(user_id)[len("dshwork-") :]
         if init_containers:
             vi = 2 if nas else 1
             p[f"Volume.{vi}.Name"] = _SEED_VOLUME
@@ -567,6 +568,10 @@ class EciBackend(Backend):
                     p[f"InitContainer.{k}.Command.{j}"] = arg
                 p[f"InitContainer.{k}.VolumeMount.1.Name"] = _SEED_VOLUME
                 p[f"InitContainer.{k}.VolumeMount.1.MountPath"] = ic.seed_mount
+                for j, (subdir, path) in enumerate(ic.mounts, start=2):
+                    p[f"InitContainer.{k}.VolumeMount.{j}.Name"] = "dshwork-nas"
+                    p[f"InitContainer.{k}.VolumeMount.{j}.MountPath"] = path
+                    p[f"InitContainer.{k}.VolumeMount.{j}.SubPath"] = f"{hexid}/{subdir}"
         # 主容器的种子挂载接在 NAS 那两个之后 —— 编号是连续的, 空一格整个
         # 请求就被阿里云按"到此为止"截断, 后面的挂载静默消失。
         for j, (sub, path) in enumerate(seeds, start=(2 if nas else 0) + 1):
@@ -582,7 +587,6 @@ class EciBackend(Backend):
                 p[f"HostAliase.1.Hostname.{j}"] = name
         # 伴随容器: 用上游原生镜像, 与主容器共享网络命名空间 (互相 127.0.0.1)。
         # 不给容器级 cpu/mem —— 组给总量, 容器之间自己挤, 与 compose 默认一致。
-        hexid = cname(user_id)[len("dshwork-") :]
         for ci, sc in enumerate(sidecars, start=2):
             p[f"Container.{ci}.Name"] = sc.name
             p[f"Container.{ci}.Image"] = sc.image_ref
@@ -590,6 +594,8 @@ class EciBackend(Backend):
                 p[f"Container.{ci}.SecurityContext.RunAsUser"] = str(sc.run_as_user)
             for j, arg in enumerate(sc.cmd, start=1):
                 p[f"Container.{ci}.Command.{j}"] = arg
+            for j, arg in enumerate(sc.args, start=1):
+                p[f"Container.{ci}.Arg.{j}"] = arg
             for j, (k, v) in enumerate(sc.env, start=1):
                 p[f"Container.{ci}.EnvironmentVar.{j}.Key"] = k
                 p[f"Container.{ci}.EnvironmentVar.{j}.Value"] = v
