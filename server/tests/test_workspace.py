@@ -1208,8 +1208,7 @@ def test_the_progress_head_is_a_blinking_caret():
     # ease-in-out 它照样绿, 因为旁边注释里就有这四个字。
     assert "animation:caret-blink1.06sstep-endinfinite" in css, "渐隐的话就不像光标了"
     js = w._BOOT_JS.replace(" ", "")
-    assert "caret.style.left=cur+'%'" in js and "fill.style.width=cur+'%'" in js, \
-        "光标和填充必须用同一个 cur"
+    assert "caret.style.left=cur+'%'" in js and "fill.style.width=cur+'%'" in js, "光标和填充必须用同一个 cur"
 
 
 # --- 手机端外壳与 dsh 的接缝 -------------------------------------------------
@@ -1753,8 +1752,10 @@ def test_openclaw_auth_is_trusted_proxy_not_open(monkeypatch):
     boot = products.boot_script("openclaw")
     assert '"mode": "trusted-proxy"' in boot
     assert f'"userHeader": "{products.PROXY_USER_HEADER}"' in boot
-    assert '"trustedProxies": [\n        "10.1.2.3/32"\n      ]' in boot.replace("\r", "") or \
-        "10.1.2.3/32" in boot
+    assert (
+        '"trustedProxies": [\n        "10.1.2.3/32"\n      ]' in boot.replace("\r", "")
+        or "10.1.2.3/32" in boot
+    )
     assert '"mode": "none"' not in boot
 
 
@@ -2039,7 +2040,7 @@ def test_coze_has_no_second_login_wall(monkeypatch):
     # 浏览器自己带了 session_key 就原样透传 (他想切账号也切得了)。
     # 脚本里这些 $ 是给 nginx 的, 对 shell 转义过, 所以认转义后的形态。
     assert "default \\$http_cookie;" in sh
-    assert 'map \\$cookie_session_key \\$dsh_cookie {' in sh
+    assert "map \\$cookie_session_key \\$dsh_cookie {" in sh
 
 
 def test_coze_elasticsearch_init_gets_an_explicit_address(monkeypatch):
@@ -2208,8 +2209,9 @@ def test_dify_has_no_second_login_wall(monkeypatch):
     # 三个 cookie 缺一不可: 少 csrf 前端拼不出请求头, 少 refresh 一小时后就掉线
     for var in ("$dsh_at", "$dsh_rt", "$dsh_ct"):
         assert f"add_header Set-Cookie {var} always;" in boot, f"少发 {var}"
-        assert f"map $sent_http_content_type {var} {{ default \"\"; }}" in boot, \
+        assert f'map $sent_http_content_type {var} {{ default ""; }}' in boot, (
             f"{var} 没有安全默认值 —— nginx 会因为引用未定义变量直接起不来"
+        )
     assert "/usr/local/bin/dsh-dify-autologin" in boot
 
     sh = products._DIFY_AUTOLOGIN
@@ -2266,7 +2268,7 @@ def test_dify_preinstalls_a_model_provider(monkeypatch):
     # **写凭据要重试**: 容器组刚起来时插件运行时还没加载完, 写会被顶回来
     # (no available node, plugin runtime not found)。一次就放弃 = 凭据里留着
     # 上一枚已撤销的令牌, 用户点开就是 401, 而 Dify 侧看着一切正常。
-    assert 'LLM_OK=no; EMB_OK=no' in sh and "while [ \"$n\" -lt 30 ]" in sh
+    assert "LLM_OK=no; EMB_OK=no" in sh and 'while [ "$n" -lt 30 ]' in sh
     assert '"result":"success"' in sh, "不看返回就没法判成败, 重试也就无从谈起"
     # 排查用的日志: 此前全部输出丢进 /dev/null, 出问题只能翻上游日志
     assert "/root/.dify-autologin.log" in sh
@@ -2329,8 +2331,9 @@ def test_dify_autologin_password_is_derived_not_stored(monkeypatch):
     assert a != b, "所有用户共用一个口令等于没有口令"
     assert len(a) >= 12
     assert any(c.isupper() for c in a) and any(c.isdigit() for c in a), "过不了口令强度校验"
-    assert products.dify_autologin_password("") == "", \
+    assert products.dify_autologin_password("") == "", (
         "没有密钥时该跳过免登录, 而不是退回一个人人都知道的口令"
+    )
 
     monkeypatch.setattr(config, "DIFY_DOMAIN", "dify.test.local")
     env = products.env_for("dify", "tok", "s" * 64)

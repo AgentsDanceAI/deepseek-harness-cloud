@@ -625,13 +625,11 @@ def _dify_boot() -> str:
         # 起来才拿得到, 而 nginx 现在就要能起; 引用未定义的变量它会直接启动失败。
         # 变量取空串时 nginx 不会发出这个响应头, 所以空值就是"什么都不做"。
         "cat > /etc/nginx/conf.d/00-autologin.conf <<'AUTOCONF'\n"
-        "map $sent_http_content_type $dsh_at { default \"\"; }\n"
-        "map $sent_http_content_type $dsh_rt { default \"\"; }\n"
-        "map $sent_http_content_type $dsh_ct { default \"\"; }\n"
+        'map $sent_http_content_type $dsh_at { default ""; }\n'
+        'map $sent_http_content_type $dsh_rt { default ""; }\n'
+        'map $sent_http_content_type $dsh_ct { default ""; }\n'
         "AUTOCONF\n"
-        "cat > /usr/local/bin/dsh-dify-autologin <<'AUTOLOGIN'\n"
-        + _DIFY_AUTOLOGIN
-        + "AUTOLOGIN\n"
+        "cat > /usr/local/bin/dsh-dify-autologin <<'AUTOLOGIN'\n" + _DIFY_AUTOLOGIN + "AUTOLOGIN\n"
         "chmod +x /usr/local/bin/dsh-dify-autologin\n"
         "/usr/local/bin/dsh-dify-autologin >/dev/null 2>&1 &\n"
         "cat > /etc/nginx/conf.d/default.conf <<'NGINXCONF'\n"
@@ -1091,9 +1089,7 @@ def _coze_boot() -> str:
         "AUTOCONF\n"
         f"sed -i '/{_COZE_APIHOST_ANCHOR}/a\\        proxy_set_header Cookie $dsh_cookie;'"
         " /etc/nginx/conf.d/default.conf\n"
-        "cat > /usr/local/bin/dsh-coze-autologin <<'AUTOLOGIN'\n"
-        + _COZE_AUTOLOGIN
-        + "AUTOLOGIN\n"
+        "cat > /usr/local/bin/dsh-coze-autologin <<'AUTOLOGIN'\n" + _COZE_AUTOLOGIN + "AUTOLOGIN\n"
         "chmod +x /usr/local/bin/dsh-coze-autologin\n"
         "/usr/local/bin/dsh-coze-autologin >/dev/null 2>&1 &\n"
         "exec nginx -g 'daemon off;'\n"
@@ -1635,8 +1631,7 @@ def _opendesign_patch_yaml() -> str:
         "- id: llm-pi-ai\n"
         "  config:\n"
         "    providers:\n"
-        "      dshcloud:\n" + _dshcloud_provider("        ") +
-        "- id: agent-default-model\n"
+        "      dshcloud:\n" + _dshcloud_provider("        ") + "- id: agent-default-model\n"
         "  config:\n"
         "    provider: dshcloud\n"
         f"    model: {model_catalog.default_model()}\n"
