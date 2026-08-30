@@ -224,6 +224,10 @@ _DIFY_APP_ENV = _DIFY_DB_ENV + (
     ("CODE_EXECUTION_ENDPOINT", "http://127.0.0.1:8194"),
     ("CODE_EXECUTION_API_KEY", _DIFY_SANDBOX_KEY),
     ("LOG_LEVEL", "INFO"), ("DEPLOY_ENV", "PRODUCTION"),
+    # 上游默认连错 5 次密码就锁 24 小时。单用户工作台里这把锁只锁得住我们自己
+    # (能走到这个域的人早过了我们那层鉴权), 而一旦锁上, 整个产品一天不能用。
+    # 收到 5 分钟: 防爆破的意义还在, 又不会因为一次自动重试把人关在门外。
+    ("LOGIN_LOCKOUT_DURATION", "300"),
     # 不跑 squid: 它要挂配置文件, 而我们的每用户容器组本来就是隔离边界。
     # 留空 = 不经代理直出; 留着指向不存在的 3128 会让 HTTP 请求节点全挂。
     ("SSRF_PROXY_HTTP_URL", ""), ("SSRF_PROXY_HTTPS_URL", ""),
@@ -361,6 +365,14 @@ API=http://127.0.0.1:5001/console/api
 # 登录接口收 base64 的密码 (前端就是这么发的); setup 收明文。
 B64=$(printf '%s' "$PW" | base64 | tr -d '\n')
 
+# Dify 连错 5 次密码就把这个账号锁 24 小时 (LOGIN_LOCKOUT_DURATION, 键在 redis)。
+# 单用户工作台里这把锁只会锁住我们自己 —— 能走到这个域的人早就过了我们那层
+# 鉴权。所以每次启动先清掉它, 顺带也把用户自己手滑锁上的解开。
+unlock() {
+  printf 'AUTH %s\r\nDEL login_error_rate_limit:%s\r\nQUIT\r\n' \
+    "$DSH_REDIS_PASSWORD" "$EM" | timeout 5 nc 127.0.0.1 6379 >/dev/null 2>&1
+}
+
 write_conf() {
   cat > /etc/nginx/conf.d/00-autologin.conf <<EOF
 # 浏览器还没有会话时把工作台自己的那份发给它; 有了就不再覆盖 (它会自己续期)。
@@ -380,24 +392,41 @@ EOF
   nginx -s reload
 }
 
+tries=0
 while :; do
-  H=$(curl -s -D- -o /dev/null -m 10 -X POST -H 'Content-Type: application/json' \
-      -d "{\"email\":\"$EM\",\"password\":\"$B64\",\"language\":\"zh-Hans\",\"remember_me\":true}" \
-      "$API/login")
-  AT=$(echo "$H" | grep -i '^set-cookie: access_token=' | head -1 | sed 's/.*access_token=//; s/;.*//' | tr -d '\r')
-  RT=$(echo "$H" | grep -i '^set-cookie: refresh_token=' | head -1 | sed 's/.*refresh_token=//; s/;.*//' | tr -d '\r')
-  CT=$(echo "$H" | grep -i '^set-cookie: csrf_token=' | head -1 | sed 's/.*csrf_token=//; s/;.*//' | tr -d '\r')
+  unlock
+  CODE=$(curl -s -o /tmp/.dify-login -w '%{http_code}' -m 10 -X POST \
+         -H 'Content-Type: application/json' \
+         -d "{\"email\":\"$EM\",\"password\":\"$B64\",\"language\":\"zh-Hans\",\"remember_me\":true}" \
+         -D /tmp/.dify-hdr "$API/login")
+  AT=$(grep -i '^set-cookie: access_token=' /tmp/.dify-hdr 2>/dev/null | head -1 | sed 's/.*access_token=//; s/;.*//' | tr -d '\r')
+  RT=$(grep -i '^set-cookie: refresh_token=' /tmp/.dify-hdr 2>/dev/null | head -1 | sed 's/.*refresh_token=//; s/;.*//' | tr -d '\r')
+  CT=$(grep -i '^set-cookie: csrf_token=' /tmp/.dify-hdr 2>/dev/null | head -1 | sed 's/.*csrf_token=//; s/;.*//' | tr -d '\r')
   if [ -n "$AT" ] && [ -n "$RT" ] && [ -n "$CT" ]; then
     write_conf
-    # access_token 只活 1 小时。容器能连着跑很久, 所以定期重登再刷一遍 ——
-    # 否则新开的标签页会拿到一个早就过期的 token。
+    tries=0
+    # access_token 只活 1 小时, 而容器能连着跑很久 —— 定期重登刷新, 否则新开的
+    # 标签页会拿到一个早就过期的 token。
     sleep 1500
     continue
   fi
-  # 登不上多半是还没初始化。setup 一辈子只能跑一次, 已初始化时会失败, 忽略即可。
-  curl -s -o /dev/null -m 10 -X POST -H 'Content-Type: application/json' \
-    -d "{\"email\":\"$EM\",\"name\":\"owner\",\"password\":\"$PW\"}" "$API/setup" || true
-  sleep 3
+  # 000/5xx = api 还没起来, 这是常态, 快重试。
+  # 4xx = 它答了但不认 —— 密码不对之类, 再快也没用, **而且会把账号锁掉**
+  # (2026-08-30 就是这么把老板的 Dify 锁了 24 小时的)。退到慢档, 并且只在头
+  # 几次尝试 setup: 那个接口一辈子只能成功一次。
+  case "$CODE" in
+    000|5*)  sleep 3 ;;
+    *)
+      tries=$((tries + 1))
+      if [ "$tries" -le 3 ]; then
+        curl -s -o /dev/null -m 10 -X POST -H 'Content-Type: application/json' \
+          -d "{\"email\":\"$EM\",\"name\":\"owner\",\"password\":\"$PW\"}" "$API/setup" || true
+        sleep 5
+      else
+        sleep 120
+      fi
+      ;;
+  esac
 done
 """
 
@@ -1255,6 +1284,8 @@ def env_for(product_id: str, token: str, secret: str = "") -> dict[str, str]:
             # 账号, 没有第二个可建 —— 所以这里必须与既有账号对齐, 不能另起一个。
             "DSH_AUTOLOGIN_EMAIL": "admin@dshcloud.online",
             "DSH_AUTOLOGIN_PASSWORD": dify_autologin_password(secret),
+            # 用来清掉 Dify 那把 24 小时的登录锁 (见 _DIFY_AUTOLOGIN 的 unlock)。
+            "DSH_REDIS_PASSWORD": _DIFY_REDIS_PASSWORD,
         }
     if product_id == "open-design":
         return {

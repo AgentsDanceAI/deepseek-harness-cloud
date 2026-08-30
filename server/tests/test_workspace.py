@@ -2088,6 +2088,30 @@ def test_dify_has_no_second_login_wall(monkeypatch):
     assert "sleep 1500" in sh
 
 
+def test_dify_autologin_backs_off_instead_of_locking_the_account(monkeypatch):
+    """认证失败要退避, 不能死循环快重试。
+
+    Dify 连错 5 次密码就把账号锁 **24 小时** (LOGIN_LOCKOUT_DURATION, 键在
+    redis)。每 3 秒重试一次的话, 密码一旦对不上, 十几秒内就把用户自己的产品
+    锁一整天 —— 2026-08-30 迁移既有账号密码时就这么锁了一次。
+
+    分两档: 连不上/5xx 是 api 还没起来 (常态, 快重试); 4xx 是它答了但不认,
+    再快也没用, 只会攒锁。setup 只在头几次试 —— 那个接口一辈子只能成功一次。
+    """
+    sh = products._DIFY_AUTOLOGIN
+    assert "000|5*)" in sh, "没有区分'还没起来'和'不认'"
+    assert "sleep 120" in sh, "认证失败没有退避 —— 会把账号锁 24 小时"
+    assert '"$tries" -le 3' in sh, "setup 会被反复调用"
+    # 单用户工作台里那把锁只锁得住我们自己, 所以启动时先清掉
+    assert "login_error_rate_limit" in sh
+    assert "DSH_REDIS_PASSWORD" in sh
+    monkeypatch.setattr(config, "DIFY_DOMAIN", "dify.test.local")
+    assert products.env_for("dify", "t", "s" * 64)["DSH_REDIS_PASSWORD"]
+    # 纵深防御: 锁定时长也收短, 免得哪天还是锁上了要等一天
+    api = next(sc for sc in products._dify_stack() if sc.name == "api")
+    assert dict(api.env)["LOGIN_LOCKOUT_DURATION"] == "300"
+
+
 def test_dify_autologin_password_is_derived_not_stored(monkeypatch):
     """密码按用户推导, 且不同用户不同; 没有密钥时**不给**弱口令兜底。"""
     a = products.dify_autologin_password("a" * 64)
