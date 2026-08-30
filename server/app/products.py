@@ -34,6 +34,9 @@ PREVIEW_STATIC_PORT = 8088
 # 官方 API 节点垫片的端口。只在容器回环上, 不经反代 —— 它带着容器的凭据。
 SHIM_PORT = 8199
 
+# OpenClaw 网关 (API + 控制台 UI + 频道入口) 的端口。
+OPENCLAW_PORT = 18789
+
 
 @dataclass(frozen=True)
 class Sidecar:
@@ -125,6 +128,11 @@ class Product:
     init_containers: tuple[InitContainer, ...] = ()
     # 主容器要从种子卷上取的东西: (卷内相对路径, 容器内路径)。
     seeds: tuple[tuple[str, str], ...] = ()
+    # 主容器以哪个 uid 跑。None = 用镜像自己的 USER。
+    # 与 Sidecar.run_as_user 同理: NAS 挂进来的目录是 root 的, 镜像里 USER 不是
+    # root 的话 (OpenClaw 是 node) 就写不进自己的状态目录, 而它只会在日志里抱怨
+    # 一句数据库打不开, 照常起来 —— 于是用户的东西全落在容器内, 一回收就没了。
+    run_as_user: int | None = None
 
 
 def wskey(user_id: str, product_id: str = DEFAULT) -> str:
@@ -1015,6 +1023,75 @@ def _coze_boot() -> str:
 # 下面这一段是**表**, 不是代码块: 相关的键成对排在一行上读。交给 formatter
 # 会拆成一项一行, 分组关系随之消失。
 # fmt: off
+#: 反代注入的身份头。OpenClaw 的 trusted-proxy 鉴权认它, 值由 /api/work/route
+#: 随 forward_auth 一起吐出来 (见 workspace.work_route)。
+PROXY_USER_HEADER = "X-Dsh-User"
+
+
+def _openclaw_boot() -> str:
+    """写配置 -> 起网关。
+
+    **用 `config patch` 而不是整份覆盖**: 这个文件里还装着用户自己接的频道
+    (Telegram/Discord/Slack 那些), 每次启动重写一遍等于把他配的东西全抹掉。
+    patch 是递归合并的, 只动我们这几个键。
+
+    鉴权走 trusted-proxy 而不是关掉: OpenClaw 明确拒绝"监听 LAN + 无鉴权"
+    (实测 `Refusing to bind gateway to lan without auth`), 而这个模式就是为
+    "边缘已经鉴过权"设计的 —— 用户走到这个域已经过了我们的 forward_auth。
+    身份头只认 WORK_PROXY_CIDR 那个来源, 放宽等于让任何能连到容器的人自称是
+    任意用户。
+    """
+    import json as _json
+
+    gateway = config.PUBLIC_BASE.rstrip("/")
+    models = [
+        {
+            "id": m["id"],
+            "name": m.get("display_name", m["id"]),
+            "contextWindow": 65536,
+            "maxTokens": 8192,
+        }
+        for m in model_catalog.catalog().values()
+    ]
+    patch = _json.dumps(
+        {
+            "gateway": {
+                "mode": "local",
+                "port": OPENCLAW_PORT,
+                "bind": "lan",
+                "auth": {
+                    "mode": "trusted-proxy",
+                    "trustedProxy": {"userHeader": PROXY_USER_HEADER},
+                },
+                "trustedProxies": [config.WORK_PROXY_CIDR],
+                "controlUi": {"enabled": True},
+            },
+            "models": {
+                "mode": "merge",
+                "providers": {
+                    "dshcloud": {
+                        "baseUrl": f"{gateway}/llm/v1",
+                        # 展开成该用户的网关令牌 —— 见下面那个**不带引号**的 heredoc
+                        "apiKey": "$DSH_CLOUD_TOKEN",
+                        "models": models,
+                    }
+                },
+            },
+            "agents": {"defaults": {"model": f"dshcloud/{model_catalog.default_model()}"}},
+        },
+        ensure_ascii=False,
+        indent=2,
+    )
+    return (
+        "set -e\n"
+        'mkdir -p "$OPENCLAW_STATE_DIR"\n'
+        # heredoc **不加引号**: 里面的 $DSH_CLOUD_TOKEN 要展开成真令牌。
+        # 配置里除它以外没有别的 $, 所以不会误伤。
+        "node /app/openclaw.mjs config patch --stdin <<PATCH\n" + patch + "\nPATCH\n"
+        "exec node /app/openclaw.mjs gateway\n"
+    )
+
+
 def registry() -> dict[str, Product]:
     return {
         DEFAULT: Product(
@@ -1083,6 +1160,23 @@ def registry() -> dict[str, Product]:
                 ),
             ),
             seeds=(("nginx", "/seed"),),
+        ),
+        # OpenClaw: 自托管的个人智能体 (Peter Steinberger), 一个网关同时接
+        # Telegram/Discord/Slack 等几十个渠道, 自带控制台 UI。单容器。
+        "openclaw": Product(
+            id="openclaw",
+            name="OpenClaw",
+            image=config.OPENCLAW_IMAGE_REF,
+            image_ref=config.OPENCLAW_IMAGE_REF,
+            port=OPENCLAW_PORT,
+            mem_mb=config.OPENCLAW_MEM_LIMIT_MB,
+            cpus=config.OPENCLAW_CPUS,
+            domain=config.OPENCLAW_DOMAIN if config.WORK_PROXY_CIDR else "",
+            reports_presence=False,
+            tab_grace_min=config.OPENCLAW_TAB_GRACE_MIN,
+            # 镜像里 USER 是 node, 写不进 NAS 挂进来的目录 —— 而它只会在日志里
+            # 抱怨一句数据库打不开, 照常起来, 于是用户的东西一回收就没了。
+            run_as_user=0,
         ),
         # Open Design: 智能体编排壳 (上游官方镜像**不带任何 agent CLI**, 托管
         # 环境里干不了活 —— 衍生镜像 od-local 烤进了我们的 dsh, 见
@@ -1354,6 +1448,7 @@ _BOOTS = {
     "open-design": _opendesign_boot,
     "dify": _dify_boot,
     "coze": _coze_boot,
+    "openclaw": _openclaw_boot,
 }
 
 
@@ -1406,6 +1501,14 @@ def env_for(product_id: str, token: str, secret: str = "") -> dict[str, str]:
             "DEEPSEEK_SEARCH_BASE_URL": f"{gateway}/llm/anthropic/v1",
             "DSH_TELEMETRY_DISABLED": "1",
             "DSH_PERMISSION_MODE": "danger-full-access",
+        }
+    if product_id == "openclaw":
+        return {
+            # 状态与配置落在 NAS 上 (/workspace 是挂载点) —— 镜像默认写
+            # /home/node, 那是容器内的盘, 实例一回收就没了。
+            "OPENCLAW_STATE_DIR": "/workspace/.openclaw",
+            "OPENCLAW_CONFIG_PATH": "/workspace/.openclaw/openclaw.json",
+            "DSH_CLOUD_TOKEN": token,
         }
     if product_id == "comfyui":
         return {

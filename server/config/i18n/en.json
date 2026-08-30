@@ -74,7 +74,6 @@
   "apps.cat.media": "Image · Video",
   "apps.cat.whiteboard": "Whiteboard",
   "apps.count_live": "{live} of 16 live · more landing soon",
-  "apps.d.aider": "A pair programmer in your terminal, committing straight into your git repo.",
   "apps.d.bolt-diy": "Describe an app, get a full-stack build you can tweak and deploy.",
   "apps.d.code-server": "Full VS Code in the browser — extensions, terminal, debugging included.",
   "apps.d.comfyui": "Node-graph canvas for image & video generation — Seedance, Wan and Qwen-Image ready to pick.",
@@ -635,5 +634,6 @@
   "works.ports.note": "Development servers the agent started on its own. These links stop working once the container shuts down; file outputs are not affected.",
   "works.ports.port": "Port {port}",
   "works.ports.title": "Running services",
-  "works.title": "My outputs — deepseek-harness-cloud"
+  "works.title": "My outputs — deepseek-harness-cloud",
+  "apps.d.openclaw": "A self-hosted always-on personal agent: one gateway across Telegram, Discord, Slack and dozens more — it reads your files and gets things done."
 }

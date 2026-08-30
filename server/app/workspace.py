@@ -240,6 +240,7 @@ async def _create(user: dict, product: products.Product) -> None:
         host_aliases=product.host_aliases,
         init_containers=product.init_containers,
         seeds=product.seeds,
+        run_as_user=product.run_as_user,
     )
 
 
@@ -896,6 +897,23 @@ async def preview_fallback(request: Request):
 # --- routing (Caddy forward_auth hits this on EVERY request incl. WS) --------
 
 
+def _route_headers(key: str, product: products.Product, user: dict) -> dict[str, str]:
+    """forward_auth 回给 Caddy 的头。
+
+    除了上游地址, 还带一个身份头: 有些产品 (OpenClaw) 用 trusted-proxy 模式
+    鉴权 —— 它不肯在无鉴权下监听 LAN, 而这个模式正是为"边缘已经鉴过权"设计的。
+    Caddy 用 copy_headers 把它写到发往容器的请求上, **覆盖**掉浏览器可能自带的
+    同名头, 所以伪造不了。容器那边还额外只认 WORK_PROXY_CIDR 这个来源。
+
+    对不需要它的产品也照发: Caddyfile 里没列进 copy_headers 的头不会往上游走,
+    多发一个不会有任何影响, 而少发一个的症状是"整个产品打不开"。
+    """
+    return {
+        "X-Work-Upstream": _upstream(key, product),
+        products.PROXY_USER_HEADER: user["id"],
+    }
+
+
 @router.get("/api/work/route")
 async def work_route(request: Request):
     if not config.WORK_ENABLED:
@@ -924,7 +942,7 @@ async def work_route(request: Request):
     # on the next cold check, which is where a new task would land anyway.
     if now - _last_seen.get(key, 0) < 30 and key not in _starting:
         _last_seen[key] = now
-        return Response(status_code=200, headers={"X-Work-Upstream": _upstream(key, product)})
+        return Response(status_code=200, headers=_route_headers(key, product, user))
 
     # When the machine-time allowance is exhausted, route to plans rather than
     # consuming model credits.
@@ -941,7 +959,7 @@ async def work_route(request: Request):
     if state != "running":
         return RedirectResponse(f"{site}/work/starting?product_id={product.id}", status_code=302)
     _last_seen[key] = now
-    return Response(status_code=200, headers={"X-Work-Upstream": _upstream(key, product)})
+    return Response(status_code=200, headers=_route_headers(key, product, user))
 
 
 # --- PWA shell: the workspace document with mobile/PWA layers injected -------

@@ -74,7 +74,6 @@
   "apps.cat.media": "图像 · 视频",
   "apps.cat.whiteboard": "白板",
   "apps.count_live": "已上线 {live} / 16 · 其余陆续接入中",
-  "apps.d.aider": "终端里的结对程序员，直接在你的 git 仓库上迭代提交。",
   "apps.d.bolt-diy": "一句话生成全栈应用，改完直接部署。",
   "apps.d.code-server": "浏览器里的完整 VS Code，插件、终端、调试一样不少。",
   "apps.d.comfyui": "节点式画布编排生图与生视频，Seedance、Wan、Qwen-Image 等模型即选即用。",
@@ -635,5 +634,6 @@
   "works.ports.note": "智能体自己起的开发服务器。容器停止后这些链接会失效，文件成品不受影响。",
   "works.ports.port": "端口 {port}",
   "works.ports.title": "正在运行的服务",
-  "works.title": "个人成品 — deepseek-harness-cloud"
+  "works.title": "个人成品 — deepseek-harness-cloud",
+  "apps.d.openclaw": "自托管的常驻个人助理：一个网关同时接 Telegram、Discord、Slack 等几十个渠道，读你的文件、办你的事。"
 }

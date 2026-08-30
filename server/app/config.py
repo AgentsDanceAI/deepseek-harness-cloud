@@ -318,6 +318,19 @@ COZE_MEM_LIMIT_MB = _env_int("COZE_MEM_LIMIT_MB", 16384)
 COZE_CPUS = _env_float("COZE_CPUS", 4.0)
 # 冷启动最贵的一个 (ES 装分词器 + Milvus 起 standalone), 多留一会儿。
 COZE_TAB_GRACE_MIN = _env_int("COZE_TAB_GRACE_MIN", 15)
+
+# OpenClaw (单容器)。控制台 UI 在 18789, 自带 /healthz /readyz 探针。
+OPENCLAW_DOMAIN = _env("OPENCLAW_DOMAIN", "")
+OPENCLAW_IMAGE_REF = _env("OPENCLAW_IMAGE_REF", "ghcr.io/openclaw/openclaw:2026.7.1")
+OPENCLAW_MEM_LIMIT_MB = _env_int("OPENCLAW_MEM_LIMIT_MB", 4096)
+OPENCLAW_CPUS = _env_float("OPENCLAW_CPUS", 2.0)
+OPENCLAW_TAB_GRACE_MIN = _env_int("OPENCLAW_TAB_GRACE_MIN", 10)
+
+# 反代所在主机的 IP/CIDR。OpenClaw 的 trusted-proxy 鉴权只认这个来源送来的身份头
+# —— 放宽等于让任何能连到容器的人自称是任意用户, 所以**不给默认值**: 没配就
+# 让这个产品不出现在目录里 (见 products.enabled), 而不是退回一个宽松值。
+# 与安全组里那条入站规则是同一个地址。
+WORK_PROXY_CIDR = _env("WORK_PROXY_CIDR", "")
 # 智能体最后一次调网关之后再等这么久。长任务必须能在关掉标签页之后接着跑完,
 # 所以这一条单独顶着, 与"有没有人在"无关。
 WORK_AGENT_IDLE_STOP_MIN = _env_int("WORK_AGENT_IDLE_STOP_MIN", 30)

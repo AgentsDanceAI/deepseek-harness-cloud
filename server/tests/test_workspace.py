@@ -1703,6 +1703,71 @@ def test_open_design_product_spec(monkeypatch):
     assert env["OD_ALLOWED_ORIGINS"] == "https://od.test.local"
 
 
+def _openclaw_ready(monkeypatch):
+    monkeypatch.setattr(config, "OPENCLAW_DOMAIN", "claw.test.local")
+    monkeypatch.setattr(config, "WORK_PROXY_CIDR", "10.1.2.3/32")
+    return products.registry()["openclaw"]
+
+
+def test_openclaw_state_lands_on_nas_and_runs_as_root(monkeypatch):
+    """状态目录必须落在 NAS 上, 而且要以 root 跑才写得进去。
+
+    两个都是"错了也不报错"的:
+      · 镜像默认把状态写 /home/node —— 那是容器内的盘, 实例一回收用户的会话、
+        频道、记忆全没了, 而过程中一句错都没有。
+      · 镜像里 USER 是 node, 而 NAS 挂进来的目录是 root 的。不改 uid 的话它只
+        在日志里抱怨一句数据库打不开, 照常起来, 东西照样落在容器内。
+    """
+    prod = _openclaw_ready(monkeypatch)
+    assert prod.run_as_user == 0, "以 node 跑 -> 写不进 NAS -> 数据随回收消失"
+    env = products.env_for("openclaw", "tok_x")
+    assert env["OPENCLAW_STATE_DIR"].startswith("/workspace/")
+    assert env["OPENCLAW_CONFIG_PATH"].startswith("/workspace/")
+    assert env["DSH_CLOUD_TOKEN"] == "tok_x"
+
+
+def test_openclaw_patches_config_instead_of_overwriting(monkeypatch):
+    """只能 patch, 不能整份重写。
+
+    openclaw.json 里还装着**用户自己接的频道** (Telegram/Discord/Slack)。每次
+    启动重写一遍等于把他配的东西全抹掉 —— 而且是静默的, 他只会发现机器人不回
+    消息了。`config patch` 是递归合并的。
+    """
+    _openclaw_ready(monkeypatch)
+    boot = products.boot_script("openclaw")
+    assert "config patch --stdin" in boot
+    assert "cat >" not in boot, "又变成整份覆盖了 —— 会抹掉用户接的频道"
+    # 令牌靠**不带引号**的 heredoc 展开; 加了引号就会把字面量写进配置
+    assert "<<PATCH" in boot and "<<'PATCH'" not in boot
+    assert "$DSH_CLOUD_TOKEN" in boot
+
+
+def test_openclaw_auth_is_trusted_proxy_not_open(monkeypatch):
+    """鉴权走 trusted-proxy, 且身份头只认我们的反代来源。
+
+    OpenClaw 明确拒绝"监听 LAN + 无鉴权" (实测 Refusing to bind gateway to lan
+    without auth), 所以关掉鉴权这条路本来就走不通; 而 trusted-proxy 正是为
+    "边缘已经鉴过权"设计的。来源放宽等于让任何能连到容器的人自称是任意用户。
+    """
+    _openclaw_ready(monkeypatch)
+    boot = products.boot_script("openclaw")
+    assert '"mode": "trusted-proxy"' in boot
+    assert f'"userHeader": "{products.PROXY_USER_HEADER}"' in boot
+    assert '"trustedProxies": [\n        "10.1.2.3/32"\n      ]' in boot.replace("\r", "") or \
+        "10.1.2.3/32" in boot
+    assert '"mode": "none"' not in boot
+
+
+def test_openclaw_hidden_until_the_proxy_cidr_is_configured(monkeypatch):
+    """没配反代来源就别出现在目录里。
+
+    退回一个宽松的默认值等于让身份头可以被任何人伪造 —— 宁可这个产品先不上。
+    """
+    monkeypatch.setattr(config, "OPENCLAW_DOMAIN", "claw.test.local")
+    monkeypatch.setattr(config, "WORK_PROXY_CIDR", "")
+    assert "openclaw" not in [p.id for p in products.enabled()]
+
+
 def test_open_design_points_dsh_at_our_gateway_not_the_deepseek_adapter():
     """Open Design 里的 dsh 必须走 pi-ai (openai-completions), 不是 llm-deepseek。
 
