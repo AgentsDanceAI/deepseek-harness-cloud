@@ -409,12 +409,17 @@ api() {
 # 一次上游做校验, 也就是真扣一次积分。二十个模型全配等于每次首启白烧二十次,
 # 而用户想要别的在界面上点两下就能加。
 provision() {
-  # 已经有模型就什么都不做。判据取自接口而不是标记文件: 用户自己删过重配的话,
-  # 标记文件会撒谎。这也是幂等的关键 —— 配置存在 Postgres 上 (NAS), 实例重建
-  # 后还在, 不能每次冷启动都重来一遍。
-  if api GET "/workspaces/current/models/model-types/llm" | grep -q '"model"'; then
-    return 0
-  fi
+  # 幂等: 判据取自接口而不是标记文件 —— 配置存在 Postgres 上 (NAS), 实例重建后
+  # 还在, 不能每次冷启动都重来一遍; 而标记文件在用户自己删过重配之后会撒谎。
+  # **两类分开判**: 只看 llm 的话, 已经配了聊天模型的老实例永远补不上向量化
+  # 模型, 知识库就一直不能用。
+  HAVE_LLM=no; HAVE_EMB=no
+  api GET "/workspaces/current/models/model-types/llm" | grep -q '"model"' && HAVE_LLM=yes
+  api GET "/workspaces/current/models/model-types/text-embedding" | grep -q '"model"' && HAVE_EMB=yes
+  [ -z "$DSH_EMBEDDING_MODEL" ] && HAVE_EMB=yes
+  [ "$HAVE_LLM" = yes ] && [ "$HAVE_EMB" = yes ] && return 0
+  # 供应商已在就不用再装一遍 (补配另一类模型时会走到这里)。
+  if ! api GET "/workspaces/current/model-providers" | grep -q openai_api_compatible; then
   PID=$(curl -s -m 20 "https://marketplace.dify.ai/api/v1/plugins/langgenius/openai_api_compatible" \
         | tr ',' '\n' | grep -o '"latest_package_identifier":"[^"]*"' | head -1 \
         | sed 's/^[^:]*:"//; s/"$//')
@@ -433,7 +438,9 @@ provision() {
     esac
     sleep 5
   done
+  fi
   PROV=langgenius/openai_api_compatible/openai_api_compatible
+  if [ "$HAVE_LLM" = no ]; then
   api POST "/workspaces/current/model-providers/$PROV/models/credentials" \
     "{\"model\":\"$DSH_DEFAULT_MODEL\",\"model_type\":\"llm\",\"name\":\"DSH Cloud\",\"credentials\":{
       \"api_key\":\"$DSH_CLOUD_TOKEN\",\"endpoint_url\":\"$DSH_GATEWAY_BASE\",
@@ -442,8 +449,9 @@ provision() {
       \"agent_thought_support\":\"supported\",\"vision_support\":\"no_support\"}}" >/dev/null
   api POST "/workspaces/current/default-model" \
     "{\"model_settings\":[{\"model_type\":\"llm\",\"provider\":\"$PROV\",\"model\":\"$DSH_DEFAULT_MODEL\"}]}" >/dev/null
+  fi
   # 向量化模型: 有它知识库才能用, 没有的话建知识库那一步直接卡住。
-  if [ -n "$DSH_EMBEDDING_MODEL" ]; then
+  if [ "$HAVE_EMB" = no ]; then
     api POST "/workspaces/current/model-providers/$PROV/models/credentials" \
       "{\"model\":\"$DSH_EMBEDDING_MODEL\",\"model_type\":\"text-embedding\",\"name\":\"DSH Cloud\",\"credentials\":{
         \"api_key\":\"$DSH_CLOUD_TOKEN\",\"endpoint_url\":\"$DSH_GATEWAY_BASE\",
