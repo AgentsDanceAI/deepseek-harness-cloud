@@ -840,28 +840,42 @@ def by_domain(host: str) -> Product | None:
 # 用户 —— 这正是"运行中的容器算不算过期"能被判定的原因。
 
 
-def _dsh_boot() -> str:
+def _dshcloud_provider(indent: str) -> str:
+    """dsh 侧「DSH Cloud」这个 provider 的定义, 按给定缩进吐 YAML。
+
+    两处要用同一份 (dsh 工作台的 settings.yaml、Open Design 那个 profile 的
+    patch 层), 而它们的缩进层级不同 —— 所以参数化缩进而不是各写一份: 目录里
+    加个模型只改一处, 否则必漂, 而漂的表现是"某个工作台里选不到新模型"。
+
+    走 pi-ai 适配器 (openai-completions) 而**不是** llm-deepseek: 我们的上游说
+    的是标准 OpenAI 流式, 而 llm-deepseek 那套 DeepSeek 风味的工具调用解析会从
+    里面拼出空的工具名 —— 智能体于是干不完活也不报错。
+    """
     gateway = config.PUBLIC_BASE.rstrip("/")
-    # Chat goes through dsh's pi-ai adapter (openai-completions protocol), NOT
-    # the llm-deepseek adapter: our upstream speaks standard OpenAI streaming,
-    # and llm-deepseek's DeepSeek-flavored tool-call parsing assembles empty
-    # tool names from it. web_search stays on the deepseek search row via env.
-    model_rows = "".join(
-        f"        - id: {m['id']}\n          name: {m.get('display_name', m['id'])}\n"
+    rows = "".join(
+        f"{indent}  - id: {m['id']}\n{indent}    name: {m.get('display_name', m['id'])}\n"
         for m in model_catalog.catalog().values()
     )
+    return (
+        f"{indent}displayName: DSH Cloud\n"
+        f"{indent}apiKeyEnv: DSH_CLOUD_TOKEN\n"
+        f"{indent}api: openai-completions\n"
+        f"{indent}baseURL: {gateway}/llm/v1\n"
+        f"{indent}models:\n" + rows
+    )
+
+
+def _dsh_boot() -> str:
+    gateway = config.PUBLIC_BASE.rstrip("/")
+    # web_search stays on the deepseek search row via env; 聊天走 pi-ai,
+    # 理由见 _dshcloud_provider。
     settings_yaml = (
         "llm-deepseek:\n"
         f"  baseURL: {gateway}/llm/v1\n"
         "  models: []\n"
         "llm-pi-ai:\n"
         "  providers:\n"
-        "    dshcloud:\n"
-        "      displayName: DSH Cloud\n"
-        "      apiKeyEnv: DSH_CLOUD_TOKEN\n"
-        "      api: openai-completions\n"
-        f"      baseURL: {gateway}/llm/v1\n"
-        "      models:\n" + model_rows + "agent-default-model:\n"
+        "    dshcloud:\n" + _dshcloud_provider("      ") + "agent-default-model:\n"
         "  provider: dshcloud\n"
         f"  model: {model_catalog.default_model()}\n"
     )
@@ -1005,9 +1019,39 @@ def _opendesign_boot() -> str:
         "dsh plugin --profile open-design add /opt/od-profile.tgz\n"
         "ln -sfn /root/.dsh/profiles/open-design/node_modules/@open-design "
         "/usr/local/lib/node_modules/@deepseek-ai/dsh/node_modules/@open-design\n"
+        "cat > /root/.dsh/profiles/open-design/cordis.patch.yml <<'DHCPATCH'\n"
+        + _opendesign_patch_yaml()
+        + "DHCPATCH\n"
         f"node -e {_OD_APP_CONFIG_JS!r}\n"
         "cd /app\n"
         "exec node apps/daemon/dist/cli.js --no-open\n"
+    )
+
+
+def _opendesign_patch_yaml() -> str:
+    """给 open-design 这个 profile 的**用户层** (cordis.patch.yml) 写模型配置。
+
+    `~/.dsh/settings.yaml` 对**命名 profile 不生效** —— 那是 web profile 的用户层。
+    没有这一步, agent-default-model 解析出来是 `provider: deepseek-official`,
+    即 llm-deepseek 适配器; 它对着我们这个说标准 OpenAI 流式的网关, 会把工具调用
+    拼成空的工具名, 于是智能体跑一半就结束、**不给终态**。
+    用户看到的是 `DSH_PROFILE_MISSING_RESULT: profile exited without a terminal
+    result`, 而每一层自己看都正常: 令牌是对的、网关是通的、probe 也握手成功。
+    2026-08-30 老板在 Open Design 里点"写种"就撞上了这个。
+
+    这个文件是**我们的配置**, 不是用户的内容 —— 与 dsh 工作台的 settings.yaml
+    同一性质, 所以每次启动照写 (目录里加了模型, 下次进来就能选到)。
+    (用户的内容是 AGENTS.md 那种, 那边走的是带标记的合并。)
+    """
+    return (
+        "- id: llm-pi-ai\n"
+        "  config:\n"
+        "    providers:\n"
+        "      dshcloud:\n" + _dshcloud_provider("        ") +
+        "- id: agent-default-model\n"
+        "  config:\n"
+        "    provider: dshcloud\n"
+        f"    model: {model_catalog.default_model()}\n"
     )
 
 
