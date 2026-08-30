@@ -37,6 +37,7 @@ from app import (  # noqa: E402
     config,
     credits,
     db,
+    model_catalog,
     products,
     rate_limit,
     security,
@@ -1678,6 +1679,44 @@ def test_open_design_product_spec(monkeypatch):
     assert env["DEEPSEEK_BASE_URL"].endswith("/llm/v1")
     assert env["OD_DISABLE_API_AUTH"] == "1"
     assert env["OD_ALLOWED_ORIGINS"] == "https://od.test.local"
+
+
+def test_open_design_points_dsh_at_our_gateway_not_the_deepseek_adapter():
+    """Open Design 里的 dsh 必须走 pi-ai (openai-completions), 不是 llm-deepseek。
+
+    `~/.dsh/settings.yaml` 对**命名 profile 不生效** —— 那是 web profile 的用户层。
+    不给 profile 的 cordis.patch.yml 写配置的话, agent-default-model 解析出来是
+    `provider: deepseek-official`, 即 llm-deepseek 适配器; 它对着我们这个说标准
+    OpenAI 流式的网关, 会把工具调用拼成空的工具名 —— 智能体跑一半就结束、
+    **不给终态**, 用户看到 DSH_PROFILE_MISSING_RESULT。
+    而每一层自己看都正常: 令牌是对的、网关是通的、probe 也握手成功, 所以只能靠
+    测试钉住。2026-08-30 线上撞到过。
+    """
+    boot = products.boot_script("open-design")
+    assert "cordis.patch.yml" in boot, "没给 profile 写用户层配置"
+    patch = products._opendesign_patch_yaml()
+    assert "api: openai-completions" in patch, "又掉回 llm-deepseek 适配器了"
+    assert "apiKeyEnv: DSH_CLOUD_TOKEN" in patch
+    assert "provider: dshcloud" in patch, "默认模型没指向我们的 provider"
+    assert f"model: {model_catalog.default_model()}" in patch
+    # patch 层是 YAML 数组, 两个条目各带 id —— 写成映射的话 dsh 读不出来
+    assert patch.startswith("- id: llm-pi-ai")
+    assert "\n- id: agent-default-model" in patch
+
+
+def test_open_design_and_dsh_share_one_provider_definition():
+    """两个工作台的 provider 定义必须同源。
+
+    各写一份的话, 目录里加个模型只会在一边生效 —— 表现是"某个工作台里选不到
+    新模型", 不报错也不好查。
+    """
+    ids = [m["id"] for m in model_catalog.catalog().values()]
+    dsh_boot = products.boot_script("dsh")
+    od_patch = products._opendesign_patch_yaml()
+    for mid in ids:
+        assert f"- id: {mid}" in dsh_boot, f"dsh 工作台少了 {mid}"
+        assert f"- id: {mid}" in od_patch, f"Open Design 少了 {mid}"
+    assert len(ids) > 1
 
 
 def test_open_design_app_config_seed_kills_upstream_login_wall(tmp_path):
