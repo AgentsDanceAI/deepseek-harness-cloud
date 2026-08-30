@@ -103,14 +103,25 @@ def resolve_user(request: Request) -> dict:
     return user
 
 
-def try_resolve_user(request: Request) -> dict | None:
+def try_resolve_user(request: Request, *, cookie_only: bool = False) -> dict | None:
+    """解析当前用户。
+
+    cookie_only=True 时**只看会话 cookie**, 不看 Authorization / X-Api-Key。
+    这是给云空间那条 forward_auth 用的: 那里的请求是浏览器发给**产品**的,
+    而云空间里的产品往往自带 Authorization 头 —— Dify 的前端就是从 cookie 里
+    读出它自家的 JWT 再放进 Authorization 发出来。那个头会一路带进 forward_auth
+    的子请求, 我们拿它当 DSH 令牌验, 验不过就 302 去登录页, 于是**产品控制台的
+    每个请求都被我们弹回登录**, 而用户明明已经登录了、我们这边也一个错都不报。
+    2026-08-30 拆 Dify 登录墙时发现。
+    """
     token = ""
-    auth = request.headers.get("authorization", "")
-    if auth.lower().startswith("bearer "):
-        token = auth[7:].strip()
-    if not token:
-        token = request.headers.get("x-api-key", "").strip()
     from_cookie = False
+    if not cookie_only:
+        auth = request.headers.get("authorization", "")
+        if auth.lower().startswith("bearer "):
+            token = auth[7:].strip()
+        if not token:
+            token = request.headers.get("x-api-key", "").strip()
     if not token:
         token = request.cookies.get(config.SESSION_COOKIE, "")
         from_cookie = bool(token)

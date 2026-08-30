@@ -901,7 +901,10 @@ async def work_route(request: Request):
     if not config.WORK_ENABLED:
         return JSONResponse(status_code=404, content={"detail": "work_disabled"})
     product = _product_of(request)
-    user = try_resolve_user(request)
+    # cookie_only: 这两条都跑在**产品域**上, 认的是浏览器, 不是产品自己带的
+    # Authorization 头 —— 认错了会把整个产品控制台弹回登录页, 而且一个错都不报。
+    # 见 accounts.try_resolve_user 的说明。
+    user = try_resolve_user(request, cookie_only=True)
     site = config.PUBLIC_BASE.rstrip("/")
     if user is None:
         return RedirectResponse(f"{site}/login?next={_login_next(product)}", status_code=302)
@@ -976,7 +979,10 @@ async def work_shell(request: Request):
     if not config.WORK_ENABLED:
         return JSONResponse(status_code=404, content={"detail": "work_disabled"})
     product = _product_of(request)
-    user = try_resolve_user(request)
+    # cookie_only: 这两条都跑在**产品域**上, 认的是浏览器, 不是产品自己带的
+    # Authorization 头 —— 认错了会把整个产品控制台弹回登录页, 而且一个错都不报。
+    # 见 accounts.try_resolve_user 的说明。
+    user = try_resolve_user(request, cookie_only=True)
     site = config.PUBLIC_BASE.rstrip("/")
     if user is None:
         return RedirectResponse(f"{site}/login?next={_login_next(product)}", status_code=302)
