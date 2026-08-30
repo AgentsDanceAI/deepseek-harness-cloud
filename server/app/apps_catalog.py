@@ -17,14 +17,17 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class AppEntry:
-    id: str        # 与 products.py 的 Product.id 对齐; 对上了才算"已上线"
-    name: str      # 产品名不翻译 —— 它们是专有名词
-    cat: str       # 类目键, 文案在 i18n 的 apps.cat.<cat>
-    icon: str      # 24x24 viewBox 下的 SVG 内部标记 (stroke 图标)
+    id: str  # 与 products.py 的 Product.id 对齐; 对上了才算"已上线"
+    name: str  # 产品名不翻译 —— 它们是专有名词
+    cat: str  # 类目键, 文案在 i18n 的 apps.cat.<cat>
+    icon: str  # 24x24 viewBox 下的 SVG 内部标记 (stroke 图标)
 
 
 # 排布顺序即页面顺序: 已上线的两个放最前, 其余按"编码 -> 应用搭建 -> 媒体 ->
 # 对话/知识 -> 工具"的叙事排。改顺序就是改这里。
+# 下面这张表是**表**: 一行一个应用, 三列对齐着读。交给 formatter 会拆成一项一行,
+# 16 个应用变成六十多行, 哪一列是什么就看不出来了。
+# fmt: off
 CATALOG: tuple[AppEntry, ...] = (
     AppEntry(
         "dsh", "DSH Agent", "agent",
@@ -103,6 +106,7 @@ CATALOG: tuple[AppEntry, ...] = (
         '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3M8 21h8"/>',
     ),
 )
+# fmt: on
 
 
 def entries_with_status(enabled_ids: set[str]) -> list[dict]:

@@ -253,6 +253,8 @@ def video_input_style(model: str) -> str:
     """素材是给一张首帧 (img_url) 还是给一个数组 (media)。"""
     style = str((_catalog().get(model) or {}).get("video_input") or "img_url")
     return style if style in _INPUT_STYLES else "img_url"
+
+
 _BAILIAN_TERMINAL = {"SUCCEEDED": "succeeded", "FAILED": "failed", "CANCELED": "failed", "UNKNOWN": "failed"}
 
 
@@ -283,8 +285,14 @@ def _bailian_headers(async_mode: bool = False) -> dict:
 
 
 async def submit_video(
-    provider: str, model: str, prompt: str, resolution: str, duration: int,
-    image_url: str = "", ratio: str = "", media: list | None = None,
+    provider: str,
+    model: str,
+    prompt: str,
+    resolution: str,
+    duration: int,
+    image_url: str = "",
+    ratio: str = "",
+    media: list | None = None,
     auto_duration: bool = False,
 ) -> tuple[str, dict | None, int]:
     """向上游下单。返回 (task_id, 错误报文, 错误码) —— 成功时后两者为 None/0。"""
@@ -349,8 +357,12 @@ async def poll_video(provider: str, task_id: str) -> dict:
                     secs = float((body.get("usage") or {}).get("output_video_duration") or 0)
                 except (TypeError, ValueError):
                     secs = 0.0
-                return {"status": "succeeded", "url": str(out.get("video_url") or ""),
-                        "error": "", "seconds": secs}
+                return {
+                    "status": "succeeded",
+                    "url": str(out.get("video_url") or ""),
+                    "error": "",
+                    "seconds": secs,
+                }
             if state == "failed":
                 msg = str(out.get("message") or out.get("code") or "生成失败")
                 return {"status": "failed", "url": "", "error": msg[:500]}
@@ -486,8 +498,9 @@ async def create_video(request: Request, user: dict = Depends(resolve_user)):
         return _error(400, "invalid_request_error", f"ratio must be one of {', '.join(_RATIOS)}.")
     media = body.get("media") or []
     if not isinstance(media, list) or len(media) > _MEDIA_MAX_ITEMS:
-        return _error(400, "invalid_request_error",
-                      f"media must be a list of at most {_MEDIA_MAX_ITEMS} items.")
+        return _error(
+            400, "invalid_request_error", f"media must be a list of at most {_MEDIA_MAX_ITEMS} items."
+        )
     for item in media:
         url_ = str((item or {}).get("url") or "") if isinstance(item, dict) else ""
         if not url_ or len(url_) > _MEDIA_MAX_URL:
@@ -504,8 +517,9 @@ async def create_video(request: Request, user: dict = Depends(resolve_user)):
     # 上游也不认这个值。
     auto_duration = duration < 1
     if auto_duration and not supports_auto_duration(model):
-        return _error(400, "invalid_request_error",
-                      f"「{model}」不支持自动时长，请在 duration 里给一个具体秒数。")
+        return _error(
+            400, "invalid_request_error", f"「{model}」不支持自动时长，请在 duration 里给一个具体秒数。"
+        )
 
     if not model:
         return _error(400, "invalid_request_error", "model is required.")
@@ -575,7 +589,7 @@ async def create_video(request: Request, user: dict = Depends(resolve_user)):
                 task_id,
                 "processing",
                 prompt[:2000],
-                0 if auto_duration else duration,   # 0 = auto, 结算时按实际秒数补差
+                0 if auto_duration else duration,  # 0 = auto, 结算时按实际秒数补差
                 resolution,
                 amount,
                 provider,
@@ -618,15 +632,19 @@ def _settle_auto_duration(job: dict, seconds: float) -> dict:
         log.info("作业 %s 实际 %.1f 秒, 与预扣一致 (%d 积分)", job["id"], seconds, real)
         return {**job, "duration": actual}
     if delta > 0:
-        credits.spend(job["user_id"], delta, kind="video", model=str(job["model"]),
-                      request_id=f"{job['id']}-adj")
-        log.info("作业 %s 实际 %.1f 秒, 补收 %d 积分 (预扣 %d -> %d)",
-                 job["id"], seconds, delta, charged, real)
+        credits.spend(
+            job["user_id"], delta, kind="video", model=str(job["model"]), request_id=f"{job['id']}-adj"
+        )
+        log.info(
+            "作业 %s 实际 %.1f 秒, 补收 %d 积分 (预扣 %d -> %d)", job["id"], seconds, delta, charged, real
+        )
     else:
-        credits.grant(job["user_id"], -delta, config.VIDEO_REFUND_TTL_S,
-                      kind="refund", ref=f"{job['id']}-adj")
-        log.info("作业 %s 实际 %.1f 秒, 退回 %d 积分 (预扣 %d -> %d)",
-                 job["id"], seconds, -delta, charged, real)
+        credits.grant(
+            job["user_id"], -delta, config.VIDEO_REFUND_TTL_S, kind="refund", ref=f"{job['id']}-adj"
+        )
+        log.info(
+            "作业 %s 实际 %.1f 秒, 退回 %d 积分 (预扣 %d -> %d)", job["id"], seconds, -delta, charged, real
+        )
     return {**job, "credits": real, "duration": math.ceil(seconds)}
 
 
@@ -918,24 +936,31 @@ async def create_upload(request: Request, user: dict = Depends(resolve_user)):
     ctype = str(body.get("content_type") or "application/octet-stream").split(";")[0].strip().lower()
     if not ctype.startswith(_UPLOAD_TYPES):
         return _error(
-            415, "unsupported_media_type",
+            415,
+            "unsupported_media_type",
             f"只接受图片/视频/音频 (收到 {ctype})。",
         )
     blob_id = security.new_id()  # 96 位随机十六进制 —— 取回那端无鉴权, 全靠它猜不到
     _UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     _, meta = _upload_paths(blob_id)
-    meta.write_text(json.dumps({
-        "user_id": user["id"],
-        "content_type": ctype,
-        "file_name": str(body.get("file_name") or "")[:200],
-        "created": time.time(),
-    }))
+    meta.write_text(
+        json.dumps(
+            {
+                "user_id": user["id"],
+                "content_type": ctype,
+                "file_name": str(body.get("file_name") or "")[:200],
+                "created": time.time(),
+            }
+        )
+    )
     base = config.PUBLIC_BASE.rstrip("/")
-    return JSONResponse({
-        "id": blob_id,
-        "upload_url": f"{base}/llm/v1/media/uploads/{blob_id}",
-        "download_url": f"{base}/llm/v1/media/blobs/{blob_id}",
-    })
+    return JSONResponse(
+        {
+            "id": blob_id,
+            "upload_url": f"{base}/llm/v1/media/uploads/{blob_id}",
+            "download_url": f"{base}/llm/v1/media/blobs/{blob_id}",
+        }
+    )
 
 
 @router.put("/v1/media/uploads/{blob_id}")

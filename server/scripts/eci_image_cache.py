@@ -239,7 +239,8 @@ def rebuild() -> int:
             continue
         # 在建的要**等出结果**, 不能当成已经有了 —— 见 _await_ready 的说明。
         building = [
-            c for c in caches
+            c
+            for c in caches
             if c.get("Status") in ("Creating", "Preparing") and set(refs) <= set(c.get("Images") or [])
         ]
         if building and _await_ready(building[0]["ImageCacheId"], refs[0]):
@@ -253,14 +254,14 @@ def rebuild() -> int:
             _drop(old)
         return check()
     rc = 0
-    for i, (pid, refs) in enumerate(todo):
+    for i, (_pid, refs) in enumerate(todo):
         rc |= _build_one(refs, stale if i == len(todo) - 1 else [])
     return rc or check()
 
 
 def _build_one(refs, stale: list[str]) -> int:
     if isinstance(refs, str):
-        refs = (refs,)   # prepare 的单镜像路径继续可用
+        refs = (refs,)  # prepare 的单镜像路径继续可用
     print(f"==> 目标镜像组 ({len(refs)} 个):")
     for r in refs:
         print(f"      {r}")
@@ -341,7 +342,7 @@ def prepare(refs: list[str]) -> int:
         building = [c for c in mine if c.get("Status") in ("Creating", "Preparing")]
         if building and _await_ready(building[0]["ImageCacheId"], ref):
             continue
-        rc |= _build_one(ref, [])   # stale=[] —— 这一步什么都不删
+        rc |= _build_one(ref, [])  # stale=[] —— 这一步什么都不删
     return rc
 
 

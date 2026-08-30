@@ -76,7 +76,7 @@ def test_apps_page_shows_all_16_with_live_status(client, monkeypatch):
     for a in apps_catalog.CATALOG:
         assert a.name in body, f"{a.name} 没出现在页面上"
     # 上线的卡是真链接
-    assert '/work?product_id=comfyui' in body
+    assert "/work?product_id=comfyui" in body
     enabled = {pr.id for pr in products.enabled()}
     assert "comfyui" in enabled, "前提: 测试配置里 comfyui 已启用"
     # 没上线的绝不能挂工作台链接 —— 点进去是 404/错误页
@@ -112,7 +112,7 @@ def test_landing_is_the_storefront(client, monkeypatch):
     for a in apps_catalog.CATALOG:
         assert a.name in body, f"{a.name} 没上主页货架"
     assert "hero-composer" in body, "composer 挪没了 —— 那是 dsh 的转化入口"
-    assert '/work?product_id=comfyui' in body, "ComfyUI 旗舰卡没直达工作台"
+    assert "/work?product_id=comfyui" in body, "ComfyUI 旗舰卡没直达工作台"
 
 
 def test_landing_no_icp_when_unset(client):
