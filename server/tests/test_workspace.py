@@ -2075,7 +2075,7 @@ def test_dify_has_no_second_login_wall(monkeypatch):
     # 三个 cookie 缺一不可: 少 csrf 前端拼不出请求头, 少 refresh 一小时后就掉线
     for var in ("$dsh_at", "$dsh_rt", "$dsh_ct"):
         assert f"add_header Set-Cookie {var} always;" in boot, f"少发 {var}"
-        assert f"map $cookie_refresh_token {var} {{ default \"\"; }}" in boot, \
+        assert f"map $sent_http_content_type {var} {{ default \"\"; }}" in boot, \
             f"{var} 没有安全默认值 —— nginx 会因为引用未定义变量直接起不来"
     assert "/usr/local/bin/dsh-dify-autologin" in boot
 
@@ -2084,8 +2084,29 @@ def test_dify_has_no_second_login_wall(monkeypatch):
     # 登录收 base64 的密码, setup 收明文 —— 上游就是这么不对称的
     assert "base64" in sh
     assert '"$API/setup"' in sh and '"$API/login"' in sh
-    # access_token 只活一小时, 容器能跑很久 -> 必须定期重登
-    assert "sleep 1500" in sh
+    # access_token 只活一小时, 容器能跑很久 -> 必须定期重登 (间隔见另一条测试)
+    assert "sleep 1200" in sh
+
+
+def test_dify_reissues_the_session_on_every_page_load(monkeypatch):
+    """补发会话不能以"浏览器还没有"为条件。
+
+    以 cookie 是否存在为条件有个致命洞: 浏览器手里那份一旦**失效**
+    (账号改过密码、会话被服务端作废), 它仍然"存在" —— 于是永远补不上新的,
+    用户被永久钉在 Dify 自己的登录页, 不手动清 cookie 怎么刷新都没用。
+    2026-08-30 上线当天就是这么锁住老板的: 我给账号迁密码作废了他浏览器里的
+    会话, 而规则只在"缺失"时补发。
+
+    工作台只有一个账号, 不存在"别人的会话"要保住, 所以每次页面加载都覆盖。
+    按响应类型收窄到 HTML: 静态资源和接口响应不必背这三个头。
+    """
+    monkeypatch.setattr(config, "DIFY_DOMAIN", "dify.test.local")
+    sh = products._DIFY_AUTOLOGIN
+    assert "$cookie_refresh_token" not in sh, "又退回了'只在缺失时补发'"
+    assert "$cookie_access_token" not in sh
+    assert sh.count("~*^text/html") == 3, "三个 cookie 都要按 HTML 文档补发"
+    # 刷新间隔要明显短于 token 的 60 分钟寿命, 否则新开的标签页会拿到过期的
+    assert "sleep 1200" in sh
 
 
 def test_dify_preinstalls_a_model_provider(monkeypatch):
