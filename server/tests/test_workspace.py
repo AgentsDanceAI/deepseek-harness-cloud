@@ -2088,6 +2088,47 @@ def test_dify_has_no_second_login_wall(monkeypatch):
     assert "sleep 1500" in sh
 
 
+def test_dify_preinstalls_a_model_provider(monkeypatch):
+    """Dify 开箱必须有模型可用。
+
+    它的模型供应商是**插件**, 全新实例一个都没装 —— 用户新建个聊天助手, 模板里
+    写的是 gpt-*, 于是当场报 `Provider langgenius/openai/openai does not exist`,
+    模型那栏还标着"不兼容"。2026-08-30 老板一进去就撞上。
+
+    所以启动后自己装一个 OpenAI 兼容插件, 把我们的网关配成自定义模型并设默认。
+    """
+    monkeypatch.setattr(config, "DIFY_DOMAIN", "dify.test.local")
+    sh = products._DIFY_AUTOLOGIN
+    assert "provision()" in sh and "provision || true" in sh
+    assert "openai_api_compatible" in sh
+    assert "plugin/install/marketplace" in sh
+    assert "models/credentials" in sh, "只 POST /models 是空转 —— 上游那个接口不建凭据却回 success"
+    assert "default-model" in sh
+    # 幂等: 判据取自接口而不是标记文件 (配置在 NAS 上的 Postgres, 实例重建后还在;
+    # 而用户自己删过重配的话, 标记文件会撒谎)
+    assert "models/model-types/llm" in sh
+
+    env = products.env_for("dify", "tok_x", "s" * 64)
+    assert env["DSH_CLOUD_TOKEN"] == "tok_x"
+    assert env["DSH_GATEWAY_BASE"].endswith("/llm/v1")
+    assert env["DSH_DEFAULT_MODEL"] == model_catalog.default_model()
+
+
+def test_dify_only_preconfigures_one_model_of_each_kind():
+    """只预置默认的那一个 chat 模型 + 一个向量化模型, 不是整份目录。
+
+    每加一个模型 Dify 都会真打一次上游做校验, 也就是**真扣一次积分**。二十个
+    模型全配等于每次首次进入白烧二十次, 而用户想要别的在界面上点两下就能加。
+    """
+    sh = products._DIFY_AUTOLOGIN
+    assert sh.count("models/credentials") == 2, "配的模型不止两个 —— 每个都要扣一次积分"
+    # 脚本里这段 JSON 是在 shell 双引号里的, 所以引号带着反斜杠
+    assert r'\"model_type\":\"llm\"' in sh
+    assert r'\"model_type\":\"text-embedding\"' in sh
+    # 目录里没有向量化模型时要跳过, 而不是配个空的进去 (那会让知识库在运行期才炸)
+    assert 'if [ -n "$DSH_EMBEDDING_MODEL" ]' in sh
+
+
 def test_dify_autologin_backs_off_instead_of_locking_the_account(monkeypatch):
     """认证失败要退避, 不能死循环快重试。
 
