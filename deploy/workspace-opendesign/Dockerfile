@@ -26,9 +26,31 @@ LABEL org.opencontainers.image.source="https://github.com/AgentsDanceAI/deepseek
 
 USER root
 COPY --from=dsh /usr/local/lib/node_modules/@deepseek-ai/dsh /usr/local/lib/node_modules/@deepseek-ai/dsh
-RUN ln -sf /usr/local/lib/node_modules/@deepseek-ai/dsh/lib/bin.js /usr/local/bin/dsh \
- && chmod +x /usr/local/lib/node_modules/@deepseek-ai/dsh/lib/bin.js \
- && dsh --version \
+# dsh 不是软链而是**包装脚本**, 就为了带上 `node --expose-internals`。
+# 理由与下面 sharp 那条同源, 都是 musl:
+#   dsh 启动 profile 时, 若上下文里没有 hmr 服务就自己注入一个
+#   (profile-boot: `if (ctx.get("hmr") === void 0) loader.create(...hmr)`),
+#   而 hmr 要拿到 Node 内部模块 —— 两条路: process.execArgv 里有
+#   --expose-internals, 或者原生包 node-addon-require-builtin。后者**根本没发
+#   musl 版**(optionalDependencies 里只有 gnu/darwin/win), 于是 Alpine 上两条
+#   路都断, profile 启动即崩:
+#     failed to apply loader entry (@deepseek-ai/cordis-plugin-hmr):
+#     --expose-internals is required for HMR service
+#   而 NODE_OPTIONS 里放不了这个旗标 (node 明确拒绝), 所以只能落在 bin 上。
+#   用户侧的表现是 DSH_PROFILE_MISSING_RESULT —— "跑一半就结束, 不给终态"。
+#   2026-08-30 老板在 Open Design 里点"写种"撞到。
+# 带引号的 heredoc 定界符 —— Docker 不对内容做变量展开, 于是 `"$@"` 原样落地。
+# (printf 那种写法要给 $ 转义, 而转义出来的反斜杠会一起写进文件, 包装脚本当场坏掉。)
+RUN <<'MKDSH'
+set -e
+cat > /usr/local/bin/dsh <<'SH'
+#!/bin/sh
+exec node --expose-internals /usr/local/lib/node_modules/@deepseek-ai/dsh/lib/bin.js "$@"
+SH
+chmod +x /usr/local/bin/dsh /usr/local/lib/node_modules/@deepseek-ai/dsh/lib/bin.js
+MKDSH
+
+RUN dsh --version \
  # dsh plugin add 用 pnpm 装 profile 插件 —— 运行时装 (profile 落在 NAS 的
  # /root 上, 按用户持久化), 所以 pnpm 必须在镜像里
  && npm install -g pnpm@10 >/dev/null 2>&1 && pnpm --version \
