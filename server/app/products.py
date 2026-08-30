@@ -474,6 +474,32 @@ _COZE_AES_ENV = (
 )
 
 
+def _coze_embedding_env(gateway: str) -> tuple[tuple[str, str], ...]:
+    """知识库的向量化配置 —— 指回我们自己的 /llm/v1/embeddings。
+
+    没有它, Coze 的知识库要用户自己去第三方申请一把 key, 而他已经在我们这里
+    付过费了。上游开箱的那套是 `ark` + 空 key: 服务照常起, 只是知识库不可用。
+    目录里一个向量化模型都没有时 (自建部署带着旧的 models.json) 仍退回那套,
+    因为把 OPENAI_EMBEDDING_MODEL 配成空串会让知识库在**运行期**才炸。
+
+    REQUEST_DIMS 必须跟着模型走: 它为真时 Coze 每次都带上 dimensions, 而
+    BGE-M3 那类模型的上游**拒收**这个参数 (网关会回 400)。写死成真, 换个默认
+    模型就是知识库整个不能用, 而这里一个字都不会变。
+    """
+    model_id = model_catalog.default_embedding_model()
+    entry = model_catalog.resolve_embedding(model_id)
+    if entry is None:
+        return (("EMBEDDING_TYPE", "ark"),)
+    return (
+        ("EMBEDDING_TYPE", "openai"),
+        ("OPENAI_EMBEDDING_BASE_URL", f"{gateway}/llm/v1"),
+        ("OPENAI_EMBEDDING_API_KEY", GATEWAY_TOKEN_PLACEHOLDER),
+        ("OPENAI_EMBEDDING_MODEL", model_id),
+        ("OPENAI_EMBEDDING_DIMS", str(entry["dimensions"])),
+        ("OPENAI_EMBEDDING_REQUEST_DIMS", "true" if entry.get("supports_dimensions") else "false"),
+    )
+
+
 def _coze_server_env() -> tuple[tuple[str, str], ...]:
     """coze-server 的环境。
 
@@ -518,10 +544,11 @@ def _coze_server_env() -> tuple[tuple[str, str], ...]:
         ("ES_NUMBER_OF_SHARDS", "1"), ("ES_NUMBER_OF_REPLICAS", "0"),
         ("COZE_MQ_TYPE", "nsq"), ("MQ_NAME_SERVER", "nsqd:4150"),
         ("VECTOR_STORE_TYPE", "milvus"), ("MILVUS_ADDR", "milvus:19530"),
-        # 知识库要向量化, 而我们的网关目前**没有** /v1/embeddings —— 保持上游
-        # 开箱即用的那套 (ark + 空 key): 服务照常起, 只是知识库要用户自己填 key。
-        # 网关补上 embeddings 之后这里才该改。
-        ("EMBEDDING_TYPE", "ark"), ("EMBEDDING_MAX_BATCH_SIZE", "100"),
+        # 一批 100 条实测上游吃得下 (2026-08-29), usage 是整批合计的。
+        ("EMBEDDING_MAX_BATCH_SIZE", "100"),
+        # 重排仍用 rrf (纯本地的倒数排序融合, 不调任何模型): 重排不是 OpenAI
+        # 的标准端点, 网关也还没有这一支 —— 上游确实在售 bge-reranker, 要接是
+        # 另一件事, 不是这次顺手能带的。
         ("RERANK_TYPE", "rrf"),
         ("OCR_TYPE", ""), ("PARSER_TYPE", "builtin"),
         # 开箱就有模型可选 —— 用户已经在我们这里付过费, 不该再去别处申请 key。
@@ -537,7 +564,7 @@ def _coze_server_env() -> tuple[tuple[str, str], ...]:
         ("BUILTIN_CM_OPENAI_API_KEY", GATEWAY_TOKEN_PLACEHOLDER),
         ("BUILTIN_CM_OPENAI_MODEL", model_id),
         ("BUILTIN_CM_OPENAI_BY_AZURE", "false"),
-    ) + _COZE_AES_ENV
+    ) + _coze_embedding_env(gateway) + _COZE_AES_ENV
 
 
 def _coze_stack() -> tuple[Sidecar, ...]:

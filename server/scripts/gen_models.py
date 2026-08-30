@@ -48,6 +48,30 @@ SKIP_SUBSTRINGS = (
     "codex-auto-review",
 )
 
+# 我们转售的向量化模型。**价格仍然来自价目表**, 这里只钉表里没有的两件事:
+# 原生维度, 以及上游认不认 `dimensions` 参数 —— 网关的 /models 只给
+# id/object/created/owned_by 四个字段, 控制台的牌价接口也不带这两项, 只能实测。
+# 实测日期 2026-08-29, 方法是发一条最短的 /embeddings 请求数返回向量的长度,
+# 再带 dimensions=512 复发一次看是 200 还是 400。
+#
+# 为什么不能跟对话模型走同一条路: 它们没有输出 token, 混合单价
+# (输入 x 0.75 + 输出 x 0.25) 对它们没有意义, 而 charge_credits 对**不在对话
+# 目录里**的 id 会按"最贵条目"兜底 —— 拿对话目录去算一次向量化请求, 用户会被
+# 按 claude-fable-5 的输出价收钱。所以另立一节, 由 charge_embedding_credits 算。
+#
+# (id, 展示名, 原生维度, 上游是否接受 dimensions)
+EMBEDDING_MODELS = (
+    ("Qwen/Qwen3-Embedding-0.6B", "Qwen3-Embedding-0.6B", 1024, True),
+    ("Qwen/Qwen3-Embedding-4B", "Qwen3-Embedding-4B", 2560, True),
+    ("Qwen/Qwen3-Embedding-8B", "Qwen3-Embedding-8B", 4096, True),
+    # 上游 0 元, 但仍按每次请求收底价 1 积分 (charge_embedding_credits 的下限)。
+    # 唯一一个**拒收** dimensions 的 (400 code=20015), 所以别把它设成默认 ——
+    # 客户端普遍会带上 dimensions。
+    ("BAAI/bge-m3", "BGE-M3", 1024, False),
+    ("text-embedding-3-small", "Text-Embedding-3-Small", 1536, True),
+    ("text-embedding-3-large", "Text-Embedding-3-Large", 3072, True),
+)
+
 PROVIDER_BY_PREFIX = [
     ("claude-", "Anthropic"),
     ("gpt-", "OpenAI"),
@@ -105,6 +129,7 @@ def main() -> int:
     ap.add_argument("--prices", required=True, help="price table with models[].{id,input_price,output_price}")
     ap.add_argument("--out", default=str(Path(__file__).resolve().parents[1] / "config" / "models.json"))
     ap.add_argument("--default-model", default="deepseek-v4-flash")
+    ap.add_argument("--default-embedding-model", default="Qwen/Qwen3-Embedding-0.6B")
     ap.add_argument(
         "--all", action="store_true", help="emit every priced chat model instead of config/models.curated.txt"
     )
@@ -148,6 +173,10 @@ def main() -> int:
         return 1
     base_blended = blended(prices[BASELINE_MODEL])
 
+    # curated 会把 served 换成清单本身, 而向量化模型不在那份清单里 —— 先留一份
+    # 完整的, 否则下面那道"网关是否真的在售"的检查会把每个模型都判成缺货。
+    served_all = set(served)
+
     if curated is not None:
         missing = [m for m in curated if m not in served]
         if missing:
@@ -189,6 +218,33 @@ def main() -> int:
     if not any(m["default"] for m in models) and models:
         models[0]["default"] = True
 
+    embeddings = []
+    for mid, label, dims, req_dims in EMBEDDING_MODELS:
+        if mid not in served_all:
+            print(f"embedding model absent from the gateway: {mid}", file=sys.stderr)
+            return 1
+        row = prices.get(mid)
+        # 0 元是合法价 (bge-m3 上游免费), 缺价才是问题 —— 用 is None 分开这两件事,
+        # 真值判断会把免费模型当成没价格而静默丢掉。
+        if row is None or row.get("input_price") is None:
+            print(f"price table has no input price for {mid}", file=sys.stderr)
+            return 1
+        embeddings.append(
+            {
+                "id": mid,
+                "upstream_model": mid,
+                "display_name": label,
+                "provider": provider_of(mid, row.get("provider", "")),
+                "input_usd_per_m": round(row["input_price"], 4),
+                "dimensions": dims,
+                "supports_dimensions": req_dims,
+                "default": mid == args.default_embedding_model,
+            }
+        )
+    if embeddings and not any(m["default"] for m in embeddings):
+        print(f"--default-embedding-model {args.default_embedding_model} is not offered", file=sys.stderr)
+        return 1
+
     out = {
         "_comment": (
             "由 server/scripts/gen_models.py 生成，请勿手改——手写的价目表迟早会漂。"
@@ -199,6 +255,12 @@ def main() -> int:
         "baseline_model": BASELINE_MODEL,
         "credits_per_baseline_m": CREDITS_PER_BASELINE_M,
         "models": models,
+        "_comment_embeddings": (
+            "向量化模型。只按**输入** token 计价 (它们没有输出 token), 由 "
+            "model_catalog.charge_embedding_credits 结算; dimensions 是原生维度, "
+            "supports_dimensions 说的是上游认不认这个参数 (BGE-M3 不认)。"
+        ),
+        "embedding_models": embeddings,
     }
     Path(args.out).write_text(json.dumps(out, ensure_ascii=False, indent=2) + "\n")
 
@@ -208,6 +270,7 @@ def main() -> int:
         f"… {models[-1]['multiplier']}x ({models[-1]['id']})"
     )
     print(f"  跳过非对话模型 {len(skipped)} 个，缺价格 {len(unpriced)} 个: {unpriced[:6]}")
+    print(f"  向量化模型 {len(embeddings)} 个，默认 {args.default_embedding_model}")
     return 0
 
 

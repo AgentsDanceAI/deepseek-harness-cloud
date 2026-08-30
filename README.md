@@ -121,6 +121,23 @@ npx --yes dsh-plugin-cloud setup
 The gateway serves the live catalog, so this table is contract-tested against
 [`server/config/models.json`](server/config/models.json).
 
+## Knowledge bases, same gateway
+
+The gateway also speaks `POST /v1/embeddings` — the OpenAI surface Coze, Dify
+and RAGFlow expect for their knowledge bases. Vectors are billed on **input
+tokens only**, out of the same credit balance as chat.
+
+<!-- embedding-catalog:start -->
+| Embedding model | Dimensions |
+| --- | --- |
+| `Qwen3-Embedding-0.6B` | 1024 |
+| `Qwen3-Embedding-4B` | 2560 |
+| `Qwen3-Embedding-8B` | 4096 |
+| `BGE-M3` | 1024 |
+| `Text-Embedding-3-Small` | 1536 |
+| `Text-Embedding-3-Large` | 3072 |
+<!-- embedding-catalog:end -->
+
 ## Quick start
 
 All commands below pin release `0.2.4`; pin exact versions in automation.

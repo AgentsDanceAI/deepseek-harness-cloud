@@ -11,6 +11,18 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from . import config
 
 
+# 网关那几条路: 报文可以很大 (整段对话、一整批待向量化的文本), 而且必须**先鉴权
+# 再读**。两处都要列到 —— 只加进 _limit 会让报文在鉴权之前被缓冲下来, 只加进
+# _read_after_auth 会让它退回 2MB 的通用上限。所以共用一份清单, 别写两遍。
+GATEWAY_PATHS = frozenset(
+    {
+        "/llm/v1/chat/completions",
+        "/llm/v1/embeddings",
+        "/llm/anthropic/v1/messages",
+    }
+)
+
+
 async def read_limited_body(request: Request, *, max_bytes: int, timeout_s: float) -> bytes:
     """Read a high-capacity route body after its authentication checks."""
     limit = max(0, int(max_bytes))
@@ -65,10 +77,7 @@ class RequestBodyLimit:
             return None
         if path.startswith("/api/pay/webhook/"):
             return self.webhook_bytes
-        if path.rstrip("/") in {
-            "/llm/v1/chat/completions",
-            "/llm/anthropic/v1/messages",
-        }:
+        if path.rstrip("/") in GATEWAY_PATHS:
             return self.gateway_bytes
         parts = path.split("/", 3)
         if len(parts) >= 3 and parts[1] == "preview" and parts[2].isdigit():
@@ -81,10 +90,7 @@ class RequestBodyLimit:
     def _read_after_auth(method: str, path: str) -> bool:
         if method.upper() in {"GET", "HEAD", "OPTIONS"}:
             return False
-        if path.rstrip("/") in {
-            "/llm/v1/chat/completions",
-            "/llm/anthropic/v1/messages",
-        }:
+        if path.rstrip("/") in GATEWAY_PATHS:
             return True
         parts = path.split("/", 3)
         return len(parts) >= 3 and parts[1] == "preview" and parts[2].isdigit()
