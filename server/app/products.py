@@ -431,7 +431,15 @@ _COZE_ES_CMD = (
     # 在 compose 里 sed 掉, 照搬。
     "  sed 's/\\r$//' /seed/elasticsearch/setup_es.sh > /tmp/setup_es.sh\n"
     "  chmod +x /tmp/setup_es.sh\n"
-    "  /tmp/setup_es.sh --index-dir /seed/elasticsearch/es_index_schema\n"
+    # **必须显式传 --es-address**: 脚本自己没有默认值, 它指望 compose 的 env_file
+    # 给每个容器都塞一份 .env (里面有 ES_ADDR) —— 我们只给 coze-server 发了这个
+    # 变量, 所以这里 ES_ADDR 是空串。空地址探测 60 次全失败后, 它打印的是
+    # "smartcn plugin not loaded correctly" —— **报错完全指错方向**, 而真正的
+    # 后果是索引一个都没建, 用户一进工作区就是 500 (no such index [project_draft])。
+    # --docker-host false 顺带关掉它那条 "localhost -> http://elasticsearch:9200"
+    # 的改写: 我们走回环, 不该再绕一次名字解析。
+    "  /tmp/setup_es.sh --es-address http://127.0.0.1:9200 --docker-host false"
+    " --index-dir /seed/elasticsearch/es_index_schema\n"
     ") &\n"
     "exec /opt/bitnami/scripts/elasticsearch/entrypoint.sh"
     " /opt/bitnami/scripts/elasticsearch/run.sh\n"
@@ -683,6 +691,63 @@ def _coze_stack() -> tuple[Sidecar, ...]:
 # fmt: on
 _COZE_SUBFILTER_FROM = "sub_filter 'minio:9000' '\\$http_host/local_storage';"
 _COZE_SUBFILTER_TO = "sub_filter 'http://minio:9000' 'https://\\$http_host/local_storage';"
+#: 免登录那行 proxy_set_header 插在哪。这一行在整份上游配置里唯一 ——
+#: /local_storage/ 那个 location 用的是 `Host minio:9000`, 匹配不上。
+#: build.sh 在构建期断言它还在: 匹配不上是**静默失效**, 用户只会又看到登录墙。
+_COZE_APIHOST_ANCHOR = "proxy_set_header Host \\$http_host;"
+
+
+#: 工作台自己签发 Coze 的会话, 于是用户不再看到第二道登录墙。
+#:
+#: 平台的通则是**只有我们这一层登录墙**: 用户进到这个域已经过了 forward_auth,
+#: 容器是他一个人的, 再让他注册一个第三方账号既多余又走不通 —— 密码是我们随机
+#: 生成的, 他根本不知道。
+#:
+#: Coze 那边没有任何免登开关: SessionAuthMW 只认 session_key cookie ->
+#: ValidateSession, 既没有受信头也没有匿名模式
+#: (backend/api/middleware/session.go)。所以只能真登一次。
+#:
+#: 注入在**上游方向**而不是给浏览器发 Set-Cookie: 少依赖一层浏览器状态, 用户
+#: 禁 cookie 也照样能用; 而他自己带了 session_key 时原样透传, 想切账号也切得了。
+#:
+#: 密码存在 /root (NAS, 跟着用户走) —— 实例重建后还是同一个账号, 里面的智能体
+#: 和知识库都还在。账号用 owner@ 而不是 admin@: 后者可能已被人工建过而密码不在
+#: 我们手里, 那样注册和登录会双双失败, 而且**不报错**, 只是又看到登录墙。
+_COZE_AUTOLOGIN = r"""#!/bin/sh
+# 由 products.py 下发。工作台自己登一次 Coze, 把会话注入到上游请求里。
+PWF=/root/.coze-autologin
+EM=owner@dshcloud.online
+API=http://127.0.0.1:8888/api/passport/web/email
+[ -s "$PWF" ] || {
+  printf 'Dsh%s1a\n' "$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 20)" > "$PWF"
+  chmod 600 "$PWF"
+}
+PW=$(cat "$PWF")
+BODY="{\"email\":\"$EM\",\"password\":\"$PW\"}"
+SK=""
+i=0
+while [ "$i" -lt 150 ]; do
+  i=$((i + 1))
+  SK=$(curl -s -D- -o /dev/null -m 10 -X POST -H 'Content-Type: application/json' \
+        -d "$BODY" "$API/login/" \
+       | grep -i '^set-cookie: session_key=' | head -1 \
+       | sed 's/.*session_key=//; s/;.*//' | tr -d '\r')
+  [ -n "$SK" ] && break
+  # 登不上多半是账号还不存在 (或 coze-server 还没起来) —— 注册一次再试。
+  curl -s -o /dev/null -m 10 -X POST -H 'Content-Type: application/json' \
+       -d "$BODY" "$API/register/v2/" || true
+  sleep 3
+done
+[ -n "$SK" ] || exit 0
+cat > /etc/nginx/conf.d/00-autologin.conf <<EOF
+# 浏览器没带 session_key 时注入工作台自己的那个; 带了就原样透传 (想切账号也切得了)。
+map \$cookie_session_key \$dsh_cookie {
+    ""      "session_key=$SK";
+    default \$http_cookie;
+}
+EOF
+nginx -s reload
+"""
 
 
 def _coze_boot() -> str:
@@ -715,6 +780,19 @@ def _coze_boot() -> str:
         # 头像和附件一片空白, 而服务端一切正常、控制台里才有一行 blocked。
         f'sed -i "s#{_COZE_SUBFILTER_FROM}#{_COZE_SUBFILTER_TO}#" '
         "/etc/nginx/conf.d/default.conf\n"
+        # 免登录 (见 _COZE_AUTOLOGIN)。先落一份**透传**的默认值 —— 会话要等
+        # coze-server 起来才拿得到, 而 nginx 现在就要能起; 引用一个还没定义的
+        # 变量会让 nginx 直接启动失败, 那就连静态页都没有了。
+        "cat > /etc/nginx/conf.d/00-autologin.conf <<'AUTOCONF'\n"
+        "map $cookie_session_key $dsh_cookie { default $http_cookie; }\n"
+        "AUTOCONF\n"
+        f"sed -i '/{_COZE_APIHOST_ANCHOR}/a\\        proxy_set_header Cookie $dsh_cookie;'"
+        " /etc/nginx/conf.d/default.conf\n"
+        "cat > /usr/local/bin/dsh-coze-autologin <<'AUTOLOGIN'\n"
+        + _COZE_AUTOLOGIN
+        + "AUTOLOGIN\n"
+        "chmod +x /usr/local/bin/dsh-coze-autologin\n"
+        "/usr/local/bin/dsh-coze-autologin >/dev/null 2>&1 &\n"
         "exec nginx -g 'daemon off;'\n"
     )
 

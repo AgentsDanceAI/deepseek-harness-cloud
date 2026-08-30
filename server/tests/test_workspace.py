@@ -1853,6 +1853,58 @@ def test_coze_boot_rewrites_object_storage_links_to_https(monkeypatch):
     assert f"s#{products._COZE_SUBFILTER_FROM}#{products._COZE_SUBFILTER_TO}#" in boot
 
 
+def test_coze_has_no_second_login_wall(monkeypatch):
+    """平台的通则: **只有我们这一层登录墙**。
+
+    用户进到这个域已经过了 forward_auth, 容器是他一个人的; 再让他注册一个
+    Coze 账号既多余又走不通 —— 密码是工作台随机生成的, 他根本不知道。
+    而 Coze 那边没有任何免登开关 (SessionAuthMW 只认 session_key cookie ->
+    ValidateSession), 所以只能由工作台自己登一次, 把会话注入到上游请求里。
+    2026-08-30 老板在 Coze 上点名要求。
+    """
+    _coze_ready(monkeypatch)
+    boot = products.boot_script("coze")
+    # 先落一份透传默认值: 会话要等 coze-server 起来才拿得到, 而 nginx 现在就要
+    # 能起 —— 引用未定义的变量会让 nginx 直接启动失败, 那连静态页都没有了。
+    assert "map $cookie_session_key $dsh_cookie { default $http_cookie; }" in boot
+    assert "proxy_set_header Cookie $dsh_cookie;" in boot
+    assert "/usr/local/bin/dsh-coze-autologin" in boot
+
+    sh = products._COZE_AUTOLOGIN
+    # 地址是拼出来的 ($API/login/), 所以分开认
+    assert "http://127.0.0.1:8888/api/passport/web/email" in sh
+    assert '"$API/login/"' in sh
+    assert '"$API/register/v2/"' in sh
+    # 密码落在 NAS 上 —— 实例重建后还是同一个账号, 里面的智能体和知识库都还在
+    assert "/root/.coze-autologin" in sh
+    # 账号不能用 admin@: 那个可能已被人工建过而密码不在我们手里, 注册与登录会
+    # 双双失败, 而且**不报错**, 只是又看到登录墙
+    assert "owner@dshcloud.online" in sh
+    assert "admin@" not in sh
+    # 浏览器自己带了 session_key 就原样透传 (他想切账号也切得了)。
+    # 脚本里这些 $ 是给 nginx 的, 对 shell 转义过, 所以认转义后的形态。
+    assert "default \\$http_cookie;" in sh
+    assert 'map \\$cookie_session_key \\$dsh_cookie {' in sh
+
+
+def test_coze_elasticsearch_init_gets_an_explicit_address(monkeypatch):
+    """setup_es.sh 必须显式收到 --es-address。
+
+    它自己**没有默认值**: 指望 compose 的 env_file 给每个容器都塞一份 .env
+    (里面有 ES_ADDR)。我们只给 coze-server 发了这个变量, 所以在 ES 容器里
+    ES_ADDR 是空串 —— 它拿空地址探测 60 次全失败, 然后打印
+    "smartcn plugin not loaded correctly", **报错完全指错方向** (插件其实装好了)。
+    真正的后果是索引一个都没建, 用户一进工作区就是 500:
+    `no such index [project_draft]`。2026-08-30 开 UI 才看到, 只测 API 测不出来。
+    """
+    _coze_ready(monkeypatch)
+    es = next(sc for sc in products.registry()["coze"].sidecars if sc.name == "elasticsearch")
+    cmd = es.cmd[-1]
+    assert "--es-address http://127.0.0.1:9200" in cmd, "空地址会让索引静默建不出来"
+    assert "--docker-host false" in cmd, "别再绕一次 localhost -> elasticsearch 的名字改写"
+    assert "--index-dir /seed/elasticsearch/es_index_schema" in cmd
+
+
 def test_coze_wires_our_gateway_so_users_need_no_api_key(monkeypatch):
     """开箱就有模型可选: 模型 key 走网关凭据占位符, create 时换成该用户的令牌。
 
