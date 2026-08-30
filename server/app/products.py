@@ -421,9 +421,10 @@ api() {
 # 写的是 gpt-*, 于是当场报 "Provider langgenius/openai/openai does not exist"。
 # 所以装一个 OpenAI 兼容插件, 把我们的网关配成自定义模型, 并设为默认。
 #
-# 只配**默认的那一个** chat 模型和一个向量化模型: 每写一次凭据 Dify 都会真打
-# 一次上游做校验, 也就是真扣一次积分。二十个模型全配等于每次冷启动白烧二十次,
-# 而用户想要别的在界面上点两下就能加。
+# 只配**默认的那一个** chat 模型和一个向量化模型: **新建**凭据时 Dify 会真打一次
+# 上游做校验, 也就是真扣一次积分 (实测 84/49 token)。二十个模型全配等于首次进入
+# 白烧二十次, 而用户想要别的在界面上点两下就能加。
+# (刷新已存凭据的 PUT 实测**不**校验, 所以每次冷启动刷一遍是免费的。)
 PROV=langgenius/openai_api_compatible/openai_api_compatible
 CREDS_URL="/workspaces/current/model-providers/$PROV/models/credentials"
 
