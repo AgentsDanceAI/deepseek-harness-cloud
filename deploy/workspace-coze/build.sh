@@ -79,6 +79,18 @@ if ! grep -qF "sub_filter 'minio:9000' '\$http_host/local_storage';" assets/ngin
   exit 1
 fi
 
+# 免登录那行 proxy_set_header 要插在 API 那个 location 里, 锚点是下面这一行
+# (它在整份配置里唯一 —— /local_storage/ 用的是 `Host minio:9000`)。
+# 匹配不上是**静默失效**: nginx 照常起, 用户照常看到 Coze 自己的登录墙, 而他
+# 根本不知道密码 (是我们随机生成的)。这个字面量与 products._COZE_APIHOST_ANCHOR 一致。
+n=$(grep -cF 'proxy_set_header Host $http_host;' assets/nginx/conf.d/default.conf)
+if [ "$n" != "1" ]; then
+  echo "!! 免登录的插入锚点在上游配置里出现了 $n 次 (要求恰好 1 次) —— " >&2
+  echo "   products._COZE_APIHOST_ANCHOR 要跟着改, 否则会话注入静默失效, 用户又会看到登录墙。" >&2
+  grep -n 'proxy_set_header Host' assets/nginx/conf.d/default.conf | sed 's/^/     /' >&2
+  exit 1
+fi
+
 if grep -qE '^\s*resolver\s' assets/nginx/nginx.conf assets/nginx/conf.d/default.conf; then
   echo "!! 上游 nginx 配置改用 resolver 了 —— HostAliase 兜不住 (见 products._dify_boot)," >&2
   echo "   要么在这里把 upstream 改写成 127.0.0.1, 要么自己生成 conf。" >&2
