@@ -1157,49 +1157,53 @@ async def work_entry(request: Request, product_id: str = products.DEFAULT):
 # Keep the launch-page assets outside the HTML f-string so CSS/JS braces remain
 # readable and do not require manual escaping.
 _BOOT_CSS = """
-.boot{max-width:430px;margin:0 auto;text-align:center}
-.boot .track{position:relative;height:8px;margin:30px 0 12px;border-radius:999px;
-  background:var(--brand-weak)}
-.boot .fill{height:100%;width:0;border-radius:999px;background:var(--brand);
-  transition:width .5s cubic-bezier(.22,.61,.36,1)}
-/* 鲸鱼骑在进度条头上: 它和填充用的是同一个百分比, 不会各走各的 */
-.boot .swimmer{position:absolute;top:50%;left:0;width:0;
-  transition:left .5s cubic-bezier(.22,.61,.36,1)}
-.boot .whale{position:absolute;left:-19px;top:-14px;width:38px;height:26px;
-  color:var(--brand);animation:bob 2.6s ease-in-out infinite}
-/* Anchor the tail animation to its own bounding box. `fill-box` prevents viewBox
-   changes from moving the transform origin. */
-.boot .whale .fluke{transform-box:fill-box;transform-origin:0% 50%;
-  animation:flick 1.15s ease-in-out infinite}
-@keyframes bob{0%,100%{transform:translateY(0) rotate(-2deg)}
-  50%{transform:translateY(-3px) rotate(2deg)}}
-@keyframes flick{0%,100%{transform:rotate(-10deg)}50%{transform:rotate(10deg)}}
-.boot .phase{margin:2px 0 0;font-size:13px;color:var(--muted)}
-.boot .slow{margin:12px 0 0;font-size:13px;color:var(--warn)}
-/* 动效敏感的人只看进度, 不看游动 */
-@media (prefers-reduced-motion: reduce){
-  .boot .whale,.boot .whale .fluke{animation:none}
-  .boot .fill,.boot .swimmer{transition:none}
-}
-"""
+/* 加载页整页用主页那块深蓝, 且**不跟随浅/深色主题** —— 它是品牌页面, 不是文档页,
+   五个云空间产品共用这一张 (/work/starting), 所以它就是产品的第一印象。 */
+body[data-page="work"]{background:#0b1c38;color:#eef3fb;min-height:100vh}
+/* 主页同款细网格。用伪元素而不是主页那块 canvas: 这页要在几百毫秒内出现,
+   不值得为背景多下一段脚本。 */
+body[data-page="work"]::before{content:"";position:fixed;inset:0;pointer-events:none;
+  background-image:linear-gradient(rgba(255,255,255,.045) 1px,transparent 1px),
+    linear-gradient(90deg,rgba(255,255,255,.045) 1px,transparent 1px);
+  background-size:72px 72px;
+  -webkit-mask-image:linear-gradient(#000 55%,transparent);
+  mask-image:linear-gradient(#000 55%,transparent)}
+body[data-page="work"] .auth-wrap{position:relative;z-index:1;min-height:100vh;
+  display:flex;align-items:center;justify-content:center;padding:24px}
+body[data-page="work"] .auth-card{max-width:520px;width:100%;color:#eef3fb;
+  background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.10);
+  box-shadow:none;backdrop-filter:blur(6px)}
+body[data-page="work"] .auth-title{color:#eef3fb}
+body[data-page="work"] .muted{color:rgba(238,243,251,.66)}
+body[data-page="work"] a{color:#8fb0e8}
+body[data-page="work"] a:hover{color:#eef3fb}
 
-# 自己画的鲸鱼, 不是 DeepSeek 的商标。页脚已经声明"与其无背书关系", 把对方的
-# 标识摆进自家加载动画会正好抵消那句声明。
-_BOOT_WHALE = """
-<svg class="whale" viewBox="0 0 38 26" fill="none" aria-hidden="true">
-<g transform="translate(38,0) scale(-1,1)">
-<path class="fluke" d="M27 13c3-3 6-5 8-5 .8 0 1.1.7.7 1.4L34.2 13l1.5 3.6c.4.7.1 1.4-.7 1.4-2 0-5-2-8-5z" fill="currentColor" opacity=".72"/>
-<path d="M5 14.4C5 9.7 10.4 6.4 17 6.4c6.3 0 11 3.2 11 7.3 0 4-4.7 6.8-11 6.8-6.6 0-12-2.5-12-6.1z" fill="currentColor"/>
-<circle cx="11.4" cy="12.3" r="1.35" fill="var(--card)"/>
-<path d="M14 6.1c.4-1.6 1.7-2.6 3.1-2.6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" opacity=".5"/>
-</g>
-</svg>
+.boot{max-width:430px;margin:0 auto;text-align:center}
+.boot .track{position:relative;height:6px;margin:30px 0 14px;border-radius:999px;
+  background:rgba(255,255,255,.10)}
+.boot .fill{height:100%;width:0;border-radius:999px;background:#4d84e0;
+  transition:width .5s cubic-bezier(.22,.61,.36,1)}
+/* 光标骑在进度条头上: 它和填充用的是同一个百分比, 不会各走各的 */
+.boot .caret{position:absolute;top:50%;left:0;width:0;
+  transition:left .5s cubic-bezier(.22,.61,.36,1)}
+.boot .caret i{position:absolute;left:-1.5px;top:-9px;width:3px;height:18px;
+  border-radius:1.5px;background:#eaf0fb;
+  animation:caret-blink 1.06s step-end infinite}
+/* step-end: 光标是"亮/灭"两态, 不是渐隐 —— 渐隐看着像呼吸灯, 不像光标 */
+@keyframes caret-blink{0%,49%{opacity:1}50%,100%{opacity:0}}
+.boot .phase{margin:2px 0 0;font-size:13px;color:rgba(238,243,251,.6)}
+.boot .slow{margin:12px 0 0;font-size:13px;color:#f0c674}
+/* 动效敏感的人只看进度, 不看闪烁 */
+@media (prefers-reduced-motion: reduce){
+  .boot .caret i{animation:none}
+  .boot .fill,.boot .caret{transition:none}
+}
 """
 
 _BOOT_JS = """
 (function(){
 var track=document.getElementById('track'),fill=document.getElementById('fill'),
-    swim=document.getElementById('swim'),phaseEl=document.getElementById('phase'),
+    caret=document.getElementById('caret'),phaseEl=document.getElementById('phase'),
     slowEl=document.getElementById('slow');
 // 每个阶段一个区间: [下界, 上界, 时间常数]。阶段跳变才是大跨步; 区间内按停留
 // 时长渐近逼近上界, 永远不撞天花板 —— 慢的时候表现为"变慢"而不是"卡死",
@@ -1211,7 +1215,7 @@ function paint(){
   var b=BAND[phase]||BAND.queued,el=(Date.now()-since)/1000,
       target=b[0]+(b[1]-b[0])*(1-Math.exp(-el/b[2]));
   if(target>cur)cur=target;              // 只前进, 不回退
-  fill.style.width=cur+'%';swim.style.left=cur+'%';
+  fill.style.width=cur+'%';caret.style.left=cur+'%';
   track.setAttribute('aria-valuenow',Math.round(cur));
   phaseEl.textContent=LABEL[phase]||'';
   // 比平时久就直说。一条不动的进度条只会让人以为坏了。
@@ -1266,7 +1270,7 @@ async def work_starting(request: Request, state: str = ""):
             '<div class="track" id="track" role="progressbar" aria-valuemin="0" '
             'aria-valuemax="100" aria-valuenow="0" aria-label="启动进度">'
             '<div class="fill" id="fill"></div>'
-            f'<div class="swimmer" id="swim">{_BOOT_WHALE}</div>'
+            '<div class="caret" id="caret"><i></i></div>'
             "</div>"
             '<p class="phase" id="phase">正在排队</p>'
             '<p class="slow" id="slow" hidden>比平时久一些，仍在继续。</p>'

@@ -1145,50 +1145,48 @@ def test_the_bar_never_claims_to_be_done_early():
     assert got["ready"][1] == 100
 
 
-def test_the_loading_animation_does_not_ship_someone_elses_logo():
-    """页脚已经声明"与 DeepSeek 无背书关系"。把对方的标识摆进自家加载动画,
-    会正好抵消那句声明 —— 这里用的是自己画的鲸鱼。"""
-    from app import workspace as w
-
-    assert "<svg" in w._BOOT_WHALE
-    assert "deepseek" not in w._BOOT_WHALE.lower()
-    assert "currentColor" in w._BOOT_WHALE, "颜色要跟随 --brand, 不写死"
-
-
-def test_reduced_motion_users_still_get_the_progress():
-    """关掉游动动画, 但进度本身不能一起关掉。"""
-    from app import workspace as w
-
-    assert "prefers-reduced-motion" in w._BOOT_CSS
-    tail = w._BOOT_CSS[w._BOOT_CSS.index("prefers-reduced-motion") :]
-    assert "animation:none" in tail.replace(" ", "")
-    assert ".fill{height" in w._BOOT_CSS.replace(" ", "")  # 填充本身照常存在
-
-
-def test_the_whale_faces_the_way_it_swims():
-    """它沿进度条从左往右移动, 所以头必须朝右, 否则是倒着游。
-
-    原始路径是头朝左画的 (眼睛 cx=11.4 在左, 尾鳍 x≈27-36 在右), 靠一个镜像
-    组翻过来。谁把这个组去掉, 鲸鱼就会倒着游而不会报任何错。
+def test_the_loading_page_does_not_ship_someone_elses_logo():
+    """页脚已经声明"与 DeepSeek 无背书关系"。把对方的标识摆进自家加载页,
+    会正好抵消那句声明。这页是**五个云空间产品共用的第一印象**, 所以尤其要干净。
     """
     from app import workspace as w
 
-    assert "scale(-1,1)" in w._BOOT_WHALE, "镜像组没了 —— 鲸鱼会倒着游"
-    # 眼睛仍画在 x<19 (左半), 说明确实靠镜像而不是重画; 两者一起变才是对的
-    assert 'cx="11.4"' in w._BOOT_WHALE
+    page = w._BOOT_CSS + w._BOOT_JS
+    assert "deepseek" not in page.lower()
 
 
-def test_the_fluke_pivots_on_its_own_box_not_the_viewbox():
-    """transform-origin 的百分比默认按 viewBox 解析, 不是按元素自身。
+def test_the_loading_page_wears_the_homepage_blue():
+    """加载页用主页那块深蓝, 且不跟随浏览器的浅/深色主题。
 
-    之前写的 78% 是撞上的 (78%×38≈29.6 恰好落在尾鳍附近), 换个 viewBox 就会
-    歪到别处 —— 尾巴会绕着一个不相干的点甩。
+    它是品牌页面而不是文档页 —— 跟着系统主题变的话, 同一个产品在两个人的
+    机器上是两种观感, 而这是用户见到工作台的第一屏。
     """
     from app import workspace as w
 
-    css = w._BOOT_CSS.replace(" ", "").replace("\n", "")
-    assert "transform-box:fill-box" in css, "没有 fill-box, 支点会按 viewBox 算"
-    assert "transform-origin:0%50%" in css, "支点要在尾鳍与身体的连接处"
+    assert "#0b1c38" in w._BOOT_CSS, "主页那块深蓝没用上"
+    css = w._BOOT_CSS.replace(" ", "")
+    assert 'body[data-page="work"]{background:#0b1c38' in css
+    # 颜色写死而不是走 --brand 之类的变量: 变量在深色模式下会被改写
+    assert "prefers-color-scheme" not in w._BOOT_CSS
+
+
+def test_the_progress_head_is_a_blinking_caret():
+    """进度条头上是一个**闪烁的光标**, 且与填充共用同一个百分比。
+
+    两者各走各的话, 光标会飘在填充前面或后面 —— 不报错, 只是看着坏了。
+    闪烁必须是两态跳变 (step-end): 渐隐看着像呼吸灯, 不像光标。
+    """
+    from app import workspace as w
+
+    css = w._BOOT_CSS.replace(" ", "")
+    assert "caret-blink" in css
+    # 认的是 animation 声明本身, 不是注释里提到的 step-end ——
+    # 第一版断言写成 `"step-end" in _BOOT_CSS`, 把 timing function 改成
+    # ease-in-out 它照样绿, 因为旁边注释里就有这四个字。
+    assert "animation:caret-blink1.06sstep-endinfinite" in css, "渐隐的话就不像光标了"
+    js = w._BOOT_JS.replace(" ", "")
+    assert "caret.style.left=cur+'%'" in js and "fill.style.width=cur+'%'" in js, \
+        "光标和填充必须用同一个 cur"
 
 
 # --- 手机端外壳与 dsh 的接缝 -------------------------------------------------
