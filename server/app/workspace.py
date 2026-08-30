@@ -268,10 +268,17 @@ async def _ready(key: str, product: products.Product) -> bool:
     要求 200 的话它永远停在 warming —— 容器全 Running、应用真在应答, 而用户对着
     进度条等到天荒地老, 服务端一个错都不报。2026-08-29 Dify 首次接入时踩到。
     5xx 才是"起来了但坏了", 那种不算就绪。
+
+    **打哪个路径由产品自己定** (Product.ready_path)。栈产品的首页答的是前端, 而
+    前端比后端早起来得多 —— 拿首页当判据只探到门脸, 后面的应用还没活。那边有
+    完整说明 (2026-08-30 Dify 事故)。
     """
     try:
         async with httpx.AsyncClient(timeout=3.0, follow_redirects=False) as client:
-            r = await client.get(f"http://{_upstream(key, product)}/", headers={"host": "127.0.0.1:3080"})
+            r = await client.get(
+                f"http://{_upstream(key, product)}{product.ready_path}",
+                headers={"host": "127.0.0.1:3080"},
+            )
             return r.status_code < 500
     except httpx.HTTPError:
         return False
