@@ -408,67 +408,69 @@ api() {
   fi
 }
 
-# ---- 预置模型 (被 autologin 在登录成功后调用一次) -------------------------
+# ---- 预置模型 (被 autologin 在登录成功后调用) -----------------------------
 # Dify 的模型供应商是**插件**, 开箱一个都没装 —— 用户新建个聊天助手, 模板里
 # 写的是 gpt-*, 于是当场报 "Provider langgenius/openai/openai does not exist"。
 # 所以装一个 OpenAI 兼容插件, 把我们的网关配成自定义模型, 并设为默认。
 #
-# 只配**默认的那一个** chat 模型和一个向量化模型: 每加一个模型 Dify 都会真打
-# 一次上游做校验, 也就是真扣一次积分。二十个模型全配等于每次首启白烧二十次,
+# 只配**默认的那一个** chat 模型和一个向量化模型: 每写一次凭据 Dify 都会真打
+# 一次上游做校验, 也就是真扣一次积分。二十个模型全配等于每次冷启动白烧二十次,
 # 而用户想要别的在界面上点两下就能加。
-provision() {
-  # 幂等: 判据取自接口而不是标记文件 —— 配置存在 Postgres 上 (NAS), 实例重建后
-  # 还在, 不能每次冷启动都重来一遍; 而标记文件在用户自己删过重配之后会撒谎。
-  # **两类分开判**: 只看 llm 的话, 已经配了聊天模型的老实例永远补不上向量化
-  # 模型, 知识库就一直不能用。
-  HAVE_LLM=no; HAVE_EMB=no
-  api GET "/workspaces/current/models/model-types/llm" | grep -q '"model"' && HAVE_LLM=yes
-  api GET "/workspaces/current/models/model-types/text-embedding" | grep -q '"model"' && HAVE_EMB=yes
-  [ -z "$DSH_EMBEDDING_MODEL" ] && HAVE_EMB=yes
-  [ "$HAVE_LLM" = yes ] && [ "$HAVE_EMB" = yes ] && return 0
-  # 供应商已在就不用再装一遍 (补配另一类模型时会走到这里)。
-  if ! api GET "/workspaces/current/model-providers" | grep -q openai_api_compatible; then
-  PID=$(curl -s -m 20 "https://marketplace.dify.ai/api/v1/plugins/langgenius/openai_api_compatible" \
-        | tr ',' '\n' | grep -o '"latest_package_identifier":"[^"]*"' | head -1 \
-        | sed 's/^[^:]*:"//; s/"$//')
-  [ -n "$PID" ] || return 1
-  TASK=$(api POST "/workspaces/current/plugin/install/marketplace" \
-         "{\"plugin_unique_identifiers\":[\"$PID\"]}" \
-         | grep -o '"task_id":"[^"]*"' | sed 's/^[^:]*:"//; s/"$//')
-  [ -n "$TASK" ] || return 1
-  n=0
-  while [ "$n" -lt 40 ]; do
-    n=$((n + 1))
-    S=$(api GET "/workspaces/current/plugin/tasks/$TASK" | grep -o '"status":"[a-z]*"' | tail -1)
-    case "$S" in
-      *success*) break ;;
-      *failed*)  return 1 ;;
-    esac
-    sleep 5
-  done
-  fi
-  PROV=langgenius/openai_api_compatible/openai_api_compatible
-  if [ "$HAVE_LLM" = no ]; then
-  api POST "/workspaces/current/model-providers/$PROV/models/credentials" \
-    "{\"model\":\"$DSH_DEFAULT_MODEL\",\"model_type\":\"llm\",\"name\":\"DSH Cloud\",\"credentials\":{
-      \"api_key\":\"$DSH_CLOUD_TOKEN\",\"endpoint_url\":\"$DSH_GATEWAY_BASE\",
-      \"mode\":\"chat\",\"context_size\":\"65536\",\"max_tokens_to_sample\":\"8192\",
-      \"function_calling_type\":\"tool_call\",\"stream_function_calling\":\"supported\",
-      \"agent_thought_support\":\"supported\",\"vision_support\":\"no_support\"}}" >/dev/null
-  api POST "/workspaces/current/default-model" \
-    "{\"model_settings\":[{\"model_type\":\"llm\",\"provider\":\"$PROV\",\"model\":\"$DSH_DEFAULT_MODEL\"}]}" >/dev/null
-  fi
-  # 向量化模型: 有它知识库才能用, 没有的话建知识库那一步直接卡住。
-  if [ "$HAVE_EMB" = no ]; then
-    api POST "/workspaces/current/model-providers/$PROV/models/credentials" \
-      "{\"model\":\"$DSH_EMBEDDING_MODEL\",\"model_type\":\"text-embedding\",\"name\":\"DSH Cloud\",\"credentials\":{
-        \"api_key\":\"$DSH_CLOUD_TOKEN\",\"endpoint_url\":\"$DSH_GATEWAY_BASE\",
-        \"context_size\":\"8192\",\"max_chunks\":\"32\"}}" >/dev/null
+PROV=langgenius/openai_api_compatible/openai_api_compatible
+CREDS_URL="/workspaces/current/model-providers/$PROV/models/credentials"
+
+cred_id() {  # cred_id <model> <model_type> -> 已存凭据的 id (没有则空)
+  api GET "$CREDS_URL?model=$1&model_type=$2&config_from=custom-model" \
+    | grep -o '"current_credential_id":"[^"]*"' | head -1 | sed 's/^[^:]*:"//; s/"$//'
+}
+
+# **每次启动都把令牌写一遍**, 不只是"没有模型时才建"。
+# 工作台每次重建都会铸新令牌并撤销旧的 (workspace._mint_workspace_token 的安全
+# 语义), 而 Dify 把令牌**存在自己库里** —— 只在缺失时写的话, 实例一回收重建,
+# 它手里那枚就永远是废的, 表现是模型节点报
+# `API request failed with status code 401 {"detail":"not_authenticated"}`,
+# 而 Dify 侧一切正常。2026-08-30 老板撞上。
+# (Coze 没这问题: 它的令牌走 env, 每次启动都是新的。)
+ensure_model() {  # ensure_model <model> <model_type> <credentials-json>
+  CID=$(cred_id "$1" "$2")
+  if [ -n "$CID" ]; then
+    api PUT "$CREDS_URL" \
+      "{\"credential_id\":\"$CID\",\"model\":\"$1\",\"model_type\":\"$2\",\"name\":\"DSH Cloud\",\"credentials\":$3}" >/dev/null
+  else
+    api POST "$CREDS_URL" \
+      "{\"model\":\"$1\",\"model_type\":\"$2\",\"name\":\"DSH Cloud\",\"credentials\":$3}" >/dev/null
     api POST "/workspaces/current/default-model" \
-      "{\"model_settings\":[{\"model_type\":\"text-embedding\",\"provider\":\"$PROV\",\"model\":\"$DSH_EMBEDDING_MODEL\"}]}" >/dev/null
+      "{\"model_settings\":[{\"model_type\":\"$2\",\"provider\":\"$PROV\",\"model\":\"$1\"}]}" >/dev/null
   fi
 }
 
+provision() {
+  # 供应商不在才装插件 (装一次就够, 配置在 NAS 上的 Postgres, 实例重建后还在)。
+  if ! api GET "/workspaces/current/model-providers" | grep -q openai_api_compatible; then
+    PID=$(curl -s -m 20 "https://marketplace.dify.ai/api/v1/plugins/langgenius/openai_api_compatible" \
+          | tr ',' '\n' | grep -o '"latest_package_identifier":"[^"]*"' | head -1 \
+          | sed 's/^[^:]*:"//; s/"$//')
+    [ -n "$PID" ] || return 1
+    TASK=$(api POST "/workspaces/current/plugin/install/marketplace" \
+           "{\"plugin_unique_identifiers\":[\"$PID\"]}" \
+           | grep -o '"task_id":"[^"]*"' | sed 's/^[^:]*:"//; s/"$//')
+    [ -n "$TASK" ] || return 1
+    n=0
+    while [ "$n" -lt 40 ]; do
+      n=$((n + 1))
+      S=$(api GET "/workspaces/current/plugin/tasks/$TASK" | grep -o '"status":"[a-z]*"' | tail -1)
+      case "$S" in *success*) break ;; *failed*) return 1 ;; esac
+      sleep 5
+    done
+  fi
+  ensure_model "$DSH_DEFAULT_MODEL" llm \
+    "{\"api_key\":\"$DSH_CLOUD_TOKEN\",\"endpoint_url\":\"$DSH_GATEWAY_BASE\",\"mode\":\"chat\",\"context_size\":\"65536\",\"max_tokens_to_sample\":\"8192\",\"function_calling_type\":\"tool_call\",\"stream_function_calling\":\"supported\",\"agent_thought_support\":\"supported\",\"vision_support\":\"no_support\"}"
+  # 向量化模型: 有它知识库才能用, 没有的话建知识库那一步直接卡住。
+  if [ -n "$DSH_EMBEDDING_MODEL" ]; then
+    ensure_model "$DSH_EMBEDDING_MODEL" text-embedding \
+      "{\"api_key\":\"$DSH_CLOUD_TOKEN\",\"endpoint_url\":\"$DSH_GATEWAY_BASE\",\"context_size\":\"8192\",\"max_chunks\":\"32\"}"
+  fi
+}
 write_conf() {
   cat > /etc/nginx/conf.d/00-autologin.conf <<EOF
 # **每次页面加载都补发**, 而不是"只在 cookie 不存在时补"。

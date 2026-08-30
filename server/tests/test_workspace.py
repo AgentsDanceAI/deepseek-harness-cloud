@@ -2190,9 +2190,14 @@ def test_dify_preinstalls_a_model_provider(monkeypatch):
     assert "plugin/install/marketplace" in sh
     assert "models/credentials" in sh, "只 POST /models 是空转 —— 上游那个接口不建凭据却回 success"
     assert "default-model" in sh
-    # 幂等: 判据取自接口而不是标记文件 (配置在 NAS 上的 Postgres, 实例重建后还在;
-    # 而用户自己删过重配的话, 标记文件会撒谎)
-    assert "models/model-types/llm" in sh
+    # **每次启动都要把令牌写一遍**: 工作台每次重建都会铸新令牌并撤销旧的, 而
+    # Dify 把它存在自己库里 —— 只在缺失时写的话, 实例一回收它手里那枚就永远是
+    # 废的, 模型节点报 401 not_authenticated 而 Dify 侧一切正常。
+    assert 'api PUT "$CREDS_URL"' in sh, "已有凭据不会被刷新 -> 实例重建后必 401"
+    assert "current_credential_id" in sh
+    # 装插件这一步才幂等 (装一次就够, 配置在 NAS 上的 Postgres, 实例重建后还在);
+    # 凭据则每次启动都刷 —— 见上。
+    assert "model-providers" in sh
 
     env = products.env_for("dify", "tok_x", "s" * 64)
     assert env["DSH_CLOUD_TOKEN"] == "tok_x"
@@ -2207,15 +2212,15 @@ def test_dify_only_preconfigures_one_model_of_each_kind():
     模型全配等于每次首次进入白烧二十次, 而用户想要别的在界面上点两下就能加。
     """
     sh = products._DIFY_AUTOLOGIN
-    assert sh.count("models/credentials") == 2, "配的模型不止两个 —— 每个都要扣一次积分"
-    # 脚本里这段 JSON 是在 shell 双引号里的, 所以引号带着反斜杠
-    assert r'\"model_type\":\"llm\"' in sh
-    assert r'\"model_type\":\"text-embedding\"' in sh
+    # 每写一次凭据 Dify 都会真打一次上游校验 = 真扣一次积分
+    assert sh.count('ensure_model "$DSH_') == 2, "配的模型不止两个 —— 每个都要扣一次积分"
+    assert 'ensure_model "$DSH_DEFAULT_MODEL" llm' in sh
+    assert 'ensure_model "$DSH_EMBEDDING_MODEL" text-embedding' in sh
     # 目录里没有向量化模型时要跳过, 而不是配个空的进去 (那会让知识库在运行期才炸)
-    assert '[ -z "$DSH_EMBEDDING_MODEL" ] && HAVE_EMB=yes' in sh
-    # 两类分开判: 只看 llm 的话, 已经配了聊天模型的老实例永远补不上向量化模型
-    assert 'HAVE_LLM' in sh and 'HAVE_EMB' in sh
-    assert 'models/model-types/text-embedding' in sh
+    assert 'if [ -n "$DSH_EMBEDDING_MODEL" ]; then' in sh
+    # 两类各自判"有没有已存凭据", 各自建或刷 —— 只看 llm 的话, 已经配了聊天模型
+    # 的老实例永远补不上向量化模型
+    assert sh.count("CID=$(cred_id") == 1 and "ensure_model" in sh
 
 
 def test_dify_autologin_backs_off_instead_of_locking_the_account(monkeypatch):
