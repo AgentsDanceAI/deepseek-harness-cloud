@@ -463,18 +463,24 @@ provision() {
 
 write_conf() {
   cat > /etc/nginx/conf.d/00-autologin.conf <<EOF
-# 浏览器还没有会话时把工作台自己的那份发给它; 有了就不再覆盖 (它会自己续期)。
-map \$cookie_refresh_token \$dsh_at {
-    ""      "access_token=$AT; Path=/; Max-Age=3600; HttpOnly; SameSite=Lax";
-    default "";
+# **每次页面加载都补发**, 而不是"只在 cookie 不存在时补"。
+# 后者有个致命洞: 浏览器手里那份一旦失效 (账号改过密码、会话被服务端作废),
+# 它仍然"存在", 于是永远补不上新的 —— 用户就被永久钉在 Dify 自己的登录页,
+# 而清 cookie 之前怎么刷新都没用。2026-08-30 上线当天就这么锁住了老板。
+# 工作台只有一个账号, 不存在"别人的会话"要保住, 所以覆盖是安全的。
+#
+# 按响应类型收窄到 HTML 文档: 静态资源和接口响应不必背这三个头。
+map \$sent_http_content_type \$dsh_at {
+    ~*^text/html  "access_token=$AT; Path=/; Max-Age=3600; HttpOnly; SameSite=Lax";
+    default       "";
 }
-map \$cookie_refresh_token \$dsh_rt {
-    ""      "refresh_token=$RT; Path=/; Max-Age=2592000; HttpOnly; SameSite=Lax";
-    default "";
+map \$sent_http_content_type \$dsh_rt {
+    ~*^text/html  "refresh_token=$RT; Path=/; Max-Age=2592000; HttpOnly; SameSite=Lax";
+    default       "";
 }
-map \$cookie_refresh_token \$dsh_ct {
-    ""      "csrf_token=$CT; Path=/; Max-Age=3600; SameSite=Lax";
-    default "";
+map \$sent_http_content_type \$dsh_ct {
+    ~*^text/html  "csrf_token=$CT; Path=/; Max-Age=3600; SameSite=Lax";
+    default       "";
 }
 EOF
   nginx -s reload
@@ -496,7 +502,7 @@ while :; do
     tries=0
     # access_token 只活 1 小时, 而容器能连着跑很久 —— 定期重登刷新, 否则新开的
     # 标签页会拿到一个早就过期的 token。
-    sleep 1500
+    sleep 1200
     continue
   fi
   # 000/5xx = api 还没起来, 这是常态, 快重试。
@@ -531,9 +537,9 @@ def _dify_boot() -> str:
         # 起来才拿得到, 而 nginx 现在就要能起; 引用未定义的变量它会直接启动失败。
         # 变量取空串时 nginx 不会发出这个响应头, 所以空值就是"什么都不做"。
         "cat > /etc/nginx/conf.d/00-autologin.conf <<'AUTOCONF'\n"
-        "map $cookie_refresh_token $dsh_at { default \"\"; }\n"
-        "map $cookie_refresh_token $dsh_rt { default \"\"; }\n"
-        "map $cookie_refresh_token $dsh_ct { default \"\"; }\n"
+        "map $sent_http_content_type $dsh_at { default \"\"; }\n"
+        "map $sent_http_content_type $dsh_rt { default \"\"; }\n"
+        "map $sent_http_content_type $dsh_ct { default \"\"; }\n"
         "AUTOCONF\n"
         "cat > /usr/local/bin/dsh-dify-autologin <<'AUTOLOGIN'\n"
         + _DIFY_AUTOLOGIN
