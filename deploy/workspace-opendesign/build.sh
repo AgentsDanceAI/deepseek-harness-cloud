@@ -53,17 +53,31 @@ docker build \
   --build-arg REVISION="$(git -C "$repo" rev-parse --short HEAD)" \
   -t "$REF" .
 
-# --- 3. 自检: 装 profile -> probe 必须吐出协议握手 ---------------------------
-# 这一步照的是 musl/glibc 这类"装上了但一跑就炸"的错 (sharp 踩过), 以及
-# bundle 与 od 版本的协议不匹配。
+# --- 3. 自检: 装 profile -> 按**守护进程真正用的方式**跑起来 ------------------
+# 照的是 musl/glibc 这类"装上了但一跑就炸"的错 (sharp、hmr 都踩过), 以及 bundle
+# 与 od 版本的协议不匹配。
+#
+# 必须跑 --stdio, 不能只跑 --probe: probe 不会走到插件栈的 hmr 那一步, 所以
+# **镜像坏了它照样绿**。2026-08-30 就是这么漏出去的 —— probe 握手成功, 而
+# 守护进程一 spawn 就 DSH_PROFILE_MISSING_RESULT。自检要照着线上的用法做。
 echo "==> 镜像内自检"
-docker run --rm --entrypoint sh "$REF" -c '
+docker run --rm -e DSH_CLOUD_TOKEN=selfcheck --entrypoint sh "$REF" -c '
   dsh plugin --profile open-design add /opt/od-profile.tgz >/dev/null 2>&1
   ln -sfn /root/.dsh/profiles/open-design/node_modules/@open-design \
     /usr/local/lib/node_modules/@deepseek-ai/dsh/node_modules/@open-design
   out="$(dsh --profile open-design --probe 2>&1 | head -1)"
   echo "$out" | grep -q "\"type\":\"probe\"" || { echo "!! probe 没握手: $out" >&2; exit 1; }
-  echo "  ✓ probe: $out"'
+  echo "  ✓ probe: $out"
+
+  log="$(echo "" | timeout 60 dsh --profile open-design --stdio 2>&1)"
+  echo "$log" | grep -q "\"type\":\"ready\"" || {
+    echo "!! stdio 没就绪 (守护进程就是这么起它的):" >&2
+    echo "$log" | tail -20 >&2; exit 1; }
+  echo "$log" | grep -qE "^Error:|failed to apply loader entry" && {
+    echo "!! stdio 起来了但插件栈报错 —— 用户侧会是 DSH_PROFILE_MISSING_RESULT:" >&2
+    echo "$log" | grep -E "^Error:|failed to apply loader entry|\[cause\]" | head -5 >&2
+    exit 1; }
+  echo "  ✓ stdio: ready, 插件栈无报错"'
 
 # --- 4. 推 -------------------------------------------------------------------
 if [ "${SKIP_PUSH:-0}" = "1" ]; then
