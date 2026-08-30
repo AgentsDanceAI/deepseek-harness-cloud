@@ -88,6 +88,7 @@ class Backend(abc.ABC):
         host_aliases: tuple = (),
         init_containers: tuple = (),
         seeds: tuple = (),
+        run_as_user: int | None = None,
     ) -> None: ...
 
     @abc.abstractmethod
@@ -193,6 +194,7 @@ class DockerBackend(Backend):
         host_aliases: tuple = (),
         init_containers: tuple = (),
         seeds: tuple = (),
+        run_as_user: int | None = None,
     ) -> None:
         if sidecars or init_containers:
             # docker 后端一个容器就是一个容器, 拼不出共享网络命名空间的容器组,
@@ -514,6 +516,7 @@ class EciBackend(Backend):
         host_aliases: tuple = (),
         init_containers: tuple = (),
         seeds: tuple = (),
+        run_as_user: int | None = None,
     ) -> None:
         p = {
             "ContainerGroupName": cname(user_id),
@@ -534,6 +537,8 @@ class EciBackend(Backend):
             "EipBandwidth": config.ECI_EIP_BANDWIDTH,
             "Container.1.Name": "app",
             "Container.1.Image": image_ref or image,
+            **({"Container.1.SecurityContext.RunAsUser": str(run_as_user)}
+               if run_as_user is not None else {}),
             "Container.1.WorkingDir": "/workspace",
             "Container.1.Command.1": "sh",
             "Container.1.Arg.1": "-c",
