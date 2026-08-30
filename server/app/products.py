@@ -333,6 +333,19 @@ def _dify_stack() -> tuple[Sidecar, ...]:
 # fmt: on
 
 
+def _dify_embedding_model() -> str:
+    """预置给 Dify 的向量化模型; 目录里没有就返回空串 (跳过, 而不是配个假的)。
+
+    有它知识库才能用 —— 没有向量化模型, Dify 建知识库那一步直接卡住。
+    """
+    try:
+        mid = model_catalog.default_embedding_model()
+        return mid if model_catalog.resolve_embedding(mid) else ""
+    except AttributeError:
+        # 自建部署带着旧的 models.json 时没有这两个函数, 跳过预置即可。
+        return ""
+
+
 def dify_autologin_password(secret: str) -> str:
     """Dify 免登录账号的密码, 从该用户的栈密钥推导。
 
@@ -373,6 +386,73 @@ unlock() {
     "$DSH_REDIS_PASSWORD" "$EM" | timeout 5 nc 127.0.0.1 6379 >/dev/null 2>&1
 }
 
+
+# 带着刚拿到的会话调控制台接口。用法: api METHOD PATH [BODY]
+api() {
+  _m=$1; _p=$2; _b=$3
+  if [ -n "$_b" ]; then
+    curl -s -m 90 -X "$_m" -H 'Content-Type: application/json' \
+      -H "Cookie: access_token=$AT; csrf_token=$CT" -H "X-CSRF-Token: $CT" \
+      -d "$_b" "$API$_p"
+  else
+    curl -s -m 60 -X "$_m" \
+      -H "Cookie: access_token=$AT; csrf_token=$CT" -H "X-CSRF-Token: $CT" "$API$_p"
+  fi
+}
+
+# ---- 预置模型 (被 autologin 在登录成功后调用一次) -------------------------
+# Dify 的模型供应商是**插件**, 开箱一个都没装 —— 用户新建个聊天助手, 模板里
+# 写的是 gpt-*, 于是当场报 "Provider langgenius/openai/openai does not exist"。
+# 所以装一个 OpenAI 兼容插件, 把我们的网关配成自定义模型, 并设为默认。
+#
+# 只配**默认的那一个** chat 模型和一个向量化模型: 每加一个模型 Dify 都会真打
+# 一次上游做校验, 也就是真扣一次积分。二十个模型全配等于每次首启白烧二十次,
+# 而用户想要别的在界面上点两下就能加。
+provision() {
+  # 已经有模型就什么都不做。判据取自接口而不是标记文件: 用户自己删过重配的话,
+  # 标记文件会撒谎。这也是幂等的关键 —— 配置存在 Postgres 上 (NAS), 实例重建
+  # 后还在, 不能每次冷启动都重来一遍。
+  if api GET "/workspaces/current/models/model-types/llm" | grep -q '"model"'; then
+    return 0
+  fi
+  PID=$(curl -s -m 20 "https://marketplace.dify.ai/api/v1/plugins/langgenius/openai_api_compatible" \
+        | tr ',' '\n' | grep -o '"latest_package_identifier":"[^"]*"' | head -1 \
+        | sed 's/^[^:]*:"//; s/"$//')
+  [ -n "$PID" ] || return 1
+  TASK=$(api POST "/workspaces/current/plugin/install/marketplace" \
+         "{\"plugin_unique_identifiers\":[\"$PID\"]}" \
+         | grep -o '"task_id":"[^"]*"' | sed 's/^[^:]*:"//; s/"$//')
+  [ -n "$TASK" ] || return 1
+  n=0
+  while [ "$n" -lt 40 ]; do
+    n=$((n + 1))
+    S=$(api GET "/workspaces/current/plugin/tasks/$TASK" | grep -o '"status":"[a-z]*"' | tail -1)
+    case "$S" in
+      *success*) break ;;
+      *failed*)  return 1 ;;
+    esac
+    sleep 5
+  done
+  PROV=langgenius/openai_api_compatible/openai_api_compatible
+  api POST "/workspaces/current/model-providers/$PROV/models/credentials" \
+    "{\"model\":\"$DSH_DEFAULT_MODEL\",\"model_type\":\"llm\",\"name\":\"DSH Cloud\",\"credentials\":{
+      \"api_key\":\"$DSH_CLOUD_TOKEN\",\"endpoint_url\":\"$DSH_GATEWAY_BASE\",
+      \"mode\":\"chat\",\"context_size\":\"65536\",\"max_tokens_to_sample\":\"8192\",
+      \"function_calling_type\":\"tool_call\",\"stream_function_calling\":\"supported\",
+      \"agent_thought_support\":\"supported\",\"vision_support\":\"no_support\"}}" >/dev/null
+  api POST "/workspaces/current/default-model" \
+    "{\"model_settings\":[{\"model_type\":\"llm\",\"provider\":\"$PROV\",\"model\":\"$DSH_DEFAULT_MODEL\"}]}" >/dev/null
+  # 向量化模型: 有它知识库才能用, 没有的话建知识库那一步直接卡住。
+  if [ -n "$DSH_EMBEDDING_MODEL" ]; then
+    api POST "/workspaces/current/model-providers/$PROV/models/credentials" \
+      "{\"model\":\"$DSH_EMBEDDING_MODEL\",\"model_type\":\"text-embedding\",\"name\":\"DSH Cloud\",\"credentials\":{
+        \"api_key\":\"$DSH_CLOUD_TOKEN\",\"endpoint_url\":\"$DSH_GATEWAY_BASE\",
+        \"context_size\":\"8192\",\"max_chunks\":\"32\"}}" >/dev/null
+    api POST "/workspaces/current/default-model" \
+      "{\"model_settings\":[{\"model_type\":\"text-embedding\",\"provider\":\"$PROV\",\"model\":\"$DSH_EMBEDDING_MODEL\"}]}" >/dev/null
+  fi
+}
+
 write_conf() {
   cat > /etc/nginx/conf.d/00-autologin.conf <<EOF
 # 浏览器还没有会话时把工作台自己的那份发给它; 有了就不再覆盖 (它会自己续期)。
@@ -404,6 +484,7 @@ while :; do
   CT=$(grep -i '^set-cookie: csrf_token=' /tmp/.dify-hdr 2>/dev/null | head -1 | sed 's/.*csrf_token=//; s/;.*//' | tr -d '\r')
   if [ -n "$AT" ] && [ -n "$RT" ] && [ -n "$CT" ]; then
     write_conf
+    provision || true
     tries=0
     # access_token 只活 1 小时, 而容器能连着跑很久 —— 定期重登刷新, 否则新开的
     # 标签页会拿到一个早就过期的 token。
@@ -1286,6 +1367,13 @@ def env_for(product_id: str, token: str, secret: str = "") -> dict[str, str]:
             "DSH_AUTOLOGIN_PASSWORD": dify_autologin_password(secret),
             # 用来清掉 Dify 那把 24 小时的登录锁 (见 _DIFY_AUTOLOGIN 的 unlock)。
             "DSH_REDIS_PASSWORD": _DIFY_REDIS_PASSWORD,
+            # 预置模型用 (见 _DIFY_AUTOLOGIN 的 provision)。Dify 的模型供应商是
+            # **插件**, 开箱一个都没装 —— 用户新建个聊天助手, 模板里写的是 gpt-*,
+            # 于是当场报 "Provider langgenius/openai/openai does not exist"。
+            "DSH_CLOUD_TOKEN": token,
+            "DSH_GATEWAY_BASE": f"{gateway}/llm/v1",
+            "DSH_DEFAULT_MODEL": model_catalog.default_model(),
+            "DSH_EMBEDDING_MODEL": _dify_embedding_model(),
         }
     if product_id == "open-design":
         return {
