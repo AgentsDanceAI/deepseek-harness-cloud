@@ -1208,11 +1208,13 @@ def _hermes_stack() -> tuple[Sidecar, ...]:
             image_ref=config.HERMES_IMAGE_REF,
             args=("dashboard", "--host", "127.0.0.1", "--port", str(HERMES_PORT),
                   "--no-open", "--skip-build"),
-            # **必须告诉它公开域名**。它有 Host 白名单: 只认绑定的主机名或这里
-            # 配的公开主机名, 别的一律
-            # `400 {"detail":"Invalid Host header..."}` —— 而两个容器都 Running、
-            # 日志里还写着 HERMES_DASHBOARD_READY, 看着一切正常。
-            env=(("HERMES_DASHBOARD_PUBLIC_URL", f"https://{config.HERMES_DOMAIN}"),),
+            # **不要设 HERMES_DASHBOARD_PUBLIC_URL**。它和鉴权是绑死的:
+            # 一旦配了外部公开 URL, 它就要求必须有鉴权提供方, 否则直接拒绝启动
+            # ("There is no unauthenticated public-dashboard option. For
+            # local-only use, bind 127.0.0.1 and leave dashboard.public_url
+            # unset")。而那正是我们不要的第二道登录墙。
+            # 它文档给的本地用法就是"绑回环 + 隧道", 于是 Host 由 nginx 用**绑定
+            # 主机名**送过去 (见 _hermes_boot) —— SSH 隧道本来也是这个效果。
             mounts=(("hermes/data", "/opt/data"),),
             run_as_user=0,
         ),
@@ -1257,7 +1259,13 @@ def _hermes_boot() -> str:
         "  client_max_body_size 512m;\n"
         "  location / {\n"
         f"    proxy_pass http://127.0.0.1:{HERMES_PORT};\n"
-        "    proxy_set_header Host $host;\n"
+        # Host 必须是它**绑定的**主机名。它有 Host 白名单, 只认绑定主机名或
+        # 配了 public_url 的那个域; 送 $host 过去就是每一发都
+        # `400 Invalid Host header`, 而两个容器都 Running、日志还写着 READY,
+        # 看着一切正常。而 public_url 那条路要求必须有鉴权 = 第二道登录墙。
+        f"    proxy_set_header Host 127.0.0.1:{HERMES_PORT};\n"
+        # 真实域名另外给, 免得应用拼出来的绝对链接指向回环。
+        "    proxy_set_header X-Forwarded-Host $host;\n"
         "    proxy_set_header X-Real-IP $remote_addr;\n"
         "    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n"
         "    proxy_set_header X-Forwarded-Proto $scheme;\n"
