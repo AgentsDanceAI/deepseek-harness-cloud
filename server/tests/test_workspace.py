@@ -2195,6 +2195,13 @@ def test_dify_preinstalls_a_model_provider(monkeypatch):
     # 废的, 模型节点报 401 not_authenticated 而 Dify 侧一切正常。
     assert 'api PUT "$CREDS_URL"' in sh, "已有凭据不会被刷新 -> 实例重建后必 401"
     assert "current_credential_id" in sh
+    # **写凭据要重试**: 容器组刚起来时插件运行时还没加载完, 写会被顶回来
+    # (no available node, plugin runtime not found)。一次就放弃 = 凭据里留着
+    # 上一枚已撤销的令牌, 用户点开就是 401, 而 Dify 侧看着一切正常。
+    assert 'LLM_OK=no; EMB_OK=no' in sh and "while [ \"$n\" -lt 30 ]" in sh
+    assert '"result":"success"' in sh, "不看返回就没法判成败, 重试也就无从谈起"
+    # 排查用的日志: 此前全部输出丢进 /dev/null, 出问题只能翻上游日志
+    assert "/root/.dify-autologin.log" in sh
     # 装插件这一步才幂等 (装一次就够, 配置在 NAS 上的 Postgres, 实例重建后还在);
     # 凭据则每次启动都刷 —— 见上。
     assert "model-providers" in sh
@@ -2217,7 +2224,7 @@ def test_dify_only_preconfigures_one_model_of_each_kind():
     assert 'ensure_model "$DSH_DEFAULT_MODEL" llm' in sh
     assert 'ensure_model "$DSH_EMBEDDING_MODEL" text-embedding' in sh
     # 目录里没有向量化模型时要跳过, 而不是配个空的进去 (那会让知识库在运行期才炸)
-    assert 'if [ -n "$DSH_EMBEDDING_MODEL" ]; then' in sh
+    assert '[ -n "$DSH_EMBEDDING_MODEL" ] || EMB_OK=yes' in sh
     # 两类各自判"有没有已存凭据", 各自建或刷 —— 只看 llm 的话, 已经配了聊天模型
     # 的老实例永远补不上向量化模型
     assert sh.count("CID=$(cred_id") == 1 and "ensure_model" in sh

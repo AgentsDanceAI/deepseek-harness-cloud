@@ -395,6 +395,14 @@ unlock() {
 }
 
 
+# 排查用的日志。此前整个脚本的输出都丢进 /dev/null, 出问题只能去翻 Dify 自己的
+# 日志才知道我们这边干了什么 —— 两次都是这么排的, 太贵。落在 NAS 上, 只留末尾。
+LOGF=/root/.dify-autologin.log
+log() {
+  printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" >> "$LOGF" 2>/dev/null
+  tail -n 400 "$LOGF" > "$LOGF.t" 2>/dev/null && mv "$LOGF.t" "$LOGF" 2>/dev/null
+}
+
 # 带着刚拿到的会话调控制台接口。用法: api METHOD PATH [BODY]
 api() {
   _m=$1; _p=$2; _b=$3
@@ -434,14 +442,28 @@ cred_id() {  # cred_id <model> <model_type> -> 已存凭据的 id (没有则空)
 ensure_model() {  # ensure_model <model> <model_type> <credentials-json>
   CID=$(cred_id "$1" "$2")
   if [ -n "$CID" ]; then
-    api PUT "$CREDS_URL" \
-      "{\"credential_id\":\"$CID\",\"model\":\"$1\",\"model_type\":\"$2\",\"name\":\"DSH Cloud\",\"credentials\":$3}" >/dev/null
+    OUT=$(api PUT "$CREDS_URL" \
+      "{\"credential_id\":\"$CID\",\"model\":\"$1\",\"model_type\":\"$2\",\"name\":\"DSH Cloud\",\"credentials\":$3}")
   else
-    api POST "$CREDS_URL" \
-      "{\"model\":\"$1\",\"model_type\":\"$2\",\"name\":\"DSH Cloud\",\"credentials\":$3}" >/dev/null
-    api POST "/workspaces/current/default-model" \
+    OUT=$(api POST "$CREDS_URL" \
+      "{\"model\":\"$1\",\"model_type\":\"$2\",\"name\":\"DSH Cloud\",\"credentials\":$3}")
+    echo "$OUT" | grep -q '"result":"success"' && api POST "/workspaces/current/default-model" \
       "{\"model_settings\":[{\"model_type\":\"$2\",\"provider\":\"$PROV\",\"model\":\"$1\"}]}" >/dev/null
   fi
+  if echo "$OUT" | grep -q '"result":"success"'; then
+    return 0
+  fi
+  log "写凭据失败 $1/$2: $(echo "$OUT" | head -c 160)"
+  return 1
+}
+
+llm_creds() {
+  printf '{"api_key":"%s","endpoint_url":"%s","mode":"chat","context_size":"65536","max_tokens_to_sample":"8192","function_calling_type":"tool_call","stream_function_calling":"supported","agent_thought_support":"supported","vision_support":"no_support"}' \
+    "$DSH_CLOUD_TOKEN" "$DSH_GATEWAY_BASE"
+}
+emb_creds() {
+  printf '{"api_key":"%s","endpoint_url":"%s","context_size":"8192","max_chunks":"32"}' \
+    "$DSH_CLOUD_TOKEN" "$DSH_GATEWAY_BASE"
 }
 
 provision() {
@@ -450,27 +472,38 @@ provision() {
     PID=$(curl -s -m 20 "https://marketplace.dify.ai/api/v1/plugins/langgenius/openai_api_compatible" \
           | tr ',' '\n' | grep -o '"latest_package_identifier":"[^"]*"' | head -1 \
           | sed 's/^[^:]*:"//; s/"$//')
-    [ -n "$PID" ] || return 1
+    [ -n "$PID" ] || { log "取不到插件标识"; return 1; }
     TASK=$(api POST "/workspaces/current/plugin/install/marketplace" \
            "{\"plugin_unique_identifiers\":[\"$PID\"]}" \
            | grep -o '"task_id":"[^"]*"' | sed 's/^[^:]*:"//; s/"$//')
-    [ -n "$TASK" ] || return 1
+    [ -n "$TASK" ] || { log "装插件没拿到 task_id"; return 1; }
     n=0
     while [ "$n" -lt 40 ]; do
       n=$((n + 1))
       S=$(api GET "/workspaces/current/plugin/tasks/$TASK" | grep -o '"status":"[a-z]*"' | tail -1)
-      case "$S" in *success*) break ;; *failed*) return 1 ;; esac
+      case "$S" in *success*) break ;; *failed*) log "装插件失败"; return 1 ;; esac
       sleep 5
     done
   fi
-  ensure_model "$DSH_DEFAULT_MODEL" llm \
-    "{\"api_key\":\"$DSH_CLOUD_TOKEN\",\"endpoint_url\":\"$DSH_GATEWAY_BASE\",\"mode\":\"chat\",\"context_size\":\"65536\",\"max_tokens_to_sample\":\"8192\",\"function_calling_type\":\"tool_call\",\"stream_function_calling\":\"supported\",\"agent_thought_support\":\"supported\",\"vision_support\":\"no_support\"}"
-  # 向量化模型: 有它知识库才能用, 没有的话建知识库那一步直接卡住。
-  if [ -n "$DSH_EMBEDDING_MODEL" ]; then
-    ensure_model "$DSH_EMBEDDING_MODEL" text-embedding \
-      "{\"api_key\":\"$DSH_CLOUD_TOKEN\",\"endpoint_url\":\"$DSH_GATEWAY_BASE\",\"context_size\":\"8192\",\"max_chunks\":\"32\"}"
-  fi
+
+  # **要重试**: 容器组刚起来时插件运行时还没加载完, 写凭据会被插件守护进程顶回来
+  # (`PluginDaemonInternalServerError: no available node, plugin runtime not found`)。
+  # 一次就放弃的话, 凭据里留着上一枚**已被撤销**的令牌, 用户点开就是
+  # `401 not_authenticated`, 而 Dify 侧看着一切正常。2026-08-30 老板撞上两次。
+  LLM_OK=no; EMB_OK=no
+  [ -n "$DSH_EMBEDDING_MODEL" ] || EMB_OK=yes
+  n=0
+  while [ "$n" -lt 30 ]; do
+    n=$((n + 1))
+    if [ "$LLM_OK" = no ] && ensure_model "$DSH_DEFAULT_MODEL" llm "$(llm_creds)"; then LLM_OK=yes; fi
+    if [ "$EMB_OK" = no ] && ensure_model "$DSH_EMBEDDING_MODEL" text-embedding "$(emb_creds)"; then EMB_OK=yes; fi
+    if [ "$LLM_OK" = yes ] && [ "$EMB_OK" = yes ]; then log "模型凭据已就绪 (第 $n 轮)"; return 0; fi
+    sleep 10
+  done
+  log "模型凭据没配上 llm=$LLM_OK emb=$EMB_OK"
+  return 1
 }
+
 write_conf() {
   cat > /etc/nginx/conf.d/00-autologin.conf <<EOF
 # **每次页面加载都补发**, 而不是"只在 cookie 不存在时补"。
