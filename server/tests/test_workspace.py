@@ -1808,6 +1808,12 @@ def test_hermes_binds_loopback_so_there_is_no_second_login_wall(monkeypatch):
     boot = products.boot_script("hermes")
     assert f"proxy_set_header Host 127.0.0.1:{products.HERMES_PORT};" in boot
     assert "HERMES_DASHBOARD_PUBLIC_URL" not in str(hm.env), "配了它就必须带鉴权 = 第二道墙"
+    # 免登录: cookie 值里带双引号 (rt="eyJ..."), 不转义就是 nginx 语法错 ->
+    # reload 静默失败 -> 配置根本没换。而且要先验再 reload, 否则报了成功也没用。
+    sh = products._HERMES_AUTOLOGIN
+    assert r"sed 's/\"/\\\\\"/g'" in sh or 's/"/' in sh, "cookie 里的双引号没转义"
+    assert "nginx -t" in sh, "不先验就 reload, 失败了也不知道"
+    assert "reload 失败" in sh
 
 
 def test_hermes_keeps_its_entrypoint(monkeypatch):
