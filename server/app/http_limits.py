@@ -10,7 +10,6 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from . import config
 
-
 # 网关那几条路: 报文可以很大 (整段对话、一整批待向量化的文本), 而且必须**先鉴权
 # 再读**。两处都要列到 —— 只加进 _limit 会让报文在鉴权之前被缓冲下来, 只加进
 # _read_after_auth 会让它退回 2MB 的通用上限。所以共用一份清单, 别写两遍。

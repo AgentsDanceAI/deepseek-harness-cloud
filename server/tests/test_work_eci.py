@@ -527,7 +527,7 @@ async def test_stack_product_emits_sidecar_containers(eci):
     assert p["Container.3.Name"] == "cache"
     assert p["Container.3.Command.1"] == "redis-server"
     # 中间件的数据要跟着用户走: NAS 卷 + 用户 hexid 前缀的子路径
-    hexid = cname("u_stack")[len("dshwork-"):]
+    hexid = cname("u_stack")[len("dshwork-") :]
     assert p["Container.2.VolumeMount.1.Name"] == "dshwork-nas"
     assert p["Container.2.VolumeMount.1.SubPath"] == f"{hexid}/dify/pg"
     assert p["Container.2.VolumeMount.1.MountPath"] == "/var/lib/postgresql/data"
@@ -555,15 +555,27 @@ async def test_init_container_seeds_a_shared_volume_for_the_whole_group(eci, mon
     monkeypatch.setattr(config, "WORK_NAS_PATH", "/dshwork")
     await b.create(
         "u_seed",
-        boot="run-app", env={}, boot_fp="fp", image="web:x", image_ref="web:x",
-        init_containers=(InitContainer(
-            name="seed", image_ref="ghcr.io/x/coze-assets:t",
-            cmd=("sh", "-c", "cp -a /assets/. /seed/"),
-        ),),
+        boot="run-app",
+        env={},
+        boot_fp="fp",
+        image="web:x",
+        image_ref="web:x",
+        init_containers=(
+            InitContainer(
+                name="seed",
+                image_ref="ghcr.io/x/coze-assets:t",
+                cmd=("sh", "-c", "cp -a /assets/. /seed/"),
+            ),
+        ),
         seeds=(("nginx", "/seed"),),
-        sidecars=(Sidecar(name="db", image_ref="mysql:8.4.5",
-                          mounts=(("coze/mysql", "/var/lib/mysql"),),
-                          seeds=(("", "/seed"), ("conf", "/app/resources/conf"))),),
+        sidecars=(
+            Sidecar(
+                name="db",
+                image_ref="mysql:8.4.5",
+                mounts=(("coze/mysql", "/var/lib/mysql"),),
+                seeds=(("", "/seed"), ("conf", "/app/resources/conf")),
+            ),
+        ),
     )
     _, p = next(c for c in fake.calls if c[0] == "CreateContainerGroup")
 
@@ -601,7 +613,12 @@ async def test_seed_volume_takes_slot_one_when_there_is_no_nas(eci):
 
     b, fake = eci  # 这个 fixture 里 WORK_NAS_SERVER 是空的
     await b.create(
-        "u_nonas", boot="run", env={}, boot_fp="fp", image="web:x", image_ref="web:x",
+        "u_nonas",
+        boot="run",
+        env={},
+        boot_fp="fp",
+        image="web:x",
+        image_ref="web:x",
         init_containers=(InitContainer(name="seed", image_ref="a:t", cmd=("sh",)),),
         seeds=(("nginx", "/seed"),),
     )
@@ -621,10 +638,17 @@ async def test_stack_host_aliases_land_in_etc_hosts(eci):
     connection refused。"""
     b, fake = eci
     await b.create(
-        "u_alias", boot="x", env={}, boot_fp="fp", image="a:1", image_ref="r/a:1",
-        mem_mb=4096, cpus=2.0,
-        sidecars=(__import__("app.products", fromlist=["Sidecar"]).Sidecar(
-            name="db", image_ref="postgres:15"),),
+        "u_alias",
+        boot="x",
+        env={},
+        boot_fp="fp",
+        image="a:1",
+        image_ref="r/a:1",
+        mem_mb=4096,
+        cpus=2.0,
+        sidecars=(
+            __import__("app.products", fromlist=["Sidecar"]).Sidecar(name="db", image_ref="postgres:15"),
+        ),
         host_aliases=("mysql", "redis", "api", "web"),
     )
     _, p = next(c for c in fake.calls if c[0] == "CreateContainerGroup")
@@ -639,8 +663,14 @@ async def test_single_container_products_keep_restart_never(eci):
     计费器 —— 用户看着 502, 钱照扣。"""
     b, fake = eci
     await b.create(
-        "u_single", boot="x", env={}, boot_fp="fp", image="a:1", image_ref="r/a:1",
-        mem_mb=1024, cpus=0.5,
+        "u_single",
+        boot="x",
+        env={},
+        boot_fp="fp",
+        image="a:1",
+        image_ref="r/a:1",
+        mem_mb=1024,
+        cpus=0.5,
     )
     _, p = next(c for c in fake.calls if c[0] == "CreateContainerGroup")
     assert p["RestartPolicy"] == "Never"
@@ -658,6 +688,12 @@ def test_docker_backend_refuses_stack_products():
     b = DockerBackend.__new__(DockerBackend)  # 不碰 docker socket
     with pytest.raises(RuntimeError, match="ECI"):
         asyncio.get_event_loop_policy().new_event_loop().run_until_complete(
-            b.create("u_x", boot="b", env={}, boot_fp="f", image="i",
-                     sidecars=(Sidecar(name="db", image_ref="postgres:15"),))
+            b.create(
+                "u_x",
+                boot="b",
+                env={},
+                boot_fp="f",
+                image="i",
+                sidecars=(Sidecar(name="db", image_ref="postgres:15"),),
+            )
         )

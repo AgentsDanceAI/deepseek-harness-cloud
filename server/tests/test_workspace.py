@@ -33,7 +33,17 @@ from fastapi.testclient import TestClient  # noqa: E402
 from starlette.requests import Request  # noqa: E402
 from starlette.responses import StreamingResponse  # noqa: E402
 
-from app import config, credits, db, products, rate_limit, security, work_access, workbackend, workspace  # noqa: E402
+from app import (  # noqa: E402
+    config,
+    credits,
+    db,
+    products,
+    rate_limit,
+    security,
+    work_access,
+    workbackend,
+    workspace,
+)
 from app.main import app  # noqa: E402
 
 from ._signup import signup
@@ -1535,8 +1545,9 @@ def test_opening_one_workspace_does_not_kill_the_others_credential(monkeypatch):
     workspace._mint_workspace_token(dict(user), reg["comfyui"])
     workspace._mint_workspace_token(dict(user), reg[products.DEFAULT])
 
-    live = db.query("SELECT workspace FROM devices WHERE user_id=? AND platform='cloud' "
-                    "AND revoked=0", (uid,))
+    live = db.query(
+        "SELECT workspace FROM devices WHERE user_id=? AND platform='cloud' AND revoked=0", (uid,)
+    )
     keys = sorted(r["workspace"] for r in live)
     assert keys == sorted([products.wskey(uid, "comfyui"), products.wskey(uid)]), (
         f"开第二个工作台把第一个的凭据撤了: {keys}"
@@ -1544,8 +1555,10 @@ def test_opening_one_workspace_does_not_kill_the_others_credential(monkeypatch):
 
     # 同一个工作台再铸一次, 旧的**必须**失效 —— 顶替语义不能因为分了产品就丢掉
     workspace._mint_workspace_token(dict(user), reg["comfyui"])
-    comfy_live = db.query("SELECT id FROM devices WHERE user_id=? AND platform='cloud' "
-                          "AND workspace=? AND revoked=0", (uid, products.wskey(uid, "comfyui")))
+    comfy_live = db.query(
+        "SELECT id FROM devices WHERE user_id=? AND platform='cloud' AND workspace=? AND revoked=0",
+        (uid, products.wskey(uid, "comfyui")),
+    )
     assert len(comfy_live) == 1, f"同一工作台重铸后应只剩一份有效凭据: {len(comfy_live)}"
 
 
@@ -1587,8 +1600,8 @@ def test_tab_grace_is_per_product_not_global(fake, monkeypatch):
     monkeypatch.setattr(config, "COMFY_DOMAIN", "comfy.test.local")
     monkeypatch.setattr(config, "WORK_IDLE_STOP_MIN", 10)
     monkeypatch.setattr(config, "WORK_AGENT_IDLE_STOP_MIN", 3)  # 让宽限期成为决定项
-    monkeypatch.setattr(config, "WORK_TAB_GONE_MIN", 3)         # 全局
-    monkeypatch.setattr(config, "COMFY_TAB_GRACE_MIN", 10)      # ComfyUI 单列
+    monkeypatch.setattr(config, "WORK_TAB_GONE_MIN", 3)  # 全局
+    monkeypatch.setattr(config, "COMFY_TAB_GRACE_MIN", 10)  # ComfyUI 单列
 
     comfy = products.wskey("u_grace", "comfyui")
     # 5 分钟无流量: 全局宽限期早过了, 但 ComfyUI 的是 10 分钟 —— 不该收
@@ -1696,21 +1709,25 @@ def test_open_design_app_config_seed_kills_upstream_login_wall(tmp_path):
             cfg.unlink()
         subprocess.run(
             [node, "-e", js.replace("/app/.od/app-config.json", str(cfg))],
-            check=True, capture_output=True, timeout=30,
+            check=True,
+            capture_output=True,
+            timeout=30,
         )
         return json.loads(cfg.read_text())
 
     fresh = run(None)
     assert fresh["onboardingCompleted"] is True, "向导还会弹"
     assert fresh["agentId"] == "deepseek-harness", "选中的 agent 不是镜像里唯一可用的那个"
-    assert fresh["telemetry"] == {"metrics": False, "content": False}, \
+    assert fresh["telemetry"] == {"metrics": False, "content": False}, (
         "上游默认把设计内容也发给第三方; 我们是托管方, 该替用户默认关掉"
+    )
 
     stuck = run({"onboardingCompleted": True, "agentId": "amr"})
     assert stuck["agentId"] == "deepseek-harness", "在向导里点过一次的用户仍卡在登录墙"
 
-    chosen = run({"onboardingCompleted": True, "agentId": "claude",
-                  "telemetry": {"metrics": True, "content": True}})
+    chosen = run(
+        {"onboardingCompleted": True, "agentId": "claude", "telemetry": {"metrics": True, "content": True}}
+    )
     assert chosen["agentId"] == "claude", "把用户自己选的 agent 按回去了"
     assert chosen["telemetry"] == {"metrics": True, "content": True}, "把用户的遥测选择按回去了"
 
@@ -1737,8 +1754,17 @@ def test_coze_stack_shape(monkeypatch):
     assert prod.id in [p.id for p in products.enabled()]
     assert prod.port == 80
     names = [sc.name for sc in prod.sidecars]
-    assert names == ["coze-server", "mysql", "redis", "elasticsearch", "minio",
-                     "etcd", "milvus", "nsqlookupd", "nsqd"]
+    assert names == [
+        "coze-server",
+        "mysql",
+        "redis",
+        "elasticsearch",
+        "minio",
+        "etcd",
+        "milvus",
+        "nsqlookupd",
+        "nsqd",
+    ]
     assert 1 + len(prod.sidecars) <= 20, "ECI 容器组最多 20 个容器"
     assert len(prod.init_containers) == 1
     assert prod.init_containers[0].image_ref == "ghcr.io/x/coze-assets:0.5.1-r1"
@@ -1807,12 +1833,7 @@ def test_coze_wires_our_gateway_so_users_need_no_api_key(monkeypatch):
     assert env["MODEL_API_KEY_0"] == "tok_live"
     assert env["BUILTIN_CM_OPENAI_API_KEY"] == "tok_live"
     # 一个占位符都不许漏 —— 漏了是运行期 401, 不是启动期报错
-    leftovers = [
-        (sc.name, k)
-        for sc in resolved
-        for k, v in sc.env
-        if "__DSH_" in v
-    ]
+    leftovers = [(sc.name, k) for sc in resolved for k, v in sc.env if "__DSH_" in v]
     assert leftovers == [], f"没换掉的占位符: {leftovers}"
 
 
@@ -1897,8 +1918,7 @@ def test_coze_plugin_aes_keys_are_16_bytes_and_per_user(monkeypatch):
     prod = _coze_ready(monkeypatch)
     a = dict(products.resolve_sidecars(prod.sidecars, "a" * 64, "t")[0].env)
     b = dict(products.resolve_sidecars(prod.sidecars, "b" * 64, "t")[0].env)
-    for key in ("PLUGIN_AES_AUTH_SECRET", "PLUGIN_AES_STATE_SECRET",
-                "PLUGIN_AES_OAUTH_TOKEN_SECRET"):
+    for key in ("PLUGIN_AES_AUTH_SECRET", "PLUGIN_AES_STATE_SECRET", "PLUGIN_AES_OAUTH_TOKEN_SECRET"):
         assert len(a[key].encode()) == 16, f"{key} 不是 16 字节"
         assert a[key] != b[key], f"{key} 没有按用户区分"
 
@@ -2030,9 +2050,17 @@ def test_dify_plugin_daemon_has_every_field_it_validates_at_boot(monkeypatch):
     """
     monkeypatch.setattr(config, "DIFY_DOMAIN", "dify.test.local")
     env = _dify_env(products.registry()["dify"].sidecars, "plugind")
-    for k in ("DB_TYPE", "PLUGIN_REMOTE_INSTALLING_HOST", "PLUGIN_REMOTE_INSTALLING_PORT",
-              "PLUGIN_MEDIA_CACHE_PATH", "PLUGIN_PACKAGE_CACHE_PATH", "SERVER_PORT",
-              "SERVER_KEY", "PLUGIN_STORAGE_LOCAL_ROOT", "PLUGIN_WORKING_PATH"):
+    for k in (
+        "DB_TYPE",
+        "PLUGIN_REMOTE_INSTALLING_HOST",
+        "PLUGIN_REMOTE_INSTALLING_PORT",
+        "PLUGIN_MEDIA_CACHE_PATH",
+        "PLUGIN_PACKAGE_CACHE_PATH",
+        "SERVER_PORT",
+        "SERVER_KEY",
+        "PLUGIN_STORAGE_LOCAL_ROOT",
+        "PLUGIN_WORKING_PATH",
+    ):
         assert env.get(k), f"plugind 缺必填项 {k} —— 它会启动即崩"
     # 调试端口绑回环: 实例自带 EIP, 0.0.0.0 等于多开一个公网面
     assert env["PLUGIN_REMOTE_INSTALLING_HOST"] == "127.0.0.1"
@@ -2051,14 +2079,20 @@ def test_readiness_accepts_any_answer_not_only_200(monkeypatch):
     seen = {}
 
     class _Resp:
-        def __init__(self, code): self.status_code = code
+        def __init__(self, code):
+            self.status_code = code
 
     def fake_client(*_a, **_kw):
         class _C:
-            async def __aenter__(self_inner): return self_inner
-            async def __aexit__(self_inner, *_): return False
+            async def __aenter__(self_inner):
+                return self_inner
+
+            async def __aexit__(self_inner, *_):
+                return False
+
             async def get(self_inner, url, headers=None):
                 return _Resp(seen["code"])
+
         return _C()
 
     monkeypatch.setattr(httpx, "AsyncClient", fake_client)
@@ -2067,8 +2101,15 @@ def test_readiness_accepts_any_answer_not_only_200(monkeypatch):
     prod = products.registry()["comfyui"]
     loop = asyncio.get_event_loop_policy().new_event_loop()
 
-    for code, want in ((200, True), (302, True), (307, True), (404, True),
-                       (500, False), (502, False), (503, False)):
+    for code, want in (
+        (200, True),
+        (302, True),
+        (307, True),
+        (404, True),
+        (500, False),
+        (502, False),
+        (503, False),
+    ):
         seen["code"] = code
         got = loop.run_until_complete(workspace._ready("k", prod))
         assert got is want, f"HTTP {code} 应当判为 {'就绪' if want else '未就绪'}"

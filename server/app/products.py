@@ -48,9 +48,9 @@ class Sidecar:
     资源不按容器划分: 组给总的 cpu/mem, 容器之间自己挤 (与 compose 默认一致)。
     """
 
-    name: str                                # 组内容器名
-    image_ref: str                           # 上游原生镜像的完整地址
-    cmd: tuple[str, ...] = ()                # 空 = 用镜像默认 entrypoint
+    name: str  # 组内容器名
+    image_ref: str  # 上游原生镜像的完整地址
+    cmd: tuple[str, ...] = ()  # 空 = 用镜像默认 entrypoint
     env: tuple[tuple[str, str], ...] = ()
     # NAS 卷上的挂载: (用户子目录下的相对路径, 容器内路径)。中间件的数据要
     # 跟着用户走 —— 实例回收重建后, 库还在。
@@ -88,7 +88,6 @@ class InitContainer:
     cmd: tuple[str, ...] = ()
     # 种子卷挂在初始化容器内的哪个路径 (它要往这里写)。
     seed_mount: str = "/seed"
-
 
 
 @dataclass(frozen=True)
@@ -151,9 +150,7 @@ GATEWAY_TOKEN_PLACEHOLDER = "__DSH_GATEWAY_TOKEN__"
 STACK_SECRET16_PLACEHOLDER = "__DSH_STACK_SECRET16__"
 
 
-def resolve_sidecars(
-    sidecars: tuple[Sidecar, ...], secret: str, token: str = ""
-) -> tuple[Sidecar, ...]:
+def resolve_sidecars(sidecars: tuple[Sidecar, ...], secret: str, token: str = "") -> tuple[Sidecar, ...]:
     """把伴随容器 env 里的占位符换成真值 (每用户密钥、网关凭据)。"""
     from dataclasses import replace
 
@@ -195,6 +192,9 @@ _DIFY_PLUGIN_KEY = "lYkiYYT6owG+71oLerGzA7GXCgOT++6ovaezWAjpCjf+Sjc3ZtU+qUEi"
 # 跨用户隔离靠网络边界与 NAS 子路径, 不靠这几个常量 (与 Penpot 同一判断)。
 # 只有 SECRET_KEY 加密的是**落库的用户数据**, 所以它必须按用户走。
 
+# 下面这一段是**表**, 不是代码块: 相关的键成对排在一行上读。交给 formatter
+# 会拆成一项一行, 分组关系随之消失。
+# fmt: off
 _DIFY_DB_ENV = (
     ("DB_HOST", "127.0.0.1"), ("DB_PORT", "5432"), ("DB_USERNAME", "postgres"),
     ("DB_PASSWORD", _DIFY_DB_PASSWORD), ("DB_DATABASE", "dify"),
@@ -205,7 +205,11 @@ _DIFY_DB_ENV = (
     # `redis://` 的 scheme 一起换成了 127.0.0.1, celery 报 `No such transport: ''`。
     ("CELERY_BACKEND", "redis"),
 )
+# fmt: on
 
+# 下面这一段是**表**, 不是代码块: 相关的键成对排在一行上读。交给 formatter
+# 会拆成一项一行, 分组关系随之消失。
+# fmt: off
 _DIFY_APP_ENV = _DIFY_DB_ENV + (
     ("SECRET_KEY", STACK_SECRET_PLACEHOLDER),
     ("VECTOR_STORE", "weaviate"),
@@ -226,8 +230,12 @@ _DIFY_APP_ENV = _DIFY_DB_ENV + (
     ("MARKETPLACE_ENABLED", "true"),
     ("MARKETPLACE_API_URL", "https://marketplace.dify.ai"),
 )
+# fmt: on
 
 
+# 下面这一段是**表**, 不是代码块: 相关的键成对排在一行上读。交给 formatter
+# 会拆成一项一行, 分组关系随之消失。
+# fmt: off
 def _dify_stack() -> tuple[Sidecar, ...]:
     v = config.DIFY_VERSION
     api_img = f"langgenius/dify-api:{v}"
@@ -318,6 +326,7 @@ def _dify_stack() -> tuple[Sidecar, ...]:
             ("AUTHORIZATION_ADMINLIST_USERS", "dsh@dshcloud.online"),
         ), mounts=(("dify/weaviate", "/var/lib/weaviate"),)),
     )
+# fmt: on
 
 
 def _dify_boot() -> str:
@@ -432,12 +441,12 @@ _COZE_ES_CMD = (
 # 全是碎图 —— 不报错, 只是难看到没法交付。
 _COZE_MINIO_CMD = (
     "(\n"
-    '  until /usr/bin/mc alias set local http://127.0.0.1:9000'
+    "  until /usr/bin/mc alias set local http://127.0.0.1:9000"
     ' "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" >/dev/null 2>&1; do sleep 1; done\n'
     '  /usr/bin/mc mb --ignore-existing local/"$STORAGE_BUCKET"\n'
     '  /usr/bin/mc mb --ignore-existing local/"$MILVUS_BUCKET"\n'
     '  /usr/bin/mc cp --recursive /seed/default_icon/ local/"$STORAGE_BUCKET"/default_icon/\n'
-    '  /usr/bin/mc cp --recursive /seed/official_plugin_icon/'
+    "  /usr/bin/mc cp --recursive /seed/official_plugin_icon/"
     ' local/"$STORAGE_BUCKET"/official_plugin_icon/\n'
     ") &\n"
     "exec minio server /data --console-address :9001\n"
@@ -500,6 +509,9 @@ def _coze_embedding_env(gateway: str) -> tuple[tuple[str, str], ...]:
     )
 
 
+# 下面这一段是**表**, 不是代码块: 相关的键成对排在一行上读。交给 formatter
+# 会拆成一项一行, 分组关系随之消失。
+# fmt: off
 def _coze_server_env() -> tuple[tuple[str, str], ...]:
     """coze-server 的环境。
 
@@ -565,8 +577,12 @@ def _coze_server_env() -> tuple[tuple[str, str], ...]:
         ("BUILTIN_CM_OPENAI_MODEL", model_id),
         ("BUILTIN_CM_OPENAI_BY_AZURE", "false"),
     ) + _coze_embedding_env(gateway) + _COZE_AES_ENV
+# fmt: on
 
 
+# 下面这一段是**表**, 不是代码块: 相关的键成对排在一行上读。交给 formatter
+# 会拆成一项一行, 分组关系随之消失。
+# fmt: off
 def _coze_stack() -> tuple[Sidecar, ...]:
     v = config.COZE_VERSION
     return (
@@ -664,6 +680,7 @@ def _coze_stack() -> tuple[Sidecar, ...]:
 #: build.sh 能在**构建期**断言上游那行还长这样 —— 上游一改, 构建就红, 而不是
 #: 等用户看到一片碎图。`\$http_host` 的反斜杠是给 shell 的: 启动脚本经 sh -c
 #: 执行, 不转义会被当成空变量展开掉。
+# fmt: on
 _COZE_SUBFILTER_FROM = "sub_filter 'minio:9000' '\\$http_host/local_storage';"
 _COZE_SUBFILTER_TO = "sub_filter 'http://minio:9000' 'https://\\$http_host/local_storage';"
 
@@ -696,12 +713,15 @@ def _coze_boot() -> str:
         # 上游自己的部署是纯 http 的, 所以他们碰不到; 我们的站点在 https 上,
         # 页面里出现 http:// 的图片就是**混合内容**, 浏览器直接拦 —— 表现是
         # 头像和附件一片空白, 而服务端一切正常、控制台里才有一行 blocked。
-        f"sed -i \"s#{_COZE_SUBFILTER_FROM}#{_COZE_SUBFILTER_TO}#\" "
+        f'sed -i "s#{_COZE_SUBFILTER_FROM}#{_COZE_SUBFILTER_TO}#" '
         "/etc/nginx/conf.d/default.conf\n"
         "exec nginx -g 'daemon off;'\n"
     )
 
 
+# 下面这一段是**表**, 不是代码块: 相关的键成对排在一行上读。交给 formatter
+# 会拆成一项一行, 分组关系随之消失。
+# fmt: off
 def registry() -> dict[str, Product]:
     return {
         DEFAULT: Product(
@@ -732,7 +752,7 @@ def registry() -> dict[str, Product]:
         "dify": Product(
             id="dify",
             name="Dify",
-            image=f"nginx:1.27-alpine",
+            image="nginx:1.27-alpine",
             image_ref="nginx:1.27-alpine",
             port=80,
             mem_mb=config.DIFY_MEM_LIMIT_MB,
@@ -787,6 +807,7 @@ def registry() -> dict[str, Product]:
             tab_grace_min=config.OPEN_DESIGN_TAB_GRACE_MIN,
         ),
     }
+# fmt: on
 
 
 def get(product_id: str) -> Product | None:

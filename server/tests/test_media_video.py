@@ -394,8 +394,9 @@ def _bailian(monkeypatch, model, entry, body):
     monkeypatch.setattr(config, "BAILIAN_API_KEY", "sk-fake")
     monkeypatch.setattr(media, "_prices_cache", {model: entry})
     sent = {}
-    monkeypatch.setattr(media, "_client",
-                        lambda: _Spy(post=_Resp(200, {"output": {"task_id": "t1"}}), sent=sent))
+    monkeypatch.setattr(
+        media, "_client", lambda: _Spy(post=_Resp(200, {"output": {"task_id": "t1"}}), sent=sent)
+    )
     r = client.post("/llm/v1/videos/generations", json={"model": model, **body})
     return r, sent
 
@@ -408,10 +409,18 @@ def test_wan27_sends_resolution_and_ratio_never_size(monkeypatch):
     每单亏七成, 而且两边都不报错, 只能靠对账发现。
     """
     _new_user("wan27-shape@test.local")
-    entry = {"id": "wan2.7-t2v", "provider": "bailian", "video_params": "resolution_ratio",
-             "credits_per_second": {"720p": 10, "1080p": 17}}
-    r, sent = _bailian(monkeypatch, "wan2.7-t2v", entry,
-                       {"prompt": "p", "resolution": "720p", "duration": 5, "ratio": "9:16"})
+    entry = {
+        "id": "wan2.7-t2v",
+        "provider": "bailian",
+        "video_params": "resolution_ratio",
+        "credits_per_second": {"720p": 10, "1080p": 17},
+    }
+    r, sent = _bailian(
+        monkeypatch,
+        "wan2.7-t2v",
+        entry,
+        {"prompt": "p", "resolution": "720p", "duration": 5, "ratio": "9:16"},
+    )
     assert r.status_code == 200, r.text
     params = sent.get("parameters") or {}
     assert params.get("resolution") == "720P", params
@@ -422,10 +431,15 @@ def test_wan27_sends_resolution_and_ratio_never_size(monkeypatch):
 def test_wanx21_still_sends_size(monkeypatch):
     """老一代 (wanx2.1) 用的就是 size —— 不能顺手把两代都改成新写法。"""
     _new_user("wanx21-shape@test.local")
-    entry = {"id": "wanx2.1-t2v-turbo", "provider": "bailian", "video_params": "size",
-             "credits_per_second": {"480p": 4}}
-    r, sent = _bailian(monkeypatch, "wanx2.1-t2v-turbo", entry,
-                       {"prompt": "p", "resolution": "480p", "duration": 5})
+    entry = {
+        "id": "wanx2.1-t2v-turbo",
+        "provider": "bailian",
+        "video_params": "size",
+        "credits_per_second": {"480p": 4},
+    }
+    r, sent = _bailian(
+        monkeypatch, "wanx2.1-t2v-turbo", entry, {"prompt": "p", "resolution": "480p", "duration": 5}
+    )
     assert r.status_code == 200, r.text
     params = sent.get("parameters") or {}
     assert params.get("size") == "832*480", params
@@ -440,13 +454,27 @@ def test_wan3_passes_reference_media_through_not_just_a_first_frame(monkeypatch)
     报错, 只会让人觉得"模型不听话"。
     """
     _new_user("wan3-media@test.local")
-    entry = {"id": "wan3.0-video", "provider": "bailian", "video_params": "resolution_ratio",
-             "video_input": "media", "credits_per_second": {"720p": 10}}
-    r, sent = _bailian(monkeypatch, "wan3.0-video", entry, {
-        "prompt": "p", "resolution": "720p", "duration": 5,
-        "media": [{"type": "reference_image", "url": "https://x/a.png"},
-                  {"type": "reference_video", "url": "https://x/b.mp4"}],
-    })
+    entry = {
+        "id": "wan3.0-video",
+        "provider": "bailian",
+        "video_params": "resolution_ratio",
+        "video_input": "media",
+        "credits_per_second": {"720p": 10},
+    }
+    r, sent = _bailian(
+        monkeypatch,
+        "wan3.0-video",
+        entry,
+        {
+            "prompt": "p",
+            "resolution": "720p",
+            "duration": 5,
+            "media": [
+                {"type": "reference_image", "url": "https://x/a.png"},
+                {"type": "reference_video", "url": "https://x/b.mp4"},
+            ],
+        },
+    )
     assert r.status_code == 200, r.text
     got = (sent.get("input") or {}).get("media")
     assert got and len(got) == 2, sent
@@ -457,13 +485,24 @@ def test_wan3_passes_reference_media_through_not_just_a_first_frame(monkeypatch)
 def test_wan27_still_uses_img_url_not_media(monkeypatch):
     """老一代只认一张首帧 —— 不能顺手把两代都改成 media[]。"""
     _new_user("wan27-media@test.local")
-    entry = {"id": "wan2.7-i2v", "provider": "bailian", "video_params": "resolution_ratio",
-             "credits_per_second": {"720p": 10}}
-    r, sent = _bailian(monkeypatch, "wan2.7-i2v", entry, {
-        "prompt": "p", "resolution": "720p", "duration": 5,
-        "image_url": "data:image/png;base64,AAA",
-        "media": [{"type": "reference_image", "url": "https://x/a.png"}],
-    })
+    entry = {
+        "id": "wan2.7-i2v",
+        "provider": "bailian",
+        "video_params": "resolution_ratio",
+        "credits_per_second": {"720p": 10},
+    }
+    r, sent = _bailian(
+        monkeypatch,
+        "wan2.7-i2v",
+        entry,
+        {
+            "prompt": "p",
+            "resolution": "720p",
+            "duration": 5,
+            "image_url": "data:image/png;base64,AAA",
+            "media": [{"type": "reference_image", "url": "https://x/a.png"}],
+        },
+    )
     assert r.status_code == 200, r.text
     inp = sent.get("input") or {}
     assert inp.get("img_url") == "data:image/png;base64,AAA", inp
@@ -473,13 +512,20 @@ def test_wan27_still_uses_img_url_not_media(monkeypatch):
 def test_media_list_is_bounded_and_urls_checked(monkeypatch):
     """media 里的 URL 会原样交给上游, 数量和形状都要有边界。"""
     _new_user("wan3-media-bad@test.local")
-    entry = {"id": "wan3.0-video", "provider": "bailian", "video_params": "resolution_ratio",
-             "video_input": "media", "credits_per_second": {"720p": 10}}
+    entry = {
+        "id": "wan3.0-video",
+        "provider": "bailian",
+        "video_params": "resolution_ratio",
+        "video_input": "media",
+        "credits_per_second": {"720p": 10},
+    }
     base = {"prompt": "p", "resolution": "720p", "duration": 5}
-    for bad in ([{"type": "x"}],                                   # 没有 url
-                [{"type": "x", "url": "javascript:alert(1)"}],     # 不是 http/data
-                [{"type": "x", "url": "https://x/a.png"}] * 9,     # 超过上限
-                "not-a-list"):
+    for bad in (
+        [{"type": "x"}],  # 没有 url
+        [{"type": "x", "url": "javascript:alert(1)"}],  # 不是 http/data
+        [{"type": "x", "url": "https://x/a.png"}] * 9,  # 超过上限
+        "not-a-list",
+    ):
         r, sent = _bailian(monkeypatch, "wan3.0-video", entry, {**base, "media": bad})
         assert r.status_code == 400, (bad, r.status_code)
         assert sent == {}, "被拒的请求不该打上游"
@@ -492,11 +538,16 @@ def test_auto_duration_is_rejected_rather_than_billed_as_one_second(monkeypatch)
     而上游可能自动生成到 30 秒。宁可让客户端选一个具体秒数。
     """
     _new_user("auto-dur@test.local")
-    entry = {"id": "wan3.0-video", "provider": "bailian", "video_params": "resolution_ratio",
-             "credits_per_second": {"720p": 10}}
+    entry = {
+        "id": "wan3.0-video",
+        "provider": "bailian",
+        "video_params": "resolution_ratio",
+        "credits_per_second": {"720p": 10},
+    }
     for bad in (-1, 0 - 5):
-        r, sent = _bailian(monkeypatch, "wan3.0-video", entry,
-                           {"prompt": "p", "resolution": "720p", "duration": bad})
+        r, sent = _bailian(
+            monkeypatch, "wan3.0-video", entry, {"prompt": "p", "resolution": "720p", "duration": bad}
+        )
         assert r.status_code == 400, (bad, r.text)
         assert sent == {}, "被拒的请求不该打上游"
 
@@ -504,10 +555,18 @@ def test_auto_duration_is_rejected_rather_than_billed_as_one_second(monkeypatch)
 def test_bad_ratio_is_rejected(monkeypatch):
     """ratio 会原样转给上游, 白名单之外的一律拒。"""
     _new_user("bad-ratio@test.local")
-    entry = {"id": "wan3.0-video", "provider": "bailian", "video_params": "resolution_ratio",
-             "credits_per_second": {"720p": 10}}
-    r, sent = _bailian(monkeypatch, "wan3.0-video", entry,
-                       {"prompt": "p", "resolution": "720p", "duration": 5, "ratio": "16:10"})
+    entry = {
+        "id": "wan3.0-video",
+        "provider": "bailian",
+        "video_params": "resolution_ratio",
+        "credits_per_second": {"720p": 10},
+    }
+    r, sent = _bailian(
+        monkeypatch,
+        "wan3.0-video",
+        entry,
+        {"prompt": "p", "resolution": "720p", "duration": 5, "ratio": "16:10"},
+    )
     assert r.status_code == 400, r.text
     assert sent == {}
 
@@ -533,8 +592,7 @@ def test_every_bailian_video_model_declares_its_param_generation():
 
 
 def _open_upload(ctype="image/png", name="ref.png"):
-    return client.post("/llm/v1/media/uploads",
-                       json={"file_name": name, "content_type": ctype})
+    return client.post("/llm/v1/media/uploads", json={"file_name": name, "content_type": ctype})
 
 
 def test_only_media_types_can_be_uploaded():
@@ -592,8 +650,10 @@ def test_expired_uploads_are_swept(monkeypatch, tmp_path):
     monkeypatch.setattr(media, "_UPLOAD_DIR", tmp_path)
     monkeypatch.setattr(config, "MEDIA_UPLOAD_TTL_S", 60)
     fresh, stale = tmp_path / "a.bin", tmp_path / "b.bin"
-    fresh.write_bytes(b"1"); stale.write_bytes(b"2")
+    fresh.write_bytes(b"1")
+    stale.write_bytes(b"2")
     import os
+
     os.utime(stale, (time.time() - 3600, time.time() - 3600))
     assert media.sweep_uploads() == 1
     assert fresh.exists() and not stale.exists()
@@ -714,9 +774,14 @@ def test_abandoned_job_that_failed_upstream_gets_refunded(monkeypatch):
 # ComfyUI 的 Wan 3.0 节点 duration 下拉**第一项就是 auto**, 也就是默认值。
 # 挡掉它等于这个节点开箱即坏 —— 2026-08-28 我就是这么做的, 用户连着撞了几次。
 
-_AUTO_ENTRY = {"id": "wan3.0-video", "provider": "bailian", "video_params": "resolution_ratio",
-               "video_input": "media", "auto_duration": True,
-               "credits_per_second": {"720p": 10}}
+_AUTO_ENTRY = {
+    "id": "wan3.0-video",
+    "provider": "bailian",
+    "video_params": "resolution_ratio",
+    "video_input": "media",
+    "auto_duration": True,
+    "credits_per_second": {"720p": 10},
+}
 
 
 def _auto_job(monkeypatch, upstream_seconds=None, entry=None):
@@ -726,18 +791,35 @@ def _auto_job(monkeypatch, upstream_seconds=None, entry=None):
     monkeypatch.setattr(config, "VIDEO_AUTO_DURATION_S", 5)
     monkeypatch.setattr(media, "_prices_cache", {"wan3.0-video": entry or _AUTO_ENTRY})
     sent = {}
-    monkeypatch.setattr(media, "_client",
-                        lambda: _Spy(post=_Resp(200, {"output": {"task_id": "t_auto"}}), sent=sent))
-    r = client.post("/llm/v1/videos/generations",
-                    json={"model": "wan3.0-video", "prompt": "p", "resolution": "720p",
-                          "duration": -1, "ratio": "adaptive"})
+    monkeypatch.setattr(
+        media, "_client", lambda: _Spy(post=_Resp(200, {"output": {"task_id": "t_auto"}}), sent=sent)
+    )
+    r = client.post(
+        "/llm/v1/videos/generations",
+        json={
+            "model": "wan3.0-video",
+            "prompt": "p",
+            "resolution": "720p",
+            "duration": -1,
+            "ratio": "adaptive",
+        },
+    )
     if upstream_seconds is None or r.status_code != 200:
         return r, sent, None
     job_id = r.json()["id"]
-    monkeypatch.setattr(media, "_client", lambda: _FakeClient(get=_Resp(200, {
-        "output": {"task_status": "SUCCEEDED", "video_url": "https://x/v.mp4"},
-        "usage": {"output_video_duration": upstream_seconds},
-    })))
+    monkeypatch.setattr(
+        media,
+        "_client",
+        lambda: _FakeClient(
+            get=_Resp(
+                200,
+                {
+                    "output": {"task_status": "SUCCEEDED", "video_url": "https://x/v.mp4"},
+                    "usage": {"output_video_duration": upstream_seconds},
+                },
+            )
+        ),
+    )
     client.get("/llm/v1/videos/result/" + job_id)
     return r, sent, job_id
 
@@ -756,7 +838,7 @@ def test_auto_duration_settles_to_the_real_length(monkeypatch):
     user = _new_user("auto-settle@test.local")
     before = credits.balance(user["id"])
     r, _, job_id = _auto_job(monkeypatch, upstream_seconds=8.0)
-    assert r.json()["credits"] == 50            # 预扣 5 秒
+    assert r.json()["credits"] == 50  # 预扣 5 秒
     row = dict(db.query_one("SELECT * FROM video_jobs WHERE id=?", (job_id,)))
     assert row["credits"] == 80, "实际 8 秒应当补收到 80"
     assert row["duration"] == 8
@@ -802,21 +884,32 @@ def test_settling_twice_does_not_double_charge(monkeypatch):
     monkeypatch.setattr(config, "BAILIAN_API_KEY", "sk-fake")
     monkeypatch.setattr(config, "VIDEO_AUTO_DURATION_S", 5)
     monkeypatch.setattr(media, "_prices_cache", {"wan3.0-video": _AUTO_ENTRY})
-    monkeypatch.setattr(media, "_client",
-                        lambda: _Spy(post=_Resp(200, {"output": {"task_id": "t_race"}}), sent={}))
-    job_id = client.post("/llm/v1/videos/generations",
-                         json={"model": "wan3.0-video", "prompt": "p", "resolution": "720p",
-                               "duration": -1}).json()["id"]
+    monkeypatch.setattr(
+        media, "_client", lambda: _Spy(post=_Resp(200, {"output": {"task_id": "t_race"}}), sent={})
+    )
+    job_id = client.post(
+        "/llm/v1/videos/generations",
+        json={"model": "wan3.0-video", "prompt": "p", "resolution": "720p", "duration": -1},
+    ).json()["id"]
     stale = dict(db.query_one("SELECT * FROM video_jobs WHERE id=?", (job_id,)))
     assert stale["status"] == "processing"
 
-    monkeypatch.setattr(media, "_client", lambda: _FakeClient(get=_Resp(200, {
-        "output": {"task_status": "SUCCEEDED", "video_url": "https://x/v.mp4"},
-        "usage": {"output_video_duration": 8.0},
-    })))
+    monkeypatch.setattr(
+        media,
+        "_client",
+        lambda: _FakeClient(
+            get=_Resp(
+                200,
+                {
+                    "output": {"task_status": "SUCCEEDED", "video_url": "https://x/v.mp4"},
+                    "usage": {"output_video_duration": 8.0},
+                },
+            )
+        ),
+    )
     loop = asyncio.get_event_loop_policy().new_event_loop()
     loop.run_until_complete(media._settle(dict(stale)))
-    loop.run_until_complete(media._settle(dict(stale)))   # 同一份旧行再来一次
+    loop.run_until_complete(media._settle(dict(stale)))  # 同一份旧行再来一次
     assert credits.balance(user["id"]) == before - 80, "并发结算把差价补了两遍"
 
 
@@ -831,15 +924,26 @@ def test_fixed_duration_jobs_are_never_re_settled(monkeypatch):
     monkeypatch.setattr(config, "BAILIAN_NATIVE_BASE", "https://ws-x.example.com/api/v1")
     monkeypatch.setattr(config, "BAILIAN_API_KEY", "sk-fake")
     monkeypatch.setattr(media, "_prices_cache", {"wan3.0-video": _AUTO_ENTRY})
-    monkeypatch.setattr(media, "_client",
-                        lambda: _Spy(post=_Resp(200, {"output": {"task_id": "t_fixed"}}), sent={}))
-    job_id = client.post("/llm/v1/videos/generations",
-                         json={"model": "wan3.0-video", "prompt": "p", "resolution": "720p",
-                               "duration": 4}).json()["id"]           # 明确选了 4 秒
-    monkeypatch.setattr(media, "_client", lambda: _FakeClient(get=_Resp(200, {
-        "output": {"task_status": "SUCCEEDED", "video_url": "https://x/v.mp4"},
-        "usage": {"output_video_duration": 30.0},                     # 上游报了 30 秒
-    })))
+    monkeypatch.setattr(
+        media, "_client", lambda: _Spy(post=_Resp(200, {"output": {"task_id": "t_fixed"}}), sent={})
+    )
+    job_id = client.post(
+        "/llm/v1/videos/generations",
+        json={"model": "wan3.0-video", "prompt": "p", "resolution": "720p", "duration": 4},
+    ).json()["id"]  # 明确选了 4 秒
+    monkeypatch.setattr(
+        media,
+        "_client",
+        lambda: _FakeClient(
+            get=_Resp(
+                200,
+                {
+                    "output": {"task_status": "SUCCEEDED", "video_url": "https://x/v.mp4"},
+                    "usage": {"output_video_duration": 30.0},  # 上游报了 30 秒
+                },
+            )
+        ),
+    )
     client.get("/llm/v1/videos/result/" + job_id)
     row = dict(db.query_one("SELECT * FROM video_jobs WHERE id=?", (job_id,)))
     assert row["credits"] == 40, "用户选了 4 秒, 却按上游报的 30 秒改了账"
@@ -984,9 +1088,9 @@ def test_per_item_image_price_follows_the_size_tier(monkeypatch):
     分档判的是**面积**不是边长 —— 按边长会把 2560x800 这种宽幅错判成 2K。
     """
     entry = {"credits_per_image": {"1k": 4, "2k": 8}}
-    assert media.image_credits(entry, None, "1328*1328") == 4      # 1.76M <= 2.25M
-    assert media.image_credits(entry, None, "1024x1024") == 4      # x 与 * 都要认
-    assert media.image_credits(entry, None, "2048*2048") == 8      # 4.19M
+    assert media.image_credits(entry, None, "1328*1328") == 4  # 1.76M <= 2.25M
+    assert media.image_credits(entry, None, "1024x1024") == 4  # x 与 * 都要认
+    assert media.image_credits(entry, None, "2048*2048") == 8  # 4.19M
     assert media.image_credits(entry, None, "2560*800") == 4, "宽幅面积只有 2.05M, 是 1K 档"
     assert media.image_credits(entry, None, "") == 8, "认不出尺寸时按贵的算, 不能亏本"
 
@@ -1012,18 +1116,31 @@ def test_bailian_image_model_actually_reaches_the_bailian_adapter(monkeypatch):
     """
     monkeypatch.setattr(config, "BAILIAN_NATIVE_BASE", "https://ws-x.example.com/api/v1")
     monkeypatch.setattr(config, "BAILIAN_API_KEY", "sk-fake")
-    monkeypatch.setattr(media, "_image_cache", {
-        "qwen-image-3.0": {"id": "qwen-image-3.0", "provider": "bailian", "credits_per_image": 3},
-    })
+    monkeypatch.setattr(
+        media,
+        "_image_cache",
+        {
+            "qwen-image-3.0": {"id": "qwen-image-3.0", "provider": "bailian", "credits_per_image": 3},
+        },
+    )
     user = _new_user("img-bailian@test.local")
     before = credits.balance(user["id"])
     log = []
     # 百炼的同步生图形状: output.choices[].message.content[].image, **没有 usage**
-    monkeypatch.setattr(media, "_client", lambda: _FakeClient(post=_Resp(200, {
-        "output": {"choices": [{"message": {"content": [{"image": "https://oss/x.png"}]}}]},
-    }), log=log))
-    r = client.post("/llm/v1/images/generations",
-                    json={"model": "qwen-image-3.0", "prompt": "一只柴犬"})
+    monkeypatch.setattr(
+        media,
+        "_client",
+        lambda: _FakeClient(
+            post=_Resp(
+                200,
+                {
+                    "output": {"choices": [{"message": {"content": [{"image": "https://oss/x.png"}]}}]},
+                },
+            ),
+            log=log,
+        ),
+    )
+    r = client.post("/llm/v1/images/generations", json={"model": "qwen-image-3.0", "prompt": "一只柴犬"})
     assert r.status_code == 200, r.text
     assert r.json()["data"][0]["url"] == "https://oss/x.png"
     assert r.json()["credits"] == 3, "百炼没有 token 用量, 只能按张"
@@ -1043,11 +1160,20 @@ def test_bailian_image_request_carries_the_size(monkeypatch):
             sent.update(json or {})
             return await super().post(url, headers=headers, json=json, timeout=timeout)
 
-    monkeypatch.setattr(media, "_client", lambda: _Spy(post=_Resp(200, {
-        "output": {"choices": [{"message": {"content": [{"image": "https://oss/x.png"}]}}]}})))
+    monkeypatch.setattr(
+        media,
+        "_client",
+        lambda: _Spy(
+            post=_Resp(
+                200, {"output": {"choices": [{"message": {"content": [{"image": "https://oss/x.png"}]}}]}}
+            )
+        ),
+    )
     import asyncio
+
     asyncio.get_event_loop_policy().new_event_loop().run_until_complete(
-        media.gen_image("bailian", "qwen-image-3.0-pro", "p", 1, {"size": "2048x2048"}))
+        media.gen_image("bailian", "qwen-image-3.0-pro", "p", 1, {"size": "2048x2048"})
+    )
     # 百炼写 "*", OpenAI 那套写 "x" —— 转达时要统一
     assert sent.get("parameters", {}).get("size") == "2048*2048", sent
 
@@ -1059,14 +1185,17 @@ def test_bailian_image_without_credentials_is_not_offered(monkeypatch):
     """
     monkeypatch.setattr(config, "BAILIAN_NATIVE_BASE", "")
     monkeypatch.setattr(config, "BAILIAN_API_KEY", "")
-    monkeypatch.setattr(media, "_image_cache", {
-        "qwen-image-3.0": {"id": "qwen-image-3.0", "provider": "bailian", "credits_per_image": 3},
-    })
+    monkeypatch.setattr(
+        media,
+        "_image_cache",
+        {
+            "qwen-image-3.0": {"id": "qwen-image-3.0", "provider": "bailian", "credits_per_image": 3},
+        },
+    )
     _new_user("img-bailian-nocred@test.local")
     log = []
     monkeypatch.setattr(media, "_client", lambda: _FakeClient(post=_Resp(200, {}), log=log))
-    r = client.post("/llm/v1/images/generations",
-                    json={"model": "qwen-image-3.0", "prompt": "x"})
+    r = client.post("/llm/v1/images/generations", json={"model": "qwen-image-3.0", "prompt": "x"})
     assert r.status_code == 404, r.text
     assert log == [], "凭据没配却还是打了上游"
     assert "qwen-image-3.0" not in [m["id"] for m in media.offered()["image"]]

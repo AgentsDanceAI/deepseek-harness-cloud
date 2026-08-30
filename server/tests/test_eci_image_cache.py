@@ -13,6 +13,7 @@ sys.path.insert(0, os.path.dirname(_here))
 sys.path.insert(0, os.path.join(os.path.dirname(_here), "scripts"))
 
 import eci_image_cache  # noqa: E402
+
 from app import config  # noqa: E402
 
 

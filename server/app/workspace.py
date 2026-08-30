@@ -170,8 +170,7 @@ def _mint_workspace_token(user: dict, product: products.Product) -> str:
         )
         # 被顶替的那份必须立刻失效 —— 但只顶替**同一个工作台**的。
         conn.execute(
-            "UPDATE devices SET revoked=1 WHERE user_id=? AND platform='cloud' "
-            "AND workspace=? AND revoked=0",
+            "UPDATE devices SET revoked=1 WHERE user_id=? AND platform='cloud' AND workspace=? AND revoked=0",
             (user["id"], key),
         )
         # 留最近几条备查, 其余删掉
@@ -227,9 +226,7 @@ async def _create(user: dict, product: products.Product) -> None:
     boot = products.boot_script(product.id)
     # 栈产品 env 里的密钥占位符在这里换成该用户的确定性密钥 —— 产品定义是静态
     # 数据, 而密钥按用户走; 确定性是为了实例重建后应用内会话不作废。
-    sidecars = products.resolve_sidecars(
-        product.sidecars, security.stack_secret(user["id"]), token
-    )
+    sidecars = products.resolve_sidecars(product.sidecars, security.stack_secret(user["id"]), token)
     await backend().create(
         products.wskey(user["id"], product.id),
         boot=boot,
