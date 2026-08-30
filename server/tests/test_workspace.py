@@ -1758,6 +1758,19 @@ def test_openclaw_auth_is_trusted_proxy_not_open(monkeypatch):
     assert '"mode": "none"' not in boot
 
 
+def test_openclaw_allows_its_own_origin(monkeypatch):
+    """控制台 UI 的来源必须列全。
+
+    少了它页面照样打得开, 但一连 WebSocket 就被网关按来源拒掉 —— 页面上显示
+    "浏览器来源不被允许", 并退回一个要你填 WebSocket URL / 令牌 / 密码的连接
+    表单, 看着就像第二道登录墙。不支持通配符, 只能按域名拼。
+    """
+    _openclaw_ready(monkeypatch)
+    boot = products.boot_script("openclaw")
+    assert '"https://claw.test.local"' in boot
+    assert "allowedOrigins" in boot
+
+
 def test_openclaw_hidden_until_the_proxy_cidr_is_configured(monkeypatch):
     """没配反代来源就别出现在目录里。
 

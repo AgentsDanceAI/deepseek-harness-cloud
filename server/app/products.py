@@ -1129,7 +1129,15 @@ def _openclaw_boot() -> str:
                     "trustedProxy": {"userHeader": PROXY_USER_HEADER},
                 },
                 "trustedProxies": [config.WORK_PROXY_CIDR],
-                "controlUi": {"enabled": True},
+                # **必须列出完整来源**。少了它, 控制台 UI 能打开, 但一连
+                # WebSocket 就被网关按来源拒掉, 页面上显示"浏览器来源不被允许"
+                # 并退回一个要你填 WebSocket URL / 令牌 / 密码的连接表单 ——
+                # 看着像第二道登录墙, 其实是 CORS 那一类的拒绝。
+                # 不支持通配符, 所以只能按域名拼。2026-08-30 上线当天踩到。
+                "controlUi": {
+                    "enabled": True,
+                    "allowedOrigins": [f"https://{config.OPENCLAW_DOMAIN}"],
+                },
             },
             "models": {
                 "mode": "merge",
