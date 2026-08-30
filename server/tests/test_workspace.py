@@ -2126,7 +2126,10 @@ def test_dify_only_preconfigures_one_model_of_each_kind():
     assert r'\"model_type\":\"llm\"' in sh
     assert r'\"model_type\":\"text-embedding\"' in sh
     # 目录里没有向量化模型时要跳过, 而不是配个空的进去 (那会让知识库在运行期才炸)
-    assert 'if [ -n "$DSH_EMBEDDING_MODEL" ]' in sh
+    assert '[ -z "$DSH_EMBEDDING_MODEL" ] && HAVE_EMB=yes' in sh
+    # 两类分开判: 只看 llm 的话, 已经配了聊天模型的老实例永远补不上向量化模型
+    assert 'HAVE_LLM' in sh and 'HAVE_EMB' in sh
+    assert 'models/model-types/text-embedding' in sh
 
 
 def test_dify_autologin_backs_off_instead_of_locking_the_account(monkeypatch):
