@@ -189,11 +189,13 @@ def test_route_creates_and_serves_container(fake):
 def test_route_ignores_the_products_own_authorization_header(fake):
     """产品自带的 Authorization 头不能把用户从我们这层踢出去。
 
-    云空间里的产品普遍自带 Authorization: Dify 的前端从 cookie 里读出它自家的
-    JWT, 再放进 Authorization 发出来。那个头会一路带进 Caddy 的 forward_auth
-    子请求, 我们要是拿它当 DSH 令牌验, 验不过就 302 去登录页 —— 于是**产品
-    控制台的每个请求都被我们弹回登录**, 而用户明明已经登录了, 服务端也一个错
-    都不报。2026-08-30 拆 Dify 登录墙时发现, 在此之前 Dify 的控制台是用不了的。
+    forward_auth 的子请求会原样带上浏览器发给**产品**的头。要是拿产品自己的
+    Bearer 当 DSH 令牌验, 验不过就 302 去登录页 —— 表现是产品控制台每个请求都
+    被我们弹回登录, 而用户明明已经登录, 服务端也一个错都不报。
+
+    (更正: 加这条时以为 Dify 正踩着, 实测不是 —— 它的 access_token 是 HttpOnly,
+    前端读不到, 走的是 cookie + X-CSRF-Token, 不发 Authorization。所以这是
+    防御性的守卫, 不是在复现一次真实故障。)
     """
     c, uid = _user("bearer@test.local")
     foreign = {"Authorization": "Bearer eyJhbGciOiJIUzI1NiJ9.not-ours.sig"}
@@ -2055,6 +2057,52 @@ def test_coze_disabled_without_domain_or_assets_image(monkeypatch):
     monkeypatch.setattr(config, "COZE_DOMAIN", "")
     monkeypatch.setattr(config, "COZE_ASSETS_IMAGE_REF", "ghcr.io/x/a:t")
     assert "coze" not in [p.id for p in products.enabled()]
+
+
+def test_dify_has_no_second_login_wall(monkeypatch):
+    """Dify 也只留我们这一层登录墙。
+
+    与 Coze 的两处关键差别 (改错任何一处都是"看着像好了, 其实没登进去"):
+      · Dify 认 **cookie + X-CSRF-Token 头**, 而 access_token 是 HttpOnly ——
+        前端读不到, 也就不发 Authorization。所以必须给**浏览器**发 Set-Cookie,
+        只在上游注入是不够的 (前端还要自己从 csrf_token 里取值拼请求头)。
+      · Dify 是单租户: setup 一辈子只能跑一次, 建不了第二个账号。所以免登录的
+        密码必须**可推导** —— 随机后存盘的话, NAS 一丢就再也登不进那个既有账号,
+        而 Dify 没有找回密码的路。
+    """
+    monkeypatch.setattr(config, "DIFY_DOMAIN", "dify.test.local")
+    boot = products.boot_script("dify")
+    # 三个 cookie 缺一不可: 少 csrf 前端拼不出请求头, 少 refresh 一小时后就掉线
+    for var in ("$dsh_at", "$dsh_rt", "$dsh_ct"):
+        assert f"add_header Set-Cookie {var} always;" in boot, f"少发 {var}"
+        assert f"map $cookie_refresh_token {var} {{ default \"\"; }}" in boot, \
+            f"{var} 没有安全默认值 —— nginx 会因为引用未定义变量直接起不来"
+    assert "/usr/local/bin/dsh-dify-autologin" in boot
+
+    sh = products._DIFY_AUTOLOGIN
+    assert "csrf_token" in sh and "refresh_token" in sh and "access_token" in sh
+    # 登录收 base64 的密码, setup 收明文 —— 上游就是这么不对称的
+    assert "base64" in sh
+    assert '"$API/setup"' in sh and '"$API/login"' in sh
+    # access_token 只活一小时, 容器能跑很久 -> 必须定期重登
+    assert "sleep 1500" in sh
+
+
+def test_dify_autologin_password_is_derived_not_stored(monkeypatch):
+    """密码按用户推导, 且不同用户不同; 没有密钥时**不给**弱口令兜底。"""
+    a = products.dify_autologin_password("a" * 64)
+    b = products.dify_autologin_password("b" * 64)
+    assert a != b, "所有用户共用一个口令等于没有口令"
+    assert len(a) >= 12
+    assert any(c.isupper() for c in a) and any(c.isdigit() for c in a), "过不了口令强度校验"
+    assert products.dify_autologin_password("") == "", \
+        "没有密钥时该跳过免登录, 而不是退回一个人人都知道的口令"
+
+    monkeypatch.setattr(config, "DIFY_DOMAIN", "dify.test.local")
+    env = products.env_for("dify", "tok", "s" * 64)
+    assert env["DSH_AUTOLOGIN_PASSWORD"] == products.dify_autologin_password("s" * 64)
+    # 邮箱必须与 setup 建的那个一致 —— 单租户, 没有第二个账号可用
+    assert env["DSH_AUTOLOGIN_EMAIL"] == "admin@dshcloud.online"
 
 
 def _dify_env(sidecars, name):

@@ -329,6 +329,79 @@ def _dify_stack() -> tuple[Sidecar, ...]:
 # fmt: on
 
 
+def dify_autologin_password(secret: str) -> str:
+    """Dify 免登录账号的密码, 从该用户的栈密钥推导。
+
+    定长小写十六进制不一定过得了口令强度校验, 所以前后各补一段, 保证同时含
+    大写、小写、数字。secret 为空时返回空串 —— 上层据此跳过免登录 (而不是用一个
+    所有人共用的弱口令)。
+    """
+    return f"Dsh{secret[:24]}1a" if secret else ""
+
+
+#: 工作台自己签发 Dify 的会话, 于是用户不再看到第二道登录墙。
+#: 通则见 _COZE_AUTOLOGIN —— 只留我们这一层登录墙。
+#:
+#: 与 Coze 的差别有两处:
+#:   · Dify 认的是 **cookie + X-CSRF-Token 头**, 而 access_token 是 HttpOnly,
+#:     前端读不到、也不发 Authorization。所以必须给**浏览器**发 Set-Cookie,
+#:     不能像 Coze 那样只在上游注入 —— 前端还要自己从 csrf_token 里取值拼头。
+#:   · Dify 是单租户, setup 只能跑一次, 建不了第二个账号 -> 密码走推导而不是
+#:     随机存盘 (见 dify_autologin_password)。
+_DIFY_AUTOLOGIN = r"""#!/bin/sh
+# 由 products.py 下发。工作台自己登一次 Dify, 把三个会话 cookie 发给浏览器。
+#
+# Dify 认的是 cookie + X-CSRF-Token 头 (access_token 是 HttpOnly, 前端读不到,
+# 所以它不发 Authorization)。因此这里必须**给浏览器发 Set-Cookie**, 不能像
+# Coze 那样只在上游注入 —— 前端还要自己从 csrf_token 里读值拼请求头。
+EM="$DSH_AUTOLOGIN_EMAIL"
+PW="$DSH_AUTOLOGIN_PASSWORD"
+[ -n "$EM" ] && [ -n "$PW" ] || exit 0
+API=http://127.0.0.1:5001/console/api
+# 登录接口收 base64 的密码 (前端就是这么发的); setup 收明文。
+B64=$(printf '%s' "$PW" | base64 | tr -d '\n')
+
+write_conf() {
+  cat > /etc/nginx/conf.d/00-autologin.conf <<EOF
+# 浏览器还没有会话时把工作台自己的那份发给它; 有了就不再覆盖 (它会自己续期)。
+map \$cookie_refresh_token \$dsh_at {
+    ""      "access_token=$AT; Path=/; Max-Age=3600; HttpOnly; SameSite=Lax";
+    default "";
+}
+map \$cookie_refresh_token \$dsh_rt {
+    ""      "refresh_token=$RT; Path=/; Max-Age=2592000; HttpOnly; SameSite=Lax";
+    default "";
+}
+map \$cookie_refresh_token \$dsh_ct {
+    ""      "csrf_token=$CT; Path=/; Max-Age=3600; SameSite=Lax";
+    default "";
+}
+EOF
+  nginx -s reload
+}
+
+while :; do
+  H=$(curl -s -D- -o /dev/null -m 10 -X POST -H 'Content-Type: application/json' \
+      -d "{\"email\":\"$EM\",\"password\":\"$B64\",\"language\":\"zh-Hans\",\"remember_me\":true}" \
+      "$API/login")
+  AT=$(echo "$H" | grep -i '^set-cookie: access_token=' | head -1 | sed 's/.*access_token=//; s/;.*//' | tr -d '\r')
+  RT=$(echo "$H" | grep -i '^set-cookie: refresh_token=' | head -1 | sed 's/.*refresh_token=//; s/;.*//' | tr -d '\r')
+  CT=$(echo "$H" | grep -i '^set-cookie: csrf_token=' | head -1 | sed 's/.*csrf_token=//; s/;.*//' | tr -d '\r')
+  if [ -n "$AT" ] && [ -n "$RT" ] && [ -n "$CT" ]; then
+    write_conf
+    # access_token 只活 1 小时。容器能连着跑很久, 所以定期重登再刷一遍 ——
+    # 否则新开的标签页会拿到一个早就过期的 token。
+    sleep 1500
+    continue
+  fi
+  # 登不上多半是还没初始化。setup 一辈子只能跑一次, 已初始化时会失败, 忽略即可。
+  curl -s -o /dev/null -m 10 -X POST -H 'Content-Type: application/json' \
+    -d "{\"email\":\"$EM\",\"name\":\"owner\",\"password\":\"$PW\"}" "$API/setup" || true
+  sleep 3
+done
+"""
+
+
 def _dify_boot() -> str:
     """主容器是 nginx。**配置我们自己生成** —— 官方那份用 `set $up api:5001` +
     `resolver 127.0.0.11` (Docker 内嵌 DNS), 而 nginx 的 resolver 不读
@@ -336,11 +409,29 @@ def _dify_boot() -> str:
     """
     return (
         "set -e\n"
+        # 免登录 (见 _DIFY_AUTOLOGIN)。先落一份**空**的默认值 —— 会话要等 api
+        # 起来才拿得到, 而 nginx 现在就要能起; 引用未定义的变量它会直接启动失败。
+        # 变量取空串时 nginx 不会发出这个响应头, 所以空值就是"什么都不做"。
+        "cat > /etc/nginx/conf.d/00-autologin.conf <<'AUTOCONF'\n"
+        "map $cookie_refresh_token $dsh_at { default \"\"; }\n"
+        "map $cookie_refresh_token $dsh_rt { default \"\"; }\n"
+        "map $cookie_refresh_token $dsh_ct { default \"\"; }\n"
+        "AUTOCONF\n"
+        "cat > /usr/local/bin/dsh-dify-autologin <<'AUTOLOGIN'\n"
+        + _DIFY_AUTOLOGIN
+        + "AUTOLOGIN\n"
+        "chmod +x /usr/local/bin/dsh-dify-autologin\n"
+        "/usr/local/bin/dsh-dify-autologin >/dev/null 2>&1 &\n"
         "cat > /etc/nginx/conf.d/default.conf <<'NGINXCONF'\n"
         "server {\n"
         "  listen 80;\n"
         "  server_name _;\n"
         "  client_max_body_size 100m;\n"
+        # 放在 server 层: 这份配置里没有别的 add_header, 所以各 location 都继承
+        # 得到 (nginx 的 add_header 一旦在子层出现就会丢掉父层的, 这里没有子层的)。
+        "  add_header Set-Cookie $dsh_at always;\n"
+        "  add_header Set-Cookie $dsh_rt always;\n"
+        "  add_header Set-Cookie $dsh_ct always;\n"
         "  proxy_set_header Host $host;\n"
         "  proxy_set_header X-Real-IP $remote_addr;\n"
         "  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n"
@@ -1149,11 +1240,22 @@ def boot_script(product_id: str) -> str:
     return builder()
 
 
-def env_for(product_id: str, token: str) -> dict[str, str]:
+def env_for(product_id: str, token: str, secret: str = "") -> dict[str, str]:
     gateway = config.PUBLIC_BASE.rstrip("/")
-    if product_id in ("dify", "coze"):
-        # 主容器只是 nginx —— 业务 env 全在伴随容器上 (见 _dify_stack/_coze_stack)。
+    if product_id == "coze":
+        # 主容器只是 nginx —— 业务 env 全在伴随容器上 (见 _coze_stack)。
+        # 免登录的账号密码由容器自己随机生成并存在 NAS 上 (Coze 可以随便建账号)。
         return {}
+    if product_id == "dify":
+        # 同上, 但 Dify 是**单租户**: setup 一辈子只能跑一次, 建不了第二个账号。
+        # 所以免登录的密码必须**可推导** —— 存文件的话, NAS 一丢或换个实例就再也
+        # 登不进那个既有账号了 (而且它没有找回密码的路)。
+        return {
+            # 用 admin@ 而不是 Coze 那边的 owner@: Dify 单租户, setup 建的就是这个
+            # 账号, 没有第二个可建 —— 所以这里必须与既有账号对齐, 不能另起一个。
+            "DSH_AUTOLOGIN_EMAIL": "admin@dshcloud.online",
+            "DSH_AUTOLOGIN_PASSWORD": dify_autologin_password(secret),
+        }
     if product_id == "open-design":
         return {
             # daemon 自身
