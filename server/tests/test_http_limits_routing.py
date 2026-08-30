@@ -101,6 +101,9 @@ async def test_body_middleware_has_distinct_gateway_and_preview_limits():
     for path, size, expected_status in (
         ("/api/auth/login", 512, 413),
         ("/llm/v1/chat/completions", 512, 204),
+        # 向量化的报文是**整批**文本, 走 2MB 的通用上限会在知识库导入时 413,
+        # 而 413 在 Coze 里只显示成"处理失败"。
+        ("/llm/v1/embeddings", 512, 204),
         ("/llm/anthropic/v1/messages", 512, 204),
         ("/preview/8080/upload", 1500, 204),
         ("/api/pay/webhook/stripe", 65, 413),
@@ -111,6 +114,7 @@ async def test_body_middleware_has_distinct_gateway_and_preview_limits():
 
     assert called == [
         "/llm/v1/chat/completions",
+        "/llm/v1/embeddings",
         "/llm/anthropic/v1/messages",
         "/preview/8080/upload",
     ]
@@ -121,6 +125,7 @@ async def test_body_middleware_has_distinct_gateway_and_preview_limits():
     "path",
     [
         "/llm/v1/chat/completions",
+        "/llm/v1/embeddings",
         "/llm/anthropic/v1/messages",
         "/preview/8080/upload",
     ],

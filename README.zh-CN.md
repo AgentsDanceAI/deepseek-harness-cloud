@@ -109,6 +109,22 @@ npx --yes dsh-plugin-cloud setup
 网关下发的是实时目录，本表与
 [`server/config/models.json`](server/config/models.json) 由合同测试互钉。
 
+## 知识库，同一个入口
+
+网关同时提供 `POST /v1/embeddings`——Coze、Dify、RAGFlow 的知识库认的就是
+这一支 OpenAI 接口。向量化**只按输入 token 计费**，扣的是与对话同一份积分。
+
+<!-- embedding-catalog:start -->
+| 向量化模型 | 维度 |
+| --- | --- |
+| `Qwen3-Embedding-0.6B` | 1024 |
+| `Qwen3-Embedding-4B` | 2560 |
+| `Qwen3-Embedding-8B` | 4096 |
+| `BGE-M3` | 1024 |
+| `Text-Embedding-3-Small` | 1536 |
+| `Text-Embedding-3-Large` | 3072 |
+<!-- embedding-catalog:end -->
+
 ## 快速开始
 
 以下命令均固定使用 `0.2.4`；自动化环境也应固定精确版本。

@@ -223,5 +223,68 @@
       "credits_per_m": 5000,
       "default": false
     }
+  ],
+  "_comment_embeddings": "向量化模型。只按**输入** token 计价 (它们没有输出 token), 由 model_catalog.charge_embedding_credits 结算; dimensions 是原生维度, supports_dimensions 说的是上游认不认这个参数 (BGE-M3 不认)。",
+  "embedding_models": [
+    {
+      "id": "Qwen/Qwen3-Embedding-0.6B",
+      "upstream_model": "Qwen/Qwen3-Embedding-0.6B",
+      "display_name": "Qwen3-Embedding-0.6B",
+      "provider": "Alibaba",
+      "input_usd_per_m": 0.07,
+      "dimensions": 1024,
+      "supports_dimensions": true,
+      "default": true
+    },
+    {
+      "id": "Qwen/Qwen3-Embedding-4B",
+      "upstream_model": "Qwen/Qwen3-Embedding-4B",
+      "display_name": "Qwen3-Embedding-4B",
+      "provider": "Alibaba",
+      "input_usd_per_m": 0.07,
+      "dimensions": 2560,
+      "supports_dimensions": true,
+      "default": false
+    },
+    {
+      "id": "Qwen/Qwen3-Embedding-8B",
+      "upstream_model": "Qwen/Qwen3-Embedding-8B",
+      "display_name": "Qwen3-Embedding-8B",
+      "provider": "Alibaba",
+      "input_usd_per_m": 0.07,
+      "dimensions": 4096,
+      "supports_dimensions": true,
+      "default": false
+    },
+    {
+      "id": "BAAI/bge-m3",
+      "upstream_model": "BAAI/bge-m3",
+      "display_name": "BGE-M3",
+      "provider": "BAAI",
+      "input_usd_per_m": 0.0,
+      "dimensions": 1024,
+      "supports_dimensions": false,
+      "default": false
+    },
+    {
+      "id": "text-embedding-3-small",
+      "upstream_model": "text-embedding-3-small",
+      "display_name": "Text-Embedding-3-Small",
+      "provider": "OpenAI",
+      "input_usd_per_m": 0.14,
+      "dimensions": 1536,
+      "supports_dimensions": true,
+      "default": false
+    },
+    {
+      "id": "text-embedding-3-large",
+      "upstream_model": "text-embedding-3-large",
+      "display_name": "Text-Embedding-3-Large",
+      "provider": "OpenAI",
+      "input_usd_per_m": 0.91,
+      "dimensions": 3072,
+      "supports_dimensions": true,
+      "default": false
+    }
   ]
 }

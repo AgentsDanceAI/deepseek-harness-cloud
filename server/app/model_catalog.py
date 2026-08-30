@@ -14,6 +14,11 @@ never the advertised multiplier.
 
 Every charge rounds up to at least 1 credit, so streaming freeloaders can't ride
 for free on sub-credit requests.
+
+Embedding models live in a second section of the same file and price on INPUT
+tokens alone — they have no output and no prompt cache. They are kept out of
+`catalog()` on purpose: that one is "models you can chat with", and it is what
+`GET /v1/models` hands to dsh.
 """
 
 from __future__ import annotations
@@ -27,6 +32,7 @@ from . import config
 
 _lock = threading.Lock()
 _cache: dict | None = None
+_embeddings: dict = {}
 _meta: dict = {}
 _cache_mtime: float = 0.0
 
@@ -38,13 +44,14 @@ def _path() -> Path:
 
 
 def _load() -> None:
-    global _cache, _meta, _cache_mtime
+    global _cache, _embeddings, _meta, _cache_mtime
     p = _path()
     mtime = p.stat().st_mtime
     if _cache is None or mtime != _cache_mtime:
         data = json.loads(p.read_text())
         _cache = {m["id"]: m for m in data["models"]}
-        _meta = {k: v for k, v in data.items() if k != "models"}
+        _embeddings = {m["id"]: m for m in data.get("embedding_models", [])}
+        _meta = {k: v for k, v in data.items() if k not in ("models", "embedding_models")}
         _cache_mtime = mtime
 
 
@@ -72,6 +79,29 @@ def default_model() -> str:
     return next(iter(catalog()))
 
 
+def embedding_catalog() -> dict[str, dict]:
+    """id -> embedding entry. Deliberately a SEPARATE catalog from the chat one.
+
+    Merging them would put a vector model in `GET /v1/models`, and dsh renders
+    that list as "models you can chat with" — picking one there fails upstream
+    with an error that says nothing about why.
+    """
+    with _lock:
+        _load()
+        return _embeddings
+
+
+def resolve_embedding(model_id: str) -> dict | None:
+    return embedding_catalog().get(model_id)
+
+
+def default_embedding_model() -> str:
+    for m in embedding_catalog().values():
+        if m.get("default"):
+            return m["id"]
+    return next(iter(embedding_catalog()), "")
+
+
 def _usd_per_m(entry: dict, field: str) -> float:
     """Price in USD per 1M tokens, tolerating the pre-generator CNY schema."""
     if f"{field}_usd_per_m" in entry:
@@ -97,6 +127,32 @@ def charge_credits(model_id: str, uncached_input: int, cache_read: int, output: 
     usd = (uncached_input * input_usd + cache_read * cache_usd + output * output_usd) / 1_000_000
     credits = math.ceil(usd * CREDITS_PER_USD * config.MODEL_PRICE_MARKUP)
     if credits < 1 and (uncached_input or cache_read or output):
+        credits = 1
+    return credits
+
+
+def charge_embedding_credits(model_id: str, input_tokens: int) -> int:
+    """Credits for one completed embeddings request. Input tokens only.
+
+    An embedding model has no output tokens and no prompt cache, so the chat
+    formula's other two terms are meaningless for it. Worse, `charge_credits`
+    resolves against the CHAT catalog, where these ids do not exist — it would
+    fall through to its "priciest entry" guard and bill a knowledge-base import
+    at the most expensive chat model's output rate. That is the failure this
+    function exists to prevent, so it must stay the only path for /v1/embeddings.
+    """
+    m = resolve_embedding(model_id)
+    if m is None:
+        # Same principle as chat: an id that slipped past the catalog check is
+        # billed at the priciest entry rather than free. Fall back to the chat
+        # catalog only if there are no embedding models at all.
+        pool = embedding_catalog() or catalog()
+        m = max(pool.values(), key=lambda x: _usd_per_m(x, "input"))
+    usd = input_tokens * _usd_per_m(m, "input") / 1_000_000
+    credits = math.ceil(usd * CREDITS_PER_USD * config.MODEL_PRICE_MARKUP)
+    # Upstream gives BGE-M3 away, and a lot of short chunks round to nothing —
+    # a request that did work still costs us a slot, so it costs at least one.
+    if credits < 1 and input_tokens:
         credits = 1
     return credits
 

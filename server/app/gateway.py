@@ -1,9 +1,12 @@
 """The LLM gateway. The upstream API key lives ONLY here, server-side.
 
-Two surfaces, matching exactly what dsh emits:
+The chat and Anthropic surfaces match exactly what dsh emits; /v1/embeddings
+is for the cloud workspaces' knowledge bases, which speak OpenAI too:
 
   POST /llm/v1/chat/completions   OpenAI-compatible chat completions (llm-deepseek
                                   adapter; always stream:true + include_usage)
+  POST /llm/v1/embeddings         OpenAI-compatible embeddings (knowledge bases in
+                                  the cloud workspaces: Coze / Dify / RAGFlow)
   POST /llm/anthropic/v1/messages Anthropic Messages (web-search-deepseek hits
                                   {base}/messages with x-api-key + anthropic-version)
   GET  /llm/v1/models             catalog listing (pi-ai discovery compatible)
@@ -241,6 +244,102 @@ async def chat_completions(request: Request, user: dict = Depends(resolve_user))
         media_type="text/event-stream",
         headers={"x-request-id": request_id, "cache-control": "no-cache"},
     )
+
+
+# --- OpenAI-compatible embeddings -------------------------------------------
+#
+# 知识库要向量化。Coze / Dify / RAGFlow 全都只会说 OpenAI 的这一支, 缺了它,
+# 用户得自己去第三方申请一把 key —— 而他已经在我们这里付过费了。
+#
+# 上游走的是同一个千面网关 (2026-08-29 实测 POST /v1/embeddings 通, 返回标准
+# OpenAI 形状 + usage.prompt_tokens)。**不直连百炼**: 隐私政策的服务商表里
+# 「阿里巴巴」是记在「经千面网关的上游」那一行的, 直连会新增一个直接接收方,
+# 中英双语政策都得改; 走千面一个字都不用动。
+
+
+@router.post("/v1/embeddings")
+async def embeddings(request: Request, user: dict = Depends(resolve_user)):
+    _require_upstream()
+    rejected = _admit(user)
+    if rejected is not None:
+        return rejected
+
+    try:
+        raw = await read_limited_body(
+            request,
+            max_bytes=config.GATEWAY_BODY_MAX_BYTES,
+            timeout_s=config.REQUEST_BODY_TIMEOUT_S,
+        )
+        body = json.loads(raw)
+    except json.JSONDecodeError:
+        return _openai_error(400, "invalid_request_error", "Body must be JSON.")
+    if not isinstance(body, dict):
+        return _openai_error(400, "invalid_request_error", "Body must be a JSON object.")
+
+    model_id = str(body.get("model", "")) or model_catalog.default_embedding_model()
+    entry = model_catalog.resolve_embedding(model_id)
+    if entry is None:
+        # 对话模型的 id 也走这条分支。放行的话上游会拿一个不会做向量的模型去做
+        # 向量, 而计费要么按最贵条目兜底、要么按对话价 —— 两种都是静默收错钱。
+        return _openai_error(
+            404,
+            "model_not_found",
+            f"Model '{model_id}' is not offered for embeddings. "
+            f"Available: {', '.join(model_catalog.embedding_catalog())}.",
+        )
+
+    text = body.get("input")
+    if text is None or (isinstance(text, (str, list)) and len(text) == 0):
+        return _openai_error(400, "invalid_request_error", "input is required.")
+    if body.get("dimensions") is not None and not entry.get("supports_dimensions"):
+        # 上游对这个会回 400 + 一句它自己的 "The parameter is invalid", 看不出是
+        # 哪个参数。悄悄把 dimensions 丢掉更糟: 客户端按自己要的维度建了集合,
+        # 拿回来的却是原生维度, 报错要等到写向量库那一刻。
+        return _openai_error(
+            400,
+            "invalid_request_error",
+            f"Model '{model_id}' does not accept 'dimensions'; it always returns "
+            f"{entry.get('dimensions')} dimensions.",
+        )
+
+    body["model"] = entry.get("upstream_model", model_id)
+    request_id = f"dhc-{uuid.uuid4().hex[:16]}"
+    headers = {
+        "authorization": f"Bearer {config.UPSTREAM_API_KEY}",
+        "content-type": "application/json",
+        "accept": "application/json",
+    }
+    url = config.UPSTREAM_BASE_URL.rstrip("/") + "/embeddings"
+
+    async with _upstream_client() as client:
+        with _Slot(user["id"]):
+            upstream = await client.post(url, json=body, headers=headers)
+    if upstream.status_code != 200:
+        # 上游报错的路径上一分不收 —— 与聊天、与生图同口径。
+        return _relay_upstream_error(upstream, request_id)
+
+    data = upstream.json()
+    usage = data.get("usage") or {}
+    tokens = usage.get("prompt_tokens")
+    if tokens is None:
+        tokens = usage.get("total_tokens")
+    if tokens is None:
+        # 上游漏了 usage 不能变成免单: 按送上去的 input 字节估, 与流式聊天断流时
+        # 同一个兜底系数。
+        sent = len(json.dumps(text, ensure_ascii=False).encode())
+        tokens = max(1, math.ceil(sent / STREAM_FALLBACK_BYTES_PER_TOKEN))
+    tokens = int(tokens)
+    amount = model_catalog.charge_embedding_credits(model_id, tokens)
+    credits.spend(
+        user["id"],
+        amount,
+        kind="embedding",
+        model=model_id,
+        device_id=user.get("device_id", ""),
+        uncached_input=tokens,
+        request_id=request_id,
+    )
+    return JSONResponse(content=data, headers={"x-request-id": request_id})
 
 
 def _relay_upstream_error(upstream: httpx.Response, request_id: str) -> JSONResponse:

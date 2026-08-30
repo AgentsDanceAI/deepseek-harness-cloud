@@ -1816,6 +1816,78 @@ def test_coze_wires_our_gateway_so_users_need_no_api_key(monkeypatch):
     assert leftovers == [], f"没换掉的占位符: {leftovers}"
 
 
+def test_coze_knowledge_base_embeds_through_our_gateway(monkeypatch):
+    """知识库的向量化也走我们的网关, 用户不用再去第三方申请一把 key。
+
+    三个值是**耦合**的, 而错配一个都不会在启动期报错:
+      - MODEL 必须在网关的向量化目录里, 否则每次向量化都 404, 错误显示在
+        Coze 的"知识库处理失败"里, 看不出是模型名的事;
+      - DIMS 必须是该模型的原生维度 —— Coze 拿它建向量集合, 对不上要等到写
+        Milvus 那一刻才炸;
+      - REQUEST_DIMS 为真时每次都带 dimensions, 而有的型号上游拒收 (400)。
+    """
+    from app import model_catalog
+
+    prod = _coze_ready(monkeypatch)
+    raw = dict(next(sc for sc in prod.sidecars if sc.name == "coze-server").env)
+    assert raw["EMBEDDING_TYPE"] == "openai"
+    assert raw["OPENAI_EMBEDDING_BASE_URL"].endswith("/llm/v1")
+    assert raw["OPENAI_EMBEDDING_API_KEY"] == products.GATEWAY_TOKEN_PLACEHOLDER
+
+    entry = model_catalog.resolve_embedding(raw["OPENAI_EMBEDDING_MODEL"])
+    assert entry is not None, "配给 Coze 的向量化模型不在网关目录里"
+    assert raw["OPENAI_EMBEDDING_DIMS"] == str(entry["dimensions"])
+    assert raw["OPENAI_EMBEDDING_REQUEST_DIMS"] == ("true" if entry["supports_dimensions"] else "false")
+
+
+def test_coze_never_asks_for_dimensions_a_model_refuses(monkeypatch):
+    """REQUEST_DIMS 得**跟着模型算**, 不能写死。
+
+    当前默认型号恰好接受 dimensions, 所以写死成 "true" 上面那条也照样绿 ——
+    只有拿一个拒收的型号当默认才验得出来。换默认模型是一行配置的事, 而错了的
+    表现是知识库整个不能用, 启动期一声不吭。
+    """
+    from app import model_catalog
+
+    picky = next(
+        (m for m in model_catalog.embedding_catalog().values() if not m["supports_dimensions"]), None
+    )
+    if picky is None:
+        pytest.skip("目录里当前没有拒收 dimensions 的型号")
+    monkeypatch.setattr(model_catalog, "default_embedding_model", lambda: picky["id"])
+    env = dict(products._coze_embedding_env("https://example.test"))
+    assert env["OPENAI_EMBEDDING_MODEL"] == picky["id"]
+    assert env["OPENAI_EMBEDDING_DIMS"] == str(picky["dimensions"])
+    assert env["OPENAI_EMBEDDING_REQUEST_DIMS"] == "false"
+
+
+def test_coze_dims_follow_the_model_not_a_constant(monkeypatch):
+    """DIMS 也得跟着模型算。上面那条钉不住它: 当前默认恰好是 1024 维, 写死成
+    1024 照样绿 —— 换个维度不同的型号才验得出来。填错的后果是 Coze 按 1024 建
+    好集合, 写入 2560 维的向量时才炸, 报错说的是"写入"。"""
+    from app import model_catalog
+
+    current = model_catalog.resolve_embedding(model_catalog.default_embedding_model())
+    other = next(
+        (m for m in model_catalog.embedding_catalog().values() if m["dimensions"] != current["dimensions"]),
+        None,
+    )
+    if other is None:
+        pytest.skip("目录里所有型号维度都一样")
+    monkeypatch.setattr(model_catalog, "default_embedding_model", lambda: other["id"])
+    env = dict(products._coze_embedding_env("https://example.test"))
+    assert env["OPENAI_EMBEDDING_DIMS"] == str(other["dimensions"])
+
+
+def test_coze_keeps_the_upstream_default_when_nothing_is_offered(monkeypatch):
+    """自建部署带着旧的 models.json 时目录是空的 —— 那就退回上游开箱的 ark,
+    而不是把 OPENAI_EMBEDDING_MODEL 配成空串 (那要到运行期才炸)。"""
+    from app import model_catalog
+
+    monkeypatch.setattr(model_catalog, "default_embedding_model", lambda: "")
+    assert dict(products._coze_embedding_env("https://example.test")) == {"EMBEDDING_TYPE": "ark"}
+
+
 def test_coze_plugin_aes_keys_are_16_bytes_and_per_user(monkeypatch):
     """插件 OAuth 令牌的 AES 密钥: 必须正好 16 字节, 且按用户走。
 
