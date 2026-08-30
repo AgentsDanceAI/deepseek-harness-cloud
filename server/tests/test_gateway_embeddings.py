@@ -24,7 +24,7 @@ os.environ.setdefault("UPSTREAM_API_KEY", "sk-upstream-test")
 import httpx  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
-from app import config, credits, db, gateway, model_catalog, plans  # noqa: E402
+from app import config, credits, db, gateway, model_catalog, plans, rate_limit  # noqa: E402
 from app.main import app  # noqa: E402
 
 from ._signup import signup  # noqa: E402
@@ -67,6 +67,10 @@ def _vec_response(prompt_tokens: int | None, n: int = 1) -> dict:
 def _pin_upstream(monkeypatch):
     monkeypatch.setattr(config, "UPSTREAM_API_KEY", "sk-upstream-test")
     monkeypatch.setattr(config, "UPSTREAM_BASE_URL", "https://api.qianmian.ai/v1")
+    # QPS 桶是**进程级**的, 而本模块所有用例共用一个账号 —— 攒到第 16 发就开始
+    # 撞 429, 于是"加一条用例"会让**另一条**用例红, 而错误看着与它毫无关系。
+    # 每个用例发一个新桶, 限流本身另有用例专管。
+    monkeypatch.setattr(gateway, "_qps", rate_limit.TokenBucket(config.GATEWAY_QPS, config.GATEWAY_QPS_BURST))
     _FakeUpstream.calls = []
 
 
@@ -245,6 +249,45 @@ def test_dimensions_passes_through_when_supported(monkeypatch, user):
     r = client.post(URL, json={"model": _default_id(), "input": "hi", "dimensions": 512})
     assert r.status_code == 200
     assert _FakeUpstream.calls[-1]["json"]["dimensions"] == 512
+
+
+def test_response_is_relayed_verbatim(monkeypatch, user):
+    """报文原样回, 不重新组装。
+
+    langchain / Dify 的 OpenAI 客户端**默认**发 encoding_format=base64, 拿回来的
+    `embedding` 是一个 base64 字符串而不是数组。任何"顺手规整一下响应"的改动都会
+    把它弄坏, 而坏法是客户端那边解出一堆乱数 —— 检索结果变差, 没有任何报错。
+    2026-08-29 线上实测过这条路是通的, 这里把它钉住。
+    """
+    client, _ = user
+    upstream = {
+        "object": "list",
+        "data": [{"object": "embedding", "index": 0, "embedding": "c29tZS1iYXNlNjQ="}],
+        "model": "Qwen/Qwen3-Embedding-0.6B",
+        "usage": {"prompt_tokens": 4, "total_tokens": 4},
+    }
+    _stub(monkeypatch, json_body=upstream)
+    r = client.post(URL, json={"input": "hi", "encoding_format": "base64"})
+    assert r.status_code == 200
+    assert r.json() == upstream
+    # 客户端要的编码必须原样送到上游, 否则它拿回数组、按 base64 去解。
+    assert _FakeUpstream.calls[-1]["json"]["encoding_format"] == "base64"
+
+
+def test_usage_falls_back_to_total_tokens(monkeypatch, user):
+    """有的型号只给 total_tokens 不给 prompt_tokens (线上 text-embedding-3-small
+    就是), 少了这一档就会走字节估算 —— 不是免单, 但账不准。"""
+    client, uid = user
+    _stub(
+        monkeypatch,
+        json_body={
+            "object": "list",
+            "data": [{"object": "embedding", "index": 0, "embedding": [0.1]}],
+            "usage": {"total_tokens": 777},
+        },
+    )
+    assert client.post(URL, json={"input": "hi"}).status_code == 200
+    assert _last_usage(uid)["uncached_input"] == 777
 
 
 @pytest.mark.parametrize("body", [{"input": ""}, {"input": []}, {}])
