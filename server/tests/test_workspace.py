@@ -1802,6 +1802,9 @@ def test_hermes_binds_loopback_so_there_is_no_second_login_wall(monkeypatch):
     assert "0.0.0.0" not in hm.args
     # 主容器是 nginx, 代理到同组的回环端口
     assert f"proxy_pass http://127.0.0.1:{products.HERMES_PORT}" in products.boot_script("hermes")
+    # 它有 Host 白名单: 只认绑定主机名或这里配的公开主机名, 别的一律 400
+    # `Invalid Host header` —— 而容器全 Running、日志还写着 READY, 看着一切正常。
+    assert dict(hm.env)["HERMES_DASHBOARD_PUBLIC_URL"] == "https://hermes.test.local"
 
 
 def test_hermes_keeps_its_entrypoint(monkeypatch):

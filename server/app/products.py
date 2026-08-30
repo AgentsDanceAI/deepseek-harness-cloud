@@ -1208,6 +1208,11 @@ def _hermes_stack() -> tuple[Sidecar, ...]:
             image_ref=config.HERMES_IMAGE_REF,
             args=("dashboard", "--host", "127.0.0.1", "--port", str(HERMES_PORT),
                   "--no-open", "--skip-build"),
+            # **必须告诉它公开域名**。它有 Host 白名单: 只认绑定的主机名或这里
+            # 配的公开主机名, 别的一律
+            # `400 {"detail":"Invalid Host header..."}` —— 而两个容器都 Running、
+            # 日志里还写着 HERMES_DASHBOARD_READY, 看着一切正常。
+            env=(("HERMES_DASHBOARD_PUBLIC_URL", f"https://{config.HERMES_DOMAIN}"),),
             mounts=(("hermes/data", "/opt/data"),),
             run_as_user=0,
         ),
