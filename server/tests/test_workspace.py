@@ -1768,6 +1768,57 @@ def test_openclaw_hidden_until_the_proxy_cidr_is_configured(monkeypatch):
     assert "openclaw" not in [p.id for p in products.enabled()]
 
 
+def test_hermes_binds_loopback_so_there_is_no_second_login_wall(monkeypatch):
+    """Hermes 绑**回环**, 由同组的 nginx 做那条隧道。
+
+    它自己的规矩: 非回环绑定强制要鉴权 (`--insecure` 从 2026-06 起是 no-op),
+    而它只有表单密码和 OAuth 两种 —— 都是第二道登录墙。文档给的建议正是
+    "绑 127.0.0.1 + 隧道", 而容器组共享网络命名空间, 主容器那个 nginx 就是隧道。
+    所以这不是绕开它的安全控制, 是按它推荐的姿势部署。
+    """
+    monkeypatch.setattr(config, "HERMES_DOMAIN", "hermes.test.local")
+    prod = products.registry()["hermes"]
+    assert prod.id in [p.id for p in products.enabled()]
+    hm = next(sc for sc in prod.sidecars if sc.name == "hermes")
+    assert "--host" in hm.args and "127.0.0.1" in hm.args, "绑了非回环就会冒出登录墙"
+    assert "0.0.0.0" not in hm.args
+    # 主容器是 nginx, 代理到同组的回环端口
+    assert f"proxy_pass http://127.0.0.1:{products.HERMES_PORT}" in products.boot_script("hermes")
+
+
+def test_hermes_keeps_its_entrypoint(monkeypatch):
+    """只传 args, 不覆盖 entrypoint。
+
+    它的 entrypoint 是 s6 监督树。顶掉之后脚本自己会在 stderr 抱怨一句
+    "supervised services are unavailable" 然后**照常跑** —— 进程在、端口不在,
+    表现是"起来了但什么都不工作"。
+    """
+    monkeypatch.setattr(config, "HERMES_DOMAIN", "hermes.test.local")
+    hm = next(sc for sc in products.registry()["hermes"].sidecars if sc.name == "hermes")
+    assert hm.cmd == (), "覆盖了 entrypoint -> s6 监督树不起 -> 服务全无"
+    assert hm.args[0] == "dashboard"
+
+
+def test_hermes_model_is_written_before_it_starts(monkeypatch):
+    """模型配置由初始化容器写, 而且用 `config set` 不整份重写。
+
+    config.yaml 里还有用户自己调的东西 (人格、技能、渠道), 重写等于抹掉。
+    令牌占位符必须在这里被换掉 —— 漏了会把字面量写进配置, 文件看着好好的,
+    一发消息就 401。
+    """
+    monkeypatch.setattr(config, "HERMES_DOMAIN", "hermes.test.local")
+    ics = products.registry()["hermes"].init_containers
+    assert len(ics) == 1
+    cmd = ics[0].cmd[-1]
+    assert "hermes config set model.base_url" in cmd
+    assert "hermes config set model.api_key" in cmd
+    assert "cat >" not in cmd and "config.yaml" not in cmd, "整份重写会抹掉用户自己的配置"
+    assert ("hermes/data", "/opt/data") in ics[0].mounts, "配置没写到 NAS 上 = 重建即失"
+    assert products.GATEWAY_TOKEN_PLACEHOLDER in cmd
+    done = products.resolve_init_containers(ics, "s" * 64, "tok_live")
+    assert "tok_live" in done[0].cmd[-1] and "__DSH_" not in done[0].cmd[-1]
+
+
 def test_open_design_points_dsh_at_our_gateway_not_the_deepseek_adapter():
     """Open Design 里的 dsh 必须走 pi-ai (openai-completions), 不是 llm-deepseek。
 

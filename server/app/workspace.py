@@ -238,7 +238,9 @@ async def _create(user: dict, product: products.Product) -> None:
         cpus=product.cpus,
         sidecars=sidecars,
         host_aliases=product.host_aliases,
-        init_containers=product.init_containers,
+        init_containers=products.resolve_init_containers(
+            product.init_containers, security.stack_secret(user["id"]), token
+        ),
         seeds=product.seeds,
         run_as_user=product.run_as_user,
     )

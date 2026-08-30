@@ -331,6 +331,13 @@ OPENCLAW_TAB_GRACE_MIN = _env_int("OPENCLAW_TAB_GRACE_MIN", 10)
 # 让这个产品不出现在目录里 (见 products.enabled), 而不是退回一个宽松值。
 # 与安全组里那条入站规则是同一个地址。
 WORK_PROXY_CIDR = _env("WORK_PROXY_CIDR", "")
+
+# Hermes Agent (Nous Research)。两容器: nginx 主容器 + hermes 伴随容器。
+HERMES_DOMAIN = _env("HERMES_DOMAIN", "")
+HERMES_IMAGE_REF = _env("HERMES_IMAGE_REF", "nousresearch/hermes-agent:v2026.8.27")
+HERMES_MEM_LIMIT_MB = _env_int("HERMES_MEM_LIMIT_MB", 4096)
+HERMES_CPUS = _env_float("HERMES_CPUS", 2.0)
+HERMES_TAB_GRACE_MIN = _env_int("HERMES_TAB_GRACE_MIN", 10)
 # 智能体最后一次调网关之后再等这么久。长任务必须能在关掉标签页之后接着跑完,
 # 所以这一条单独顶着, 与"有没有人在"无关。
 WORK_AGENT_IDLE_STOP_MIN = _env_int("WORK_AGENT_IDLE_STOP_MIN", 30)

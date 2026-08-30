@@ -74,7 +74,6 @@
   "apps.cat.media": "Image · Video",
   "apps.cat.whiteboard": "Whiteboard",
   "apps.count_live": "{live} of 16 live · more landing soon",
-  "apps.d.bolt-diy": "Describe an app, get a full-stack build you can tweak and deploy.",
   "apps.d.code-server": "Full VS Code in the browser — extensions, terminal, debugging included.",
   "apps.d.comfyui": "Node-graph canvas for image & video generation — Seedance, Wan and Qwen-Image ready to pick.",
   "apps.d.coze": "ByteDance's open-source agent platform: agents, knowledge bases, workflows and plugins — build and publish in one place.",
@@ -635,5 +634,6 @@
   "works.ports.port": "Port {port}",
   "works.ports.title": "Running services",
   "works.title": "My outputs — deepseek-harness-cloud",
-  "apps.d.openclaw": "A self-hosted always-on personal agent: one gateway across Telegram, Discord, Slack and dozens more — it reads your files and gets things done."
+  "apps.d.openclaw": "A self-hosted always-on personal agent: one gateway across Telegram, Discord, Slack and dozens more — it reads your files and gets things done.",
+  "apps.d.hermes": "Nous Research's always-on agent: persistent memory, and it writes each solved problem into a reusable skill — it gets better the longer it runs."
 }
