@@ -107,12 +107,16 @@ def try_resolve_user(request: Request, *, cookie_only: bool = False) -> dict | N
     """解析当前用户。
 
     cookie_only=True 时**只看会话 cookie**, 不看 Authorization / X-Api-Key。
-    这是给云空间那条 forward_auth 用的: 那里的请求是浏览器发给**产品**的,
-    而云空间里的产品往往自带 Authorization 头 —— Dify 的前端就是从 cookie 里
-    读出它自家的 JWT 再放进 Authorization 发出来。那个头会一路带进 forward_auth
-    的子请求, 我们拿它当 DSH 令牌验, 验不过就 302 去登录页, 于是**产品控制台的
-    每个请求都被我们弹回登录**, 而用户明明已经登录了、我们这边也一个错都不报。
-    2026-08-30 拆 Dify 登录墙时发现。
+    这是给云空间那条 forward_auth 用的: 那里的请求是浏览器发给**产品**的, 而
+    产品可能自带 Authorization 头。这个函数是"哪个来源先有值就只用它" —— 见到
+    Bearer 就再也不看 cookie, 于是拿别人的令牌当 DSH 令牌验, 验不过就 302 去
+    登录页, 表现是**产品控制台每个请求都被我们弹回登录**, 而用户明明已经登录、
+    我们这边也一个错都不报。
+
+    更正 (2026-08-30): 提这条改动时以为 Dify 正踩在上面, 实测**不是** —— Dify
+    的 access_token 是 HttpOnly, 前端读不到, 它走的是 cookie + X-CSRF-Token,
+    并不发 Authorization。那个头只出现在我手工构造的请求里。所以这条是**防御性**
+    的, 当时并没有修复线上故障; 但语义本身是对的: 这两条路认的是浏览器。
     """
     token = ""
     from_cookie = False

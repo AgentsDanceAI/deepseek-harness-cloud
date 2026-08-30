@@ -230,7 +230,7 @@ async def _create(user: dict, product: products.Product) -> None:
     await backend().create(
         products.wskey(user["id"], product.id),
         boot=boot,
-        env=products.env_for(product.id, token),
+        env=products.env_for(product.id, token, security.stack_secret(user["id"])),
         boot_fp=_boot_fingerprint(boot),
         image=product.image,
         image_ref=product.image_ref,
@@ -902,8 +902,8 @@ async def work_route(request: Request):
         return JSONResponse(status_code=404, content={"detail": "work_disabled"})
     product = _product_of(request)
     # cookie_only: 这两条都跑在**产品域**上, 认的是浏览器, 不是产品自己带的
-    # Authorization 头 —— 认错了会把整个产品控制台弹回登录页, 而且一个错都不报。
-    # 见 accounts.try_resolve_user 的说明。
+    # Authorization 头。见 accounts.try_resolve_user (含一条更正: 这是防御性的,
+    # Dify 实际并不发那个头)。
     user = try_resolve_user(request, cookie_only=True)
     site = config.PUBLIC_BASE.rstrip("/")
     if user is None:
@@ -980,8 +980,8 @@ async def work_shell(request: Request):
         return JSONResponse(status_code=404, content={"detail": "work_disabled"})
     product = _product_of(request)
     # cookie_only: 这两条都跑在**产品域**上, 认的是浏览器, 不是产品自己带的
-    # Authorization 头 —— 认错了会把整个产品控制台弹回登录页, 而且一个错都不报。
-    # 见 accounts.try_resolve_user 的说明。
+    # Authorization 头。见 accounts.try_resolve_user (含一条更正: 这是防御性的,
+    # Dify 实际并不发那个头)。
     user = try_resolve_user(request, cookie_only=True)
     site = config.PUBLIC_BASE.rstrip("/")
     if user is None:
