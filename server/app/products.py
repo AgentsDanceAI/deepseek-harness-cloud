@@ -111,6 +111,21 @@ class Product:
     mem_mb: int
     cpus: float
     domain: str  # 这个产品的工作台域名; 留空 = 该产品未启用
+    # 探活打哪个路径 (见 workspace._ready)。默认首页就够: 单容器产品的端口一通,
+    # 就是应用本身在应答。
+    #
+    # **前置 nginx + 独立后端的栈产品必须改掉**。那种形态下首页答的是前端 (静态
+    # 资源或 SSR), 而前端起得比后端早得多 —— 首页早早回 200, 应用却是坏的。判据
+    # 只看状态码, 分不出"应用好了"和"前端把自己的错误页渲染出来了"。
+    #
+    # 2026-08-30 Dify 事故: api 要先跑完数据库迁移才 bind 5001 (约 75 秒), 而
+    # nginx 和 Next.js 几秒就起来。用户在 api 就绪前 44 秒被放进去, 吃到 Dify 的
+    # React 错误边界「渲染此组件时发生了意外错误。」—— SSR 的错误页 **HTTP 仍然
+    # 是 200**, 旧探针一路绿灯。而且不自愈: 后端 44 秒后好了, 那张已经渲染出来的
+    # 页面还是坏的, 只能用户自己刷新。
+    #
+    # 指到一条**代理去后端**的路径, 后端没起来时 nginx 给 502, 判据自然做对。
+    ready_path: str = "/"
     # 前端会不会主动上报「人还在」(dsh 调 /api/work/active)。False 表示没有
     # 上报器, 回收器改用请求流量当在场信号 —— 否则容器起来十分钟就被当成
     # 空闲杀掉, 不管人在不在用。见 workspace.reaper_tick。
@@ -1137,6 +1152,14 @@ def _openclaw_boot() -> str:
                 "controlUi": {
                     "enabled": True,
                     "allowedOrigins": [f"https://{config.OPENCLAW_DOMAIN}"],
+                    # 设备配对与"严格浏览器鉴权"都关掉。它们防的是"网关直接暴露
+                    # 在公网、任意浏览器都能连"的场景 —— 而我们的实例入站只放行
+                    # 应用机那一个 /32, 前面还压着自家的 forward_auth, 身份也已经
+                    # 由 trusted-proxy 给定。留着它们只会变成第二道墙: 配对那道会
+                    # 让用户去主机上跑 `openclaw devices approve <id>`, 而他既没有
+                    # 主机也不该有。
+                    "dangerouslyDisableDeviceAuth": True,
+                    "allowInsecureAuth": True,
                 },
             },
             "models": {
@@ -1288,6 +1311,10 @@ def registry() -> dict[str, Product]:
             domain=config.DIFY_DOMAIN,
             reports_presence=False,
             tab_grace_min=config.DIFY_TAB_GRACE_MIN,
+            # 首页 (/) 答的是 Next.js, 它比 api 早起来一分多钟, 而且 api 没起来时
+            # 它把错误边界渲染出来照样回 200 —— 拿它探活等于没探。这条路径
+            # proxy_pass 去 api:5001 (见 _dify_boot), api 没起来时 nginx 给 502。
+            ready_path="/console/api/system-features",
             sidecars=_dify_stack(),
             # 栈内互相用回环, 这里只兜住万一漏改的服务名引用。
             host_aliases=("api", "api_websocket", "web", "db_postgres", "redis",

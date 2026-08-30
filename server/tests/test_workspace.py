@@ -1769,6 +1769,10 @@ def test_openclaw_allows_its_own_origin(monkeypatch):
     boot = products.boot_script("openclaw")
     assert '"https://claw.test.local"' in boot
     assert "allowedOrigins" in boot
+    # 设备配对那道也得关: 它会让用户去主机上跑 `openclaw devices approve <id>`,
+    # 而他既没有主机也不该有 —— 那是第三道墙, 长得同样不像登录墙。
+    assert '"dangerouslydisabledeviceauth": true' in boot.lower()
+    assert '"allowinsecureauth": true' in boot.lower()
 
 
 def test_openclaw_hidden_until_the_proxy_cidr_is_configured(monkeypatch):
@@ -2500,3 +2504,63 @@ def test_readiness_accepts_any_answer_not_only_200(monkeypatch):
         seen["code"] = code
         got = loop.run_until_complete(workspace._ready("k", prod))
         assert got is want, f"HTTP {code} 应当判为 {'就绪' if want else '未就绪'}"
+
+
+def test_readiness_probes_the_product_ready_path(monkeypatch):
+    """探针打产品自己那条路径, 不是一律打首页。
+
+    栈产品的首页答的是**前端**, 而前端比后端早起来得多 —— 拿首页当判据只探到
+    门脸。2026-08-30 事故: Dify 的 api 还在跑数据库迁移 (约 75 秒), 首页那个
+    Next.js 早就回 200 了, 于是用户在 api 就绪前 44 秒被放进去, 看到的是 Dify
+    自己的 React 错误边界。
+    """
+    import httpx
+
+    urls = []
+
+    class _Resp:
+        status_code = 200
+
+    def fake_client(*_a, **_kw):
+        class _C:
+            async def __aenter__(self_inner):
+                return self_inner
+
+            async def __aexit__(self_inner, *_):
+                return False
+
+            async def get(self_inner, url, headers=None):
+                urls.append(url)
+                return _Resp()
+
+        return _C()
+
+    monkeypatch.setattr(httpx, "AsyncClient", fake_client)
+    loop = asyncio.get_event_loop_policy().new_event_loop()
+    reg = products.registry()
+
+    loop.run_until_complete(workspace._ready("k", reg["dify"]))
+    assert urls[-1].endswith(reg["dify"].ready_path), urls[-1]
+
+    # 单容器产品仍旧打首页: 端口一通就是应用本身在应答, 没有"门脸"这一层。
+    loop.run_until_complete(workspace._ready("k", reg[products.DEFAULT]))
+    assert urls[-1].endswith("/"), urls[-1]
+
+
+def test_dify_ready_path_lands_on_the_api_upstream():
+    """Dify 的 ready_path 必须落在**转发去 api** 的那条 location 上。
+
+    这是一对跨文件的改动: 探活路径写在 registry(), 而它转发去哪个上游写在
+    _dify_boot() 生成的 nginx 配置里。两处不一致不报错, 只是探针又探回了
+    Next.js —— 事故原样复现, 而且照样一路绿灯。按 nginx 的最长前缀匹配钉住。
+    """
+    import re
+
+    prod = products.registry()["dify"]
+    conf = products.boot_script("dify")
+    locs = re.findall(r"location\s+(/\S*)\s*\{\s*proxy_pass\s+http://127\.0\.0\.1:(\d+);", conf)
+    assert locs, "没解析出 location —— nginx 配置的写法变了, 这个测试要跟着改"
+    matched = [loc for loc in locs if prod.ready_path.startswith(loc[0])]
+    assert matched, f"ready_path {prod.ready_path} 不落在任何 location 上"
+    path, port = max(matched, key=lambda loc: len(loc[0]))
+    assert port == "5001", f"ready_path 命中的是 location {path} -> {port}, 不是 api(5001)"
