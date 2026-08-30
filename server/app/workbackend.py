@@ -537,8 +537,9 @@ class EciBackend(Backend):
             "EipBandwidth": config.ECI_EIP_BANDWIDTH,
             "Container.1.Name": "app",
             "Container.1.Image": image_ref or image,
-            **({"Container.1.SecurityContext.RunAsUser": str(run_as_user)}
-               if run_as_user is not None else {}),
+            **(
+                {"Container.1.SecurityContext.RunAsUser": str(run_as_user)} if run_as_user is not None else {}
+            ),
             "Container.1.WorkingDir": "/workspace",
             "Container.1.Command.1": "sh",
             "Container.1.Arg.1": "-c",
