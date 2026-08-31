@@ -1786,20 +1786,22 @@ def test_openclaw_hidden_until_the_proxy_cidr_is_configured(monkeypatch):
     assert "openclaw" not in [p.id for p in products.enabled()]
 
 
-def test_hermes_binds_loopback_so_there_is_no_second_login_wall(monkeypatch):
-    """Hermes 绑**回环**, 由同组的 nginx 做那条隧道。
+def test_hermes_keeps_its_auth_on_and_we_carry_the_credential(monkeypatch):
+    """Hermes 绑 0.0.0.0 并**开着它自己的鉴权**, 凭据由工作台代持。
 
-    它自己的规矩: 非回环绑定强制要鉴权 (`--insecure` 从 2026-06 起是 no-op),
-    而它只有表单密码和 OAuth 两种 —— 都是第二道登录墙。文档给的建议正是
-    "绑 127.0.0.1 + 隧道", 而容器组共享网络命名空间, 主容器那个 nginx 就是隧道。
-    所以这不是绕开它的安全控制, 是按它推荐的姿势部署。
+    走过一次弯路: 先前绑回环想省掉鉴权 (它文档确实建议"绑 127.0.0.1 + 隧道",
+    而同组的 nginx 就是隧道)。页面确实能开, 但**它的 /api/* 在回环模式下不认
+    会话** —— 直连登录拿到 cookie 再用照样 401, SPA 停在未登录态。
+    实测同一套流程在 0.0.0.0 + basic auth 下: 登录 200, /api/auth/me 与
+    /api/profiles 全 200。
     """
     monkeypatch.setattr(config, "HERMES_DOMAIN", "hermes.test.local")
     prod = products.registry()["hermes"]
     assert prod.id in [p.id for p in products.enabled()]
     hm = next(sc for sc in prod.sidecars if sc.name == "hermes")
-    assert "--host" in hm.args and "127.0.0.1" in hm.args, "绑了非回环就会冒出登录墙"
-    assert "0.0.0.0" not in hm.args
+    assert "0.0.0.0" in hm.args, "绑回环的话它的 API 不认会话, 页面开着也用不了"
+    # 鉴权开着 —— 我们没绕开它的控制, 只是替用户拿着凭据
+    assert dict(hm.env)["HERMES_DASHBOARD_BASIC_AUTH_USERNAME"] == "owner"
     # 主容器是 nginx, 代理到同组的回环端口
     assert f"proxy_pass http://127.0.0.1:{products.HERMES_PORT}" in products.boot_script("hermes")
     # 它有 Host 白名单, 只认**绑定的**主机名; 送真实域名过去就是每一发 400

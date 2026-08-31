@@ -1267,14 +1267,17 @@ log "登不上, 放弃"
 
 
 def _hermes_stack() -> tuple[Sidecar, ...]:
-    """Hermes 本体作为伴随容器, **绑回环**。
+    """Hermes 本体作为伴随容器, 绑 0.0.0.0 并**开着它自己的鉴权**。
 
-    它自己的规矩: 非回环绑定强制要鉴权 (`--insecure` 从 2026-06 起是 no-op),
-    而它没有 OpenClaw 那种 trusted-proxy 模式, 只有表单密码或 OAuth —— 两条都
-    是第二道登录墙。文档给的建议是"绑 127.0.0.1 + 隧道"。
-    容器组共享网络命名空间, 所以**主容器那个 nginx 就是那条隧道**: Hermes 绑
-    回环 (于是免鉴权, 完全按它自己推荐的姿势), 只有同组的 nginx 够得着, 而
-    nginx 前面是我们的 forward_auth。既没绕开它的安全控制, 也没有第二道墙。
+    绕过一次弯路, 记下来: 先前想绑回环省掉鉴权 (它文档确实建议"绑 127.0.0.1
+    + 隧道"), 而组内共享网络命名空间, 主容器那个 nginx 就是隧道。页面确实能开,
+    但**它的 /api/* 在回环模式下不认会话** —— 直连登录拿到 cookie 再用, 照样
+    401, 于是 SPA 停在未登录态。实测过: 同一套流程在 0.0.0.0 + basic auth 下
+    登录 200、/api/auth/me 与 /api/profiles 全 200。
+
+    所以走这条: 鉴权**开着** (它的规矩完全满足, 我们没绕开任何控制), 凭据由
+    工作台代持 —— 主容器登一次再把会话补发给浏览器 (见 _HERMES_AUTOLOGIN),
+    用户看不到登录框。这也和 Dify/Coze 是同一套做法。
 
     **不覆盖 entrypoint, 只传 args**: 它的 entrypoint 是 s6 监督树, 顶掉之后
     脚本自己会在 stderr 抱怨一句"supervised services are unavailable"然后照常
@@ -1284,7 +1287,7 @@ def _hermes_stack() -> tuple[Sidecar, ...]:
         Sidecar(
             name="hermes",
             image_ref=config.HERMES_IMAGE_REF,
-            args=("dashboard", "--host", "127.0.0.1", "--port", str(HERMES_PORT),
+            args=("dashboard", "--host", "0.0.0.0", "--port", str(HERMES_PORT),
                   "--no-open", "--skip-build"),
             # **不要设 HERMES_DASHBOARD_PUBLIC_URL**。它和鉴权是绑死的:
             # 一旦配了外部公开 URL, 它就要求必须有鉴权提供方, 否则直接拒绝启动
