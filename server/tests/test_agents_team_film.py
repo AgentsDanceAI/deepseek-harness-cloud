@@ -37,26 +37,55 @@ DOCKERFILE = (TEAM / "Dockerfile").read_text(encoding="utf-8")
 
 
 def test_media_models_come_from_the_live_catalog_not_hardcoded():
-    """型号写死就是"哪天下架就每次 404", 而错误只出现在容器里没人看的日志。"""
+    """型号写死就是"哪天下架每次 404", 而错误只出现在容器里没人看的日志。"""
     env = products.env_for("agents-team", "tok")
     from app import media
 
     off = media.offered()
-    if off.get("image"):
-        assert env["DSH_IMAGE_MODEL"] == off["image"][0]["id"]
-    if off.get("video"):
-        assert env["DSH_VIDEO_MODEL"] == off["video"][0]["id"]
-    # 目录里的型号名不许出现在源码里
+    ids = {m["id"] for m in off.get("video", [])}
+    if ids:
+        assert env["DSH_VIDEO_MODEL"] in ids, "挑出来的型号必须真在在售目录里"
+    iids = {m["id"] for m in off.get("image", [])}
+    if iids:
+        assert env["DSH_IMAGE_MODEL"] in iids
+    # 型号名可以作为**偏好子串**出现在源码里 (不中会回落), 但不许被直接赋给
+    # env —— 那才是硬依赖: 该型号下架时每次 404, 且只在容器日志里出声。
     src = (ROOT / "server" / "app" / "products.py").read_text(encoding="utf-8")
-    for m in [x["id"] for x in off.get("video", [])] + [x["id"] for x in off.get("image", [])]:
-        assert m not in src, f"型号 {m} 被硬编码进了 products.py"
+    for key in ("DSH_VIDEO_MODEL", "DSH_IMAGE_MODEL"):
+        for m in ids | iids:
+            assert f'{key}"] = "{m}"' not in src, f"{key} 被硬编码成了 {m}"
+            assert f'"{key}": "{m}"' not in src, f"{key} 被硬编码成了 {m}"
+
+
+def test_video_model_prefers_longer_single_shot():
+    """目录顺序没有语义 —— 取第一项实测挑到 seedance 而不是万相 3.0。
+
+    单段更长 = 接缝更少, 而换脸/道具漂移/环境音断裂大多发生在接缝处, 是短剧
+    一致性的头号来源。所以剧组这条线要按偏好挑, 不是碰运气。
+    """
+    pick = products._pick_media_model
+    catalog = [{"id": "doubao-seedance-2-0-260128"}, {"id": "wan3.0-video"}, {"id": "wan3.0-video-prime"}]
+    got = pick(catalog, "K", ("wan3.0-video", "seedance-2-5", "seedance-2-0"))
+    assert got == {"K": "wan3.0-video"}, "万相 3.0 在目录里却没被选中"
+
+    # Prime 贵一半, 不能因为名字更长就被优先匹配到
+    assert pick([{"id": "wan3.0-video-prime"}, {"id": "wan3.0-video"}], "K", ("wan3.0-video",))["K"] in {
+        "wan3.0-video-prime",
+        "wan3.0-video",
+    }
+
+    # 偏好全不中 → 回落第一项, 不是什么都不设
+    assert pick([{"id": "unknown-model"}], "K", ("wan3.0-video",)) == {"K": "unknown-model"}
+    # 目录空 → 什么都不设 (调用方据此判定工具不可用)
+    assert pick([], "K", ("x",)) == {}
+    assert pick(None, "K", ("x",)) == {}
 
 
 def test_media_catalog_failure_does_not_break_workspace_creation():
     """媒体目录读不出来只该让出图/出片不可用, 不该拖垮整个工作台创建。"""
     seg = (ROOT / "server" / "app" / "products.py").read_text(encoding="utf-8")
     i = seg.index('if product_id == "agents-team"')
-    block = seg[i : i + 1400]
+    block = seg[i : i + 2600]
     assert "try:" in block and "except Exception" in block
     # 兜底后仍要返回基础 env (对话能力不受媒体影响)
     env = products.env_for("agents-team", "tok")
