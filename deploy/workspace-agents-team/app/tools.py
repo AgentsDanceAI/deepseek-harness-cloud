@@ -19,11 +19,11 @@ import pathlib
 
 #: 工作目录。与 products.py 里的 mounts 一致 —— 改一处必须改另一处,
 #: 不然用户的文件写进容器本地, 实例一回收就没了 (而且不报错)。
-WORKDIR = pathlib.Path(os.environ.get("OPERATOR_WORKDIR", "/workspace"))
+WORKDIR = pathlib.Path(os.environ.get("AGENTS_TEAM_WORKDIR", "/workspace"))
 
 #: 单次 shell 的墙钟上限。超时不是失败, 是**把已有输出还给模型**让它自己决定 ——
 #: 直接报错会让"跑一个长任务"这种正常用法变成死路。
-SHELL_TIMEOUT_S = float(os.environ.get("OPERATOR_SHELL_TIMEOUT", "120"))
+SHELL_TIMEOUT_S = float(os.environ.get("AGENTS_TEAM_SHELL_TIMEOUT", "120"))
 
 #: 回给模型的输出上限。超了从**中间**截断而不是砍尾巴: 命令的结论通常在最后几行
 #: (报错、退出码、汇总), 砍尾巴等于把最有用的部分丢掉。
@@ -117,7 +117,7 @@ async def screenshot(display: str | None = None) -> tuple[str, str]:
     env_display = display or os.environ.get("DISPLAY", "")
     if not env_display:
         return "这个工作台没有图形桌面, 截图不可用。", "截图 (无桌面)"
-    out = WORKDIR / ".operator-shot.png"
+    out = WORKDIR / ".agents-team-shot.png"
     proc = await asyncio.create_subprocess_exec(
         "scrot",
         "-o",

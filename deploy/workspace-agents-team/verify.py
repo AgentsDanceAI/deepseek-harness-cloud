@@ -1,6 +1,6 @@
 """Operator 自检: 假造网关, 把单个机器人的一轮和一个群的并行一轮都真跑一遍。
 
-跑法: python deploy/workspace-operator/verify.py
+跑法: python deploy/workspace-agents-team/verify.py
 
 钉两件最容易悄悄坏掉的事:
 1. **流式工具调用按 index 归位**。按到达顺序拼的实现会把 A 的参数接到 B 上, 而拼出来
@@ -22,12 +22,12 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import httpx
 from app import agent, tools
 
-_tmp = pathlib.Path(tempfile.mkdtemp(prefix="operator-verify-"))
+_tmp = pathlib.Path(tempfile.mkdtemp(prefix="agents-team-verify-"))
 tools.WORKDIR = _tmp
 
 from app import rooms
 
-rooms.STATE_PATH = _tmp / ".operator" / "rooms.json"
+rooms.STATE_PATH = _tmp / ".agents-team" / "rooms.json"
 
 FAILS: list[str] = []
 
@@ -67,7 +67,7 @@ ROUND1 = sse(
         frag(1, cid="b", name="write_file"),
         frag(0, args='{"comm'),
         frag(1, args='{"path": "note.txt", "cont'),
-        frag(0, args='and": "echo hello-from-operator"}'),
+        frag(0, args='and": "echo hello-from-team"}'),
         frag(1, args='ent": "written"}'),
     ]
 )
@@ -98,7 +98,7 @@ async def check_single() -> None:
 
     by = {e["name"]: e["args"] for e in events if e["type"] == "tool"}
     check(
-        by.get("shell", {}).get("command") == "echo hello-from-operator",
+        by.get("shell", {}).get("command") == "echo hello-from-team",
         f"shell 参数拼错: {by.get('shell')}",
     )
     check(

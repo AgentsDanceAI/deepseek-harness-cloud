@@ -2754,28 +2754,28 @@ def test_coze_preconfigures_the_whole_catalog_as_yaml():
     assert env["BUILTIN_CM_OPENAI_MODEL"] == model_catalog.default_model()
 
 
-def test_operator_probes_its_api_not_its_index_page():
+def test_agents_team_probes_its_api_not_its_index_page():
     """Operator 的就绪探针要打 /api/health。
 
     它前端和 API 在同一个端口上, 首页是 FastAPI 直接返回的静态文件 —— 后端逻辑
     没起来它照样 200。拿首页当判据就是 Dify/Coze 那个洞的第三次 (见 ready_path
     字段的说明), 只不过这次是我们自己写的应用, 更没有借口。
     """
-    prod = products.registry()["operator"]
+    prod = products.registry()["agents-team"]
     assert prod.ready_path == "/api/health"
-    boot = products.boot_script("operator")
+    boot = products.boot_script("agents-team")
     # 端口是**一对**: 产品定义里写进 X-Work-Upstream, 启动脚本里给 uvicorn。
     # 两处不一致不会报错, 只是反代打到一个没人听的端口上, 表现是一直 502。
     assert f"--port {prod.port}" in boot, f"启动脚本的端口与 product.port({prod.port}) 对不上"
 
 
-def test_operator_gets_gateway_credentials_and_the_whole_catalog():
+def test_agents_team_gets_gateway_credentials_and_the_whole_catalog():
     """Operator 靠 env 拿网关凭据和模型列表, 没有别的来源。
 
     少了任何一个的表现都是"能打开、一说话就报错", 而错误显示在对话里,
     看不出是接线的问题。
     """
-    env = products.env_for("operator", "tok_live", "s" * 64)
+    env = products.env_for("agents-team", "tok_live", "s" * 64)
     assert env["DSH_CLOUD_TOKEN"] == "tok_live"
     assert "__DSH_" not in env["DSH_CLOUD_TOKEN"], "占位符没换 = 运行期 401"
     assert env["DSH_GATEWAY_BASE"].endswith("/llm/v1")

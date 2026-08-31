@@ -1,6 +1,6 @@
 """本地预览: 一个进程里同时跑 Operator 和一个假网关。
 
-跑法: python deploy/workspace-operator/dev_preview.py   -> http://127.0.0.1:8710
+跑法: python deploy/workspace-agents-team/dev_preview.py   -> http://127.0.0.1:8710
 
 假网关按成员给不同回答, 而且**故意让两个成员一快一慢** —— 界面上要看得出它们是
 同时在说, 而不是排队。只为看界面用, 不进镜像。
@@ -19,11 +19,11 @@ HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
 PORT = 8710
-_work = pathlib.Path(tempfile.mkdtemp(prefix="operator-dev-"))
+_work = pathlib.Path(tempfile.mkdtemp(prefix="agents-team-dev-"))
 # env 必须在 import app 之前设好 —— agent 在导入时就读它们。
 os.environ.update(
     {
-        "OPERATOR_WORKDIR": str(_work),
+        "AGENTS_TEAM_WORKDIR": str(_work),
         "DSH_GATEWAY_BASE": f"http://127.0.0.1:{PORT}/stub/llm/v1",
         "DSH_CLOUD_TOKEN": "dev-token",
         "DSH_DEFAULT_MODEL": "deepseek-v4-flash",
@@ -31,7 +31,7 @@ os.environ.update(
     }
 )
 
-from app.main import app as operator_app
+from app.main import app as team_app
 from fastapi import FastAPI, Request
 from fastapi.responses import StreamingResponse
 
@@ -112,7 +112,7 @@ async def stub(request: Request) -> StreamingResponse:
     return StreamingResponse(gen(), media_type="text/event-stream")
 
 
-root.mount("/", operator_app)
+root.mount("/", team_app)
 
 if __name__ == "__main__":
     import uvicorn

@@ -1,7 +1,7 @@
-# DSH Operator 云工作台镜像。
+# Agents Team 云工作台镜像。
 #
 # 是什么: 一个会**动手**的智能体 —— 在用户自己的容器里跑命令、读写文件、访问网络,
-# 前端是我们自己写的聊天界面 (deploy/workspace-operator/web)。与 codecli 那条线的
+# 前端是我们自己写的聊天界面 (deploy/workspace-agents-team/web)。与 codecli 那条线的
 # 区别: 那边给的是编辑器 + 几个 CLI, 用户自己敲; 这边是交代一件事, 它自己做完。
 #
 # 没有账号体系, 也不该有 —— 域前面压着我们的 forward_auth (见 app/main.py 开头)。
@@ -40,15 +40,15 @@ RUN pip install --no-cache-dir \
       "uvicorn[standard]==${UVICORN_VERSION}" \
       "httpx==${HTTPX_VERSION}"
 
-WORKDIR /opt/operator
-COPY app/ /opt/operator/app/
-COPY web/ /opt/operator/web/
+WORKDIR /opt/agents-team
+COPY app/ /opt/agents-team/app/
+COPY web/ /opt/agents-team/web/
 
 # 工作目录挂 NAS (products.py 的 mounts)。先建出来, 免得首轮 shell 落在一个
 # 不存在的 cwd 上 —— 那会让第一条命令莫名其妙失败。
 RUN mkdir -p /workspace
 
-ENV OPERATOR_WORKDIR=/workspace \
+ENV AGENTS_TEAM_WORKDIR=/workspace \
     PYTHONUNBUFFERED=1
 
 EXPOSE 8710
