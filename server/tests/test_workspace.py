@@ -2296,22 +2296,62 @@ def test_dify_preinstalls_a_model_provider(monkeypatch):
     assert env["DSH_DEFAULT_MODEL"] == model_catalog.default_model()
 
 
-def test_dify_only_preconfigures_one_model_of_each_kind():
-    """只预置默认的那一个 chat 模型 + 一个向量化模型, 不是整份目录。
+def test_dify_preconfigures_the_whole_catalog():
+    """在售模型全部预置 (2026-08-31 老板定), 不再只配默认那一个。
 
-    每加一个模型 Dify 都会真打一次上游做校验, 也就是**真扣一次积分**。二十个
-    模型全配等于每次首次进入白烧二十次, 而用户想要别的在界面上点两下就能加。
+    此前只配两个, 理由是新建凭据会真打一次上游校验、真扣一次积分。改了之后代价
+    仍在但是**一次性**的 (凭据落 NAS 上的 Postgres, 刷新用的 PUT 不校验), 换来
+    用户开箱就能选到我们卖的每一个模型。
     """
     sh = products._DIFY_AUTOLOGIN
-    # 每写一次凭据 Dify 都会真打一次上游校验 = 真扣一次积分
-    assert sh.count('ensure_model "$DSH_') == 2, "配的模型不止两个 —— 每个都要扣一次积分"
+    # 默认那两个单独先配 —— 重试等的是"插件运行时加载完", 那是供应商一次性的状态
     assert 'ensure_model "$DSH_DEFAULT_MODEL" llm' in sh
     assert 'ensure_model "$DSH_EMBEDDING_MODEL" text-embedding' in sh
+    # 其余的照列表循环
+    assert "for M in $DSH_MODELS" in sh
+    assert "for M in $DSH_EMBEDDING_MODELS" in sh
     # 目录里没有向量化模型时要跳过, 而不是配个空的进去 (那会让知识库在运行期才炸)
     assert '[ -n "$DSH_EMBEDDING_MODEL" ] || EMB_OK=yes' in sh
-    # 两类各自判"有没有已存凭据", 各自建或刷 —— 只看 llm 的话, 已经配了聊天模型
-    # 的老实例永远补不上向量化模型
-    assert sh.count("CID=$(cred_id") == 1 and "ensure_model" in sh
+
+
+def test_dify_sets_workspace_default_only_for_the_default_model():
+    """只有默认模型能设工作区默认模型。
+
+    早先版本每建一个新模型就设一次默认 —— 那时只配一个模型, 这个 bug 看不出来。
+    一旦循环预置二十个, 默认会被**最后一个建成的**顶掉, 而那是按目录顺序排的随便
+    哪一个 (目录按倍率排, 最后一个是最贵的那个)。用户打开 Dify 发现默认模型是
+    claude-fable-5, 每问一句烧五倍积分, 而没有任何东西提示他。
+    """
+    sh = products._DIFY_AUTOLOGIN
+    assert '[ "$4" = default ]' in sh, "设默认这一步必须按模型区分"
+    # 设默认只出现一次, 且在那道判断之后
+    assert sh.count("default-model") == 1
+    guard = sh.index('[ "$4" = default ]')
+    assert guard < sh.index("default-model"), "设默认没有被那道判断挡住"
+    # 循环里配其余模型时不带第四个参数 = 不设默认
+    assert 'ensure_model "$M" llm "$(llm_creds)"' in sh
+    assert 'ensure_model "$M" text-embedding "$(emb_creds)"' in sh
+
+
+def test_dify_model_lists_cover_the_catalog_and_are_shell_safe():
+    """下发给容器的模型列表 = 整份目录, 且能被 sh 正确分词。
+
+    脚本里是 `for M in $DSH_MODELS` —— sh 按空白分词, 所以 id 里但凡有空白就会被
+    拆成两个不存在的模型: 日志里两条莫名其妙的失败, 而真正那个模型没配上。
+    """
+    env = products.env_for("dify", "tok_x", "s" * 64)
+    chat = env["DSH_MODELS"].split()
+    emb = env["DSH_EMBEDDING_MODELS"].split()
+
+    assert set(chat) == set(model_catalog.catalog()), "chat 模型没覆盖整份目录"
+    assert set(emb) == set(model_catalog.embedding_catalog()), "向量化模型没覆盖整份目录"
+    # 默认那两个也在列表里 —— provision() 靠 id 相等来跳过它们, 不在里面就说明
+    # 跳过那一步比的是两个不同的东西
+    assert env["DSH_DEFAULT_MODEL"] in chat
+    assert env["DSH_EMBEDDING_MODEL"] in emb
+    # 分词安全: 拼起来再拆一次, 个数必须对得上
+    assert len(chat) == len(model_catalog.catalog())
+    assert len(emb) == len(model_catalog.embedding_catalog())
 
 
 def test_dify_autologin_backs_off_instead_of_locking_the_account(monkeypatch):

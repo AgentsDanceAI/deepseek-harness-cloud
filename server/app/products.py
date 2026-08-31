@@ -404,6 +404,35 @@ def _dify_embedding_model() -> str:
         return ""
 
 
+def _sh_list(ids) -> str:
+    """摊成空格分隔的一行, 供 autologin 脚本里的 `for M in $DSH_MODELS` 用。
+
+    **带空白的 id 直接剔掉**而不是照原样塞进去: sh 按空白分词, 那种 id 会被拆成
+    两个不存在的模型, 表现是预置日志里两条莫名其妙的失败, 而真正那个模型没配上。
+    目前目录里没有这种 id, 这里只是不让它有机会变成一个查半天的怪事。
+    """
+    return " ".join(i for i in ids if i and not any(c.isspace() for c in i))
+
+
+def _dify_chat_models() -> str:
+    """预置给 Dify 的全部在售 chat 模型。
+
+    顺序照目录 —— models.json 是按倍率从低到高排的, 于是万一中途失败, 已经配上的
+    是便宜的那几个。默认模型也在这个列表里, 由 provision() 跳过 (它单独先配, 且
+    只有它设工作区默认)。
+    """
+    return _sh_list(model_catalog.catalog())
+
+
+def _dify_embedding_models() -> str:
+    """预置给 Dify 的全部向量化模型。知识库建好之后换模型要重建索引, 所以多给几个
+    选择的意义不如 chat 那边大 —— 但少给同样没道理, 何况刷新是免费的。"""
+    try:
+        return _sh_list(model_catalog.embedding_catalog())
+    except AttributeError:
+        return ""
+
+
 def autologin_password(secret: str) -> str:
     """免登录账号的密码, 从该用户的栈密钥推导。
 
@@ -471,10 +500,21 @@ api() {
 # 写的是 gpt-*, 于是当场报 "Provider langgenius/openai/openai does not exist"。
 # 所以装一个 OpenAI 兼容插件, 把我们的网关配成自定义模型, 并设为默认。
 #
-# 只配**默认的那一个** chat 模型和一个向量化模型: **新建**凭据时 Dify 会真打一次
-# 上游做校验, 也就是真扣一次积分 (实测 84/49 token)。二十个模型全配等于首次进入
-# 白烧二十次, 而用户想要别的在界面上点两下就能加。
-# (刷新已存凭据的 PUT 实测**不**校验, 所以每次冷启动刷一遍是免费的。)
+# **在售的模型全部预置** (2026-08-31 老板定)。原先只配默认那一个, 理由是新建凭据
+# 时 Dify 会真打一次上游做校验、真扣一次积分 (实测 llm 84 token / emb 49 token)。
+# 那个理由仍然成立, 只是代价比"少了十九个模型"小得多:
+#   · 每次校验不足百 token, 但每笔请求最少记 1 积分 -> 26 个模型约 26 积分。
+#   · **一次性**: 凭据落在 NAS 上的 Postgres, 实例重建后还在; 刷新已存凭据的 PUT
+#     实测**不**校验, 所以之后每次冷启动刷一遍都是免费的。
+# 换来的是用户开箱就能在下拉框里选到我们卖的每一个模型 —— 而"在界面上点两下就能
+# 加"这个说法低估了成本: 用户得自己知道网关地址、令牌、上下文长度那一堆字段。
+#
+# **能力参数只能一刀切**: 目录 (config/models.json) 和网关的 /models 都只给
+# id/价格/厂商, 没有上下文长度、视觉、工具调用这些能力位 (2026-08-31 查过上游,
+# 每条只有 id/object/created/owned_by)。所以这里对所有模型用同一套保守参数, 与
+# 用户自己在界面上添加时拿到的默认值一致。代价是: 大上下文模型被压到 64k、视觉
+# 模型收不了图。要改得先有能力元数据 —— 别在这里手写一张能力表, 它会像手写价目表
+# 一样漂掉, 而漂掉的表现是运行时报错, 不是构建期报错。
 PROV=langgenius/openai_api_compatible/openai_api_compatible
 CREDS_URL="/workspaces/current/model-providers/$PROV/models/credentials"
 
@@ -490,7 +530,10 @@ cred_id() {  # cred_id <model> <model_type> -> 已存凭据的 id (没有则空)
 # `API request failed with status code 401 {"detail":"not_authenticated"}`,
 # 而 Dify 侧一切正常。2026-08-30 老板撞上。
 # (Coze 没这问题: 它的令牌走 env, 每次启动都是新的。)
-ensure_model() {  # ensure_model <model> <model_type> <credentials-json>
+# 第四个参数是 `default` 时才把它设成工作区默认模型。**必须按模型区分**: 早先
+# 版本每建一个新模型就设一次默认, 那时只配一个模型看不出问题 —— 一旦循环预置
+# 二十个, 默认会被最后一个建成的顶掉, 而那是按目录顺序排的随便哪一个。
+ensure_model() {  # ensure_model <model> <model_type> <credentials-json> [default]
   CID=$(cred_id "$1" "$2")
   if [ -n "$CID" ]; then
     OUT=$(api PUT "$CREDS_URL" \
@@ -498,8 +541,10 @@ ensure_model() {  # ensure_model <model> <model_type> <credentials-json>
   else
     OUT=$(api POST "$CREDS_URL" \
       "{\"model\":\"$1\",\"model_type\":\"$2\",\"name\":\"DSH Cloud\",\"credentials\":$3}")
-    echo "$OUT" | grep -q '"result":"success"' && api POST "/workspaces/current/default-model" \
-      "{\"model_settings\":[{\"model_type\":\"$2\",\"provider\":\"$PROV\",\"model\":\"$1\"}]}" >/dev/null
+    if [ "$4" = default ] && echo "$OUT" | grep -q '"result":"success"'; then
+      api POST "/workspaces/current/default-model" \
+        "{\"model_settings\":[{\"model_type\":\"$2\",\"provider\":\"$PROV\",\"model\":\"$1\"}]}" >/dev/null
+    fi
   fi
   if echo "$OUT" | grep -q '"result":"success"'; then
     return 0
@@ -541,18 +586,40 @@ provision() {
   # (`PluginDaemonInternalServerError: no available node, plugin runtime not found`)。
   # 一次就放弃的话, 凭据里留着上一枚**已被撤销**的令牌, 用户点开就是
   # `401 not_authenticated`, 而 Dify 侧看着一切正常。2026-08-30 老板撞上两次。
+  #
+  # **只有这两个默认模型走重试**, 其余的等它们成了再配: 重试要的是"等插件运行时
+  # 加载完", 那是整个供应商一次性的状态 —— 默认模型写成功就说明运行时活了, 再让
+  # 另外二十几个各自重试三十轮只会把首次进入拖成十几分钟。
   LLM_OK=no; EMB_OK=no
   [ -n "$DSH_EMBEDDING_MODEL" ] || EMB_OK=yes
   n=0
   while [ "$n" -lt 30 ]; do
     n=$((n + 1))
-    if [ "$LLM_OK" = no ] && ensure_model "$DSH_DEFAULT_MODEL" llm "$(llm_creds)"; then LLM_OK=yes; fi
-    if [ "$EMB_OK" = no ] && ensure_model "$DSH_EMBEDDING_MODEL" text-embedding "$(emb_creds)"; then EMB_OK=yes; fi
-    if [ "$LLM_OK" = yes ] && [ "$EMB_OK" = yes ]; then log "模型凭据已就绪 (第 $n 轮)"; return 0; fi
+    if [ "$LLM_OK" = no ] && ensure_model "$DSH_DEFAULT_MODEL" llm "$(llm_creds)" default; then LLM_OK=yes; fi
+    if [ "$EMB_OK" = no ] && ensure_model "$DSH_EMBEDDING_MODEL" text-embedding "$(emb_creds)" default; then EMB_OK=yes; fi
+    if [ "$LLM_OK" = yes ] && [ "$EMB_OK" = yes ]; then break; fi
     sleep 10
   done
-  log "模型凭据没配上 llm=$LLM_OK emb=$EMB_OK"
-  return 1
+  if [ "$LLM_OK" = no ] || [ "$EMB_OK" = no ]; then
+    log "默认模型凭据没配上 llm=$LLM_OK emb=$EMB_OK"
+    return 1
+  fi
+  log "默认模型凭据已就绪 (第 $n 轮), 开始预置其余在售模型"
+
+  # 其余模型**尽力而为**: 一个失败不拖累其他, 也不影响 provision 的成败。
+  # 目录里下架某个模型后, 它在 Dify 里留着的那份凭据我们不主动删 —— 用户可能已经
+  # 在应用里引用了它, 静默删掉会让那个应用当场报模型不存在; 让他自己在界面上处理。
+  REST=0; FAIL=0
+  for M in $DSH_MODELS; do
+    [ "$M" = "$DSH_DEFAULT_MODEL" ] && continue
+    if ensure_model "$M" llm "$(llm_creds)"; then REST=$((REST + 1)); else FAIL=$((FAIL + 1)); fi
+  done
+  for M in $DSH_EMBEDDING_MODELS; do
+    [ "$M" = "$DSH_EMBEDDING_MODEL" ] && continue
+    if ensure_model "$M" text-embedding "$(emb_creds)"; then REST=$((REST + 1)); else FAIL=$((FAIL + 1)); fi
+  done
+  log "其余模型预置完成: 成功 $REST 个, 失败 $FAIL 个"
+  return 0
 }
 
 write_conf() {
@@ -1816,8 +1883,12 @@ def env_for(product_id: str, token: str, secret: str = "") -> dict[str, str]:
             # 于是当场报 "Provider langgenius/openai/openai does not exist"。
             "DSH_CLOUD_TOKEN": token,
             "DSH_GATEWAY_BASE": f"{gateway}/llm/v1",
+            # 默认那两个单独给: 它们先配、且只有它们设工作区默认模型。
             "DSH_DEFAULT_MODEL": model_catalog.default_model(),
             "DSH_EMBEDDING_MODEL": _dify_embedding_model(),
+            # 在售的全部模型 (含上面两个, provision 会跳过)。
+            "DSH_MODELS": _dify_chat_models(),
+            "DSH_EMBEDDING_MODELS": _dify_embedding_models(),
         }
     if product_id == "open-design":
         return {
