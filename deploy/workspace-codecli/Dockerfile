@@ -87,12 +87,15 @@ RUN set -e; \
       '  const cmd = process.env.DSH_AGENT_CMD;' \
       '  if (!cmd) return;' \
       '  const name = process.env.DSH_AGENT_NAME || "Agent";' \
-      '  // 重载窗口时 VS Code 会自己恢复上次的终端 —— 再开一个就是每刷新一次' \
-      '  // 多起一个 agent 进程 (各自烧着积分)。等它恢复完再判断。' \
+      '  // 重载窗口时 VS Code 会把上次的终端**恢复**出来 (持久会话)。所以是' \
+      '  // "按名字找, 有就展示, 没有才新建":' \
+      '  //   · 只判断"有没有终端"会把恢复出来的当成已经开好的, 而它的面板是' \
+      '  //     收起的 —— 用户看到的还是一个空编辑器 (踩过)。' \
+      '  //   · 不判断就每刷新一次多起一个 agent 进程, 各自烧着积分 (也踩过)。' \
       '  setTimeout(() => {' \
-      '    if (vscode.window.terminals.length > 0) return;' \
-      '    const t = vscode.window.createTerminal({ name, shellPath: cmd, cwd: "/workspace" });' \
-      '    t.show();' \
+      '    const found = vscode.window.terminals.find((t) => t.name === name);' \
+      '    if (found) { found.show(); return; }' \
+      '    vscode.window.createTerminal({ name, shellPath: cmd, cwd: "/workspace" }).show();' \
       '  }, 1500);' \
       '}' \
       'function deactivate() {}' \
