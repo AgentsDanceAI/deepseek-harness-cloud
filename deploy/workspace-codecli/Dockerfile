@@ -84,24 +84,18 @@ RUN set -e; \
     printf '%s\n' \
       'const vscode = require("vscode");' \
       'function activate() {' \
-      '  const cmd = process.env.DSH_AGENT_CMD;' \
-      '  if (!cmd) return;' \
-      '  const name = process.env.DSH_AGENT_NAME || "Agent";' \
-      '  // 重载窗口时 VS Code 会把上次的终端**恢复**出来 (持久会话)。所以是' \
-      '  // "按名字找, 有就展示, 没有才新建":' \
-      '  //   · 只判断"有没有终端"会把恢复出来的当成已经开好的, 而它的面板是' \
-      '  //     收起的 —— 用户看到的还是一个空编辑器 (踩过)。' \
-      '  //   · 不判断就每刷新一次多起一个 agent 进程, 各自烧着积分 (也踩过)。' \
+      '  if (!process.env.DSH_AGENT_CMD) return;' \
+      '  // 只叫 VS Code "把终端面板开出来" —— 默认终端配置文件已经是 agent 本身' \
+      '  // (products.py 的 _codecli_boot 写的), 所以它建出来的就是我们要的那个。' \
+      '  //' \
+      '  // 不自己 createTerminal: 面板被打开时 VS Code **还会按默认配置文件再建' \
+      '  // 一个**, 于是两个终端并排、两个 agent 进程各烧各的积分 (实测)。' \
+      '  // 也不能只 t.show(): 终端建出来了、agent 也在跑, 而面板仍然是收起的,' \
+      '  // 用户看到的还是一个空编辑器 (也实测过)。' \
+      '  //' \
+      '  // 已有终端时这条命令是聚焦而不是新建 —— 重载窗口不会多起 agent。' \
       '  setTimeout(() => {' \
-      '    const found = vscode.window.terminals.find((t) => t.name === name);' \
-      '    const t = found || vscode.window.createTerminal({ name, shellPath: cmd, cwd: "/workspace" });' \
-      '    t.show();' \
-      '    // show() 一个人**不够**: 终端建出来了、agent 也在跑, 而底部面板' \
-      '    // 仍然是收起的 —— 用户看到的还是空编辑器, 得自己按 Ctrl+`。' \
-      '    // 用 focusPanel 而不是 terminal.focus: 后者在它看来"还没有终端"时' \
-      '    // 会**自己再建一个** (按默认配置文件, 于是又是一个 agent), 实测两个' \
-      '    // 终端并排、两个进程各烧各的。focusPanel 只管把面板露出来。' \
-      '    vscode.commands.executeCommand("workbench.action.focusPanel");' \
+      '    vscode.commands.executeCommand("workbench.action.terminal.focus");' \
       '  }, 1500);' \
       '}' \
       'function deactivate() {}' \
