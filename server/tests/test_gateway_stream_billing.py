@@ -353,3 +353,40 @@ async def test_anthropic_upstream_error_stream_is_never_billed(gateway_user, mon
 
     assert b"upstream_error" in payload
     assert spends == []
+
+
+def test_body_shape_records_structure_not_content():
+    """诊断摘要只记结构, 不记正文。
+
+    上游拒一个请求时只会说一句它自己的话 ("The content field is a required
+    field."), 而我们这边看不见自己发出去的是什么 —— 同样的报错在任何客户端上
+    都长一个样, 只能靠猜。2026-08-31 Coze 工作流那个 400 就是这么排不动的。
+    但消息正文是用户数据, 一个字都不能进日志。
+    """
+    body = {
+        "model": "m1",
+        "messages": [
+            {"role": "system", "content": "绝密的系统提示词"},
+            {"role": "user", "content": [{"type": "text", "text": "用户的私密问题"}]},
+            {"role": "assistant", "tool_calls": [{"id": "x"}]},
+            {"role": "tool", "content": None, "tool_call_id": "x"},
+        ],
+        "tools": [{"type": "function"}],
+        "stream": True,
+    }
+    out = gateway._body_shape(body)
+    # 结构说清楚了
+    assert "system:content=str" in out
+    assert "user:content=list[1]" in out
+    assert "assistant:content=missing+role,tool_calls" in out
+    assert "tool:content=null" in out
+    assert "tools=list" in out and "stream=bool" in out
+    # 正文一个字都没有
+    for secret in ("绝密的系统提示词", "用户的私密问题"):
+        assert secret not in out, "把用户内容写进日志了"
+
+
+def test_body_shape_survives_junk():
+    """畸形请求也不能让诊断本身抛异常 —— 那会把一次 400 变成 500。"""
+    for junk in (None, "字符串", [1, 2], {"messages": "不是列表"}, {"messages": [1, None]}):
+        gateway._body_shape(junk)
