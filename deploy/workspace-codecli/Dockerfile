@@ -88,18 +88,27 @@ RUN set -e; \
     printf '%s\n' \
       'const vscode = require("vscode");' \
       'function activate() {' \
-      '  if (!process.env.DSH_AGENT_CMD) return;' \
-      '  // 只叫 VS Code "把终端面板开出来" —— 默认终端配置文件已经是 agent 本身' \
-      '  // (products.py 的 _codecli_boot 写的), 所以它建出来的就是我们要的那个。' \
-      '  //' \
-      '  // 不自己 createTerminal: 面板被打开时 VS Code **还会按默认配置文件再建' \
-      '  // 一个**, 于是两个终端并排、两个 agent 进程各烧各的积分 (实测)。' \
-      '  // 也不能只 t.show(): 终端建出来了、agent 也在跑, 而面板仍然是收起的,' \
-      '  // 用户看到的还是一个空编辑器 (也实测过)。' \
-      '  //' \
-      '  // 已有终端时这条命令是聚焦而不是新建 —— 重载窗口不会多起 agent。' \
+      '  const cmd = process.env.DSH_AGENT_CMD;' \
+      '  if (!cmd) return;' \
+      '  const name = process.env.DSH_AGENT_NAME || "Agent";' \
       '  setTimeout(() => {' \
-      '    vscode.commands.executeCommand("workbench.action.terminal.focus");' \
+      '    // 右边那格是给 Chat 用的, Chat 已经关掉 (chat.disableAIFeatures),' \
+      '    // 不收起来就剩一个写着 "Drag a view here to display" 的空壳。' \
+      '    vscode.commands.executeCommand("workbench.action.closeAuxiliaryBar");' \
+      '    const found = vscode.window.terminals.find((t) => t.name === name);' \
+      '    if (found) { found.show(); return; }' \
+      '    // 关键是 location: Editor —— 把 agent 开在**编辑器区**而不是底部面板。' \
+      '    // 底部面板那条路试过三版, 每版都有自己的错法: 面板默认收起 (用户看到' \
+      '    // 空编辑器)、focus 命令会自己再建一个 (两个 agent 各烧积分)。更要紧的' \
+      '    // 是形态: agent 挤在下半截、上面一大块空编辑器, 整个产品看起来就只是' \
+      '    // "VS Code 底下挂了个终端"。开在编辑器区它就是主角, 而且编辑器标签页' \
+      '    // 天然可见, 不存在"建好了却没露出来"这回事。' \
+      '    vscode.window.createTerminal({' \
+      '      name,' \
+      '      shellPath: cmd,' \
+      '      cwd: "/workspace",' \
+      '      location: vscode.TerminalLocation.Editor,' \
+      '    }).show();' \
       '  }, 1500);' \
       '}' \
       'function deactivate() {}' \
