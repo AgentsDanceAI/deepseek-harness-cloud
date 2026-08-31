@@ -220,3 +220,78 @@ def test_norm_resolution_behaviour():
     # 认不出来的一律回落到 720p, 不许把垃圾透传给上游
     assert mod._norm_resolution("4K") == "720p"
     assert mod._norm_resolution("") == "720p"
+
+
+# ── 一句话出片: 自动组队 + 接力 + 真闸门 (2026-08-31 老板: "我就想一句话,
+# 让他们协同完成一个 3 分钟的视频短剧") ──────────────────────────────────
+#
+# 原先只有并行模式 —— 五个工位对着同一句"做个短剧"各说各话, 谁也看不见谁这一轮
+# 的产出: 美术读不到导演刚写的讲戏本, 分镜读不到美术刚出的资产清单。流水线在
+# 并行模式下根本不成立。而人审闸只是写在人格里的一句话, 模型想跳过就跳过。
+MAIN = (TEAM / "app" / "main.py").read_text(encoding="utf-8")
+
+
+def test_crew_room_is_relay_not_parallel():
+    """顺序即依赖: 讲戏本 → 角色资产 → 镜头表 →(人审)→ 片段 → 成片。"""
+    assert 'CREW = ("director", "artist", "storyboard", "videographer", "editor")' in ROOMS
+    assert "def create_crew_room" in ROOMS
+    i = ROOMS.index("def create_crew_room")
+    assert 'mode="relay"' in ROOMS[i : i + 500]
+
+
+def test_relay_writes_each_turn_before_passing_the_baton():
+    """接力的**全部要害**: 先落记录再传棒, 下一位 render_for 才读得到。"""
+    i = MAIN.index("async def _run_relay")
+    seg = MAIN[i : i + 2200]
+    add_at = seg.index("store.add(room.id, ev[")
+    render_at = seg.index("store.render_for(bot, room.id)")
+    # render 在循环体开头, add 在同一轮的 end 事件里 —— 两者都在, 且循环是逐棒的
+    assert add_at > render_at
+    assert "for bot_id in room.members" in seg, "必须按成员顺序逐棒, 不是并发"
+    assert "asyncio.create_task" not in seg, "接力里不许再起并发任务"
+
+
+def test_halt_is_a_tool_not_a_prompt_hope():
+    """闸门靠工具调用判定 —— 文本标记会漏、会被改写、会混进正文。"""
+    assert 'HALT_TOOL = "wait_for_user"' in TOOLS
+    assert "async def wait_for_user" in TOOLS
+    i = MAIN.index("async def _run_relay")
+    seg = MAIN[i : i + 2200]
+    assert "tools.HALT_TOOL" in seg, "调度器没有按工具判定叫停"
+    assert "break" in seg
+
+
+def test_halted_stops_downstream_stages():
+    i = MAIN.index("async def _run_relay")
+    seg = MAIN[i : i + 2200]
+    assert '"type": "halted"' in seg, "叫停要有事件, 否则前端不知道在等人"
+
+
+def test_one_stage_failure_does_not_feed_downstream():
+    """一棒炸了就停 —— 半截产物传下去只会让后面基于错的东西接着做。"""
+    i = MAIN.index("async def _run_relay")
+    seg = MAIN[i : i + 2200]
+    j = seg.index("except Exception")
+    assert "break" in seg[j : j + 300]
+
+
+def test_parallel_mode_survives():
+    """头脑风暴仍要并行 —— 改成一律串行就变回"排队发言"。"""
+    assert "async def _run_room" in MAIN
+    assert "asyncio.create_task" in MAIN
+    assert 'runner = _run_relay if room.mode == "relay" else _run_room' in MAIN
+    assert 'mode: str = "parallel"' in ROOMS, "老房间/老 rooms.json 必须仍是并行"
+
+
+def test_gate_users_are_wired_to_the_tool():
+    """三个该停的工位都要用工具, 而不是只在人格里说"请过目"。"""
+    for role in ("director", "storyboard", "videographer"):
+        i = ROOMS.index(f'"{role}"')
+        assert "wait_for_user" in ROOMS[i : i + 1000], f"{role} 没接叫停工具"
+
+
+def test_ui_has_a_one_click_new_film_entry():
+    """一句话出片 = 不用手工拉五个人, 也不用自己记谁先谁后。"""
+    web = (TEAM / "web" / "index.html").read_text(encoding="utf-8")
+    assert 'id="newFilm"' in web
+    assert "/api/rooms/crew" in web

@@ -88,6 +88,7 @@
   <h2>房间</h2>
   <div class="rooms" id="rooms"></div>
   <button id="newRoom">＋ 拉个群</button>
+  <button id="newFilm">🎬 开新片</button>
 </aside>
 
 <main>
@@ -280,6 +281,18 @@ $('newRoom').onclick = async () => {
   const d = await api('/api/rooms', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ members: m }),
+  });
+  if (d.room) { cur = d.room; await loadRooms(d.room.id); }
+};
+
+// 开新片: 剧组五个工位按接力顺序自动入群 —— 用户提一个想法就该开工, 不该先手工
+// 拉五个人, 更不该自己记住谁先谁后。
+$('newFilm').onclick = async () => {
+  const name = prompt('这部片叫什么？(可留空)', '') ?? null;
+  if (name === null) return;
+  const d = await api('/api/rooms/crew', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name }),
   });
   if (d.room) { cur = d.room; await loadRooms(d.room.id); }
 };
