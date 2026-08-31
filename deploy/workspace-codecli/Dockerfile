@@ -66,6 +66,26 @@ RUN npm i -g --no-fund --no-audit \
 # 明令不要的东西。而且它是多余的: 这个产品的 agent 就是终端里那个 CLI。
 RUN rm -rf /usr/lib/code-server/lib/vscode/extensions/copilot
 
+# Claude Code 自带的 VS Code 扩展。
+#
+# 不装它, CLI 每次启动都会自己去装, 而容器里没有 `code` 命令 —— 于是终端里挂一
+# 条红字 `IDE extension install failed`。装上之后不只是消掉报错: 它的改动会以
+# diff 的形式开在编辑器里、能读你在编辑器里选中的内容 —— 这才是"跑在 IDE 里"
+# 与"跑在一个终端里"的区别。
+#
+# 装进**内置**扩展目录, 不是用户目录: 用户目录 (/root/.local/share/...) 挂的是
+# NAS, 镜像里烤在那儿的东西一挂载就被盖掉了。
+#
+# 版本与 CLI 锁在一起 (CLAUDE_VERSION) —— 扩展与 CLI 是配套协议, 各走各的会在
+# 某次上游升级后悄悄不兼容。
+RUN set -e; \
+    code-server --install-extension "anthropic.claude-code@${CLAUDE_VERSION}" \
+      --extensions-dir /tmp/ext >/dev/null 2>&1; \
+    cp -a /tmp/ext/anthropic.claude-code-* \
+      /usr/lib/code-server/lib/vscode/extensions/anthropic.claude-code; \
+    rm -rf /tmp/ext; \
+    test -f /usr/lib/code-server/lib/vscode/extensions/anthropic.claude-code/package.json
+
 # 开箱即用的那一下: 启动就把 agent 开在终端里。
 #
 # 不用 VS Code 的 folderOpen 自动任务 —— 实测它不跑, 而且它的前置条件 (工作区

@@ -50,6 +50,8 @@ docker run --rm -u 0 --entrypoint bash "$REF" -c '
     || { echo "!! dsh-agent 扩展不在 —— 用户进去只会看到一个空编辑器" >&2; exit 1; }
   test ! -d /usr/lib/code-server/lib/vscode/extensions/copilot \
     || { echo "!! Copilot 扩展还在 —— 右侧面板一点就要 GitHub 登录" >&2; exit 1; }
+  test -f /usr/lib/code-server/lib/vscode/extensions/anthropic.claude-code/package.json \
+    || { echo "!! Claude Code 的 IDE 扩展没装上 —— 终端里会挂一条红字报错" >&2; exit 1; }
   echo "  ✓ dsh-agent 扩展在位, Copilot 面板已移除"
 
   # 4. code-server 的无鉴权模式确实生效 —— 这是我们选它的**唯一理由**
