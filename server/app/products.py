@@ -1442,6 +1442,21 @@ def registry() -> dict[str, Product]:
             domain=config.COZE_DOMAIN,
             reports_presence=False,
             tab_grace_min=config.COZE_TAB_GRACE_MIN,
+            # 首页 (/) 是 `root /usr/share/nginx/html` 的**静态文件** —— coze-server
+            # 还没起来它照样回 200, 拿它探活等于没探 (与 Dify 同一个洞, 见
+            # Product.ready_path)。/api/ 走上游那条 `^/(api|v[1-3]|admin)(/|$)`
+            # 的 proxy_pass, 转发去 coze-server:8888。
+            #
+            # 2026-08-30 起真实例实测 (合成 key, 测完即毁): 第 23 秒 nginx 已经
+            # 就绪, `/`=200 而 `/api/`=502; 第 119 秒 coze-server 才应答,
+            # `/api/`=404。**同一条路径 502 -> 404 的跃迁**就是"后端可达了"的
+            # 铁证 —— 404 是 Hertz 对未注册路由的默认应答 (后端没有自定义
+            # NoRoute), 判据 <500 于是做对; 而旧探针会在第 23 秒就放人进来,
+            # 96 秒的坏窗口, 比 Dify 那 44 秒还长。
+            #
+            # 用未注册路由而不是某个真接口: 它**不会有副作用**, 也不随接口增删
+            # 而失效 (那几个 GET 里 /logout/ 会登出、/password/reset/ 会触发重置)。
+            ready_path="/api/",
             sidecars=_coze_stack(),
             # 组内一律用上游的服务名 (见 _coze_server_env 的说明), 全部指回环。
             host_aliases=("mysql", "redis", "elasticsearch", "minio", "milvus",

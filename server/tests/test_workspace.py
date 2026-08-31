@@ -2343,9 +2343,7 @@ def test_dify_autologin_password_is_derived_not_stored(monkeypatch):
     assert a != b, "所有用户共用一个口令等于没有口令"
     assert len(a) >= 12
     assert any(c.isupper() for c in a) and any(c.isdigit() for c in a), "过不了口令强度校验"
-    assert products.autologin_password("") == "", (
-        "没有密钥时该跳过免登录, 而不是退回一个人人都知道的口令"
-    )
+    assert products.autologin_password("") == "", "没有密钥时该跳过免登录, 而不是退回一个人人都知道的口令"
 
     monkeypatch.setattr(config, "DIFY_DOMAIN", "dify.test.local")
     env = products.env_for("dify", "tok", "s" * 64)
@@ -2353,12 +2351,11 @@ def test_dify_autologin_password_is_derived_not_stored(monkeypatch):
     # 同一个推导也给 Hermes 的伴随容器用 (占位符), 两边必须是同一个值 ——
     # 对不上的症状只是"页面能开、接口全 401", 看不出是口令的问题。
     monkeypatch.setattr(config, "HERMES_DOMAIN", "hermes.test.local")
-    hm = products.resolve_sidecars(
-        products.registry()["hermes"].sidecars, "s" * 64, "t"
-    )[0]
-    assert dict(hm.env)["HERMES_DASHBOARD_BASIC_AUTH_PASSWORD"] == products.env_for(
-        "hermes", "t", "s" * 64
-    )["HERMES_PASS"]
+    hm = products.resolve_sidecars(products.registry()["hermes"].sidecars, "s" * 64, "t")[0]
+    assert (
+        dict(hm.env)["HERMES_DASHBOARD_BASIC_AUTH_PASSWORD"]
+        == products.env_for("hermes", "t", "s" * 64)["HERMES_PASS"]
+    )
     # 邮箱必须与 setup 建的那个一致 —— 单租户, 没有第二个账号可用
     assert env["DSH_AUTOLOGIN_EMAIL"] == "admin@dshcloud.online"
 
@@ -2588,3 +2585,24 @@ def test_dify_ready_path_lands_on_the_api_upstream():
     assert matched, f"ready_path {prod.ready_path} 不落在任何 location 上"
     path, port = max(matched, key=lambda loc: len(loc[0]))
     assert port == "5001", f"ready_path 命中的是 location {path} -> {port}, 不是 api(5001)"
+
+
+def test_coze_ready_path_is_proxied_to_the_backend():
+    """Coze 的 ready_path 必须落在上游那条转发去 coze-server 的 location 上。
+
+    它的首页是 `root /usr/share/nginx/html` 的**静态文件** —— coze-server 没起来
+    也照样回 200, 与 Dify 同一个洞。2026-08-30 起真实例实测: 第 23 秒 nginx 就绪
+    (`/`=200 而 `/api/`=502), 第 119 秒 coze-server 才应答 (`/api/`=404) —— 旧探针
+    会在第 23 秒就放人进来, 96 秒的坏窗口, 比 Dify 那 44 秒还长。
+
+    上游那份 conf 在资产镜像里、不在仓库中, 所以这里只能钉住**前缀**; 配置本身
+    改没改由 deploy/workspace-coze/build.sh 的守卫在构建期拦 —— 两处要一起改。
+    """
+    import re
+
+    prod = products.registry()["coze"]
+    assert prod.ready_path != "/", "首页是静态文件, 永远回 200, 拿它探活等于没探"
+    # 与上游的 `location ~ ^/(api|v[1-3]|admin)(/|$)` 对齐
+    assert re.match(r"^/(api|v[1-3]|admin)(/|$)", prod.ready_path), (
+        f"ready_path {prod.ready_path} 不会被转发去 coze-server, 会落回静态首页"
+    )
