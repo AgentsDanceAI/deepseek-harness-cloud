@@ -33,10 +33,15 @@ CATALOG: tuple[AppEntry, ...] = (
         "dsh", "DSH Agent", "agent",
         '<path d="M17.5 19a4.5 4.5 0 1 0-.9-8.9 6 6 0 1 0-11.1 3.4"/><path d="M6 19h11.5"/>',
     ),
-    # Agents Team (products.registry() 里已经有了) **故意还没进这张目录**:
-    # 这页是 4 列的网格, 16 个正好铺满四行, 第 17 个会多出一行只有一张卡的空排。
-    # 目录是愿景、registry 才是事实 —— 产品能不能用不取决于这里。等再攒够三个
-    # 一起上, 或者决定换掉其中一个, 那是一次布局决定, 不该由"顺手加一个"带出来。
+    # Agents Team 顶掉了 JupyterLab (老板 2026-08-31 拍板): 这页是 4 列网格,
+    # 16 个正好铺满四行, 加第 17 个会多出一行只有一张卡的空排 —— 所以是换不是加。
+    # 换掉 Jupyter 而不是别的: 它是这 16 个里唯一**既没上线、也不是智能体**的坑位,
+    # 而 Agents Team 是我们自己写的、已经上线的产品 (agentsteam.dshcloud.online)。
+    AppEntry(
+        "agents-team", "Agents Team", "agent",
+        '<circle cx="8" cy="9" r="2.5"/><circle cx="16" cy="9" r="2.5"/>'
+        '<path d="M3.5 19a4.5 4.5 0 0 1 9 0M11.5 19a4.5 4.5 0 0 1 9 0"/>',
+    ),
     AppEntry(
         "comfyui", "ComfyUI", "media",
         '<rect x="3" y="4" width="7" height="6" rx="1.5"/><rect x="14" y="14" width="7" height="6" rx="1.5"/>'
@@ -61,10 +66,6 @@ CATALOG: tuple[AppEntry, ...] = (
     AppEntry(
         "claude-code", "Claude Code", "code",
         '<path d="M12 3 4 7.5v9L12 21l8-4.5v-9L12 3z"/><path d="m8 10 4 2.2 4-2.2M12 12.2V17"/>',
-    ),
-    AppEntry(
-        "jupyter", "JupyterLab", "data",
-        '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
     ),
     # Hermes 顶掉了 Bolt.diy: 搭应用这一格 Dify 和 Coze 已经占满, 而 Hermes 是
     # "会自己攒技能、带持久记忆"的常驻 agent, 与 OpenClaw 各占一端。
