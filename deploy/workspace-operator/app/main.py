@@ -1,115 +1,174 @@
-"""Operator 工作台的 HTTP 层: 一个 SSE 聊天端点 + 静态前端。
+"""Operator 的 HTTP 层: 房间、成员、以及一条把并行机器人合流的 SSE。
 
-**没有账号体系, 也不该有。** 老板的铁律是接进来的应用一律不留登录墙, 而这个域
-前面压着我们自己的 forward_auth —— 用户走到这里已经登过一次了。再加一层等于
-第二道墙, 而且会重演 Dify/Hermes 那类"会话过期就把人永久锁在登录页"的事故。
-容器本身是每用户独占的, 那才是隔离边界。
+**没有账号体系, 也不该有。** 老板铁律是接进来的应用一律不留登录墙, 而这个域前面
+压着我们自己的 forward_auth —— 用户走到这里已经登过一次了。再加一层等于第二道墙,
+还会重演 Dify/Hermes 那类"会话过期就把人永久锁在登录页"的事故。容器本身每用户
+独占, 那才是隔离边界。
 """
 
 from __future__ import annotations
 
 import asyncio
-import contextlib
-import json
 import os
 import pathlib
+from dataclasses import asdict
 
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import agent, tools
+from . import agent, rooms
 
 WEB_DIR = pathlib.Path(__file__).resolve().parent.parent / "web"
 
-#: 对话落盘在 NAS 上 —— 工作台一回收容器就没了, 而用户会指望"回来还在"。
-#: 放在 /workspace 下的隐藏目录: 它已经挂了持久卷, 不用再多要一个挂载点。
-STATE_PATH = tools.WORKDIR / ".operator" / "conversation.json"
-
 app = FastAPI(title="DSH Operator")
+store = rooms.Store()
 
-#: 进程内的对话锁。一个工作台就一个用户, 但他会开两个标签页 —— 两轮并发跑同一份
-#: history 会把 tool_calls 和 tool 结果交错写坏, 而 OpenAI 格式要求两者严格配对,
-#: 坏了之后**每一轮都 400**, 且清空对话前恢复不了。
-_lock = asyncio.Lock()
-
-
-def _load() -> list[dict]:
-    try:
-        return json.loads(STATE_PATH.read_text())
-    except (OSError, json.JSONDecodeError):
-        return []
-
-
-def _save(history: list[dict]) -> None:
-    STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    tmp = STATE_PATH.with_suffix(".tmp")
-    tmp.write_text(json.dumps(history, ensure_ascii=False))
-    tmp.replace(STATE_PATH)  # 原子替换: 写一半被杀不会留下半个 JSON
+#: 一次只跑一轮。同一个房间并发两轮会让两批机器人对着**同一份还没写回去的记录**
+#: 各说各话, 谁也看不见谁 —— 而群聊里"两个人同时回答同一个问题却互不知情"看着
+#: 就是产品坏了。跨房间也串行: 它们共用同一个容器和 /workspace, 真并行起来
+#: 会互相踩文件。
+_turn_lock = asyncio.Lock()
 
 
 @app.get("/api/health")
 def health() -> dict:
     """就绪探针打这里。
 
-    别拿首页当判据: 首页是静态文件, 后端还没起来它照样 200 —— 那样探针会在
-    应用真正可用之前就放人进来 (2026-08-30 Dify/Coze 都栽过这个)。
+    别拿首页当判据: 首页是静态文件, 后端没起来它照样 200 —— 那样探针会在应用
+    真正可用之前放人进来 (2026-08-30 Dify/Coze 都栽过)。
     """
-    return {"ok": True, "model": agent.DEFAULT_MODEL, "gateway": bool(agent.GATEWAY_BASE)}
+    return {"ok": True, "gateway": bool(agent.GATEWAY_BASE), "rooms": len(store.rooms)}
 
 
 @app.get("/api/models")
 def models() -> dict:
-    """给前端的模型下拉。列表由工作台在 env 里下发, 与在售目录一致。"""
     listed = [m for m in os.environ.get("DSH_MODELS", "").split() if m]
     return {"models": listed or [agent.DEFAULT_MODEL], "default": agent.DEFAULT_MODEL}
 
 
-@app.get("/api/conversation")
-def conversation() -> dict:
-    """回放用: 只给前端**看得见**的那部分 (用户说的和智能体说的)。
+@app.get("/api/bots")
+def bots() -> dict:
+    return {"bots": [asdict(b) for b in store.bots.values()]}
 
-    工具消息不回 —— 它们是模型的工作记录, 原文又长又是给机器读的; 前端时间线
-    要的是摘要, 那个在流式事件里已经给过了。
+
+@app.get("/api/rooms")
+def list_rooms() -> dict:
+    return {
+        "rooms": [
+            {
+                **asdict(r),
+                "last": next(
+                    (
+                        m.text[:40]
+                        for m in reversed(store.transcript(r.id))
+                        if m.text.strip()
+                    ),
+                    "",
+                ),
+            }
+            for r in sorted(store.rooms.values(), key=lambda x: x.created)
+        ]
+    }
+
+
+@app.post("/api/rooms")
+async def create_room(request: Request) -> dict:
+    body = await request.json()
+    members = [m for m in (body.get("members") or []) if m in store.bots]
+    if not members:
+        return {"error": "至少要拉一个机器人进来"}
+    name = (body.get("name") or "").strip() or "、".join(
+        store.bots[m].name for m in members
+    )
+    return {"room": asdict(store.create_room(name, members))}
+
+
+@app.post("/api/rooms/{room_id}/members")
+async def set_members(room_id: str, request: Request) -> dict:
+    """拉人进群 / 请人出群。
+
+    新成员**看得见入群前的全部记录** (render_for 每轮现渲染整份记录) —— 群聊里
+    "新来的读不到上文"是致命的, 所以这里不需要给他补发历史。
     """
-    out = [
-        {"role": m["role"], "content": m.get("content") or ""}
-        for m in _load()
-        if m["role"] in ("user", "assistant") and (m.get("content") or "").strip()
-    ]
-    return {"messages": out}
+    room = store.rooms.get(room_id)
+    if room is None:
+        return {"error": "没有这个房间"}
+    body = await request.json()
+    room.members = [m for m in (body.get("members") or []) if m in store.bots]
+    store.save()
+    return {"room": asdict(room)}
 
 
-@app.post("/api/reset")
-def reset() -> dict:
-    with contextlib.suppress(OSError):
-        STATE_PATH.unlink()
-    return {"ok": True}
+@app.get("/api/rooms/{room_id}/messages")
+def messages(room_id: str) -> dict:
+    return {"messages": [asdict(m) for m in store.transcript(room_id)]}
 
 
-@app.post("/api/chat")
-async def chat(request: Request) -> StreamingResponse:
+async def _run_room(room: rooms.Room, model: str | None):
+    """让房间里的成员**同时**跑各自的一轮, 把事件合成一条流。
+
+    并行的代价说清楚: 同一轮里几个成员是**对着用户说话, 不是对着彼此** —— 它们
+    在开跑那一刻拿到的是同一份记录, 谁也看不见谁这一轮说了什么。要它们接话, 就得
+    再发一轮 (那时上一轮的话已经在记录里了)。这是"同时出结果"换来的, 不是 bug;
+    改成串行就变回"排队发言", 那正是我们不想要的形态。
+    """
+    members = [store.bots[m] for m in room.members if m in store.bots]
+    queue: asyncio.Queue = asyncio.Queue()
+
+    async def drive(bot: rooms.Bot) -> None:
+        try:
+            view = store.render_for(bot, room.id)
+            async for ev in agent.run_turn(bot.id, view, bot.model or model):
+                await queue.put(ev)
+        except Exception as e:  # noqa: BLE001 — 一个成员炸了不该拖垮整个房间
+            await queue.put(
+                {"type": "error", "bot": bot.id, "message": f"{type(e).__name__}: {e}"}
+            )
+        finally:
+            await queue.put({"type": "_done", "bot": bot.id})
+
+    tasks = [asyncio.create_task(drive(b)) for b in members]
+    left = len(tasks)
+    try:
+        while left:
+            ev = await queue.get()
+            if ev["type"] == "_done":
+                left -= 1
+                continue
+            if ev["type"] == "end":
+                text = (ev.get("text") or "").strip()
+                if text:
+                    store.add(room.id, ev["bot"], text, ev.get("tools") or [])
+            yield ev
+    finally:
+        for t in tasks:
+            t.cancel()
+        store.save()
+
+
+@app.post("/api/rooms/{room_id}/send")
+async def send(room_id: str, request: Request) -> StreamingResponse:
     body = await request.json()
     text = (body.get("message") or "").strip()
     model = body.get("model") or None
 
     async def stream():
+        room = store.rooms.get(room_id)
+        if room is None:
+            yield _sse({"type": "error", "message": "没有这个房间"})
+            return
         if not text:
             yield _sse({"type": "error", "message": "空消息"})
             return
-        if _lock.locked():
+        if _turn_lock.locked():
             yield _sse({"type": "error", "message": "上一轮还在跑, 等它结束再发。"})
             return
-        async with _lock:
-            history = _load()
-            history.append({"role": "user", "content": text})
-            try:
-                async for event in agent.run_turn(history, model):
-                    yield _sse(event)
-            finally:
-                # 无论正常收尾还是客户端中途断开, 都把已经产生的对话存下来 ——
-                # 否则用户刷新一下, 智能体刚做的事在记录里完全不存在。
-                _save(history)
+        async with _turn_lock:
+            store.add(room_id, "user", text)
+            store.save()
+            async for ev in _run_room(room, model):
+                yield _sse(ev)
 
     return StreamingResponse(
         stream(),
@@ -119,7 +178,9 @@ async def chat(request: Request) -> StreamingResponse:
 
 
 def _sse(payload: dict) -> str:
-    return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+    import json as _json
+
+    return f"data: {_json.dumps(payload, ensure_ascii=False)}\n\n"
 
 
 @app.get("/")

@@ -5,193 +5,295 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>DSH Operator</title>
 <style>
-  /* 不引任何外部资源: 工作台容器出站受安全组约束, 拉不到 CDN 时页面会裸奔,
+  /* 零外部资源: 工作台容器出站受安全组约束, 拉不到 CDN 时页面会裸奔,
      而那种坏法在本地开发时完全看不出来。 */
   :root {
-    --bg: #fbfbfd; --fg: #1c1c1e; --muted: #6b6b70; --line: #e4e4e8;
-    --card: #fff; --accent: #2f6fed; --tool-bg: #f2f3f7; --err: #c0392b;
+    --bg:#fbfbfd; --fg:#1c1c1e; --muted:#6b6b70; --line:#e4e4e8;
+    --card:#fff; --accent:#2f6fed; --tool:#f2f3f7; --err:#c0392b; --side:#f6f6f9;
   }
   @media (prefers-color-scheme: dark) {
     :root {
-      --bg: #16171a; --fg: #e8e8ea; --muted: #9a9aa2; --line: #2c2d31;
-      --card: #1e1f23; --accent: #5b8dff; --tool-bg: #24252a; --err: #ff6b5e;
+      --bg:#16171a; --fg:#e8e8ea; --muted:#9a9aa2; --line:#2c2d31;
+      --card:#1e1f23; --accent:#5b8dff; --tool:#24252a; --err:#ff6b5e; --side:#131417;
     }
   }
-  * { box-sizing: border-box; }
+  * { box-sizing:border-box; }
   body {
-    margin: 0; background: var(--bg); color: var(--fg);
-    font: 15px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
-          "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
-    display: flex; flex-direction: column; height: 100vh;
+    margin:0; height:100vh; display:flex; background:var(--bg); color:var(--fg);
+    font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
   }
-  header {
-    display: flex; align-items: center; gap: 12px; padding: 10px 16px;
-    border-bottom: 1px solid var(--line); background: var(--card); flex: none;
-  }
-  header h1 { font-size: 15px; margin: 0; font-weight: 600; letter-spacing: .01em; }
-  header .sp { flex: 1; }
-  select, button {
-    font: inherit; color: var(--fg); background: var(--bg);
-    border: 1px solid var(--line); border-radius: 8px; padding: 5px 10px; cursor: pointer;
-  }
-  button:hover, select:hover { border-color: var(--accent); }
-  #log { flex: 1; overflow-y: auto; padding: 20px 16px; }
-  .wrap { max-width: 760px; margin: 0 auto; }
-  .msg { margin-bottom: 18px; }
-  .who { font-size: 12px; color: var(--muted); margin-bottom: 4px; }
-  .bubble { white-space: pre-wrap; word-wrap: break-word; }
-  .user .bubble {
-    background: var(--card); border: 1px solid var(--line);
-    border-radius: 12px; padding: 10px 14px;
-  }
-  .tool {
-    display: flex; align-items: center; gap: 8px; font-size: 13px;
-    color: var(--muted); background: var(--tool-bg); border-radius: 8px;
-    padding: 6px 10px; margin: 6px 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  }
-  .tool .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); flex: none; }
-  .tool.done .dot { background: #34a853; }
-  .shot { max-width: 100%; border-radius: 10px; border: 1px solid var(--line); margin: 8px 0; }
-  .err { color: var(--err); }
-  footer { border-top: 1px solid var(--line); background: var(--card); padding: 12px 16px; flex: none; }
-  .composer { max-width: 760px; margin: 0 auto; display: flex; gap: 8px; }
-  textarea {
-    flex: 1; resize: none; font: inherit; color: var(--fg); background: var(--bg);
-    border: 1px solid var(--line); border-radius: 10px; padding: 9px 12px; min-height: 42px;
-    max-height: 180px;
-  }
-  textarea:focus { outline: none; border-color: var(--accent); }
-  #send { padding: 0 18px; background: var(--accent); color: #fff; border-color: var(--accent); }
-  #send[disabled] { opacity: .5; cursor: default; }
-  .hint { max-width: 760px; margin: 6px auto 0; font-size: 12px; color: var(--muted); }
+  /* 侧栏 */
+  aside { width:220px; flex:none; background:var(--side); border-right:1px solid var(--line);
+          display:flex; flex-direction:column; }
+  aside h2 { font-size:12px; color:var(--muted); margin:14px 14px 6px; font-weight:600;
+             letter-spacing:.04em; text-transform:uppercase; }
+  .rooms { flex:1; overflow-y:auto; padding:0 8px 8px; }
+  .room { padding:8px 10px; border-radius:8px; cursor:pointer; margin-bottom:2px; }
+  .room:hover { background:var(--card); }
+  .room.on { background:var(--card); box-shadow:inset 2px 0 0 var(--accent); }
+  .room .n { font-size:14px; }
+  .room .l { font-size:12px; color:var(--muted); white-space:nowrap; overflow:hidden;
+             text-overflow:ellipsis; }
+  aside button { margin:8px 12px 12px; }
+  /* 主区 */
+  main { flex:1; display:flex; flex-direction:column; min-width:0; }
+  header { display:flex; align-items:center; gap:10px; padding:10px 16px;
+           border-bottom:1px solid var(--line); background:var(--card); flex:none; }
+  header .title { font-weight:600; font-size:15px; }
+  header .sp { flex:1; }
+  .chip { font-size:12px; padding:2px 8px; border:1px solid var(--line);
+          border-radius:20px; color:var(--muted); }
+  button, select { font:inherit; color:var(--fg); background:var(--bg); border:1px solid var(--line);
+                   border-radius:8px; padding:5px 10px; cursor:pointer; }
+  button:hover, select:hover { border-color:var(--accent); }
+  #log { flex:1; overflow-y:auto; padding:20px 16px; }
+  .wrap { max-width:820px; margin:0 auto; }
+  .msg { margin-bottom:16px; display:flex; gap:10px; }
+  .av { width:30px; height:30px; border-radius:50%; background:var(--tool); flex:none;
+        display:flex; align-items:center; justify-content:center; font-size:16px; }
+  .body { min-width:0; flex:1; }
+  .who { font-size:12px; color:var(--muted); margin-bottom:2px; }
+  .txt { white-space:pre-wrap; word-wrap:break-word; }
+  .msg.user { flex-direction:row-reverse; }
+  .msg.user .body { max-width:78%; }
+  .msg.user .who { text-align:right; }
+  .msg.user .txt { background:var(--card); border:1px solid var(--line);
+                   border-radius:12px; padding:9px 13px; }
+  .tool { display:flex; align-items:center; gap:8px; font-size:12.5px; color:var(--muted);
+          background:var(--tool); border-radius:8px; padding:5px 9px; margin:5px 0;
+          font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
+  .tool .dot { width:6px; height:6px; border-radius:50%; background:var(--accent); flex:none; }
+  .tool.done .dot { background:#34a853; }
+  .shot { max-width:100%; border-radius:10px; border:1px solid var(--line); margin:6px 0; }
+  .err { color:var(--err); }
+  footer { border-top:1px solid var(--line); background:var(--card); padding:12px 16px; flex:none; }
+  .composer { max-width:820px; margin:0 auto; display:flex; gap:8px; }
+  textarea { flex:1; resize:none; font:inherit; color:var(--fg); background:var(--bg);
+             border:1px solid var(--line); border-radius:10px; padding:9px 12px;
+             min-height:42px; max-height:180px; }
+  textarea:focus { outline:none; border-color:var(--accent); }
+  #send { padding:0 18px; background:var(--accent); color:#fff; border-color:var(--accent); }
+  #send[disabled] { opacity:.5; cursor:default; }
+  .hint { max-width:820px; margin:6px auto 0; font-size:12px; color:var(--muted); }
+  dialog { border:1px solid var(--line); border-radius:12px; background:var(--card);
+           color:var(--fg); padding:18px; min-width:300px; }
+  dialog h3 { margin:0 0 10px; font-size:15px; }
+  dialog label { display:flex; align-items:center; gap:8px; padding:5px 0; cursor:pointer; }
+  dialog .row { display:flex; gap:8px; justify-content:flex-end; margin-top:14px; }
+  @media (max-width:720px) { aside { display:none; } }
 </style>
 </head>
 <body>
-<header>
-  <h1>DSH Operator</h1>
-  <span class="sp"></span>
-  <select id="model" title="模型"></select>
-  <button id="reset" title="清空对话">清空</button>
-</header>
+<aside>
+  <h2>房间</h2>
+  <div class="rooms" id="rooms"></div>
+  <button id="newRoom">＋ 拉个群</button>
+</aside>
 
-<div id="log"><div class="wrap" id="wrap"></div></div>
+<main>
+  <header>
+    <span class="title" id="title">—</span>
+    <span id="members"></span>
+    <span class="sp"></span>
+    <select id="model" title="模型"></select>
+    <button id="edit">成员</button>
+  </header>
+  <div id="log"><div class="wrap" id="wrap"></div></div>
+  <footer>
+    <div class="composer">
+      <textarea id="input" rows="1" placeholder="说一件事，群里的机器人会同时开工。Enter 发送，Shift+Enter 换行"></textarea>
+      <button id="send">发送</button>
+    </div>
+    <div class="hint" id="hint">同一轮里成员是同时对你说话，彼此看不到对方这一轮说了什么；再发一轮它们就能接上话。</div>
+  </footer>
+</main>
 
-<footer>
-  <div class="composer">
-    <textarea id="input" rows="1" placeholder="交代一件事，我在你的云工作台里动手做。Enter 发送，Shift+Enter 换行"></textarea>
-    <button id="send">发送</button>
-  </div>
-  <div class="hint" id="hint">工作目录 /workspace 持久保存；其它位置的改动会随实例回收消失。</div>
-</footer>
+<dialog id="picker">
+  <h3 id="pickTitle">选成员</h3>
+  <div id="pickList"></div>
+  <div class="row"><button id="pickCancel">取消</button><button id="pickOk">确定</button></div>
+</dialog>
 
 <script>
-const wrap = document.getElementById('wrap');
-const log = document.getElementById('log');
-const input = document.getElementById('input');
-const send = document.getElementById('send');
-const modelSel = document.getElementById('model');
-const hint = document.getElementById('hint');
-let busy = false;
-const DEFAULT_HINT = hint.textContent;
+const $ = id => document.getElementById(id);
+const wrap = $('wrap'), log = $('log'), input = $('input'), send = $('send');
+const DEFAULT_HINT = $('hint').textContent;
+let BOTS = {}, ROOMS = [], cur = null, busy = false;
 
-const atBottom = () => log.scrollHeight - log.scrollTop - log.clientHeight < 80;
-function scroll(force) { if (force || atBottom()) log.scrollTop = log.scrollHeight; }
+const at = () => log.scrollHeight - log.scrollTop - log.clientHeight < 80;
+const scroll = f => { if (f || at()) log.scrollTop = log.scrollHeight; };
+const botOf = id => BOTS[id] || { name: id, emoji: '🤖' };
 
-function addMsg(role, text) {
+function msgEl(sender, text) {
+  const isUser = sender === 'user', b = botOf(sender);
   const d = document.createElement('div');
-  d.className = 'msg ' + role;
-  d.innerHTML = '<div class="who"></div><div class="bubble"></div>';
-  d.querySelector('.who').textContent = role === 'user' ? '你' : 'Operator';
-  d.querySelector('.bubble').textContent = text || '';
+  d.className = 'msg ' + (isUser ? 'user' : 'bot');
+  d.innerHTML = '<div class="av"></div><div class="body"><div class="who"></div>'
+              + '<div class="txt"></div></div>';
+  d.querySelector('.av').textContent = isUser ? '🙂' : b.emoji;
+  d.querySelector('.who').textContent = isUser ? '你' : b.name;
+  d.querySelector('.txt').textContent = text || '';
   wrap.appendChild(d); scroll(true);
-  return d.querySelector('.bubble');
-}
-
-function addTool(name, summary) {
-  const d = document.createElement('div');
-  d.className = 'tool';
-  d.innerHTML = '<span class="dot"></span><span class="t"></span>';
-  d.querySelector('.t').textContent = summary || name;
-  wrap.appendChild(d); scroll();
   return d;
 }
 
-async function boot() {
-  try {
-    const m = await (await fetch('/api/models')).json();
-    m.models.forEach(id => {
-      const o = document.createElement('option');
-      o.value = id; o.textContent = id;
-      if (id === m.default) o.selected = true;
-      modelSel.appendChild(o);
+function toolRow(container, label) {
+  const t = document.createElement('div');
+  t.className = 'tool';
+  t.innerHTML = '<span class="dot"></span><span class="t"></span>';
+  t.querySelector('.t').textContent = label;
+  container.appendChild(t); scroll();
+  return t;
+}
+
+async function api(path, opt) {
+  const r = await fetch(path, opt);
+  return r.json();
+}
+
+async function loadRooms(select) {
+  const d = await api('/api/rooms');
+  ROOMS = d.rooms;
+  $('rooms').innerHTML = '';
+  ROOMS.forEach(r => {
+    const el = document.createElement('div');
+    el.className = 'room' + (r.id === (cur && cur.id) ? ' on' : '');
+    el.innerHTML = '<div class="n"></div><div class="l"></div>';
+    el.querySelector('.n').textContent =
+      r.members.map(m => botOf(m).emoji).join('') + ' ' + r.name;
+    el.querySelector('.l').textContent = r.last || '还没说过话';
+    el.onclick = () => open(r);
+    $('rooms').appendChild(el);
+  });
+  if (select && ROOMS.length) open(ROOMS.find(r => r.id === select) || ROOMS[0]);
+  else if (!cur && ROOMS.length) open(ROOMS[0]);
+}
+
+async function open(room) {
+  cur = room;
+  $('title').textContent = room.name;
+  $('members').innerHTML = '';
+  room.members.forEach(m => {
+    const c = document.createElement('span');
+    c.className = 'chip';
+    c.textContent = botOf(m).emoji + ' ' + botOf(m).name;
+    $('members').appendChild(c);
+  });
+  wrap.innerHTML = '';
+  const d = await api('/api/rooms/' + room.id + '/messages');
+  d.messages.forEach(m => {
+    const el = msgEl(m.sender, m.text);
+    (m.tools || []).forEach(s => {
+      const t = toolRow(el.querySelector('.body'), s); t.classList.add('done');
     });
-  } catch { /* 模型列表拿不到不该挡住聊天 —— 后端会用默认模型 */ }
-  try {
-    const c = await (await fetch('/api/conversation')).json();
-    c.messages.forEach(msg => addMsg(msg.role === 'user' ? 'user' : 'assistant', msg.content));
-  } catch { /* 空对话 */ }
+  });
+  Array.from($('rooms').children).forEach((el, i) =>
+    el.classList.toggle('on', ROOMS[i].id === room.id));
+  scroll(true);
 }
 
 async function submit() {
   const text = input.value.trim();
-  if (!text || busy) return;
+  if (!text || busy || !cur) return;
   busy = true; send.disabled = true;
-  addMsg('user', text);
+  msgEl('user', text);
   input.value = ''; input.style.height = 'auto';
 
-  let bubble = null;
-  const pending = new Map();
+  // 几个机器人同时说话 —— 每个各自一个气泡, 按 bot id 归位。
+  // 用一个 map 而不是"最后一个气泡": 并行时事件是交错到达的, 追加到最后一个
+  // 气泡会把甲的话接到乙嘴里。
+  const bubbles = new Map(), tools = new Map();
+  const bubbleFor = id => {
+    if (!bubbles.has(id)) bubbles.set(id, msgEl(id, ''));
+    return bubbles.get(id);
+  };
   try {
-    const r = await fetch('/api/chat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: text, model: modelSel.value || null }),
+    const r = await fetch('/api/rooms/' + cur.id + '/send', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: text, model: $('model').value || null }),
     });
-    const reader = r.body.getReader();
-    const dec = new TextDecoder();
+    const reader = r.body.getReader(), dec = new TextDecoder();
     let buf = '';
     while (true) {
       const { value, done } = await reader.read();
       if (done) break;
       buf += dec.decode(value, { stream: true });
       // SSE 以空行分帧。**必须按帧切**而不是按行读: 一个 chunk 里可能有半帧,
-      // 按行读会把半个 JSON 交给 parse，然后整轮界面卡死在那一条上。
+      // 按行读会把半个 JSON 交给 parse, 整个界面卡死在那一条上。
       let i;
       while ((i = buf.indexOf('\n\n')) >= 0) {
         const frame = buf.slice(0, i); buf = buf.slice(i + 2);
         if (!frame.startsWith('data: ')) continue;
         const ev = JSON.parse(frame.slice(6));
+        const body = ev.bot ? bubbleFor(ev.bot).querySelector('.body') : null;
         if (ev.type === 'text') {
-          if (!bubble) bubble = addMsg('assistant', '');
-          bubble.textContent += ev.text; scroll();
+          bubbleFor(ev.bot).querySelector('.txt').textContent += ev.text; scroll();
         } else if (ev.type === 'tool') {
-          pending.set(ev.id, addTool(ev.name, '正在' + ev.name));
-          bubble = null;   // 工具之后模型还会继续说，另起一段
+          tools.set(ev.bot + ':' + ev.id, toolRow(body, '正在' + ev.name));
         } else if (ev.type === 'result') {
-          const el = pending.get(ev.id);
-          if (el) { el.classList.add('done'); el.querySelector('.t').textContent = ev.summary; }
+          const t = tools.get(ev.bot + ':' + ev.id);
+          if (t) { t.classList.add('done'); t.querySelector('.t').textContent = ev.summary; }
         } else if (ev.type === 'image') {
           const img = document.createElement('img');
-          img.className = 'shot'; img.src = ev.data_uri;
-          wrap.appendChild(img); scroll();
+          img.className = 'shot'; img.src = ev.data_uri; body.appendChild(img); scroll();
         } else if (ev.type === 'end') {
-          if (ev.note) hint.textContent = ev.note;
-          if (ev.usage && ev.usage.total_tokens) {
-            hint.textContent = '本轮用了 ' + ev.usage.total_tokens + ' tokens。' +
-              '工作目录 /workspace 持久保存。';
-          }
+          if (ev.note) $('hint').textContent = ev.note;
         } else if (ev.type === 'error') {
-          const e = addMsg('assistant', ev.message);
-          e.classList.add('err'); bubble = null;
+          const el = ev.bot ? bubbleFor(ev.bot) : msgEl('system', '');
+          el.querySelector('.txt').textContent += (ev.message || '出错了');
+          el.querySelector('.txt').classList.add('err');
         }
       }
     }
   } catch (e) {
-    addMsg('assistant', '连接中断: ' + e.message).classList.add('err');
+    msgEl('system', '连接中断: ' + e.message).querySelector('.txt').classList.add('err');
   } finally {
     busy = false; send.disabled = false; input.focus();
+    loadRooms(cur.id);
   }
 }
+
+// --- 成员选择 (拉群 / 改成员共用) -------------------------------------------
+function pick(title, checked) {
+  return new Promise(resolve => {
+    $('pickTitle').textContent = title;
+    $('pickList').innerHTML = '';
+    Object.values(BOTS).forEach(b => {
+      const l = document.createElement('label');
+      l.innerHTML = '<input type="checkbox" value="' + b.id + '">'
+                  + '<span>' + b.emoji + ' ' + b.name + '</span>';
+      l.querySelector('input').checked = checked.includes(b.id);
+      $('pickList').appendChild(l);
+    });
+    const dlg = $('picker');
+    const done = v => { dlg.close(); resolve(v); };
+    $('pickOk').onclick = () => done(
+      Array.from($('pickList').querySelectorAll('input:checked')).map(i => i.value));
+    $('pickCancel').onclick = () => done(null);
+    dlg.showModal();
+  });
+}
+
+$('newRoom').onclick = async () => {
+  const m = await pick('拉谁进群？', []);
+  if (!m || !m.length) return;
+  const d = await api('/api/rooms', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ members: m }),
+  });
+  if (d.room) { cur = d.room; await loadRooms(d.room.id); }
+};
+
+$('edit').onclick = async () => {
+  if (!cur) return;
+  const m = await pick('群成员', cur.members);
+  if (!m) return;
+  const d = await api('/api/rooms/' + cur.id + '/members', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ members: m }),
+  });
+  if (d.room) { cur = d.room; await loadRooms(d.room.id); }
+};
 
 send.onclick = submit;
 input.addEventListener('keydown', e => {
@@ -201,23 +303,21 @@ input.addEventListener('input', () => {
   input.style.height = 'auto';
   input.style.height = Math.min(input.scrollHeight, 180) + 'px';
 });
-// 清空也要占住 busy 闸。它是 async 的: 不占闸的话, 用户点完清空立刻发消息,
-// 这里的 innerHTML='' 会在消息**已经渲染之后**才跑, 把他自己刚发的那句抹掉 ——
-// 服务端有记录、屏幕上没有, 看着就是丢消息。
-document.getElementById('reset').onclick = async () => {
-  if (busy) return;
-  busy = true; send.disabled = true;
+
+(async function boot() {
+  const b = await api('/api/bots');
+  b.bots.forEach(x => BOTS[x.id] = x);
   try {
-    await fetch('/api/reset', { method: 'POST' });
-    wrap.innerHTML = '';
-    hint.textContent = DEFAULT_HINT;
-  } catch (e) {
-    addMsg('assistant', '清空失败: ' + e.message).classList.add('err');
-  } finally {
-    busy = false; send.disabled = false;
-  }
-};
-boot();
+    const m = await api('/api/models');
+    m.models.forEach(id => {
+      const o = document.createElement('option');
+      o.value = id; o.textContent = id;
+      if (id === m.default) o.selected = true;
+      $('model').appendChild(o);
+    });
+  } catch { /* 模型列表拿不到不该挡住聊天, 后端会用默认模型 */ }
+  await loadRooms();
+})();
 </script>
 </body>
 </html>

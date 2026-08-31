@@ -1,10 +1,12 @@
-"""Operator 主循环的自检: 假造一个网关, 把一整轮真跑一遍。
+"""Operator 自检: 假造网关, 把单个机器人的一轮和一个群的并行一轮都真跑一遍。
 
 跑法: python deploy/workspace-operator/verify.py
 
-**故意让两个工具调用的分片交错到达**。这是流式工具调用最容易写错的地方: 按到达
-顺序拼接的实现会把 A 的参数接到 B 上, 而拼出来的 JSON 照样能解析成功 —— 于是
-"参数对不上却完全不报错", 表现是智能体读了个它没要读的文件, 然后基于错内容往下做。
+钉两件最容易悄悄坏掉的事:
+1. **流式工具调用按 index 归位**。按到达顺序拼的实现会把 A 的参数接到 B 上, 而拼出来
+   的 JSON 照样解析成功 —— "参数对不上却完全不报错", 表现是它读了个没人要它读的文件。
+2. **并行时事件不串台**。几个成员同时跑, 事件交错到达; 归位错了就是甲的话进了乙的
+   气泡, 而两边都是通顺的中文, 光看界面看不出来。
 """
 
 from __future__ import annotations
@@ -17,124 +19,187 @@ import tempfile
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
-import httpx  # noqa: E402
+import httpx
+from app import agent, tools
 
-from app import agent, tools  # noqa: E402
+_tmp = pathlib.Path(tempfile.mkdtemp(prefix="operator-verify-"))
+tools.WORKDIR = _tmp
+
+from app import rooms
+
+rooms.STATE_PATH = _tmp / ".operator" / "rooms.json"
+
+FAILS: list[str] = []
+
+
+def check(cond: bool, msg: str) -> None:
+    if not cond:
+        FAILS.append(msg)
 
 
 def sse(chunks: list[dict]) -> bytes:
-    body = "".join(f"data: {json.dumps(c)}\n\n" for c in chunks)
-    return (body + "data: [DONE]\n\n").encode()
+    return (
+        "".join(f"data: {json.dumps(c)}\n\n" for c in chunks) + "data: [DONE]\n\n"
+    ).encode()
 
 
-def delta(**d) -> dict:
-    return {"choices": [{"delta": d}]}
-
-
-def tool_frag(index: int, *, cid: str = "", name: str = "", args: str = "") -> dict:
+def frag(i: int, *, cid: str = "", name: str = "", args: str = "") -> dict:
     fn = {}
     if name:
         fn["name"] = name
     if args:
         fn["arguments"] = args
-    part = {"index": index, "function": fn}
+    part = {"index": i, "function": fn}
     if cid:
         part["id"] = cid
     return {"choices": [{"delta": {"tool_calls": [part]}}]}
 
 
-ROUND1 = sse([
-    delta(content="我先看一下。"),
-    # 两个调用交错送达 —— index 才是归位依据, 到达顺序不是。
-    tool_frag(0, cid="call_a", name="shell"),
-    tool_frag(1, cid="call_b", name="write_file"),
-    tool_frag(0, args='{"comm'),
-    tool_frag(1, args='{"path": "note.txt", "cont'),
-    tool_frag(0, args='and": "echo hello-from-operator"}'),
-    tool_frag(1, args='ent": "written by operator"}'),
-])
-ROUND2 = sse([delta(content="做完了。")])
-
-_calls: list[dict] = []
+def text(s: str) -> dict:
+    return {"choices": [{"delta": {"content": s}}]}
 
 
-def handler(request: httpx.Request) -> httpx.Response:
-    payload = json.loads(request.content)
-    _calls.append(payload)
-    body = ROUND1 if len(_calls) == 1 else ROUND2
-    return httpx.Response(200, content=body, headers={"content-type": "text/event-stream"})
+# ---- 1. 单机器人: 分片交错归位 ---------------------------------------------
+ROUND1 = sse(
+    [
+        text("我先看一下。"),
+        frag(0, cid="a", name="shell"),
+        frag(1, cid="b", name="write_file"),
+        frag(0, args='{"comm'),
+        frag(1, args='{"path": "note.txt", "cont'),
+        frag(0, args='and": "echo hello-from-operator"}'),
+        frag(1, args='ent": "written"}'),
+    ]
+)
+ROUND2 = sse([text("做完了。")])
+
+
+async def check_single() -> None:
+    seen: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(json.loads(request.content))
+        body = ROUND1 if len(seen) == 1 else ROUND2
+        return httpx.Response(
+            200, content=body, headers={"content-type": "text/event-stream"}
+        )
+
+    with _mock(handler):
+        msgs = [
+            {"role": "system", "content": "你是测试"},
+            {"role": "user", "content": "试一下"},
+        ]
+        events = [e async for e in agent.run_turn("doer", msgs)]
+
+    kinds = [e["type"] for e in events]
+    check(kinds.count("tool") == 2, f"应当 2 次工具调用, 实际 {kinds.count('tool')}")
+    check(kinds[-1] == "end", f"最后应当是 end, 实际 {kinds[-1]}")
+    check(all(e.get("bot") == "doer" for e in events), "事件没有正确标上 bot")
+
+    by = {e["name"]: e["args"] for e in events if e["type"] == "tool"}
+    check(
+        by.get("shell", {}).get("command") == "echo hello-from-operator",
+        f"shell 参数拼错: {by.get('shell')}",
+    )
+    check(
+        by.get("write_file", {}).get("path") == "note.txt",
+        f"write_file 参数拼错: {by.get('write_file')}",
+    )
+    check((_tmp / "note.txt").exists(), "write_file 没真写")
+
+    end = events[-1]
+    check("做完了。" in end.get("text", ""), "end 没带上最终正文")
+    check(len(end.get("tools") or []) == 2, "end 没带上工具摘要")
+    if len(seen) == 2:
+        roles = [m["role"] for m in seen[1]["messages"]]
+        check(roles.count("tool") == 2, f"第二轮没带上 tool 结果: {roles}")
+
+
+# ---- 2. 群聊: 两个成员并行, 事件不串台 --------------------------------------
+async def check_room() -> None:
+    from app import main as srv
+
+    store = rooms.Store()
+    srv.store = store
+    room = store.create_room("测试群", ["doer", "checker"])
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        # 认人只能看**身份标记**, 不能看人格里出没出现某个名字 —— 成员名单里
+        # 两个人都会看到对方的名字, 拿名字当判据两边会认成同一个人。
+        who = "doer" if "名字是 阿做" in body["messages"][0]["content"] else "checker"
+        return httpx.Response(
+            200,
+            content=sse([text(f"我是{who}"), text("-已完成")]),
+            headers={"content-type": "text/event-stream"},
+        )
+
+    with _mock(handler):
+        events = [e async for e in srv._run_room(room, None)]
+
+    ends = [e for e in events if e["type"] == "end"]
+    check(len(ends) == 2, f"两个成员应当各收尾一次, 实际 {len(ends)}")
+    said = {e["bot"]: e["text"] for e in ends}
+    # 串台的判据: 谁的正文里出现了别人的名字
+    check(
+        said.get("doer") == "我是doer-已完成",
+        f"doer 的正文串台了: {said.get('doer')!r}",
+    )
+    check(
+        said.get("checker") == "我是checker-已完成",
+        f"checker 的正文串台了: {said.get('checker')!r}",
+    )
+
+    # 两条都要写进房间记录, 且发送人正确
+    tr = store.transcript(room.id)
+    senders = [m.sender for m in tr]
+    check(
+        senders.count("doer") == 1 and senders.count("checker") == 1,
+        f"房间记录里成员发言数不对: {senders}",
+    )
+
+    # 新成员看得见入群前的记录 (render_for 每轮现渲染整份记录)
+    view = store.render_for(store.bots["planner"], room.id)
+    joined = json.dumps(view, ensure_ascii=False)
+    check("我是doer" in joined and "我是checker" in joined, "新成员读不到入群前的对话")
+    check(
+        all(m["role"] != "assistant" for m in view),
+        "别人的话被放进了 assistant —— 模型会当成自己说的然后接着编",
+    )
+
+
+class _mock:
+    def __init__(self, handler):
+        self.handler = handler
+
+    def __enter__(self):
+        agent.GATEWAY_BASE = "http://gw.invalid/llm/v1"
+        agent.GATEWAY_TOKEN = "tok"
+        agent.DEFAULT_MODEL = "deepseek-v4-flash"
+        self.real = httpx.AsyncClient
+        transport = httpx.MockTransport(self.handler)
+
+        def client(*a, **kw):
+            kw["transport"] = transport
+            return self.real(*a, **kw)
+
+        agent.httpx.AsyncClient = client
+        return self
+
+    def __exit__(self, *a):
+        agent.httpx.AsyncClient = self.real
+        return False
 
 
 async def main() -> int:
-    tmp = pathlib.Path(tempfile.mkdtemp(prefix="operator-verify-"))
-    tools.WORKDIR = tmp
-    agent.GATEWAY_BASE = "http://gateway.invalid/llm/v1"
-    agent.GATEWAY_TOKEN = "tok"
-    agent.DEFAULT_MODEL = "deepseek-v4-flash"
-
-    transport = httpx.MockTransport(handler)
-    real = httpx.AsyncClient
-
-    def client(*a, **kw):
-        kw["transport"] = transport
-        return real(*a, **kw)
-
-    agent.httpx.AsyncClient = client  # type: ignore[assignment]
-
-    history: list[dict] = [{"role": "user", "content": "试一下"}]
-    events = [e async for e in agent.run_turn(history)]
-    agent.httpx.AsyncClient = real  # type: ignore[assignment]
-
-    kinds = [e["type"] for e in events]
-    fails: list[str] = []
-
-    def check(cond: bool, msg: str) -> None:
-        if not cond:
-            fails.append(msg)
-
-    check(kinds.count("text") >= 1, "没有正文增量")
-    check(kinds.count("tool") == 2, f"应当有 2 次工具调用, 实际 {kinds.count('tool')}")
-    check(kinds.count("result") == 2, "工具结果数不对")
-    check(kinds[-1] == "end", f"最后一个事件应当是 end, 实际 {kinds[-1]}")
-
-    tool_events = [e for e in events if e["type"] == "tool"]
-    by_name = {e["name"]: e["args"] for e in tool_events}
-    # 归位正确的判据: 两组参数各自完整, 且**没有串到对方身上**
-    check(
-        by_name.get("shell", {}).get("command") == "echo hello-from-operator",
-        f"shell 的参数拼错了: {by_name.get('shell')}",
-    )
-    check(
-        by_name.get("write_file", {}).get("path") == "note.txt",
-        f"write_file 的参数拼错了: {by_name.get('write_file')}",
-    )
-
-    # 工具是真执行的, 不是只发了事件
-    check("hello-from-operator" in json.dumps(history, ensure_ascii=False), "shell 没真跑")
-    check((tmp / "note.txt").exists(), "write_file 没真写")
-
-    # 第二轮必须把 tool 结果带回去 —— 少了它模型看不到自己干了什么
-    check(len(_calls) == 2, f"应当来回两次, 实际 {len(_calls)}")
-    if len(_calls) == 2:
-        roles = [m["role"] for m in _calls[1]["messages"]]
-        check(roles.count("tool") == 2, f"第二轮没带上 tool 结果: {roles}")
-        # OpenAI 格式要求 tool_calls 与 tool 消息严格配对, 不配对是每轮都 400
-        ids = {
-            tc["id"]
-            for m in _calls[1]["messages"]
-            if m["role"] == "assistant" and m.get("tool_calls")
-            for tc in m["tool_calls"]
-        }
-        tool_ids = {m["tool_call_id"] for m in _calls[1]["messages"] if m["role"] == "tool"}
-        check(ids == tool_ids, f"tool_calls 与 tool 结果没配对: {ids} vs {tool_ids}")
-
-    for f in fails:
+    await check_single()
+    await check_room()
+    for f in FAILS:
         print("  ✗", f)
-    if fails:
-        print(f"\n自检失败 ({len(fails)} 项)")
+    if FAILS:
+        print(f"\n自检失败 ({len(FAILS)} 项)")
         return 1
-    print(f"事件序列: {' -> '.join(kinds)}")
-    print("自检通过: 分片归位、工具真执行、结果回灌、消息配对 全部正确")
+    print("自检通过: 分片归位、工具真执行、结果回灌、并行不串台、新成员读得到上文")
     return 0
 
 
