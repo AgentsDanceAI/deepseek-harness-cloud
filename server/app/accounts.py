@@ -126,6 +126,10 @@ def try_resolve_user(request: Request, *, cookie_only: bool = False) -> dict | N
             token = auth[7:].strip()
         if not token:
             token = request.headers.get("x-api-key", "").strip()
+        if not token:
+            # Gemini CLI 只会发这个头 (实测 0.57.0: x-goog-api-key, 不带
+            # Authorization, 也不把 key 放查询串)。装的是同一个令牌。
+            token = request.headers.get("x-goog-api-key", "").strip()
     if not token:
         token = request.cookies.get(config.SESSION_COOKIE, "")
         from_cookie = bool(token)

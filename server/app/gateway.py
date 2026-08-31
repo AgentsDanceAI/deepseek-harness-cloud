@@ -9,6 +9,10 @@ is for the cloud workspaces' knowledge bases, which speak OpenAI too:
                                   the cloud workspaces: Coze / Dify / RAGFlow)
   POST /llm/anthropic/v1/messages Anthropic Messages (web-search-deepseek hits
                                   {base}/messages with x-api-key + anthropic-version)
+  POST /llm/v1/responses          OpenAI Responses (Codex CLI 只认这面)
+  POST /llm/gemini/v1beta/models/{model}:{action}
+                                  Google 原生 generateContent (Gemini CLI 只认这面,
+                                  鉴权走 x-goog-api-key 头)
   GET  /llm/v1/models             catalog listing (pi-ai discovery compatible)
 
 Admission order: token -> account -> concurrency -> QPS -> credits. Once a
@@ -770,6 +774,160 @@ async def anthropic_messages(request: Request, user: dict = Depends(resolve_user
                     bill(usage or None, forwarded_bytes, interrupted=not stream_complete)
                 except Exception:
                     log.exception("failed to bill Anthropic stream request_id=%s", request_id)
+
+    return StreamingResponse(relay(), media_type="text/event-stream", headers={"x-request-id": request_id})
+
+
+# --- Gemini (Google 原生协议) -----------------------------------------------
+#
+# Gemini CLI 认这套, 而且**只认它**: 实测 0.57.0 一设 GOOGLE_GEMINI_BASE_URL, 请求
+# 就是 POST {base}/v1beta/models/{model}:generateContent, 鉴权在 x-goog-api-key 头
+# 上 (不发 Authorization, 也不把 key 放查询串), body 是 Google 原生的 contents[]。
+# 上游千面原生 serve 这套 —— 所以这里只是一层带鉴权和计费的转发, 不做协议翻译。
+#
+# 路径**不挂在 /v1 下面**, 见 config.UPSTREAM_GEMINI_BASE。
+
+#: 放行的动作。白名单而不是全转: 未知动作 (比如上游将来加的 batch/文件上传)
+#: 会绕过这里的计费, 那等于白送。
+_GEMINI_ACTIONS = {"generateContent", "streamGenerateContent", "countTokens"}
+
+
+def _safe_json(raw: bytes) -> object:
+    """解析失败就返回 None —— 这个值只喂给日志里的形状摘要, 不参与转发。"""
+    try:
+        return json.loads(raw)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return None
+
+
+def _gemini_usage(meta: object) -> tuple[int, int, int]:
+    """usageMetadata -> (未命中缓存的输入, 命中缓存的输入, 输出)。
+
+    两个坑:
+      * promptTokenCount 是**含**缓存命中的总输入, 要减掉 cachedContentTokenCount
+        才是按全价计的那部分 (照抄会把缓存价按全价收)。
+      * thoughtsTokenCount 是"思考"的产出, Google 单列、**不含**在
+        candidatesTokenCount 里 —— 漏了它等于白送推理模型最贵的那段。
+    """
+    u = meta if isinstance(meta, dict) else {}
+    cached = int(u.get("cachedContentTokenCount") or 0)
+    prompt = int(u.get("promptTokenCount") or 0)
+    output = int(u.get("candidatesTokenCount") or 0) + int(u.get("thoughtsTokenCount") or 0)
+    return max(0, prompt - cached), cached, output
+
+
+def _gemini_error(status: int, message: str) -> JSONResponse:
+    return JSONResponse(
+        status_code=status,
+        content={"error": {"code": status, "message": message, "status": "INVALID_ARGUMENT"}},
+    )
+
+
+@router.post("/gemini/v1beta/models/{model_action:path}")
+async def gemini_generate(model_action: str, request: Request, user: dict = Depends(resolve_user)):
+    rejected = _admit(user)
+    if rejected is not None:
+        return rejected
+
+    model, _, action = model_action.partition(":")
+    if action not in _GEMINI_ACTIONS:
+        return _gemini_error(404, f"Unsupported action {action!r}.")
+    if not model:
+        return _gemini_error(400, "Model name is required.")
+
+    raw = await read_limited_body(
+        request,
+        max_bytes=config.GATEWAY_BODY_MAX_BYTES,
+        timeout_s=config.REQUEST_BODY_TIMEOUT_S,
+    )
+    request_id = f"dhc-{uuid.uuid4().hex[:16]}"
+
+    _require_upstream()
+    headers = {
+        "x-goog-api-key": config.UPSTREAM_API_KEY,
+        "content-type": "application/json",
+    }
+    url = f"{config.UPSTREAM_GEMINI_BASE.rstrip('/')}/v1beta/models/{model_action}"
+    # alt=sse 决定上游是吐 SSE 还是一整个 JSON 数组 —— 必须原样带过去, 否则
+    # 客户端按 SSE 解析一个数组, 表现是**一直转圈直到超时**。
+    if request.url.query:
+        url += "?" + request.url.query
+
+    # countTokens 不产出内容, 上游也不计费 —— 我们跟着不收。它是客户端在每次
+    # 发送前估算上下文用的, 按次收会变成"什么都没干就扣分"。
+    billable = action != "countTokens"
+
+    def bill(meta: object, forwarded_bytes: int = 0, *, interrupted: bool = False) -> None:
+        if not billable:
+            return
+        inp, cached, out = _gemini_usage(meta)
+        if not inp and not cached:
+            inp = max(1, math.ceil(len(raw) / STREAM_FALLBACK_BYTES_PER_TOKEN))
+        if not out and (forwarded_bytes or interrupted):
+            out = max(1, math.ceil(forwarded_bytes / STREAM_FALLBACK_BYTES_PER_TOKEN))
+        amount = model_catalog.charge_credits(model, inp, cached, out) if (inp or cached or out) else 0
+        credits.spend(
+            user["id"],
+            amount,
+            kind="llm",
+            model=model,
+            device_id=user.get("device_id", ""),
+            uncached_input=inp,
+            cache_read=cached,
+            output=out,
+            request_id=request_id,
+        )
+
+    if action != "streamGenerateContent":
+        async with _upstream_client() as client:
+            with _Slot(user["id"]):
+                upstream = await client.post(url, content=raw, headers=headers)
+        if upstream.status_code == 200:
+            data = upstream.json()
+            bill(data.get("usageMetadata"))
+            return JSONResponse(content=data, headers={"x-request-id": request_id})
+        return _relay_upstream_error(upstream, request_id, _safe_json(raw))
+
+    async def relay():
+        slot = _Slot(user["id"])
+        slot.__enter__()
+        usage: object = None
+        forwarded_bytes = 0
+        upstream_started = False
+        stream_exhausted = False
+        buffer = b""
+        try:
+            async with _upstream_client() as client:
+                async with client.stream("POST", url, content=raw, headers=headers) as upstream:
+                    if not 200 <= upstream.status_code < 300:
+                        detail = await upstream.aread()
+                        yield _sse_error_bytes(upstream.status_code, detail)
+                        return
+                    upstream_started = True
+                    async for chunk in upstream.aiter_raw():
+                        forwarded_bytes += len(chunk)
+                        buffer += chunk
+                        while b"\n" in buffer:
+                            line, buffer = buffer.split(b"\n", 1)
+                            text = line.strip()
+                            if not text.startswith(b"data:"):
+                                continue
+                            try:
+                                parsed = json.loads(text[5:].strip())
+                            except (json.JSONDecodeError, AttributeError):
+                                continue
+                            # 每个分片都带一份**累计**的 usageMetadata, 取最后一份。
+                            if isinstance(parsed, dict) and parsed.get("usageMetadata"):
+                                usage = parsed["usageMetadata"]
+                        yield chunk
+                    stream_exhausted = True
+        finally:
+            slot.__exit__()
+            if upstream_started and (forwarded_bytes or not stream_exhausted):
+                try:
+                    bill(usage, forwarded_bytes, interrupted=not stream_exhausted)
+                except Exception:
+                    log.exception("failed to bill Gemini stream request_id=%s", request_id)
 
     return StreamingResponse(relay(), media_type="text/event-stream", headers={"x-request-id": request_id})
 
