@@ -360,6 +360,9 @@ CODECLI_CPUS = _env_float("CODECLI_CPUS", 2.0)
 # code-server 冷启动实测 ~8 秒, 但用户在里面是**连续工作**的 (读代码、等 agent
 # 跑完), 关一下标签页再回来很常见 —— 留久一点, 与 ComfyUI 同理。
 CODECLI_TAB_GRACE_MIN = _env_int("CODECLI_TAB_GRACE_MIN", 10)
+# CloudCLI 版的外壳 (聊天式界面, 见 deploy/workspace-cloudcli)。与 code-server
+# 版跑同一批 CLI、同一套网关接线, 只是形态不同 —— 老板要两版摆一起比。
+CLOUDCLI_IMAGE_REF = _env("CLOUDCLI_IMAGE_REF", "ghcr.io/agentsdancepro/cloudcli-local:1.37.2-r1")
 CLAUDE_CODE_DOMAIN = _env("CLAUDE_CODE_DOMAIN", "")
 CODEX_DOMAIN = _env("CODEX_DOMAIN", "")
 

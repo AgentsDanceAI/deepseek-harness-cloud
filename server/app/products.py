@@ -1317,6 +1317,191 @@ def _openclaw_boot() -> str:
     )
 
 
+#: CloudCLI 的端口。它绑回环, 前面压一个 nginx 主容器 (见 _cloudcli_boot)。
+CLOUDCLI_PORT = 3001
+
+
+def _cloudcli_stack() -> tuple[Sidecar, ...]:
+    """CloudCLI 本体作为伴随容器。
+
+    与 code-server 版 (workspace-codecli) 是同一批 CLI 的**两种形态**: 那边是
+    编辑器 + 文件树, 这边是聊天式界面。老板要两版摆一起比。
+
+    NAS 子路径故意用 home / workspace —— 和主容器那两个 (workbackend 里写死的
+    /root 与 /workspace) 是**同一份**。换外壳的时候用户的文件和会话跟着走, 不会
+    因为我们改了产品形态就凭空消失。
+    """
+    gateway = config.PUBLIC_BASE.rstrip("/")
+    model = _codecli_model("claude-code")
+    return (
+        Sidecar(
+            name="cloudcli",
+            image_ref=config.CLOUDCLI_IMAGE_REF,
+            cmd=("sh", "-c", f"cd /workspace && exec cloudcli start --port {CLOUDCLI_PORT}"),
+            env=(
+                ("HOME", "/root"),
+                # 项目只能建在这个根下面 (它自己的校验), 默认是 HOME。指到
+                # /workspace —— 那是 NAS 上的那一份, 用户建的东西才留得住。
+                ("WORKSPACES_ROOT", "/workspace"),
+                # 它底下驱动的就是 claude / codex 两个 CLI, 网关接线与 code-server
+                # 版完全一致 (见 env_for)。
+                ("ANTHROPIC_BASE_URL", f"{gateway}/llm/anthropic"),
+                ("ANTHROPIC_AUTH_TOKEN", GATEWAY_TOKEN_PLACEHOLDER),
+                ("ANTHROPIC_MODEL", model),
+                ("ANTHROPIC_SMALL_FAST_MODEL", model),
+                ("OPENAI_API_KEY", GATEWAY_TOKEN_PLACEHOLDER),
+                ("OPENAI_BASE_URL", f"{gateway}/llm/v1"),
+                # 它自带账号体系, 没有关掉鉴权的开关 —— 凭据由工作台代持, 主容器
+                # 替用户注册+登录一次再把令牌注入页面 (见 _CLOUDCLI_AUTOLOGIN)。
+                ("DSH_AUTOLOGIN_USER", "owner"),
+                ("DSH_AUTOLOGIN_PASSWORD", STACK_PASSWORD_PLACEHOLDER),
+            ),
+            mounts=(("home", "/root"), ("workspace", "/workspace")),
+            run_as_user=0,
+        ),
+    )
+
+
+#: 工作台替用户注册+登录 CloudCLI, 再把令牌注入页面。
+#:
+#: 与 Dify/Hermes 那两处的区别: CloudCLI 的会话是 **localStorage 里的 JWT**
+#: (键名 auth-token), 不是 cookie —— 所以不能靠 Set-Cookie, 只能往 HTML 里插
+#: 一段脚本, 在应用自己的 bundle 跑起来之前把令牌写进去。
+_CLOUDCLI_AUTOLOGIN = r"""#!/bin/sh
+# 由 products.py 下发。CloudCLI 自带单用户账号体系 (注册 + 账号密码 + 7 天期的
+# JWT), 没有任何关掉鉴权的开关 —— 而老板的铁律是接进来的应用不留登录墙。
+# 凭据是我们生成的, 用户不可能知道, 所以只能由工作台代登。
+U="$DSH_AUTOLOGIN_USER"
+P="$DSH_AUTOLOGIN_PASSWORD"
+[ -n "$U" ] && [ -n "$P" ] || exit 0
+API=http://127.0.0.1:3001
+LOGF=/root/.cloudcli-autologin.log
+log() {
+  printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" >> "$LOGF" 2>/dev/null
+  tail -n 200 "$LOGF" > "$LOGF.t" 2>/dev/null && mv "$LOGF.t" "$LOGF" 2>/dev/null
+}
+
+# 令牌里可能有 . 和 -, 没有引号和反斜杠 (JWT 是 base64url), 直接塞进 nginx 的
+# 字符串是安全的。仍然校验一下形状 —— 万一上游换了令牌格式, 宁可不注入也不要
+# 写出一份语法错的配置 (那会让 reload 静默失败, 而症状是"登录墙又回来了")。
+write_conf() {
+  case "$1" in
+    *[!A-Za-z0-9._-]*) log "令牌形状不对, 拒绝注入"; return 1 ;;
+  esac
+  cat > /etc/nginx/inject/token.conf <<EOF
+# 在应用自己的 bundle 跑起来之前, 把令牌写进 localStorage。
+# CloudCLI 的会话是 localStorage 里的 JWT (键名 auth-token), 不是 cookie ——
+# 所以这里是插脚本, 不是发 Set-Cookie。
+#
+# **每次页面加载都覆盖**, 不判断浏览器里有没有: 手里那份一旦失效 (实例重建换了
+# 密码、或者 7 天到期) 它仍然"存在", 只在缺失时补的话用户就被永久钉在登录页。
+# 这个判据我在 Dify 上错过两次, 症状一模一样。
+sub_filter '</head>' '<script>try{localStorage.setItem("auth-token","$1")}catch(e){}</script></head>';
+EOF
+  if nginx -t >/tmp/.nginxt 2>&1; then
+    nginx -s reload && return 0
+    log "reload 失败: $(tail -2 /tmp/.nginxt | tr '\n' ' ')"
+    return 1
+  fi
+  log "配置语法错, 没敢 reload: $(tail -2 /tmp/.nginxt | tr '\n' ' ')"
+  return 1
+}
+
+n=0
+while [ "$n" -lt 120 ]; do
+  n=$((n + 1))
+  # needsSetup 为真 = 这台还没建过账号 (NAS 上是空的)。注册与登录返回同一个形状,
+  # 都带 token, 所以两条路都能直接拿到。
+  ST=$(curl -s -m 10 "$API/api/auth/status")
+  case "$ST" in
+    *'"needsSetup":true'*) EP=register ;;
+    *'"needsSetup":false'*) EP=login ;;
+    *) sleep 5; continue ;;
+  esac
+  R=$(curl -s -m 15 -X POST -H 'Content-Type: application/json' \
+      -d "{\"username\":\"$U\",\"password\":\"$P\"}" "$API/api/auth/$EP")
+  T=$(echo "$R" | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
+  if [ -n "$T" ]; then
+    write_conf "$T" || { sleep 10; continue; }
+    # 首次配置向导 (Git 配置 / 连接 Agents) 也一并答掉 —— 登录墙拆了却把人放进
+    # 一个"必填"表单, 对用户没区别: 他还是进不去。这个接口是幂等的。
+    curl -s -m 10 -o /dev/null -X POST -H "Authorization: Bearer $T" \
+      -H 'Content-Type: application/json' -d '{}' "$API/api/user/complete-onboarding"
+    # 向导那一步要的 git 身份。/root 挂的是 NAS, 所以只在缺失时写 —— 用户自己
+    # 改过就不该被下次启动覆盖。
+    if [ ! -f /root/.gitconfig ]; then
+      printf '[user]\n\tname = DSH Cloud Workspace\n\temail = workspace@dshcloud.online\n' > /root/.gitconfig
+    fi
+    # 一个项目都没有的话就把 /workspace 建成默认项目。不建的话用户进来看到的是
+    # "No projects found — Run Claude CLI in a project directory to get started",
+    # 得先自己建一个才能开口说话 —— 拆了登录墙却留一道空状态墙, 对他没区别。
+    # 只在列表为空时建: 之后那是用户自己的项目列表。
+    if [ "$(curl -s -m 10 -H "Authorization: Bearer $T" "$API/api/projects")" = "[]" ]; then
+      curl -s -m 15 -o /dev/null -X POST -H "Authorization: Bearer $T" \
+        -H 'Content-Type: application/json' -d '{"path":"/workspace"}' \
+        "$API/api/projects/create-project"
+      log "已建默认项目 /workspace"
+    fi
+    log "会话已下发 ($EP, 第 $n 轮)"
+    # JWT 是 7 天期而容器活不到那么久, 但重登一次很便宜 —— 而且它顺带覆盖掉
+    # "实例重建后密码变了" 这种情况。
+    sleep 1200
+    n=0
+    continue
+  fi
+  log "$EP 没拿到令牌: $(echo "$R" | head -c 160)"
+  sleep 5
+done
+log "放弃: 120 轮都没能登录, 用户会看到 CloudCLI 自己的登录页"
+"""
+
+
+def _cloudcli_boot() -> str:
+    """主容器 (nginx) : 反代 CloudCLI + 把会话注入页面。
+
+    两个坑写在这儿, 都是这套模式上踩过的:
+      * `proxy_set_header Accept-Encoding ""` —— sub_filter **改不了 gzip 过的
+        响应体**, 不关掉上游压缩的话脚本根本插不进去, 而两边都不报错。
+      * 注入点用 `</head>` 而不是 `<head>` —— 插在 head 末尾, 应用的 bundle
+        在 body 里, 顺序上稳稳早于它。
+    """
+    conf = (
+        "map $http_upgrade $connection_upgrade { default upgrade; '' close; }\n"
+        "server {\n"
+        "  listen 80;\n"
+        "  client_max_body_size 512m;\n"
+        "  location / {\n"
+        f"    proxy_pass http://127.0.0.1:{CLOUDCLI_PORT};\n"
+        "    proxy_http_version 1.1;\n"
+        "    proxy_set_header Upgrade $http_upgrade;\n"
+        "    proxy_set_header Connection $connection_upgrade;\n"
+        "    proxy_set_header Host $http_host;\n"
+        "    proxy_set_header X-Forwarded-Proto https;\n"
+        # sub_filter 改不了 gzip 过的响应体 —— 不关掉上游压缩就白插。
+        '    proxy_set_header Accept-Encoding "";\n'
+        "    proxy_buffering off;\n"
+        "    proxy_read_timeout 86400s;\n"
+        "    proxy_send_timeout 86400s;\n"
+        "    sub_filter_once on;\n"
+        "    sub_filter_types text/html;\n"
+        # 令牌那条 sub_filter 由 autologin 写进来。glob 匹配不到时 nginx 不报错,
+        # 所以登录还没成功的那几秒也能正常起。
+        "    include /etc/nginx/inject/*.conf;\n"
+        "  }\n"
+        "}\n"
+    )
+    return (
+        "set -e\n"
+        "mkdir -p /etc/nginx/inject\n"
+        "apk add --no-cache curl >/dev/null 2>&1 || true\n"
+        "cat > /etc/nginx/conf.d/default.conf <<'DSHEOF'\n" + conf + "DSHEOF\n"
+        "cat > /usr/local/bin/dsh-autologin <<'DSHEOF'\n" + _CLOUDCLI_AUTOLOGIN + "DSHEOF\n"
+        "chmod +x /usr/local/bin/dsh-autologin\n"
+        "/usr/local/bin/dsh-autologin &\n"
+        "exec nginx -g 'daemon off;'\n"
+    )
+
+
 #: 编码智能体工作台的端口 (code-server 的默认值)。
 CODECLI_PORT = 8080
 
@@ -1786,20 +1971,26 @@ def registry() -> dict[str, Product]:
         # 与网关 env。选 code-server 而不是社区那几个 CLI 聊天前端, 理由见镜像
         # 的 Dockerfile —— 一句话: 它们都自带账号体系, 而 code-server 有原生的
         # --auth none。
+        # Claude Code 这一格用 **CloudCLI** 的聊天式外壳 (两容器: nginx 主容器 +
+        # 绑回环的 CloudCLI), Codex 那格保持 code-server 的编辑器形态 —— 老板要
+        # 两版摆一起比, 之后统一成哪种由他定。两边跑的是同一批 CLI、同一套网关
+        # 接线, 连 NAS 子路径都是同一份 (见 _cloudcli_stack)。
         "claude-code": Product(
             id="claude-code",
             name="Claude Code",
-            image=config.CODECLI_IMAGE_REF,
-            image_ref=config.CODECLI_IMAGE_REF,
-            port=CODECLI_PORT,
+            image="nginx:1.27-alpine",
+            image_ref="nginx:1.27-alpine",
+            port=80,
             mem_mb=config.CODECLI_MEM_LIMIT_MB,
             cpus=config.CODECLI_CPUS,
             domain=config.CLAUDE_CODE_DOMAIN,
             reports_presence=False,
             tab_grace_min=config.CODECLI_TAB_GRACE_MIN,
-            # 镜像里 USER 是 coder, 而 NAS 挂进来的 /root 与 /workspace 是 root
-            # 的 —— 与 OpenClaw 同一个坑。
-            run_as_user=0,
+            # 首页是前端静态资源, CloudCLI 的后端没起来它照样 200 —— 探活要打一条
+            # 真去后端的路径, 否则用户会在后端就绪前被放进一个坏页面 (Dify 那次
+            # 的教训)。/api/auth/status 无副作用, 且免登录流程本来就依赖它。
+            ready_path="/api/auth/status",
+            sidecars=_cloudcli_stack(),
         ),
         "codex": Product(
             id="codex",
@@ -2114,7 +2305,7 @@ _BOOTS = {
     "coze": _coze_boot,
     "openclaw": _openclaw_boot,
     "hermes": _hermes_boot,
-    "claude-code": lambda: _codecli_boot("claude-code"),
+    "claude-code": _cloudcli_boot,
     "codex": lambda: _codecli_boot("codex"),
     "agents-team": _agents_team_boot,
 }
@@ -2135,6 +2326,13 @@ def env_for(product_id: str, token: str, secret: str = "") -> dict[str, str]:
         return {
             "HERMES_USER": "owner",
             "HERMES_PASS": autologin_password(secret),
+        }
+    if product_id == "claude-code":
+        # 主容器只是 nginx —— 业务 env 全在伴随容器上 (见 _cloudcli_stack)。
+        # 这里只给它替用户登录用的那副凭据 (见 _CLOUDCLI_AUTOLOGIN)。
+        return {
+            "DSH_AUTOLOGIN_USER": "owner",
+            "DSH_AUTOLOGIN_PASSWORD": autologin_password(secret),
         }
     if product_id in _CODECLI_AGENTS:
         model = _codecli_model(product_id)
