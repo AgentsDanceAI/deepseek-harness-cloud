@@ -17,6 +17,8 @@ import base64
 import os
 import pathlib
 
+from . import browser
+
 #: 工作目录。与 products.py 里的 mounts 一致 —— 改一处必须改另一处,
 #: 不然用户的文件写进容器本地, 实例一回收就没了 (而且不报错)。
 WORKDIR = pathlib.Path(os.environ.get("AGENTS_TEAM_WORKDIR", "/workspace"))
@@ -190,11 +192,16 @@ SCHEMAS = [
     },
 ]
 
+# 浏览器那一组单独放在 browser.py: 它有自己的生命周期 (懒启动的 Chromium) 和
+# 并发约束 (一个页面, 要串行), 混在这里会让这个文件同时管两种东西。
+SCHEMAS = SCHEMAS + browser.SCHEMAS
+
 _HANDLERS = {
     "shell": lambda a: run_shell(a["command"], a.get("timeout")),
     "read_file": lambda a: read_file(a["path"]),
     "write_file": lambda a: write_file(a["path"], a.get("content", "")),
     "screenshot": lambda a: screenshot(),
+    **browser.HANDLERS,
 }
 
 
