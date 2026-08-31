@@ -7,7 +7,7 @@
 # ⚠️ 推完必须确认镜像**匿名可拉**: ghcr 新推的包默认私有, 而我们给 ECI 的创建参数
 # 里没传 registry 凭据 —— 靠公开来拉。症状是实例卡在 Pending、镜像缓存同时 Failed,
 # 而错误里一个字都不提"私有"。改可见性没有 API, 只能去网页点:
-#   https://github.com/users/AgentsDancePro/packages/container/operator/settings
+#   https://github.com/users/AgentsDancePro/packages/container/agents-team/settings
 # 脚本最后那条 curl 就是钉这个的。
 set -euo pipefail
 
@@ -15,7 +15,7 @@ here="$(cd "$(dirname "$0")" && pwd)"
 repo="$(cd "$here/../.." && pwd)"
 cd "$here"
 
-IMAGE="${IMAGE:-ghcr.io/agentsdancepro/operator}"
+IMAGE="${IMAGE:-ghcr.io/agentsdancepro/agents-team}"
 TAG="${1:-0.1.0}"
 REF="$IMAGE:$TAG"
 

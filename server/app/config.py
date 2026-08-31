@@ -338,14 +338,14 @@ OPENCLAW_MEM_LIMIT_MB = _env_int("OPENCLAW_MEM_LIMIT_MB", 4096)
 OPENCLAW_CPUS = _env_float("OPENCLAW_CPUS", 2.0)
 OPENCLAW_TAB_GRACE_MIN = _env_int("OPENCLAW_TAB_GRACE_MIN", 10)
 
-# Operator (单容器)。我们自己写的动手型智能体, 见 deploy/workspace-operator。
+# Operator (单容器)。我们自己写的动手型智能体, 见 deploy/workspace-agents-team。
 # 8710 上同时是前端和 API; 就绪探针打 /api/health 而不是首页 —— 首页是静态文件,
 # 后端没起来它照样 200 (2026-08-30 Dify/Coze 都栽过这个)。
-OPERATOR_DOMAIN = _env("OPERATOR_DOMAIN", "")
-OPERATOR_IMAGE_REF = _env("OPERATOR_IMAGE_REF", "ghcr.io/agentsdancepro/operator:0.1.0")
-OPERATOR_MEM_LIMIT_MB = _env_int("OPERATOR_MEM_LIMIT_MB", 2048)
-OPERATOR_CPUS = _env_float("OPERATOR_CPUS", 1.0)
-OPERATOR_TAB_GRACE_MIN = _env_int("OPERATOR_TAB_GRACE_MIN", 10)
+AGENTS_TEAM_DOMAIN = _env("AGENTS_TEAM_DOMAIN", "")
+AGENTS_TEAM_IMAGE_REF = _env("AGENTS_TEAM_IMAGE_REF", "ghcr.io/agentsdancepro/agents-team:0.1.0")
+AGENTS_TEAM_MEM_LIMIT_MB = _env_int("AGENTS_TEAM_MEM_LIMIT_MB", 2048)
+AGENTS_TEAM_CPUS = _env_float("AGENTS_TEAM_CPUS", 1.0)
+AGENTS_TEAM_TAB_GRACE_MIN = _env_int("AGENTS_TEAM_TAB_GRACE_MIN", 10)
 
 # --- 编码智能体工作台 (Claude Code / Codex 共用一个镜像) ---------------------
 # 见 deploy/workspace-codecli。两个产品跑同一个镜像, 区别只在启动脚本写进去的

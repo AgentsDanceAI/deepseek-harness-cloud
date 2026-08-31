@@ -1815,20 +1815,20 @@ def registry() -> dict[str, Product]:
             reports_presence=False,
             tab_grace_min=config.OPEN_DESIGN_TAB_GRACE_MIN,
         ),
-        # Operator: 我们自己写的动手型智能体 (deploy/workspace-operator)。
+        # Operator: 我们自己写的动手型智能体 (deploy/workspace-agents-team)。
         # 与 codecli 那条线的分工: 那边给编辑器 + CLI, 用户自己敲; 这边交代一件事,
         # 它自己在容器里做完。单容器, 前端和 API 都在 8710。
-        "operator": Product(
-            id="operator",
-            name="DSH Operator",
-            image=config.OPERATOR_IMAGE_REF,
-            image_ref=config.OPERATOR_IMAGE_REF,
+        "agents-team": Product(
+            id="agents-team",
+            name="Agents Team",
+            image=config.AGENTS_TEAM_IMAGE_REF,
+            image_ref=config.AGENTS_TEAM_IMAGE_REF,
             port=8710,
-            mem_mb=config.OPERATOR_MEM_LIMIT_MB,
-            cpus=config.OPERATOR_CPUS,
-            domain=config.OPERATOR_DOMAIN,
+            mem_mb=config.AGENTS_TEAM_MEM_LIMIT_MB,
+            cpus=config.AGENTS_TEAM_CPUS,
+            domain=config.AGENTS_TEAM_DOMAIN,
             reports_presence=False,
-            tab_grace_min=config.OPERATOR_TAB_GRACE_MIN,
+            tab_grace_min=config.AGENTS_TEAM_TAB_GRACE_MIN,
             # 首页是静态文件, 后端没起来照样 200 —— 探它等于没探 (见 ready_path
             # 字段的说明)。/api/health 由 FastAPI 出, 后端不活就连不上。
             ready_path="/api/health",
@@ -2081,7 +2081,7 @@ def _opendesign_patch_yaml() -> str:
     )
 
 
-def _operator_boot() -> str:
+def _agents_team_boot() -> str:
     """Operator 是我们自己的镜像, 启动脚本因此很短 —— 配置全走 env。
 
     仍要 mkdir: 工作目录是 NAS 挂进来的, 挂载点在容器里出现的时机不由我们定;
@@ -2090,7 +2090,7 @@ def _operator_boot() -> str:
     return (
         "set -e\n"
         "mkdir -p /workspace\n"
-        "cd /opt/operator\n"
+        "cd /opt/agents-team\n"
         "exec uvicorn app.main:app --host 0.0.0.0 --port 8710\n"
     )
 
@@ -2105,7 +2105,7 @@ _BOOTS = {
     "hermes": _hermes_boot,
     "claude-code": lambda: _codecli_boot("claude-code"),
     "codex": lambda: _codecli_boot("codex"),
-    "operator": _operator_boot,
+    "agents-team": _agents_team_boot,
 }
 
 
@@ -2180,7 +2180,7 @@ def env_for(product_id: str, token: str, secret: str = "") -> dict[str, str]:
             "DSH_MODELS": _dify_chat_models(),
             "DSH_EMBEDDING_MODELS": _dify_embedding_models(),
         }
-    if product_id == "operator":
+    if product_id == "agents-team":
         # 我们自己的镜像, 所以不用占位符那一套 —— 令牌在这里就是真值 (env_for 拿到的
         # token 已经是该用户铸好的)。模型列表与在售目录一致, 前端下拉直接用。
         return {

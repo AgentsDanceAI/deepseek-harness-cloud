@@ -22,7 +22,7 @@ from dataclasses import asdict, dataclass, field
 
 from . import tools
 
-STATE_PATH = tools.WORKDIR / ".operator" / "rooms.json"
+STATE_PATH = tools.WORKDIR / ".agents-team" / "rooms.json"
 
 
 @dataclass

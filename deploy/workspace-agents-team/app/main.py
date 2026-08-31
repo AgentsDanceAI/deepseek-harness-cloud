@@ -21,7 +21,7 @@ from . import agent, rooms
 
 WEB_DIR = pathlib.Path(__file__).resolve().parent.parent / "web"
 
-app = FastAPI(title="DSH Operator")
+app = FastAPI(title="Agents Team")
 store = rooms.Store()
 
 #: 一次只跑一轮。同一个房间并发两轮会让两批机器人对着**同一份还没写回去的记录**

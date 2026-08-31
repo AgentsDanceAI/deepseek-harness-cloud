@@ -30,7 +30,7 @@ DEFAULT_MODEL = os.environ.get("DSH_DEFAULT_MODEL", "")
 
 #: 一轮里最多来回多少次。到顶不是报错, 是**把话语权还回去** —— 智能体绕进死循环
 #: 时报错只会让人重来一遍再绕一次, 而摊开说"我做到这里了"他能接手。
-MAX_STEPS = int(os.environ.get("OPERATOR_MAX_STEPS", "30"))
+MAX_STEPS = int(os.environ.get("AGENTS_TEAM_MAX_STEPS", "30"))
 
 #: 群聊里额外压一层通用约束。人格由 rooms.render_for 拼在前面, 这里只放**与形态
 #: 有关**的部分 —— 人格是产品配置, 这段是机制。
