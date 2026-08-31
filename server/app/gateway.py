@@ -197,7 +197,7 @@ async def chat_completions(request: Request, user: dict = Depends(resolve_user))
                 data = upstream.json()
                 bill(data.get("usage"))
                 return JSONResponse(content=data, headers={"x-request-id": request_id})
-            return _relay_upstream_error(upstream, request_id)
+            return _relay_upstream_error(upstream, request_id, body)
 
     async def relay():
         slot = _Slot(user["id"])
@@ -316,7 +316,7 @@ async def embeddings(request: Request, user: dict = Depends(resolve_user)):
             upstream = await client.post(url, json=body, headers=headers)
     if upstream.status_code != 200:
         # 上游报错的路径上一分不收 —— 与聊天、与生图同口径。
-        return _relay_upstream_error(upstream, request_id)
+        return _relay_upstream_error(upstream, request_id, body)
 
     data = upstream.json()
     usage = data.get("usage") or {}
@@ -342,10 +342,65 @@ async def embeddings(request: Request, user: dict = Depends(resolve_user)):
     return JSONResponse(content=data, headers={"x-request-id": request_id})
 
 
-def _relay_upstream_error(upstream: httpx.Response, request_id: str) -> JSONResponse:
+def _body_shape(body: object) -> str:
+    """请求的**形状**摘要, 用来诊断上游 4xx。只记结构, 不记内容。
+
+    上游拒一个请求时只会说一句它自己的话 (比如 "The content field is a required
+    field."), 而我们这边**看不见自己发出去的是什么** —— 于是同样的报错在
+    Coze/Dify/任意客户端上都长一个样, 只能靠猜。2026-08-31 Coze 的工作流撞上
+    这个 400, 排查时才发现整条路上一点线索都没有。
+
+    只记角色和字段名: 消息正文是用户数据, 不进日志。
+    """
+    if not isinstance(body, dict):
+        return type(body).__name__
+    msgs = body.get("messages")
+    parts = [f"model={body.get('model')!r}"]
+    if isinstance(msgs, list):
+        shapes = []
+        for m in msgs[:12]:
+            if not isinstance(m, dict):
+                shapes.append(type(m).__name__)
+                continue
+            keys = sorted(k for k in m if k != "content")
+            c = m.get("content")
+            ctype = (
+                "missing"
+                if "content" not in m
+                else "null"
+                if c is None
+                else f"list[{len(c)}]"
+                if isinstance(c, list)
+                else "empty"
+                if c == ""
+                else "str"
+            )
+            shapes.append(f"{m.get('role')}:content={ctype}{'+' + ','.join(keys) if keys else ''}")
+        parts.append("messages=[" + " | ".join(shapes) + "]")
+    for k in ("tools", "tool_choice", "response_format", "stream", "reasoning", "extra_body"):
+        if k in body:
+            parts.append(f"{k}={type(body[k]).__name__}")
+    return " ".join(parts)
+
+
+def _relay_upstream_error(upstream: httpx.Response, request_id: str, body: object = None) -> JSONResponse:
     """Map upstream failures without leaking upstream auth details. Our own key
     being rejected must NOT surface as 401 (dsh would blame the user token)."""
     status = upstream.status_code
+    if 400 <= status < 500 and status not in (401, 403, 429):
+        # 上游说"你这个请求不对"时, 把**我们发出去的形状**也记下来 —— 否则这类
+        # 报错在我们这边完全没有线索 (见 _body_shape)。
+        try:
+            why = upstream.json().get("error", {}).get("message", "")[:200]
+        except (json.JSONDecodeError, AttributeError):
+            why = upstream.text[:200]
+        log.warning(
+            "[gateway] 上游拒绝 %s rid=%s 上游说: %s | 我们发的形状: %s",
+            status,
+            request_id,
+            why,
+            _body_shape(body),
+        )
     if status in (401, 403):
         return _openai_error(502, "upstream_error", "Upstream rejected the gateway. Contact support.")
     try:
