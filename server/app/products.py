@@ -1382,6 +1382,10 @@ def _codecli_boot(product_id: str) -> str:
                 "theme": "dark",
                 "autoUpdates": False,
                 "hasSeenTasksHint": True,
+                # 目录信任是**按项目**存的, 与 hasCompletedOnboarding 是两码事:
+                # 只压掉后者的话向导没了, 但一进来还是问"这个目录你信任吗"。
+                # 这是用户自己的工作区, 问了只有一个答案。
+                "projects": {"/workspace": {"hasTrustDialogAccepted": True}},
             },
             ensure_ascii=False,
             indent=2,
