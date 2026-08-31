@@ -659,6 +659,29 @@ async def anthropic_messages(request: Request, user: dict = Depends(resolve_user
         )
 
     _require_upstream()
+    # 不在售的一律拒 —— 与 chat / responses / gemini 同口径。这面早先是放行的:
+    # 它诞生时只服务 web_search (走上面那个分支, 不转发), 转发是后加的。放行的
+    # 代价是目录外的名字在 charge_credits 里走兜底价, 用户为一个我们没上架的
+    # 型号付一个我们没标过的价 —— 2026-08-31 在 Gemini 面上实测到了这笔坏账。
+    # Claude Code 允许用户 /model 随便打, 所以这是常态而非例外。
+    requested_model = str((parsed or {}).get("model") or "")
+    entry = model_catalog.resolve(requested_model) if requested_model else None
+    if requested_model and entry is None:
+        return JSONResponse(
+            status_code=404,
+            content={
+                "type": "error",
+                "error": {
+                    "type": "not_found_error",
+                    "message": f"Model {requested_model!r} is not offered. See GET /llm/v1/models.",
+                },
+            },
+        )
+    if entry is not None and entry.get("upstream_model", requested_model) != requested_model:
+        # 牌名与上游型号名不同的话, 转发的 body 里要换成后者。
+        body = dict(parsed or {})
+        body["model"] = entry["upstream_model"]
+        raw = json.dumps(body).encode()
     headers = {
         "x-api-key": config.UPSTREAM_API_KEY,
         "authorization": f"Bearer {config.UPSTREAM_API_KEY}",
@@ -834,6 +857,14 @@ async def gemini_generate(model_action: str, request: Request, user: dict = Depe
         return _gemini_error(404, f"Unsupported action {action!r}.")
     if not model:
         return _gemini_error(400, "Model name is required.")
+    # 不在售的一律拒 —— 与 chat / responses 两面同一个口径。
+    # 放行的话有两处坏账: 上游收我们真金白银, 而 charge_credits 对目录外的名字
+    # 走的是兜底价 (实测 gemini-3.1-pro-preview 被按兜底价扣了 113 分), 于是用户
+    # 为一个我们从没上架的型号付了一个我们没标过的价。而 Gemini CLI **默认**就
+    # 挑一个它自己的型号, 不拒的话这是常态而非例外。
+    entry = model_catalog.resolve(model)
+    if entry is None:
+        return _gemini_error(404, f"Model {model!r} is not offered. See GET /llm/v1/models.")
 
     raw = await read_limited_body(
         request,
@@ -847,7 +878,9 @@ async def gemini_generate(model_action: str, request: Request, user: dict = Depe
         "x-goog-api-key": config.UPSTREAM_API_KEY,
         "content-type": "application/json",
     }
-    url = f"{config.UPSTREAM_GEMINI_BASE.rstrip('/')}/v1beta/models/{model_action}"
+    # 上游的型号名可能与我们的牌名不同 (catalog 的 upstream_model)。
+    upstream_model = entry.get("upstream_model", model)
+    url = f"{config.UPSTREAM_GEMINI_BASE.rstrip('/')}/v1beta/models/{upstream_model}:{action}"
     # alt=sse 决定上游是吐 SSE 还是一整个 JSON 数组 —— 必须原样带过去, 否则
     # 客户端按 SSE 解析一个数组, 表现是**一直转圈直到超时**。
     if request.url.query:
