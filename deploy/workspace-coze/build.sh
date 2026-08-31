@@ -91,6 +91,18 @@ if [ "$n" != "1" ]; then
   exit 1
 fi
 
+# 就绪探针 (products.registry()["coze"].ready_path = /api/) 靠这条 location 转发去
+# coze-server。上游哪天改了 API 前缀, /api/ 就会落回 `location /` 那个静态首页 ——
+# 而静态首页**永远回 200**, 判据 <500 当场失效: 探针在 coze-server 起来前就放人
+# 进去, 用户看到的是前端自己的报错页 (2026-08-30 Dify 那个洞的翻版, coze 实测坏
+# 窗口 96 秒)。这个错法完全静默, 所以在这里断言。
+if ! grep -qE 'location\s+~\s+\^/\(api\|v\[1-3\]\|admin\)' assets/nginx/conf.d/default.conf; then
+  echo "!! 上游改了 API 那条 location 的匹配式 —— products.registry() 里 coze 的 ready_path 要跟着改," >&2
+  echo "   否则探针会落到静态首页上, 那东西永远回 200, 冷启动又会把人放进坏页面。" >&2
+  grep -n 'location' assets/nginx/conf.d/default.conf | sed 's/^/     /' >&2
+  exit 1
+fi
+
 if grep -qE '^\s*resolver\s' assets/nginx/nginx.conf assets/nginx/conf.d/default.conf; then
   echo "!! 上游 nginx 配置改用 resolver 了 —— HostAliase 兜不住 (见 products._dify_boot)," >&2
   echo "   要么在这里把 upstream 改写成 127.0.0.1, 要么自己生成 conf。" >&2
