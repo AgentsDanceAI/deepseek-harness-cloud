@@ -199,7 +199,7 @@ def test_resolution_is_normalised_to_lowercase():
     seg = MEDIA[i : i + 300]
     assert ".lower()" in seg
     # 代码里不许再有大写档位 (注释里出现是在解释这个 bug, 不算)
-    code = "\n".join(l for l in MEDIA.splitlines() if not l.lstrip().startswith("#"))
+    code = "\n".join(ln for ln in MEDIA.splitlines() if not ln.lstrip().startswith("#"))
     for bad in ('= "720P"', '= "480P"', '= "1080P"', 'or "720P"', "480P/720P/1080P"):
         assert bad not in code, f"代码里还有大写档位: {bad}"
     # 提交体里用的是归一化后的值, 不是原值
