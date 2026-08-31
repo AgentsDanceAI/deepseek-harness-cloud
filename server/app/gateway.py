@@ -246,6 +246,135 @@ async def chat_completions(request: Request, user: dict = Depends(resolve_user))
     )
 
 
+# --- OpenAI Responses API ----------------------------------------------------
+#
+# Codex CLI 只认这一面: 它从某个版本起**不再支持** wire_api="chat"
+# (`\`wire_api = "chat"\` is no longer supported`)。上游千面原生就有 /v1/responses,
+# 所以这里是透传 + 计量, 不是翻译层。
+#
+# 计量口径与 chat 面一致, 只是字段名不同: Responses 用 input_tokens/output_tokens
+# (缓存命中在 input_tokens_details.cached_tokens), chat 用 prompt/completion。
+@router.post("/v1/responses")
+async def responses(request: Request, user: dict = Depends(resolve_user)):
+    _require_upstream()
+    rejected = _admit(user)
+    if rejected is not None:
+        return rejected
+
+    try:
+        raw = await read_limited_body(
+            request,
+            max_bytes=config.GATEWAY_BODY_MAX_BYTES,
+            timeout_s=config.REQUEST_BODY_TIMEOUT_S,
+        )
+        body = json.loads(raw)
+    except json.JSONDecodeError:
+        return _openai_error(400, "invalid_request_error", "Body must be JSON.")
+    if not isinstance(body, dict):
+        return _openai_error(400, "invalid_request_error", "Body must be a JSON object.")
+
+    model_id = str(body.get("model", "")) or model_catalog.default_model()
+    entry = model_catalog.resolve(model_id)
+    if entry is None:
+        return _openai_error(
+            404, "model_not_found", f"Model '{model_id}' is not offered. See GET /llm/v1/models."
+        )
+    body["model"] = entry.get("upstream_model", model_id)
+    stream = bool(body.get("stream", False))
+
+    request_id = f"dhc-{uuid.uuid4().hex[:16]}"
+    headers = {
+        "authorization": f"Bearer {config.UPSTREAM_API_KEY}",
+        "content-type": "application/json",
+        "accept": "text/event-stream" if stream else "application/json",
+    }
+    url = config.UPSTREAM_BASE_URL.rstrip("/") + "/responses"
+
+    def bill(usage: dict | None, forwarded_bytes: int = 0) -> None:
+        u = dict(usage or {})
+        if u.get("input_tokens") is None:
+            prompt_bytes = len(json.dumps(body, ensure_ascii=False).encode())
+            u["input_tokens"] = max(1, math.ceil(prompt_bytes / STREAM_FALLBACK_BYTES_PER_TOKEN))
+        if u.get("output_tokens") is None:
+            u["output_tokens"] = max(1, math.ceil(forwarded_bytes / STREAM_FALLBACK_BYTES_PER_TOKEN))
+        cache_read = int((u.get("input_tokens_details") or {}).get("cached_tokens") or 0)
+        prompt = int(u.get("input_tokens") or 0)
+        uncached = max(0, prompt - cache_read)
+        output = int(u.get("output_tokens") or 0)
+        credits.spend(
+            user["id"],
+            model_catalog.charge_credits(model_id, uncached, cache_read, output),
+            kind="llm",
+            model=model_id,
+            device_id=user.get("device_id", ""),
+            uncached_input=uncached,
+            cache_read=cache_read,
+            output=output,
+            request_id=request_id,
+        )
+
+    if not stream:
+        async with _upstream_client() as client:
+            with _Slot(user["id"]):
+                upstream = await client.post(url, json=body, headers=headers)
+            if upstream.status_code == 200:
+                data = upstream.json()
+                bill(data.get("usage"))
+                return JSONResponse(content=data, headers={"x-request-id": request_id})
+            return _relay_upstream_error(upstream, request_id, body)
+
+    async def relay():
+        slot = _Slot(user["id"])
+        slot.__enter__()
+        usage: dict | None = None
+        forwarded_bytes = 0
+        upstream_started = False
+        stream_exhausted = False
+        buffer = b""
+        try:
+            async with _upstream_client() as client:
+                async with client.stream("POST", url, json=body, headers=headers) as upstream:
+                    if not 200 <= upstream.status_code < 300:
+                        detail = await upstream.aread()
+                        yield _sse_error_bytes(upstream.status_code, detail)
+                        return
+                    upstream_started = True
+                    async for chunk in upstream.aiter_raw():
+                        forwarded_bytes += len(chunk)
+                        buffer += chunk
+                        while b"\n" in buffer:
+                            line, buffer = buffer.split(b"\n", 1)
+                            text = line.strip()
+                            if text.startswith(b"data:") and b'"usage"' in text:
+                                try:
+                                    parsed = json.loads(text[5:].strip())
+                                except (json.JSONDecodeError, AttributeError):
+                                    continue
+                                # 用量挂在收尾事件的 response 里 (response.completed),
+                                # 少数实现直接挂顶层 —— 两处都认, 认错就是白送。
+                                for cand in (
+                                    parsed.get("usage"),
+                                    (parsed.get("response") or {}).get("usage"),
+                                ):
+                                    if isinstance(cand, dict):
+                                        usage = cand
+                        yield chunk
+                    stream_exhausted = True
+        finally:
+            slot.__exit__()
+            if upstream_started and (forwarded_bytes or not stream_exhausted):
+                try:
+                    bill(usage, forwarded_bytes)
+                except Exception:
+                    log.exception("failed to bill Responses stream request_id=%s", request_id)
+
+    return StreamingResponse(
+        relay(),
+        media_type="text/event-stream",
+        headers={"x-request-id": request_id, "cache-control": "no-cache"},
+    )
+
+
 # --- OpenAI-compatible embeddings -------------------------------------------
 #
 # 知识库要向量化。Coze / Dify / RAGFlow 全都只会说 OpenAI 的这一支, 缺了它,

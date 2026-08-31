@@ -390,3 +390,37 @@ def test_body_shape_survives_junk():
     """畸形请求也不能让诊断本身抛异常 —— 那会把一次 400 变成 500。"""
     for junk in (None, "字符串", [1, 2], {"messages": "不是列表"}, {"messages": [1, None]}):
         gateway._body_shape(junk)
+
+
+def test_responses_billing_reads_the_right_usage_fields():
+    """Responses 面的用量字段名跟 chat 面**不一样**, 认错就是白送。
+
+    chat: prompt_tokens / completion_tokens / prompt_tokens_details.cached_tokens
+    responses: input_tokens / output_tokens / input_tokens_details.cached_tokens
+    照抄 chat 那套字段名的话, 每次都会走"取不到用量"的兜底 (按字节估), 而估出来
+    的数跟真实用量差很远 —— 用户少付, 我们照付。
+    """
+    import inspect
+
+    from app import gateway
+
+    src = inspect.getsource(gateway.responses)
+    assert "input_tokens" in src and "output_tokens" in src
+    assert "input_tokens_details" in src, "缓存命中字段用的是 responses 那套吗"
+    assert "prompt_tokens" not in src, "抄了 chat 面的字段名 -> 永远取不到用量"
+    # 流式的用量挂在收尾事件的 response 里, 少数实现挂顶层, 两处都要认
+    assert '(parsed.get("response") or {}).get("usage")' in src
+
+
+def test_responses_uses_the_responses_upstream_path():
+    """必须打上游的 /responses, 不是 /chat/completions。
+
+    Codex 从某个版本起不再支持 wire_api="chat", 只认 Responses API; 打错路径的
+    症状是它一直转圈 (实测卡了十分钟没有任何输出)。
+    """
+    import inspect
+
+    from app import gateway
+
+    src = inspect.getsource(gateway.responses)
+    assert 'rstrip("/") + "/responses"' in src
