@@ -1772,7 +1772,9 @@ def test_openclaw_allows_its_own_origin(monkeypatch):
     assert "allowedOrigins" in boot
     # 设备配对那道也得关: 它会让用户去主机上跑 `openclaw devices approve <id>`,
     # 而他既没有主机也不该有 —— 那是第三道墙, 长得同样不像登录墙。
-    assert '"dangerouslydisabledeviceauth": true' in boot.lower()
+    # 2026.8.1 起配对由 auth.trustedProxy.deviceAutoApprove 放行 ——
+    # dangerouslyDisableDeviceAuth 被上游废弃并明说 "retired and ignored"。
+    assert '"deviceautoapprove"' in boot.lower()
     # 原先这里还断言 allowInsecureAuth —— 那个键在 2026.8.1 被上游废弃了
     # (进了 TIER_EVAL_RETIRED_ROOT_PATHS), 而 controlUi 的 schema 是
     # strictObject, 继续下发会让容器**直接起不来**。断言反过来了:

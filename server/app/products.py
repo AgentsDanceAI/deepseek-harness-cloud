@@ -1273,7 +1273,24 @@ def _openclaw_boot() -> str:
                 "bind": "lan",
                 "auth": {
                     "mode": "trusted-proxy",
-                    "trustedProxy": {"userHeader": PROXY_USER_HEADER},
+                    "trustedProxy": {
+                        "userHeader": PROXY_USER_HEADER,
+                        # 2026.8.1 起, 设备配对由**这里**放行, 不再是
+                        # controlUi.dangerouslyDisableDeviceAuth (那个键被上游
+                        # 废弃并明确"ignored")。
+                        #
+                        # 换过来其实更严: 旧键是全局关掉配对 (所以叫
+                        # dangerously), 新的是"已经过了 trusted-proxy 鉴权的
+                        # 浏览器才自动批准" —— 身份仍由边缘给定, 我们没有绕开
+                        # 任何控制。
+                        #
+                        # 不配它的话用户看到的是一张要填 WebSocket URL/令牌/密码
+                        # 的连接表单 + "去主机上跑 openclaw devices approve",
+                        # 而他既没有主机也不该有。这道墙**HTTP 全绿**(200 +
+                        # 标题 OpenClaw Control), 只有渲染出来才看得见 ——
+                        # 2026-08-31 是 scripts/visual_check.sh 第一次跑就抓到的。
+                        "deviceAutoApprove": {"enabled": True},
+                    },
                 },
                 "trustedProxies": [config.WORK_PROXY_CIDR],
                 # **必须列出完整来源**。少了它, 控制台 UI 能打开, 但一连
@@ -1290,7 +1307,10 @@ def _openclaw_boot() -> str:
                     # 由 trusted-proxy 给定。留着它们只会变成第二道墙: 配对那道会
                     # 让用户去主机上跑 `openclaw devices approve <id>`, 而他既没有
                     # 主机也不该有。
-                    "dangerouslyDisableDeviceAuth": True,
+                    # dangerouslyDisableDeviceAuth 与 allowInsecureAuth 都在
+                    # 2026.8.1 被废弃了。前者上游明说"retired and ignored",
+                    # 后者更狠 —— controlUi 是 strictObject, 留着它容器直接起不来。
+                    # 配对现在走 auth.trustedProxy.deviceAutoApprove (见上面)。
                     # allowInsecureAuth 在 2026.8.1 被废弃了 (进了上游的
                     # TIER_EVAL_RETIRED_ROOT_PATHS), 而 controlUi 的 schema 是
                     # strictObject —— **多一个键就整个启动失败**, 报
