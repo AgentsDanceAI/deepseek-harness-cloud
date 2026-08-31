@@ -64,7 +64,10 @@ def test_terminal_opens_straight_into_the_agent(product_id):
     exe = products._CODECLI_AGENTS[product_id][0]
     assert '"terminal.integrated.defaultProfile.linux"' in boot
     assert f"/usr/local/bin/{exe}" in boot
-    assert '"runOn": "folderOpen"' in boot
+    # 自动开终端归镜像里那个 dsh-agent 扩展管 (见 test_agent_terminal_is_
+    # wired_through_env)。**不再**走 VS Code 的 folderOpen 任务: 两条路同时
+    # 生效, 实测起了两个终端、两个 agent 进程, 各自烧着积分。
+    assert "folderOpen" not in boot, "tasks.json 那条路回来了 —— 会起两个 agent"
 
 
 def test_codex_uses_the_responses_wire():
@@ -81,10 +84,27 @@ def test_claude_code_pins_the_small_model_too():
     assert env["ANTHROPIC_BASE_URL"].endswith("/llm/anthropic")
 
 
-def test_user_workspace_files_are_not_clobbered_every_boot():
-    """tasks.json 落在 /workspace (用户自己的目录) —— 每次覆盖等于抹掉他的改动。"""
+def test_user_state_files_are_not_clobbered_every_boot():
+    """CLI 自己的状态文件只在**不存在时**写。
+
+    这些文件之后装的是用户的会话与偏好, 每次启动覆盖等于悄无声息地抹掉。
+    产品配置 (code-server 的设置、Codex 的 config.toml) 相反, 必须每次重写 ——
+    里面有每次建实例都会换的网关令牌 (沿用旧的必然 401)。
+    """
     boot = products.boot_script("claude-code")
-    assert "if [ ! -f /workspace/.vscode/tasks.json ]" in boot
+    assert 'if [ ! -f "$HOME/.claude.json" ]' in boot
+
+
+def test_codex_trusts_the_workspace_up_front():
+    """不写这段, Codex 一起来就问"你信任这个目录吗" —— 用户自己的工作区, 白挡。"""
+    boot = products.boot_script("codex")
+    assert '[projects."/workspace"]' in boot
+    assert 'trust_level = "trusted"' in boot
+
+
+def test_claude_onboarding_is_pre_answered():
+    """选主题那一屏在托管环境里只有一个答案, 问出来就是让人先做一遍配置。"""
+    assert '"hasCompletedOnboarding": true' in products.boot_script("claude-code")
 
 
 @pytest.mark.parametrize("product_id", CODECLI)
