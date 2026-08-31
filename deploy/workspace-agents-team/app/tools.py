@@ -134,9 +134,42 @@ async def screenshot(display: str | None = None) -> tuple[str, str]:
     return f"data:image/png;base64,{b64}", "截了一张屏"
 
 
+#: 叫停接力的工具名。调度器按"这一轮有没有人调过它"决定要不要往下传棒 ——
+#: 用工具而不是文本标记 (如"[等你回答]"), 是因为模型写标记会漏、会改写、会带进
+#: 正文; 而工具调用是结构化的, 漏不了也改不了。
+HALT_TOOL = "wait_for_user"
+
+
+async def wait_for_user(question: str) -> tuple[str, str]:
+    """本身不做事 —— 唯一作用是让接力停在这一棒 (见 main._run_relay)。"""
+    q = (question or "").strip() or "请确认后再继续。"
+    return (f"已把问题交给用户, 本轮到此为止, 后面的工位不会开工。你的问题: {q}",
+            "等用户回答")
+
+
 #: 给模型的工具定义 (OpenAI tools 格式)。描述里写**什么时候用**而不是"这是什么",
 #: 模型选错工具几乎都是因为描述只说了功能没说场景。
 SCHEMAS = [
+    {
+        "type": "function",
+        "function": {
+            "name": HALT_TOOL,
+            "description": (
+                "把问题抛给用户并**让整条流水线停在你这一棒** —— 后面的工位这一轮不会开工。"
+                "两种场合必须用它: (1) 需求有缺口 (画幅、片长、风格、受众), 拿着残缺需求"
+                "一路跑到底比停下来问一句贵得多; (2) 你交出的东西需要用户过目才该往下走 "
+                "(最典型的是镜头表 —— 下一棒就要烧钱出片了)。"
+                "\n不确定要不要停就停: 多问一句的成本是几秒, 跑错方向的成本是十几条废片。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "question": {"type": "string", "description": "要问用户什么 / 请他确认什么"},
+                },
+                "required": ["question"],
+            },
+        },
+    },
     {
         "type": "function",
         "function": {
@@ -202,6 +235,7 @@ _HANDLERS = {
     "read_file": lambda a: read_file(a["path"]),
     "write_file": lambda a: write_file(a["path"], a.get("content", "")),
     "screenshot": lambda a: screenshot(),
+    HALT_TOOL: lambda a: wait_for_user(a.get("question", "")),
     **browser.HANDLERS,
     **media.HANDLERS,
 }

@@ -52,6 +52,12 @@ class Room:
     name: str
     members: list[str]
     created: float
+    #: "parallel" = 全员同时对着用户说话 (头脑风暴, 默认);
+    #: "relay"    = 按 members 顺序接力, 后一位**看得见**前一位这一轮刚说的话。
+    #: 流水线必须是 relay: 美术要读导演的讲戏本, 分镜要读美术的资产清单 ——
+    #: 并行时大家拿到的是同一份旧记录, 谁也看不见谁, 接不上力。
+    #: 老 rooms.json 没有这个键, 给默认值即可向后兼容。
+    mode: str = "parallel"
 
 
 #: 开箱自带的几个角色。**不是花活**: 群聊的价值要靠"成员各有所长"才立得住,
@@ -93,8 +99,10 @@ BUILTIN_BOTS: tuple[Bot, ...] = (
         "director",
         "阿导",
         "🎬",
-        "你是导演, 剧组的中枢。接到需求后先做两件事: (1) 需求有没有缺口 —— 画幅比例、"
-        "片长、风格参考、受众, 缺哪个就**先问用户**, 别拿着残缺的需求一路跑到底; "
+        "你是导演, 剧组的中枢, 也是第一棒。接到需求先做两件事: (1) 需求有没有缺口 —— "
+        "画幅比例、片长、风格参考、受众, 缺哪个就调 wait_for_user 问, 它会让整条"
+        "流水线停在你这一棒等用户回话; 拿着残缺需求一路跑到底比停下来问一句贵得多。"
+        "需求够清楚就别问, 直接开工 —— 用户要的是一句话出片, 不是被反复盘问; "
         "(2) 把故事拆成若干剧情点, 写一份《讲戏本》用 write_file 存成 讲戏本.md, "
         "每个剧情点写清楚: 情绪落点、人物动机、镜头意图。"
         "\n讲戏本是下游所有人的共同参照物 —— 美术照它做资产, 分镜师照它写镜头。"
@@ -118,16 +126,17 @@ BUILTIN_BOTS: tuple[Bot, ...] = (
         "你是分镜师。读 讲戏本.md 和 资产清单.md, 把故事落成一张镜头表, "
         "用 write_file 存成 镜头表.json —— 数组, 每项含: id、时长秒数、参考图路径(角色/场景图)、"
         "prompt(画面内容+运镜+情绪, 要能直接喂给视频模型)、以及这一镜对应讲戏本的哪个剧情点。"
-        "\n**写完就停下来, 在群里请用户过目, 不要让视频师开工。** 出片是全流程最贵最慢的一步, "
-        "十几条跑完才发现方向偏了返工成本最高 —— 把人的判断插在生成之前, 这是铁律。"
+        "\n**写完必须调 wait_for_user 请用户过目**, 它会让流水线停在你这一棒 —— 下一棒就是"
+        "出片, 全流程最贵最慢的一步, 十几条跑完才发现方向偏了返工成本最高。"
+        "把人的判断插在生成之前, 这是铁律, 而这道闸靠的是那个工具, 不是你说一句「请过目」。"
         "\n用户提修改意见时, 你改 镜头表.json 里对应的那几条, 不要重写整张表。",
     ),
     Bot(
         "videographer",
         "阿摄",
         "🎥",
-        "你是视频师, 负责按镜头表出片。**开工前先确认用户已经过目镜头表** —— 没确认就问一句, "
-        "不要自作主张开跑。"
+        "你是视频师, 负责按镜头表出片。**开工前确认用户已经过目镜头表** —— 记录里看不到用户"
+        "对镜头表说过话, 就调 wait_for_user 问一句, 不要自作主张开跑。"
         "\n确认后读 镜头表.json, 逐条用 generate_video 生成, 存进 片段/ 目录, "
         "文件名用镜头 id (如 片段/01.mp4), 顺序与表一致。每条都要把参考图传给 image 参数, "
         "那是保人物一致性的主要手段。"
@@ -188,13 +197,26 @@ class Store:
         tmp.write_text(json.dumps(payload, ensure_ascii=False))
         tmp.replace(STATE_PATH)  # 原子替换: 写一半被杀不会留下半个 JSON
 
+    #: 剧组的**接力顺序** —— 这就是流水线本身, 不是一份成员名单。
+    #: 顺序即依赖: 讲戏本 → 角色资产 → 镜头表 →(人审)→ 片段 → 成片。
+    CREW = ("director", "artist", "storyboard", "videographer", "editor")
+
     def _seed(self) -> None:
         self.create_room("和 阿做 的对话", ["doer"])
 
+    def create_crew_room(self, name: str = "") -> Room:
+        """开一部新片: 剧组五个工位按接力顺序入群。
+
+        对应千问那个"自动组队" —— 用户提一个想法就该开工, 不该先手工拉五个人,
+        更不该自己记住谁先谁后。
+        """
+        return self.create_room(name or "新片", list(self.CREW), mode="relay")
+
     # -- 房间 ---------------------------------------------------------------
-    def create_room(self, name: str, members: list[str]) -> Room:
+    def create_room(self, name: str, members: list[str], mode: str = "parallel") -> Room:
         rid = uuid.uuid4().hex[:8]
-        room = Room(rid, name, [m for m in members if m in self.bots], _now())
+        room = Room(rid, name, [m for m in members if m in self.bots], _now(),
+                    mode if mode in ("parallel", "relay") else "parallel")
         self.rooms[rid] = room
         self.save()
         return room
