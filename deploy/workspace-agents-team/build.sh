@@ -50,7 +50,13 @@ for i in $(seq 1 30); do
 done
 curl -fsS http://127.0.0.1:18710/api/health | sed 's/^/    /'
 # 根证书: 缺了的话智能体装任何东西都会证书错误, 而报错只出现在它的工具输出里。
-docker run --rm --entrypoint sh "$REF" -c 'curl -fsS -o /dev/null https://ghcr.io/v2/' \
+#
+# 这里要验的是 **TLS 握手**, 不是 HTTP 状态码 —— 所以不能用 `curl -f` 配一个需要
+# 鉴权的地址: ghcr 的 /v2/ 对匿名请求正常返回 401, 而 -f 会把它当成失败, 于是每次
+# 构建都报"根证书没装上"。用 token 这个匿名 200 的端点, 并且只看 curl 自己的退出码
+# (证书错误是 60/77, 与 HTTP 状态无关)。
+docker run --rm --entrypoint sh "$REF" -c \
+  'curl -sS -o /dev/null "https://ghcr.io/token?service=ghcr.io&scope=repository:library/x:pull"' \
   || { echo "!! 镜像里 curl 走不通 HTTPS —— 根证书没装上"; exit 1; }
 echo "    根证书 OK"
 
