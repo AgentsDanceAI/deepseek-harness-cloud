@@ -898,8 +898,13 @@ def _coze_server_env() -> tuple[tuple[str, str], ...]:
     """coze-server 的环境。
 
     上游把配置全放在 `.env` 里由 compose 的 env_file 读; ECI 这边直接发
-    EnvironmentVar。只写**非空的与选类型的** —— Go 侧 os.Getenv 读不到和读到
-    空串是一回事, 所以第三方厂商的空 key 不用逐条搬。
+    EnvironmentVar。一般只写**非空的与选类型的**, 第三方厂商的空 key 不用逐条搬。
+
+    但**"不写"不等于"空"**: 上游镜像里烤了一份 `/app/.env` (它的 Dockerfile 有
+    `COPY docker/.env.example /app/.env`), 后端启动时 `godotenv.Load` 会把我们
+    **没设过**的键按那份文件补上 (它只补 os.Environ() 里没出现过的键)。所以凡是
+    上游默认值非空、而我们要的语义是"关掉"的键, 必须**显式写成空串** —— 见下面
+    的 MODEL_PROTOCOL_0, 那一条真咬过人。
     """
     gateway = config.PUBLIC_BASE.rstrip("/")
     dsn = (
@@ -946,9 +951,17 @@ def _coze_server_env() -> tuple[tuple[str, str], ...]:
         ("RERANK_TYPE", "rrf"),
         ("OCR_TYPE", ""), ("PARSER_TYPE", "builtin"),
         # 开箱就有模型可选 —— 用户已经在我们这里付过费, 不该再去别处申请 key。
-        # **在售模型全部由 YAML 出** (见 _coze_model_yamls), 这里不再配 MODEL_*_0:
-        # 那组 env 会被**追加**到 YAML 那批之后, 两边都配等于默认模型出现两次,
-        # 而且两条同号 (100001) 的记录谁赢没有定义。
+        # **在售模型全部由 YAML 出** (见 _coze_model_yamls), env 那条路径在这里
+        # **显式关掉**。
+        #
+        # 关掉要写空串, 不能只是"不配": 镜像里那份 /app/.env (见上面的 docstring)
+        # 写着 MODEL_PROTOCOL_0="ark" 和 MODEL_OPENCOZE_ID_0="100001", 我们不设
+        # 它就由上游的默认值顶上, initModelByEnv 照样返回一条 —— 无名
+        # (MODEL_NAME_0 也是空的)、class 是 SEED (ark 映射过去的)、id 还正好撞上
+        # 我们默认模型的 100001, 追加在 20 条 YAML 之后。表现就是下拉框末尾多出
+        # 一条**空白**条目。initModelByEnv 的门槛是
+        # `MODEL_PROTOCOL_0 == "" || MODEL_OPENCOZE_ID_0 == ""`, 写空串才迈不过去。
+        ("MODEL_PROTOCOL_0", ""), ("MODEL_OPENCOZE_ID_0", ""),
         # 内建的那个"平台自己用"的模型 (起标题、扩写这类) 也指过来。
         ("BUILTIN_CM_TYPE", "openai"),
         ("BUILTIN_CM_OPENAI_BASE_URL", f"{gateway}/llm/v1"),
@@ -1132,7 +1145,8 @@ def _coze_model_yamls() -> str:
 
     Coze 读模型有**两条**旧路径, 合起来用 (backend 的 deprecate_model_get.go):
     扫 `resources/conf/model/*.yaml`, 再把 `MODEL_*_0` 那组 env 追加一条。两条都
-    走的话默认模型会**出现两次**, 所以 env 那条随这次改动一起去掉, 全部由 YAML 出。
+    走的话默认模型会**出现两次**, 所以 env 那条在 _coze_server_env 里**写空串
+    关掉** (只是不配关不掉 —— 镜像里烤了一份 .env 会把默认值补回来), 全部由 YAML 出。
 
     上游镜像里那个目录只有 `template/` 子目录和一个 json —— readDirYaml 跳过目录、
     只认 .yaml, 所以那里原本一个模型都没有, 我们铺进去的就是全部。
