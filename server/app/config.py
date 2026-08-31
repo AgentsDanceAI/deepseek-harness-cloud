@@ -343,8 +343,12 @@ OPENCLAW_TAB_GRACE_MIN = _env_int("OPENCLAW_TAB_GRACE_MIN", 10)
 # 后端没起来它照样 200 (2026-08-30 Dify/Coze 都栽过这个)。
 AGENTS_TEAM_DOMAIN = _env("AGENTS_TEAM_DOMAIN", "")
 AGENTS_TEAM_IMAGE_REF = _env("AGENTS_TEAM_IMAGE_REF", "ghcr.io/agentsdancepro/agents-team:0.1.0")
-AGENTS_TEAM_MEM_LIMIT_MB = _env_int("AGENTS_TEAM_MEM_LIMIT_MB", 2048)
-AGENTS_TEAM_CPUS = _env_float("AGENTS_TEAM_CPUS", 1.0)
+# 4G 是给 **Chromium** 留的 (浏览器工具, 见 app/browser.py): Python 侧空载才
+# 一百多兆, 而一个带页面的 headless Chromium 轻易吃掉 500MB+, 复杂页面更多。
+# 给少了的表现是容器被 OOM 杀掉重启 —— 用户看到的是"对话突然断了", 而日志里
+# 只有一行退出码, 不会说是内存。
+AGENTS_TEAM_MEM_LIMIT_MB = _env_int("AGENTS_TEAM_MEM_LIMIT_MB", 4096)
+AGENTS_TEAM_CPUS = _env_float("AGENTS_TEAM_CPUS", 2.0)
 AGENTS_TEAM_TAB_GRACE_MIN = _env_int("AGENTS_TEAM_TAB_GRACE_MIN", 10)
 
 # --- 编码智能体工作台 (Claude Code / Codex 共用一个镜像) ---------------------

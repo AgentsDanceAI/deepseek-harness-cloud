@@ -35,10 +35,21 @@ RUN apt-get update \
 ARG FASTAPI_VERSION=0.121.1
 ARG UVICORN_VERSION=0.42.0
 ARG HTTPX_VERSION=0.28.1
+ARG PLAYWRIGHT_VERSION=1.58.0
 RUN pip install --no-cache-dir \
       "fastapi==${FASTAPI_VERSION}" \
       "uvicorn[standard]==${UVICORN_VERSION}" \
-      "httpx==${HTTPX_VERSION}"
+      "httpx==${HTTPX_VERSION}" \
+      "playwright==${PLAYWRIGHT_VERSION}"
+
+# 浏览器工具用 (见 app/browser.py)。
+# **只装 chromium**: `playwright install` 不带参数会把 firefox 和 webkit 也拖下来,
+# 三个加起来一 GB 多, 而我们的工具只驱动 chromium。
+# `--with-deps` 装的是 Chromium 在 Debian 上的系统依赖 (字体、libnss 之类) ——
+# 少了它 Chromium **能装上但起不来**, 报错是一串找不到 .so, 出现在容器 stderr 里,
+# 而工具层只会显示成"浏览器启动失败"。
+RUN playwright install --with-deps chromium \
+ && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /opt/agents-team
 COPY app/ /opt/agents-team/app/
