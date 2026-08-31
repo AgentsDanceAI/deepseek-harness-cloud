@@ -1467,6 +1467,12 @@ def _cloudcli_boot() -> str:
     """
     conf = (
         "map $http_upgrade $connection_upgrade { default upgrade; '' close; }\n"
+        # 这个页面里嵌着一枚活令牌 —— 任何一层把它缓存下来重放, 用户拿到的都是
+        # 某一刻的旧快照。浏览器自己的 HTTP 缓存就够制造这个故障: 缓存发生在
+        # 令牌注入之后、容器某次重建之前, 之后免网络重放, 症状正是"session
+        # expired" (令牌本身没坏, 只是那次响应是旧的)。只对 HTML 禁缓存 ——
+        # JS/CSS 文件名带内容哈希, 天然可以长期缓存, 不必连累。\n"
+        "map $sent_http_content_type $cc_no_store { ~*^text/html \"no-store\"; default \"\"; }\n"
         "server {\n"
         "  listen 80;\n"
         "  client_max_body_size 512m;\n"
@@ -1486,6 +1492,7 @@ def _cloudcli_boot() -> str:
         "    sub_filter_types text/html;\n"
         # 令牌那条 sub_filter 由 autologin 写进来。glob 匹配不到时 nginx 不报错,
         # 所以登录还没成功的那几秒也能正常起。
+        "    add_header Cache-Control $cc_no_store always;\n"
         "    include /etc/nginx/inject/*.conf;\n"
         "  }\n"
         "}\n"
