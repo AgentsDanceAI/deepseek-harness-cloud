@@ -6,6 +6,7 @@ Deployment notes live in deploy/.env.example — keep the two in sync.
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 
 CONFIG_DIR = Path(os.environ.get("DHC_CONFIG_DIR", Path(__file__).resolve().parent.parent / "config"))
@@ -118,6 +119,12 @@ ZHIPU_SEARCH_BASE = _env("ZHIPU_SEARCH_BASE", "https://open.bigmodel.cn/api/paas
 # 地址只服务普通对话转发, 跟着主上游才对 (千面自己就有原生 /v1/messages, 实测
 # x-api-key 打过去 200, 返回原生 content 块)。
 UPSTREAM_ANTHROPIC_BASE = _env("UPSTREAM_ANTHROPIC_BASE", "") or UPSTREAM_BASE_URL
+
+# Gemini 面转发到哪。Google 原生协议的路径是 `/v1beta/models/{model}:generateContent`
+# —— 注意它**不挂在 /v1 下面**, 所以这里要的是上游的根, 不是 UPSTREAM_BASE_URL。
+# 默认由主上游推导 (千面: https://api.qianmian.ai/v1 -> https://api.qianmian.ai),
+# 实测 x-goog-api-key 打过去 200, 返回原生 candidates。
+UPSTREAM_GEMINI_BASE = _env("UPSTREAM_GEMINI_BASE", "") or re.sub(r"/v1beta/?$|/v1/?$", "", UPSTREAM_BASE_URL)
 
 # --- pricing / credits ------------------------------------------------------
 # Which price table to serve: pricing.json (CNY) or pricing.usd.json (overseas).
