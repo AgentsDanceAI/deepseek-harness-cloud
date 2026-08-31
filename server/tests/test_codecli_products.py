@@ -213,3 +213,15 @@ def test_cloudcli_projects_are_confined_to_the_nas_workspace():
     """
     env = dict(products.registry()["claude-code"].sidecars[0].env)
     assert env["WORKSPACES_ROOT"] == "/workspace"
+
+
+def test_cloudcli_html_response_is_never_cached():
+    """这个页面里嵌着一枚活令牌 —— 任何一层缓存它都是一次重放风险。
+
+    浏览器自己的 HTTP 缓存就够制造"session expired": 缓存发生在令牌注入之后、
+    容器某次重建之前, 之后免网络重放, 症状是令牌本身没坏, 只是那次响应是旧的。
+    只对 HTML 禁缓存 —— JS/CSS 文件名带内容哈希, 天然可以长期缓存。
+    """
+    boot = products.boot_script("claude-code")
+    assert "Cache-Control $cc_no_store always" in boot
+    assert '"no-store"' in boot
