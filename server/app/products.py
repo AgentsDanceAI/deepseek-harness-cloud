@@ -2404,6 +2404,23 @@ def boot_script(product_id: str) -> str:
     return builder()
 
 
+def _pick_media_model(offered: list | None, key: str, prefer: tuple[str, ...]) -> dict[str, str]:
+    """按子串优先级从在售目录里挑一个型号。
+
+    目录顺序没有语义, 取第一项是碰运气 —— 实测会挑到 seedance 而不是万相 3.0。
+    prefer 里的子串**按顺序**匹配 (子串而非全等, 免得写死 -260128 这种日期后缀),
+    全不中才回落第一项; 目录为空则什么都不设 (调用方据此判定工具不可用)。
+    """
+    if not offered:
+        return {}
+    ids = [str(m.get("id") or "") for m in offered if m.get("id")]
+    for want in prefer:
+        for mid in ids:
+            if want in mid:
+                return {key: mid}
+    return {key: ids[0]} if ids else {}
+
+
 def env_for(product_id: str, token: str, secret: str = "") -> dict[str, str]:
     gateway = config.PUBLIC_BASE.rstrip("/")
     if product_id == "hermes":
@@ -2506,17 +2523,32 @@ def env_for(product_id: str, token: str, secret: str = "") -> dict[str, str]:
             # 以后改 Dify 的人不知道自己顺手也改了这里。
             "DSH_MODELS": _sh_list(model_catalog.catalog()),
         }
-        # 剧组要出图/出片 (2026-08-31): 型号取**在售目录的第一项**, 不硬编码 ——
-        # media.offered() 已经把未定价与供应商不可用的滤掉了, 这里写死型号名的话,
-        # 哪天下架就是每次 404, 而错误只会出现在容器里没人看的日志里。
+        # 剧组要出图/出片 (2026-08-31): 型号从 media.offered() 的**在售目录**里挑,
+        # 不硬编码 —— 写死就是哪天下架每次 404, 而错误只出现在容器里没人看的日志里。
+        #
+        # 但也不能"取第一项": 目录顺序没有语义, 实测取到的是 seedance 而不是万相
+        # 3.0。剧组这条线对模型有明确偏好, 用**子串优先级**表达 —— 目录里有就用,
+        # 没有就顺位, 全都没有才回落第一项。既不依赖某个型号一定存在, 也不会把
+        # 最合适的那个漏掉。
         try:
             from . import media as _media
 
             _off = _media.offered()
-            if _off.get("image"):
-                env["DSH_IMAGE_MODEL"] = _off["image"][0]["id"]
-            if _off.get("video"):
-                env["DSH_VIDEO_MODEL"] = _off["video"][0]["id"]
+            # 视频: 万相 3.0 优先 —— 单段更长意味着**接缝更少**, 而换脸/道具漂移/
+            # 环境音断裂大多就发生在接缝处, 是短剧一致性的头号来源。
+            # Prime 不设默认: 它贵一半 (720p 15 vs 10 积分/秒), 该由用户自己选。
+            env |= _pick_media_model(
+                _off.get("video"),
+                "DSH_VIDEO_MODEL",
+                ("wan3.0-video", "seedance-2-5", "seedance-2-0"),
+            )
+            # 图像: 通义千问图像 3.0 优先 —— 提示词长度是前代的 4.5 倍, 而分镜要把
+            # 画面结构/文字内容/排版细节像需求文档一样写全。
+            env |= _pick_media_model(
+                _off.get("image"),
+                "DSH_IMAGE_MODEL",
+                ("qwen-image-3.0", "gpt-image-2"),
+            )
         except Exception:  # noqa: BLE001 — 媒体目录读不出来不该拖垮整个工作台创建
             logger.exception("agents-team: 媒体目录读取失败, 出图/出片工具将不可用")
         return env

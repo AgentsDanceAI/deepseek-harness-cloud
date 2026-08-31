@@ -342,7 +342,7 @@ OPENCLAW_TAB_GRACE_MIN = _env_int("OPENCLAW_TAB_GRACE_MIN", 10)
 # 8710 上同时是前端和 API; 就绪探针打 /api/health 而不是首页 —— 首页是静态文件,
 # 后端没起来它照样 200 (2026-08-30 Dify/Coze 都栽过这个)。
 AGENTS_TEAM_DOMAIN = _env("AGENTS_TEAM_DOMAIN", "")
-AGENTS_TEAM_IMAGE_REF = _env("AGENTS_TEAM_IMAGE_REF", "ghcr.io/agentsdancepro/agents-team:0.1.0")
+AGENTS_TEAM_IMAGE_REF = _env("AGENTS_TEAM_IMAGE_REF", "ghcr.io/agentsdancepro/agents-team:0.2.1")
 # 4G 是给 **Chromium** 留的 (浏览器工具, 见 app/browser.py): Python 侧空载才
 # 一百多兆, 而一个带页面的 headless Chromium 轻易吃掉 500MB+, 复杂页面更多。
 # 给少了的表现是容器被 OOM 杀掉重启 —— 用户看到的是"对话突然断了", 而日志里

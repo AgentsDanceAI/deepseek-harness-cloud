@@ -100,7 +100,18 @@ async def generate_image(prompt: str, path: str, size: str = "", model: str = ""
     return f"已出图并存到 {rel} ({kb} KB)。下游可以用这个路径当参考图。", f"出图 {rel.name}"
 
 
-async def generate_video(prompt: str, path: str, duration: int = 5, resolution: str = "720P",
+#: 目录里的分辨率键是**小写** (credits_per_second: {"480p":..,"720p":..}), 而服务端
+#: 不做大小写归一化 —— 传 "720P" 会让 price_of 查不到价, 判成"未定价=不售卖"当场被拒。
+#: 模型很容易照着人话写成大写, 所以在这里兜住, 不指望它每次都写对。
+_RESOLUTIONS = ("480p", "720p", "1080p")
+
+
+def _norm_resolution(r: str) -> str:
+    v = (r or "").strip().lower()
+    return v if v in _RESOLUTIONS else "720p"
+
+
+async def generate_video(prompt: str, path: str, duration: int = 5, resolution: str = "720p",
                          ratio: str = "", image: str = "", model: str = "") -> tuple[str, str]:
     """出一段视频并存到工作区 (提交 → 轮询 → 下载, 一次调用走完)。
 
@@ -115,7 +126,7 @@ async def generate_video(prompt: str, path: str, duration: int = 5, resolution: 
         "model": model or VIDEO_MODEL,
         "prompt": prompt,
         "duration": int(duration),
-        "resolution": resolution,
+        "resolution": _norm_resolution(resolution),
     }
     if not body["model"]:
         return "没有可用的视频模型 (DSH_VIDEO_MODEL 未配置)。", "出片无模型"
@@ -163,7 +174,8 @@ async def generate_video(prompt: str, path: str, duration: int = 5, resolution: 
                 f.write(chunk)
     rel = out.relative_to(WORKDIR)
     mb = out.stat().st_size / 1024 / 1024
-    return f"已出片并存到 {rel} ({mb:.1f} MB, {duration}秒 {resolution})。", f"出片 {rel.name}"
+    return (f"已出片并存到 {rel} ({mb:.1f} MB, {duration}秒 {_norm_resolution(resolution)})。",
+            f"出片 {rel.name}")
 
 
 async def _upload_blob(p: Path) -> tuple[str, str]:
@@ -280,7 +292,7 @@ SCHEMAS = [
                     "prompt": {"type": "string", "description": "镜头描述: 画面内容 + 运镜 + 情绪"},
                     "path": {"type": "string", "description": "存到哪, 如 项目/片段/01.mp4"},
                     "duration": {"type": "number", "description": "秒; 省略 5"},
-                    "resolution": {"type": "string", "description": "480P/720P/1080P; 省略 720P"},
+                    "resolution": {"type": "string", "description": "480p/720p/1080p (小写); 省略 720p"},
                     "ratio": {"type": "string", "description": "如 16:9 / 9:16"},
                     "image": {"type": "string", "description": "首帧参考图的工作区路径"},
                     "model": {"type": "string", "description": "省略用工作台默认视频模型"},
@@ -323,7 +335,7 @@ HANDLERS = {
     "generate_image": lambda a: generate_image(
         a["prompt"], a["path"], a.get("size", ""), a.get("model", "")),
     "generate_video": lambda a: generate_video(
-        a["prompt"], a["path"], int(a.get("duration") or 5), a.get("resolution") or "720P",
+        a["prompt"], a["path"], int(a.get("duration") or 5), a.get("resolution") or "720p",
         a.get("ratio", ""), a.get("image", ""), a.get("model", "")),
     "concat_videos": lambda a: concat_videos(
         list(a.get("clips") or []), a["path"], a.get("audio", "")),
