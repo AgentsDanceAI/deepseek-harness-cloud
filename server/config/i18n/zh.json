@@ -70,7 +70,7 @@
   "apps.tag.docqa": "文档问答",
   "apps.tag.lobster": "经典龙虾",
   "apps.tag.memory": "记忆型智能体",
-  "apps.tag.native": "自家智能体",
+  "apps.tag.deepseek": "DeepSeek智能体",
   "apps.tag.nodegraph": "节点式生图",
   "apps.tag.orchestrate": "应用编排",
   "apps.tag.sketch": "手绘白板",

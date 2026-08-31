@@ -34,7 +34,7 @@ class AppEntry:
 # fmt: off
 CATALOG: tuple[AppEntry, ...] = (
     AppEntry(
-        "dsh", "DSH Agent", "native",
+        "dsh", "DSH Agent", "deepseek",
         '<path d="M17.5 19a4.5 4.5 0 1 0-.9-8.9 6 6 0 1 0-11.1 3.4"/><path d="M6 19h11.5"/>',
     ),
     # Agents Team 顶掉了 JupyterLab (老板 2026-08-31 拍板): 这页是 4 列网格,
