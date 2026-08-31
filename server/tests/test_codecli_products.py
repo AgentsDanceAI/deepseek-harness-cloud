@@ -119,3 +119,16 @@ def test_agent_terminal_is_wired_through_env(product_id):
     exe = products._CODECLI_AGENTS[product_id][0]
     assert env["DSH_AGENT_CMD"] == f"/usr/local/bin/{exe}"
     assert env["DSH_AGENT_NAME"]
+
+
+@pytest.mark.parametrize("product_id", CODECLI)
+def test_builtin_chat_panel_is_disabled(product_id):
+    """VS Code 自带的 Chat/Agent 面板必须关掉。
+
+    它在 code-server 4.135 里是**内核 UI** —— 把 copilot 扩展从镜像里删掉也去不
+    掉: 面板还在, 右下角照样挂着 "Sign In", 一点就要 GitHub OAuth。等于我们自己
+    的产品里又藏了一道登录墙 (老板铁律里明令不要的)。而且它是多余的: 这个产品的
+    agent 就是终端里那个 CLI。
+    """
+    boot = products.boot_script(product_id)
+    assert '"chat.disableAIFeatures": true' in boot
