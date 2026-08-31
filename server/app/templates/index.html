@@ -30,7 +30,7 @@
       <a class="hero-app soon" href="/apps">
       {% endif %}
         <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{{ app.icon | safe }}</svg>
-        <span class="ha-txt"><b>{{ app.name }}</b><i>{{ t("apps.cat." + app.cat) }}</i></span>
+        <span class="ha-txt"><b>{{ app.name }}</b><i>{{ t("apps.tag." + app.tag) }}</i></span>
         <span class="ha-dot {{ 'on' if app.live }}" aria-hidden="true"></span>
       </a>
       {% endfor %}
