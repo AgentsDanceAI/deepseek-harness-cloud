@@ -38,9 +38,11 @@ CATALOG: tuple[AppEntry, ...] = (
         '<rect x="3" y="4" width="7" height="6" rx="1.5"/><rect x="14" y="14" width="7" height="6" rx="1.5"/>'
         '<path d="M10 7h4a3 3 0 0 1 3 3v4M7 10v4a3 3 0 0 0 3 3h4"/>',
     ),
+    # Codex 顶掉了 OpenHands: 同为"自己读库改代码"的编码 agent, 而 Codex 与
+    # Claude Code 共用一个镜像和一套接线, 多接一个几乎不要成本。
     AppEntry(
-        "openhands", "OpenHands", "agent",
-        '<path d="m8 8-4 4 4 4M16 8l4 4-4 4"/><path d="M12 3v3M12 18v3"/>',
+        "codex", "Codex", "code",
+        '<path d="m8 8-4 4 4 4M16 8l4 4-4 4"/><path d="m13.5 6-3 12"/>',
     ),
     # OpenClaw 顶掉了 Aider: 命令行编码 agent 这一格我们自己的 dsh 已经覆盖,
     # 而 OpenClaw 是"一个网关接几十个聊天渠道"的常驻个人助理, 是另一类东西。
@@ -49,9 +51,12 @@ CATALOG: tuple[AppEntry, ...] = (
         '<path d="M7 10V6.5a2 2 0 1 1 4 0V10M11 10V5.5a2 2 0 1 1 4 0V10M15 10V7a2 2 0 1 1 4 0v7'
         'a7 7 0 0 1-7 7h-1a7 7 0 0 1-7-7v-3a2 2 0 1 1 4 0"/>',
     ),
+    # Claude Code 顶掉了 code-server 这一格: 我们接进来的**就是** code-server
+    # (见 deploy/workspace-codecli), 但它只是外壳 —— 值钱的是里面那个 agent。
+    # 单卖一个空编辑器, 用户拿它干不了我们这儿该干的事。
     AppEntry(
-        "code-server", "code-server", "code",
-        '<path d="m14 4-4 16M17 7l4 5-4 5M7 7l-4 5 4 5"/>',
+        "claude-code", "Claude Code", "code",
+        '<path d="M12 3 4 7.5v9L12 21l8-4.5v-9L12 3z"/><path d="m8 10 4 2.2 4-2.2M12 12.2V17"/>',
     ),
     AppEntry(
         "jupyter", "JupyterLab", "data",
