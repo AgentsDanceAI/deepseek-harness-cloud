@@ -646,6 +646,20 @@ map \$sent_http_content_type \$dsh_ct {
     ~*^text/html  "csrf_token=$CT; Path=/; Max-Age=3600; SameSite=Lax";
     default       "";
 }
+# **上游方向也要注入。** 只发 Set-Cookie 是不够的: 浏览器第一发 / 手里还没有
+# cookie, 而 Dify 的 / 会 307 到 /auth/refresh, 那一跳认不出他就 303 到
+# /signin —— 整条链在**同一次访问里**走完, Set-Cookie 根本来不及生效。
+# 用户看到的是 Next.js 的错误页 (`渲染此组件时发生了意外错误`), 而所有容器
+# Running、所有接口 200, 从后端完全看不出问题。
+# 2026-08-31 scripts/visual_check.sh 第一次全量跑时抓到。
+#
+# Coze 与 Hermes 早就这么做了 (proxy_set_header Cookie), 是我当时没把这条推广
+# 到 Dify —— 它那次我只修了"无条件补发"这一半。
+#
+# 无条件覆盖, 判据同上: 该判的是"能不能用", 不是"有没有"。
+map \$http_cookie \$dsh_up {
+    default "access_token=$AT; refresh_token=$RT; csrf_token=$CT";
+}
 EOF
   nginx -s reload
 }
@@ -704,6 +718,9 @@ def _dify_boot() -> str:
         'map $sent_http_content_type $dsh_at { default ""; }\n'
         'map $sent_http_content_type $dsh_rt { default ""; }\n'
         'map $sent_http_content_type $dsh_ct { default ""; }\n'
+        # 上游方向的默认值: 原样透传浏览器自己的 cookie。等 autologin 拿到会话
+        # 后会把它改成"无条件用工作台那份"。
+        "map $http_cookie $dsh_up { default $http_cookie; }\n"
         "AUTOCONF\n"
         "cat > /usr/local/bin/dsh-dify-autologin <<'AUTOLOGIN'\n" + _DIFY_AUTOLOGIN + "AUTOLOGIN\n"
         "chmod +x /usr/local/bin/dsh-dify-autologin\n"
@@ -718,6 +735,10 @@ def _dify_boot() -> str:
         "  add_header Set-Cookie $dsh_at always;\n"
         "  add_header Set-Cookie $dsh_rt always;\n"
         "  add_header Set-Cookie $dsh_ct always;\n"
+        # 见 _DIFY_AUTOLOGIN 里那段注释: 光发 Set-Cookie 不够, 浏览器第一发
+        # 手里还没有 cookie, 而 / → /auth/refresh → /signin 这条链在同一次访问
+        # 里就走完了, Set-Cookie 来不及生效, 用户看到 Next.js 的错误页。
+        "  proxy_set_header Cookie $dsh_up;\n"
         "  proxy_set_header Host $host;\n"
         "  proxy_set_header X-Real-IP $remote_addr;\n"
         "  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n"

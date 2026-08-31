@@ -166,3 +166,26 @@ def test_openclaw_still_removes_the_login_wall():
     assert "trusted-proxy" in boot
     assert "allowedOrigins" in boot
     assert "deviceAutoApprove" in boot
+
+
+# ---- 会话注入: 下行不够, 上游方向也要 ---------------------------------------
+
+
+@pytest.mark.parametrize("product_id", ("dify", "coze", "hermes"))
+def test_session_injection_covers_the_upstream_direction(product_id):
+    """替用户登录的产品, **两个方向都要注入**。
+
+    只发 Set-Cookie 是不够的: 浏览器第一发手里还没有 cookie, 而这些应用的首页
+    往往会立刻 30x 到自己的鉴权路径, 那一跳认不出他就落到登录页 —— 整条链在
+    **同一次访问里**走完, Set-Cookie 根本来不及生效。
+
+    2026-08-31 在 Dify 上抓到: 所有容器 Running、所有接口 200, 而用户看到的是
+    Next.js 的错误页。Coze 与 Hermes 早就做了上游注入, 是这条经验当时没推广到
+    Dify —— 它那次只修了"无条件补发"这一半。
+    """
+    # 各产品注入用的变量名不同, 但都必须是"工作台那份会话"而不是原样透传。
+    # 只断言 `proxy_set_header Cookie` 出现过是不够的 —— 配置里可能另有一处
+    # 原样透传的, 变异掉真正那处照样能过 (实测)。
+    var = {"dify": "$dsh_up", "coze": "$dsh_cookie", "hermes": "$hm_up"}[product_id]
+    boot = products.boot_script(product_id)
+    assert f"proxy_set_header Cookie {var}" in boot, "少了上游方向的 cookie 注入"
