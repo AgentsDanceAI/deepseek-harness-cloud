@@ -1289,6 +1289,13 @@ write_conf() {
 map \$sent_http_content_type \$hm_c1 { ~*^text/html "$C1"; default ""; }
 map \$sent_http_content_type \$hm_c2 { ~*^text/html "$C2"; default ""; }
 map \$sent_http_content_type \$hm_c3 { ~*^text/html "$C3"; default ""; }
+# 上游方向也注入: 浏览器第一发 / 是没有 cookie 的, 只发 Set-Cookie 的话它会先
+# 吃一个 302 落到 /login —— 页面是"Sign in", 按规矩这就算露出登录界面了。
+# 注入之后第一发就直接 200, 登录页根本不出现。带了自己 cookie 的原样透传。
+map \$http_cookie \$hm_up {
+    "~*hermes_session_at="  \$http_cookie;
+    default                 "$V1; $V2; $V3";
+}
 EOF
   # 先验再 reload, 并把结果记下来 —— 上一版无论成败都报"已下发", 于是配置没换
   # 也看不出来。
@@ -1319,6 +1326,8 @@ while [ "$n" -lt 120 ]; do
   C1=$(pick hermes_session_at)
   C2=$(pick hermes_session_rt)
   C3=$(pick hermes_session_provider)
+  # 上游注入用的是**不带属性**的那一半 (name=value), Set-Cookie 用的才带属性。
+  V1=${C1%%;*}; V2=${C2%%;*}; V3=${C3%%;*}
   if [ -n "$C1" ] && [ -n "$C2" ] && [ -n "$C3" ]; then
     write_conf || { sleep 10; continue; }
     log "会话已下发 (第 $n 轮)"
@@ -1413,6 +1422,7 @@ def _hermes_boot() -> str:
         "map $sent_http_content_type $hm_c1 { default \"\"; }\n"
         "map $sent_http_content_type $hm_c2 { default \"\"; }\n"
         "map $sent_http_content_type $hm_c3 { default \"\"; }\n"
+        "map $http_cookie $hm_up { default $http_cookie; }\n"
         "AUTOCONF\n"
         "cat > /usr/local/bin/dsh-hermes-autologin <<'AUTOLOGIN'\n"
         + _HERMES_AUTOLOGIN
@@ -1436,6 +1446,9 @@ def _hermes_boot() -> str:
         f"    proxy_set_header Host 127.0.0.1:{HERMES_PORT};\n"
         # 真实域名另外给, 免得应用拼出来的绝对链接指向回环。
         "    proxy_set_header X-Forwarded-Host $host;\n"
+        # 见 _HERMES_AUTOLOGIN: 没带自己 cookie 的请求走工作台那份会话, 于是
+        # 第一发 / 就是 200, 不会先闪一下登录页。
+        "    proxy_set_header Cookie $hm_up;\n"
         "    proxy_set_header X-Real-IP $remote_addr;\n"
         "    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n"
         "    proxy_set_header X-Forwarded-Proto $scheme;\n"
