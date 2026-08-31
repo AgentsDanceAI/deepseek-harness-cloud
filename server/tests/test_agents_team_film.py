@@ -103,8 +103,22 @@ def test_media_endpoints_share_the_chat_gateway_prefix():
     md = (ROOT / "server" / "app" / "media.py").read_text(encoding="utf-8")
     assert 'APIRouter(prefix="/llm"' in gw
     assert 'APIRouter(prefix="/llm"' in md
-    # 容器侧按 {GATEWAY_BASE}/videos/generations 拼, base 已含 /llm/v1
-    assert "/v1/videos/generations" in MEDIA or "videos/generations" in MEDIA
+    # ⚠️ 这条断言原先写成 `"/v1/videos/generations" in MEDIA`, 而那**正是 bug 本身**:
+    # GATEWAY_BASE 已含 /llm/v1, 再拼 /v1/ 就是 /llm/v1/v1/... → 405。
+    # 断言写成"存在某个字符串"而不是"URL 拼对了", 于是它把 bug 钉成了规范。
+    # 现在钉真语义: 容器侧一律 f"{GATEWAY_BASE}/<路径>", 不许再出现 /v1/。
+    assert 'f"{GATEWAY_BASE}/v1/' not in MEDIA, "又拼出了双 /v1"
+    for path in (
+        "images/generations",
+        "videos/generations",
+        "videos/result/",
+        "media/uploads",
+        "media/models",
+    ):
+        assert 'f"{GATEWAY_BASE}/' + path in MEDIA, f"{path} 的 URL 拼法不对"
+    # 与对话端同一种拼法 —— 同一个 base, 不该有两套规矩
+    agent_src = (TEAM / "app" / "agent.py").read_text(encoding="utf-8")
+    assert 'f"{GATEWAY_BASE}/chat/completions"' in agent_src
 
 
 def test_crew_roles_exist_with_distinct_jobs():
@@ -344,3 +358,39 @@ def test_user_text_stays_literal():
     i = WEB.index("function setText")
     seg = WEB[i : i + 300]
     assert "isUser" in seg and "textContent" in seg
+
+
+# ── 工具行折叠 + 谁在工作 (2026-08-31 老板: "屏幕有限, 用户很难捕捉哪个专家
+# 正在工作") ────────────────────────────────────────────────────────────
+def test_tool_rows_collapse_into_one_summary_line():
+    """一个工位随手十几步, 平铺能占满整屏 —— 谁在干活反而看不出来了。
+
+    实测: 11 步从 470px 收成 85px, 省 385px。
+    """
+    assert "function toolBox" in WEB
+    assert ".toolbox .tl { display:none" in WEB, "默认必须是收起的"
+    assert ".toolbox.open .tl { display:block" in WEB
+
+
+def test_summary_shows_the_latest_step_not_a_count_only():
+    """摘要要回答"此刻在干嘛", 不是"一共干了多少"。"""
+    i = WEB.index("function syncToolSummary")
+    seg = WEB[i : i + 500]
+    assert "rows[rows.length - 1]" in seg, "摘要没有取最后一行"
+
+
+def test_only_one_bot_is_marked_running():
+    """接力模式下"工作中"就等于"当前这一棒是谁" —— 屏幕有限, 这比堆工具行有用。"""
+    assert ".msg.bot.running" in WEB
+    i = WEB.index("const bubbleFor = id =>")
+    seg = WEB[i : i + 600]
+    assert "querySelectorAll('.msg.bot.running')" in seg, "没有摘掉上一位的标记"
+    assert "classList.add('running')" in seg
+
+
+def test_finished_stage_stops_occupying_screen():
+    """交棒后摘掉工作中标记并收起工具组 —— 跑完了就不该再占屏。"""
+    i = WEB.index("} else if (ev.type === 'end') {")
+    seg = WEB[i : i + 500]
+    assert "classList.remove('running')" in seg
+    assert "toolbox.open" in seg
