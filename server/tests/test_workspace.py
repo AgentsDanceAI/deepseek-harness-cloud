@@ -2664,6 +2664,28 @@ def test_dify_ready_path_lands_on_the_api_upstream():
     assert port == "5001", f"ready_path 命中的是 location {path} -> {port}, 不是 api(5001)"
 
 
+def test_coze_turns_off_the_env_model_path_explicitly():
+    """env 那条模型路径, "不配" 是关不掉的 —— 得写空串。
+
+    上游镜像里烤了一份 `/app/.env` (它的 Dockerfile: `COPY docker/.env.example
+    /app/.env`), 后端启动时 godotenv.Load 会把**我们没设过**的键从那份文件补上,
+    而它写着 MODEL_PROTOCOL_0="ark" / MODEL_OPENCOZE_ID_0="100001"。于是"撤掉这组
+    env"实际是把这条路径交给了上游的默认值: initModelByEnv 照样返回一条, 无名
+    (MODEL_NAME_0 也是空的)、class SEED、id 撞上我们默认模型的 100001, 追加在 20 条
+    YAML 之后 —— 用户看到的就是下拉框末尾一条**空白**条目 (2026-08-30 线上实见)。
+
+    godotenv 只补 os.Environ() 里**没出现过**的键, 空串也算出现过; 而
+    initModelByEnv 的门槛是 `MODEL_PROTOCOL_0 == "" || MODEL_OPENCOZE_ID_0 == ""`。
+    所以显式写空串既补不上默认值, 又迈不过门槛, 这条路径才真的关掉了。
+    """
+    env = products._coze_server_env()
+    keys = [k for k, _ in env]
+    got = dict(env)
+    for k in ("MODEL_PROTOCOL_0", "MODEL_OPENCOZE_ID_0"):
+        assert k in keys, f"{k} 没设 = 交给镜像里 .env 的默认值, 下拉框里会多一条空白模型"
+        assert got[k] == "", f"{k} 非空的话 initModelByEnv 会再造一条模型出来"
+
+
 def test_coze_ready_path_is_proxied_to_the_backend():
     """Coze 的 ready_path 必须落在上游那条转发去 coze-server 的 location 上。
 
@@ -2723,9 +2745,10 @@ def test_coze_preconfigures_the_whole_catalog_as_yaml():
     )
     assert default_doc["id"] == 100001
 
-    # env 那条路径必须已经撤掉, 否则默认模型出现两次
+    # env 那条路径必须已经关掉, 否则默认模型出现两次
+    # (怎么关见 test_coze_turns_off_the_env_model_path_explicitly —— 是写空串,
+    # 不是"不配")
     env = dict(products._coze_server_env())
-    assert "MODEL_PROTOCOL_0" not in env
-    assert "MODEL_ID_0" not in env
+    assert env["MODEL_PROTOCOL_0"] == ""
     # 内建模型 (平台起标题那类) 仍然要指着我们的网关
     assert env["BUILTIN_CM_OPENAI_MODEL"] == model_catalog.default_model()
