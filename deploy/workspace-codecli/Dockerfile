@@ -98,8 +98,10 @@ RUN set -e; \
       '    t.show();' \
       '    // show() 一个人**不够**: 终端建出来了、agent 也在跑, 而底部面板' \
       '    // 仍然是收起的 —— 用户看到的还是空编辑器, 得自己按 Ctrl+`。' \
-      '    // 这条命令才真的把面板弹出来。(实测出来的, 不是照文档写的。)' \
-      '    vscode.commands.executeCommand("workbench.action.terminal.focus");' \
+      '    // 用 focusPanel 而不是 terminal.focus: 后者在它看来"还没有终端"时' \
+      '    // 会**自己再建一个** (按默认配置文件, 于是又是一个 agent), 实测两个' \
+      '    // 终端并排、两个进程各烧各的。focusPanel 只管把面板露出来。' \
+      '    vscode.commands.executeCommand("workbench.action.focusPanel");' \
       '  }, 1500);' \
       '}' \
       'function deactivate() {}' \
