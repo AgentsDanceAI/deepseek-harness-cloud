@@ -906,8 +906,8 @@ def _coze_server_env() -> tuple[tuple[str, str], ...]:
         f"{_COZE_DB_USER}:{_COZE_DB_PASSWORD}@tcp(mysql:3306)/{_COZE_DB}"
         "?charset=utf8mb4&parseTime=True"
     )
+    # 只剩内建模型 (平台起标题/扩写那类) 用它; 用户可选的那批走 _coze_model_yamls。
     model_id = model_catalog.default_model()
-    model_name = (model_catalog.catalog().get(model_id) or {}).get("display_name", model_id)
     return (
         ("LISTEN_ADDR", ":8888"),
         ("LOG_LEVEL", "info"),
@@ -946,12 +946,9 @@ def _coze_server_env() -> tuple[tuple[str, str], ...]:
         ("RERANK_TYPE", "rrf"),
         ("OCR_TYPE", ""), ("PARSER_TYPE", "builtin"),
         # 开箱就有模型可选 —— 用户已经在我们这里付过费, 不该再去别处申请 key。
-        ("MODEL_PROTOCOL_0", "openai"),
-        ("MODEL_OPENCOZE_ID_0", "100001"),
-        ("MODEL_NAME_0", f"{model_name} (DSH Cloud)"),
-        ("MODEL_ID_0", model_id),
-        ("MODEL_API_KEY_0", GATEWAY_TOKEN_PLACEHOLDER),
-        ("MODEL_BASE_URL_0", f"{gateway}/llm/v1"),
+        # **在售模型全部由 YAML 出** (见 _coze_model_yamls), 这里不再配 MODEL_*_0:
+        # 那组 env 会被**追加**到 YAML 那批之后, 两边都配等于默认模型出现两次,
+        # 而且两条同号 (100001) 的记录谁赢没有定义。
         # 内建的那个"平台自己用"的模型 (起标题、扩写这类) 也指过来。
         ("BUILTIN_CM_TYPE", "openai"),
         ("BUILTIN_CM_OPENAI_BASE_URL", f"{gateway}/llm/v1"),
@@ -1122,6 +1119,55 @@ map \$cookie_session_key \$dsh_cookie {
 EOF
 nginx -s reload
 """
+
+
+#: Coze 里模型条目的数字 id 起点。**默认模型必须保住 100001**: 早先只配一个模型时
+#: 走的是 `MODEL_OPENCOZE_ID_0=100001` 那条 env 路径, 用户已建的智能体就是按这个 id
+#: 引用模型的 —— 换个号等于让他所有智能体指向一个不存在的模型。
+_COZE_MODEL_ID_BASE = 100001
+
+
+def _coze_model_yamls() -> str:
+    """把在售模型写成 Coze 的模型配置文件, 由初始化容器铺进种子卷。
+
+    Coze 读模型有**两条**旧路径, 合起来用 (backend 的 deprecate_model_get.go):
+    扫 `resources/conf/model/*.yaml`, 再把 `MODEL_*_0` 那组 env 追加一条。两条都
+    走的话默认模型会**出现两次**, 所以 env 那条随这次改动一起去掉, 全部由 YAML 出。
+
+    上游镜像里那个目录只有 `template/` 子目录和一个 json —— readDirYaml 跳过目录、
+    只认 .yaml, 所以那里原本一个模型都没有, 我们铺进去的就是全部。
+
+    只写结构体认的四个字段 (id/name/description/meta)。模板里那一大段
+    default_parameters 不在 OldModel 结构体里, yaml 解析直接忽略 —— 抄进来纯属
+    给自己找漂移。
+
+    **新界面存过模型就不再走这条路**: Coze 有个 `do_not_use_old_model_key` 开关,
+    用户一旦在模型管理页里保存过, 旧配置整个失效, 这里铺的东西也就不再露面。那是
+    上游的语义, 不是故障。
+    """
+    gateway = config.PUBLIC_BASE.rstrip("/")
+    docs = []
+    for i, m in enumerate(model_catalog.catalog().values()):
+        mid = m["id"]
+        name = m.get("display_name", mid)
+        # 值一律加引号: 模型 id 带斜杠 (Qwen/...)、令牌是 base64url、显示名带括号,
+        # 裸写进 YAML 迟早撞上某个被当成语法的字符, 而那会让 coze-server 启动即崩。
+        doc = (
+            f"id: {_COZE_MODEL_ID_BASE + i}\n"
+            f'name: "{name} (DSH Cloud)"\n'
+            "description:\n"
+            '  zh: "由 DSH Cloud 提供，按积分计费"\n'
+            '  en: "Provided by DSH Cloud"\n'
+            "meta:\n"
+            "  protocol: openai\n"
+            "  conn_config:\n"
+            f'    base_url: "{gateway}/llm/v1"\n'
+            f'    api_key: "{GATEWAY_TOKEN_PLACEHOLDER}"\n'
+            f'    model: "{mid}"\n'
+        )
+        # 文件名不能照抄模型 id —— 带斜杠的那几个会变成"写进不存在的子目录"。
+        docs.append(f"cat > /seed/conf/model/dsh_{i:03d}.yaml <<'DSHMODEL'\n{doc}DSHMODEL\n")
+    return "".join(docs)
 
 
 def _coze_boot() -> str:
@@ -1550,7 +1596,9 @@ def registry() -> dict[str, Product]:
                 InitContainer(
                     name="seed",
                     image_ref=config.COZE_ASSETS_IMAGE_REF,
-                    cmd=("sh", "-c", "cp -a /assets/. /seed/"),
+                    # 铺完上游资产, 再把在售模型写成模型配置。顺序不能反 ——
+                    # cp 的目标目录是 conf/model, 得先有它。
+                    cmd=("sh", "-c", "set -e\ncp -a /assets/. /seed/\n" + _coze_model_yamls()),
                 ),
             ),
             seeds=(("nginx", "/seed"),),

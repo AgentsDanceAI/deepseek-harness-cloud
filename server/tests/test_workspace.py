@@ -2113,17 +2113,22 @@ def test_coze_wires_our_gateway_so_users_need_no_api_key(monkeypatch):
     """
     prod = _coze_ready(monkeypatch)
     raw = dict(next(sc for sc in prod.sidecars if sc.name == "coze-server").env)
-    assert raw["MODEL_API_KEY_0"] == products.GATEWAY_TOKEN_PLACEHOLDER
-    assert raw["MODEL_BASE_URL_0"].endswith("/llm/v1")
     assert raw["BUILTIN_CM_TYPE"] == "openai"
+    assert raw["BUILTIN_CM_OPENAI_BASE_URL"].endswith("/llm/v1")
+    # 用户可选的那批模型的令牌在**初始化容器**里 (写进 YAML), 不在伴随容器 env 里
+    assert any(products.GATEWAY_TOKEN_PLACEHOLDER in a for ic in prod.init_containers for a in ic.cmd)
 
     resolved = products.resolve_sidecars(prod.sidecars, "s" * 64, "tok_live")
     env = dict(next(sc for sc in resolved if sc.name == "coze-server").env)
-    assert env["MODEL_API_KEY_0"] == "tok_live"
     assert env["BUILTIN_CM_OPENAI_API_KEY"] == "tok_live"
-    # 一个占位符都不许漏 —— 漏了是运行期 401, 不是启动期报错
+
+    # 一个占位符都不许漏 —— 漏了是运行期 401, 不是启动期报错。
+    # **初始化容器也要扫**: 模型令牌搬进 YAML 之后, 只扫伴随容器就漏掉了它。
+    resolved_ics = products.resolve_init_containers(prod.init_containers, "s" * 64, "tok_live")
     leftovers = [(sc.name, k) for sc in resolved for k, v in sc.env if "__DSH_" in v]
+    leftovers += [(ic.name, "cmd") for ic in resolved_ics for a in ic.cmd if "__DSH_" in a]
     assert leftovers == [], f"没换掉的占位符: {leftovers}"
+    assert any("tok_live" in a for ic in resolved_ics for a in ic.cmd)
 
 
 def test_coze_knowledge_base_embeds_through_our_gateway(monkeypatch):
@@ -2678,3 +2683,49 @@ def test_coze_ready_path_is_proxied_to_the_backend():
     assert re.match(r"^/(api|v[1-3]|admin)(/|$)", prod.ready_path), (
         f"ready_path {prod.ready_path} 不会被转发去 coze-server, 会落回静态首页"
     )
+
+
+def test_coze_preconfigures_the_whole_catalog_as_yaml():
+    """Coze 的在售模型由初始化容器写成 YAML 铺进种子卷, 覆盖整份目录。
+
+    Coze 读旧模型配置有两条路径, 合起来用: 扫 resources/conf/model/*.yaml, 再把
+    MODEL_*_0 那组 env **追加**一条。所以两边都配 = 默认模型出现两次, 且两条同号。
+    """
+    import subprocess
+    import tempfile
+
+    ics = products.resolve_init_containers(products.registry()["coze"].init_containers, "s" * 64, "TOKEN-ABC")
+    cmd = ics[0].cmd[2]
+    assert products.GATEWAY_TOKEN_PLACEHOLDER not in cmd, "网关令牌没被替换, 写进去就是 401"
+
+    # 真跑一遍那段 sh, 而不是对着字符串断言 —— 生成的是 heredoc, 引号和分词错了
+    # 只有真跑才看得出来
+    with tempfile.TemporaryDirectory() as d:
+        os.makedirs(f"{d}/seed/conf/model")
+        os.makedirs(f"{d}/assets")
+        script = cmd.replace("/seed/", f"{d}/seed/").replace("/assets/", f"{d}/assets/")
+        r = subprocess.run(["sh", "-c", script], capture_output=True, text=True)
+        assert r.returncode == 0, r.stderr[:300]
+        files = sorted(os.listdir(f"{d}/seed/conf/model"))
+        assert len(files) == len(model_catalog.catalog()), "没有覆盖整份目录"
+
+        yaml = pytest.importorskip("yaml", reason="没装 pyyaml, 跳过结构校验")
+        docs = [yaml.safe_load(open(f"{d}/seed/conf/model/{f}").read()) for f in files]
+
+    ids = [d_["id"] for d_ in docs]
+    assert len(set(ids)) == len(ids), "模型 id 撞号"
+    models = [d_["meta"]["conn_config"]["model"] for d_ in docs]
+    assert set(models) == set(model_catalog.catalog())
+    # 默认模型必须还是 100001 —— 用户已建的智能体按这个号引用模型, 换号等于让它们
+    # 全部指向一个不存在的模型
+    default_doc = next(
+        d_ for d_ in docs if d_["meta"]["conn_config"]["model"] == model_catalog.default_model()
+    )
+    assert default_doc["id"] == 100001
+
+    # env 那条路径必须已经撤掉, 否则默认模型出现两次
+    env = dict(products._coze_server_env())
+    assert "MODEL_PROTOCOL_0" not in env
+    assert "MODEL_ID_0" not in env
+    # 内建模型 (平台起标题那类) 仍然要指着我们的网关
+    assert env["BUILTIN_CM_OPENAI_MODEL"] == model_catalog.default_model()
