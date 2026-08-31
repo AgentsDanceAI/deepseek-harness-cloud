@@ -365,7 +365,7 @@ CODECLI_TAB_GRACE_MIN = _env_int("CODECLI_TAB_GRACE_MIN", 10)
 CLOUDCLI_IMAGE_REF = _env("CLOUDCLI_IMAGE_REF", "ghcr.io/agentsdancepro/cloudcli-local:1.37.2-r1")
 # 自研的智能体工作台 (见 deploy/workspace-agentui)。老板 2026-08-31 拍板顶掉
 # CloudCLI —— 别人的界面里挂着别人的引流入口, 而积分这个核心机制在里面没有位置。
-AGENTUI_IMAGE_REF = _env("AGENTUI_IMAGE_REF", "ghcr.io/agentsdancepro/agentui:0.2.1")
+AGENTUI_IMAGE_REF = _env("AGENTUI_IMAGE_REF", "ghcr.io/agentsdancepro/agentui:0.2.2")
 CLAUDE_CODE_DOMAIN = _env("CLAUDE_CODE_DOMAIN", "")
 CODEX_DOMAIN = _env("CODEX_DOMAIN", "")
 

@@ -69,6 +69,18 @@ docker run --rm -u 0 --entrypoint bash "$REF" -c '
   grep -qi "ttyd\|terminal" /tmp/t.html || { echo "!! /terminal/ 返回的不是 ttyd 的页面" >&2; exit 1; }
   echo "  ✓ 终端反代: ttyd 页面出得来"
 
+  # 终端必须**直接进 agent**, 不落一个要用户自己敲命令的 shell —— 这个产品卖的
+  # 就是"点开就能用"。ttyd 的进程行里能看到它起的是什么。
+  sleep 2
+  found=""
+  for d in /proc/[0-9]*; do
+    line=$(tr "\0" " " < "$d/cmdline" 2>/dev/null || true)
+    case "$line" in *ttyd*claude*) found=1;; esac
+  done
+  test -n "$found" \
+    || { echo "!! 终端起的不是 agent —— 用户点开只会看到一个空 shell" >&2; exit 1; }
+  echo "  ✓ 终端直接进 agent"
+
   # 5. 首页真的能出来 (静态挂载顺序错了的话这里会 404 —— 它挂在 / 上, 很容易
   #    被别的路由吃掉)。
   code=$(curl -s -o /tmp/idx.html -w "%{http_code}" --max-time 10 http://127.0.0.1:18080/)
