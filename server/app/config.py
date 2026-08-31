@@ -333,7 +333,7 @@ COZE_TAB_GRACE_MIN = _env_int("COZE_TAB_GRACE_MIN", 15)
 
 # OpenClaw (单容器)。控制台 UI 在 18789, 自带 /healthz /readyz 探针。
 OPENCLAW_DOMAIN = _env("OPENCLAW_DOMAIN", "")
-OPENCLAW_IMAGE_REF = _env("OPENCLAW_IMAGE_REF", "ghcr.io/openclaw/openclaw:2026.7.1")
+OPENCLAW_IMAGE_REF = _env("OPENCLAW_IMAGE_REF", "ghcr.io/openclaw/openclaw:2026.8.1")
 OPENCLAW_MEM_LIMIT_MB = _env_int("OPENCLAW_MEM_LIMIT_MB", 4096)
 OPENCLAW_CPUS = _env_float("OPENCLAW_CPUS", 2.0)
 OPENCLAW_TAB_GRACE_MIN = _env_int("OPENCLAW_TAB_GRACE_MIN", 10)
