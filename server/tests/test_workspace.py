@@ -1815,6 +1815,10 @@ def test_hermes_keeps_its_auth_on_and_we_carry_the_credential(monkeypatch):
     sh = products._HERMES_AUTOLOGIN
     assert r"""tr -d '\r"'""" in sh, "cookie 值里的双引号没去掉 -> 要么 nginx 语法错, 要么引号留在值里"
     assert "nginx -t" in sh, "不先验就 reload, 失败了也不知道"
+    # 上游方向也要注入: 只发 Set-Cookie 的话, 浏览器第一发没 cookie -> 302 落到
+    # /login, 页面是 "Sign in" —— 按规矩这就算露出登录界面了。
+    assert "proxy_set_header Cookie $hm_up;" in products.boot_script("hermes")
+    assert "$hm_up" in sh and "hermes_session_at=" in sh
     assert "reload 失败" in sh
 
 
