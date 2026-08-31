@@ -245,3 +245,55 @@ def test_search_drops_linkless_rows(monkeypatch):
     rows = asyncio.run(zhipu_search._search_one("any", "q", 10))
     assert [r["url"] for r in rows] == ["https://ok.example/c"]
     assert rows[0]["page_age"] == "2026-08-16"
+
+
+def test_search_detector_covers_both_shapes_dsh_uses():
+    """两种形状都要认成搜索, 其余一律当普通对话。
+
+    漏认搜索 = 把它转发给上游, 那边没有 web_search 工具, 用户侧表现为搜索整个
+    失灵; 误认对话 = 任何 Anthropic 客户端 (Claude Code 这类) 每一发都只拿到
+    一份搜索结果, 而且不报错, 看着像模型犯傻。后者是 2026-08-31 之前的实际行为
+    —— 那时这个接口无条件当搜索处理。
+    """
+    from app import gateway
+
+    tool_shape = {"tools": [{"type": "web_search_20250305", "name": "web_search", "max_uses": 5}]}
+    prefix_shape = {
+        "messages": [
+            {"role": "user", "content": [{"type": "text", "text": "Perform a web search for the query: x"}]}
+        ]
+    }
+    prefix_str = {"messages": [{"role": "user", "content": "perform a web search for the query: y"}]}
+    assert gateway._is_web_search(tool_shape)
+    assert gateway._is_web_search(prefix_shape)
+    assert gateway._is_web_search(prefix_str), "大小写不敏感"
+
+    # 普通对话不能被误认
+    chat = {"messages": [{"role": "user", "content": "帮我写个函数"}]}
+    chat_tools = {
+        "messages": [{"role": "user", "content": "查天气"}],
+        "tools": [{"name": "get_weather", "type": "function"}],
+    }
+    assert not gateway._is_web_search(chat)
+    assert not gateway._is_web_search(chat_tools), "普通工具被当成了搜索"
+    # 畸形请求不能把判据本身弄崩 (那会让一次 400 变成 500)
+    for junk in (None, "字符串", [1], {"tools": "x"}, {"messages": [1, None]}):
+        gateway._is_web_search(junk)
+
+
+def test_forwarded_chat_is_billed_as_llm_on_the_requested_model(monkeypatch):
+    """通用转发那条路按**请求的模型**当普通对话计费, 不是按搜索。
+
+    早先写死成 kind="search" + 搜索固定费 + 默认模型的价 —— 那是整个接口只服务
+    web_search 时代的遗留。真跑对话时用户会被按默认模型计价再加一笔搜索费, 而
+    他用的可能是贵几十倍的 claude-opus-5。
+    """
+    import inspect
+
+    from app import gateway
+
+    src = inspect.getsource(gateway.anthropic_messages)
+    assert 'kind="llm"' in src, "转发路仍按搜索计费"
+    assert "billed_model" in src, "没有按请求的模型计价"
+    # 搜索那条路自己的计费不能被动掉
+    assert 'kind="search"' in src and "SEARCH_CALL_CREDITS" in src
