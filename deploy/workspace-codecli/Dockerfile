@@ -94,8 +94,12 @@ RUN set -e; \
       '  //   · 不判断就每刷新一次多起一个 agent 进程, 各自烧着积分 (也踩过)。' \
       '  setTimeout(() => {' \
       '    const found = vscode.window.terminals.find((t) => t.name === name);' \
-      '    if (found) { found.show(); return; }' \
-      '    vscode.window.createTerminal({ name, shellPath: cmd, cwd: "/workspace" }).show();' \
+      '    const t = found || vscode.window.createTerminal({ name, shellPath: cmd, cwd: "/workspace" });' \
+      '    t.show();' \
+      '    // show() 一个人**不够**: 终端建出来了、agent 也在跑, 而底部面板' \
+      '    // 仍然是收起的 —— 用户看到的还是空编辑器, 得自己按 Ctrl+`。' \
+      '    // 这条命令才真的把面板弹出来。(实测出来的, 不是照文档写的。)' \
+      '    vscode.commands.executeCommand("workbench.action.terminal.focus");' \
       '  }, 1500);' \
       '}' \
       'function deactivate() {}' \
