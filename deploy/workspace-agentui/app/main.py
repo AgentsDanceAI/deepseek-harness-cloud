@@ -23,7 +23,7 @@ import shlex
 
 import httpx
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from . import adapters, sessions, workspace_fs
@@ -301,64 +301,116 @@ async def ws_chat(ws: WebSocket, sid: str) -> None:
             proc.terminate()
 
 
-# ---- 终端 (WebSocket + PTY) -------------------------------------------------
+# ---- 终端 (反代 ttyd) -------------------------------------------------------
+#
+# 终端本身交给 ttyd (开源, libwebsockets + xterm.js), 我们只做转发。
+#
+# 先前是自己 pty.fork() + 往 WebSocket 上倒字节 —— 看着能跑, 实际反复出转义序列
+# 的乱码 (先是满屏 `vvvv`, "修好"之后又变成满屏 `$$$$`)。终端仿真里"尺寸协商 +
+# 转义序列 + 键盘编码"这几件事边角极多, 不值得我们自己趟。
+#
+# ttyd 绑回环, 由这里代理出去 —— 它自己带 --writable 之外没有鉴权, 而这个域
+# 前面压着我们的 forward_auth, 容器又是每用户独占的。
+
+TTYD_PORT = int(os.environ.get("DSH_TTYD_PORT", "7681"))
+_ttyd_proc: asyncio.subprocess.Process | None = None
 
 
-@app.websocket("/ws/shell")
-async def ws_shell(ws: WebSocket) -> None:
-    """一个真 PTY。没有它, `top`/`vim`/带颜色的输出全是坏的。"""
-    import fcntl
-    import pty
-    import signal
-    import struct
-    import termios
+async def _ensure_ttyd() -> None:
+    """按需起 ttyd。第一次点开「终端」标签页才起, 不用白占内存。"""
+    global _ttyd_proc
+    if _ttyd_proc is not None and _ttyd_proc.returncode is None:
+        return
+    argv = [
+        "ttyd", "--port", str(TTYD_PORT), "--interface", "127.0.0.1",
+        "--writable",
+        # 客户端断开后别把 shell 也杀了 —— 用户切个标签页回来还是同一个会话。
+        "--max-clients", "0",
+        "--cwd", WORKSPACE,
+        # **启动命令是必填的** —— 漏了它 ttyd 直接 "missing start command" 退出,
+        # 而我们这边只看到反代 503。-l 让它是登录 shell, 用户的 PATH/别名才对。
+        "bash", "-l",
+    ]
+    if AGENT_UID:
+        # 与 agent 子进程同一个身份: 用户在终端里手敲 claude 时会撞上同一堵
+        # "不能以 root 跑" 的墙, 两处不一致比两处都错更难查。
+        argv = ["setpriv", f"--reuid={AGENT_UID}", f"--regid={AGENT_GID}",
+                "--clear-groups", "--"] + argv
+    _ttyd_proc = await asyncio.create_subprocess_exec(
+        *argv, env=_agent_env(),
+        stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
+    )
+    # 等它真的开始监听 —— 立刻代理过去的话第一发必然 502。
+    for _ in range(50):
+        try:
+            async with httpx.AsyncClient(timeout=1.0) as c:
+                await c.get(f"http://127.0.0.1:{TTYD_PORT}/")
+            return
+        except httpx.HTTPError:
+            await asyncio.sleep(0.1)
 
-    await ws.accept()
-    pid, fd = pty.fork()
-    if pid == 0:  # 子进程
-        # 与对话那条一样降权: 用户在终端里手敲 `claude` 时会撞上同一堵
-        # "不能以 root 跑 bypassPermissions" 的墙, 两处不一致比两处都错更难查。
-        if AGENT_UID:
-            try:
-                os.setgid(AGENT_GID)
-                os.setuid(AGENT_UID)
-            except OSError:
-                pass
-        os.environ["HOME"] = AGENT_HOME if AGENT_UID else os.environ.get("HOME", "/root")
-        os.chdir(WORKSPACE)
-        os.execvp("/bin/bash", ["/bin/bash", "-l"])
-        os._exit(1)  # pragma: no cover
 
-    loop = asyncio.get_running_loop()
-
-    async def pump() -> None:
-        while True:
-            try:
-                data = await loop.run_in_executor(None, os.read, fd, 65536)
-            except OSError:
-                break
-            if not data:
-                break
-            await ws.send_text(data.decode("utf-8", "replace"))
-
-    task = asyncio.create_task(pump())
+@app.get("/terminal")
+@app.get("/terminal/{rest:path}")
+async def terminal_proxy(rest: str = "") -> Response:
+    await _ensure_ttyd()
+    url = f"http://127.0.0.1:{TTYD_PORT}/{rest}"
     try:
-        while True:
-            msg = json.loads(await ws.receive_text())
-            if msg.get("t") == "in":
-                os.write(fd, msg.get("data", "").encode())
-            elif msg.get("t") == "resize":
-                # 不同步窗口大小的话, 任何全屏程序 (vim/htop) 的画面都是错位的。
-                winsize = struct.pack("HHHH", int(msg.get("rows", 24)), int(msg.get("cols", 80)), 0, 0)
-                fcntl.ioctl(fd, termios.TIOCSWINSZ, winsize)
-    except (WebSocketDisconnect, json.JSONDecodeError, OSError):
+        async with httpx.AsyncClient(timeout=20.0) as c:
+            r = await c.get(url)
+    except httpx.HTTPError as e:
+        return PlainTextResponse(f"终端还没起来: {type(e).__name__}", status_code=503)
+    # 原样带回内容类型, 否则 ttyd 的 js/css 会被当成 text/plain 而不执行。
+    return Response(
+        content=r.content,
+        status_code=r.status_code,
+        media_type=r.headers.get("content-type", "application/octet-stream"),
+    )
+
+
+@app.websocket("/terminal/ws")
+async def terminal_ws(ws: WebSocket) -> None:
+    """双向转发 ttyd 的 WebSocket。
+
+    **子协议必须带上**: ttyd 用 `tty` 这个子协议, 不回它的话浏览器端握手就失败,
+    而症状只是终端一片空白 —— 看不出是握手挂了。
+    """
+    import websockets
+
+    await _ensure_ttyd()
+    await ws.accept(subprotocol="tty")
+    url = f"ws://127.0.0.1:{TTYD_PORT}/ws"
+    try:
+        async with websockets.connect(url, subprotocols=["tty"], max_size=None) as up:
+            async def c2s() -> None:
+                while True:
+                    msg = await ws.receive()
+                    if msg.get("type") == "websocket.disconnect":
+                        break
+                    if (b := msg.get("bytes")) is not None:
+                        await up.send(b)
+                    elif (t := msg.get("text")) is not None:
+                        await up.send(t)
+
+            async def s2c() -> None:
+                async for data in up:
+                    if isinstance(data, bytes):
+                        await ws.send_bytes(data)
+                    else:
+                        await ws.send_text(data)
+
+            done, pending = await asyncio.wait(
+                [asyncio.create_task(c2s()), asyncio.create_task(s2c())],
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            for t in pending:
+                t.cancel()
+    except Exception:  # noqa: BLE001
         pass
     finally:
-        task.cancel()
         try:
-            os.kill(pid, signal.SIGKILL)
-            os.close(fd)
-        except OSError:
+            await ws.close()
+        except RuntimeError:
             pass
 
 

@@ -77,6 +77,23 @@ COPY --from=vendor /out /srv/web/vendor
 # 把这两处 chown 给它 (见 products.py 的 _agentui_boot), 否则 agent 连自己的
 # 会话文件都写不进去, 而它只会在日志里抱怨一句然后照常跑, 用户是回收之后才
 # 发现东西没了。
+# 终端用 **ttyd** (开源, C 写的 libwebsockets + xterm.js), 不用我们自己写的 PTY。
+#
+# 老板 2026-08-31: "终端还是不行啊, 不行你就植入个开源的"。他是对的 —— 我手写
+# 那套 PTY 反复出转义序列的乱码 (先是一屏 `vvvv`, 修了之后又是一屏 `$$$$`),
+# 而终端仿真里"尺寸协商 + 转义序列 + 键盘编码"这几件事就是有一堆边角, 值不得
+# 我们自己趟。ttyd 是这件事上被用了很多年的实现。
+# (他提的 ghostty 是原生 GPU 终端, 跑不进浏览器; 浏览器里对应的就是 ttyd。)
+#
+# 校验 sha256 —— 从网上取二进制不核对等于把镜像的完整性交给别人的 CDN。
+ARG TTYD_VERSION=1.7.7
+ARG TTYD_SHA256=8a217c968aba172e0dbf3f34447218dc015bc4d5e59bf51db2f2cd12b7be4f55
+RUN curl -fsSL -o /usr/local/bin/ttyd \
+      "https://github.com/tsl0922/ttyd/releases/download/${TTYD_VERSION}/ttyd.x86_64" \
+ && echo "${TTYD_SHA256}  /usr/local/bin/ttyd" | sha256sum -c - \
+ && chmod +x /usr/local/bin/ttyd \
+ && ttyd --version
+
 # 直接复用 node 镜像自带的 node 用户 (uid 1000) —— 另建一个会撞 uid, 而且
 # 多一个用户就多一处要同步的属主。
 ARG AGENT_UID=1000

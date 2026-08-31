@@ -42,10 +42,13 @@ docker run --rm -u 0 --entrypoint bash "$REF" -c '
 
   # 2. 前端依赖必须**烤在镜像里**。运行时去 CDN 拿的话, 实例出网抖一下界面就
   #    白屏, 而且等于把用户的浏览器指向第三方。
-  for f in /srv/web/vendor/xterm.js /srv/web/vendor/marked.js; do
-    test -s "$f" || { echo "!! $f 不在镜像里 —— 终端/正文渲染会坏" >&2; exit 1; }
-  done
-  echo "  ✓ 前端依赖已内置 (xterm $(wc -c < /srv/web/vendor/xterm.js) 字节, marked $(wc -c < /srv/web/vendor/marked.js) 字节)"
+  test -s /srv/web/vendor/marked.js \
+    || { echo "!! marked 不在镜像里 —— 正文渲染会坏" >&2; exit 1; }
+  echo "  ✓ 正文渲染依赖已内置 (marked $(wc -c < /srv/web/vendor/marked.js) 字节)"
+
+  # 终端交给 ttyd —— 自己写的那套 PTY 反复出转义序列乱码, 换掉了。
+  command -v ttyd >/dev/null || { echo "!! ttyd 不在镜像里 —— 终端整块坏掉" >&2; exit 1; }
+  echo "  ✓ ttyd: $(ttyd --version 2>&1 | head -1)"
 
   # 3. 服务起得来, 且**四条关键接口都在**。少任何一条都是某个标签页整块坏掉,
   #    而用户看到的只是"点了没反应"。
@@ -60,7 +63,13 @@ docker run --rm -u 0 --entrypoint bash "$REF" -c '
   done
   echo "  ✓ 接口齐: health/config/sessions/files/git"
 
-  # 4. 首页真的能出来 (静态挂载顺序错了的话这里会 404 —— 它挂在 / 上, 很容易
+  # 4. 终端反代能出内容。ttyd 是按需起的, 所以这一下也顺带验了"按需拉起"这条路。
+  code=$(curl -s -o /tmp/t.html -w "%{http_code}" --max-time 25 http://127.0.0.1:18080/terminal/)
+  test "$code" = "200" || { echo "!! /terminal/ 返回 $code —— 终端整块坏掉" >&2; tail -20 /tmp/srv.log >&2; exit 1; }
+  grep -qi "ttyd\|terminal" /tmp/t.html || { echo "!! /terminal/ 返回的不是 ttyd 的页面" >&2; exit 1; }
+  echo "  ✓ 终端反代: ttyd 页面出得来"
+
+  # 5. 首页真的能出来 (静态挂载顺序错了的话这里会 404 —— 它挂在 / 上, 很容易
   #    被别的路由吃掉)。
   code=$(curl -s -o /tmp/idx.html -w "%{http_code}" --max-time 10 http://127.0.0.1:18080/)
   test "$code" = "200" || { echo "!! 首页 $code" >&2; exit 1; }
@@ -71,7 +80,7 @@ docker run --rm -u 0 --entrypoint bash "$REF" -c '
   done
   echo "  ✓ 首页与静态资源都在"
 
-  # 5. 没有登录墙 —— 这是老板的铁律, 也是我们自研的前提之一。任何一条接口回
+  # 6. 没有登录墙 —— 这是老板的铁律, 也是我们自研的前提之一。任何一条接口回
   #    401/403 就说明有人加了账号体系。
   for p in / /api/sessions /api/config; do
     code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "http://127.0.0.1:18080$p")

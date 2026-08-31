@@ -187,35 +187,18 @@ document.querySelectorAll("#tabs button[data-tab]").forEach((b) => {
 });
 
 /* ---------- 终端 ---------- */
-let term = null, termWs = null;
+/* 终端本身是 ttyd (开源), 我们只把它嵌进来。
+ * 先前是自己 pty.fork() 往 WebSocket 上倒字节, 反复出转义序列的乱码 —— 先是
+ * 满屏 vvvv, "修好"之后又变成满屏 $$$$。终端仿真的边角太多, 不值得自己趟。 */
+let termLoaded = false;
 function initShell() {
-  if (term) { term.focus(); return; }
-  if (!window.Terminal) { $("#term").textContent = "终端组件没加载成功"; return; }
-  term = new window.Terminal({ fontSize: 13, cursorBlink: true, convertEol: true,
-                               theme: { background: "#00000000" }, allowTransparency: true });
-  term.open($("#term"));
-  const proto = location.protocol === "https:" ? "wss:" : "ws:";
-  termWs = new WebSocket(`${proto}//${location.host}/ws/shell`);
-  let firstOut = false;
-  termWs.onmessage = (e) => {
-    term.write(e.data);
-    // 等 shell 真正打出东西再对齐尺寸。连上就 fit 的话, resize 会在 shell
-    // 起来之前往 PTY 里写终端查询序列, 而没人读它 —— 那串回显就是屏幕顶上
-    // 那行 `vvvv…` 乱码 (实测出来的)。
-    if (!firstOut) { firstOut = true; setTimeout(fitTerm, 120); }
-  };
-  termWs.onopen = () => term.focus();
-  term.onData((d) => termWs.readyState === 1 && termWs.send(JSON.stringify({ t: "in", data: d })));
-  window.addEventListener("resize", fitTerm);
-}
-function fitTerm() {
-  if (!term || !termWs || termWs.readyState !== 1) return;
-  // 没有 fit 插件, 自己按字符宽高算 —— 少一个依赖, 逻辑也就十行。
-  const box = $("#term").getBoundingClientRect();
-  const cols = Math.max(20, Math.floor((box.width - 16) / 8));
-  const rows = Math.max(6, Math.floor((box.height - 16) / 17));
-  term.resize(cols, rows);
-  termWs.send(JSON.stringify({ t: "resize", cols, rows }));
+  if (termLoaded) return;
+  termLoaded = true;
+  const f = el("iframe");
+  f.src = "/terminal/";
+  f.setAttribute("title", "终端");
+  $("#term").innerHTML = "";
+  $("#term").appendChild(f);
 }
 
 /* ---------- 文件 ---------- */

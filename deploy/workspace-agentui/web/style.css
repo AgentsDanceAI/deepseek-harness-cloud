@@ -98,7 +98,8 @@ body {
 #stopBtn { background: var(--err); }
 
 /* ---- 终端 / 文件 / 版本 ---- */
-#term { flex: 1; padding: 8px; min-height: 0; }
+#term { flex: 1; min-height: 0; display: flex; }
+#term iframe { flex: 1; border: 0; width: 100%; height: 100%; }
 #fileWrap, #gitWrap { flex: 1; display: flex; min-height: 0; }
 #fileTree, #gitSide { width: 280px; flex: none; border-right: 1px solid var(--line);
                       overflow-y: auto; padding: 10px; }
