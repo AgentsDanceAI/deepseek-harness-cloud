@@ -39,11 +39,15 @@ RUN ln -sf ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
+      bubblewrap \
       ca-certificates \
       curl \
       git \
       ripgrep \
  && rm -rf /var/lib/apt/lists/*
+# bubblewrap 是 Codex 的沙箱。不装它会在终端里弹一条醒目的黄字警告 (说要退回
+# 内置的那份) —— 而这个 agent 是会替用户跑 shell 命令的, 沙箱不该是"凑合用"。
+# ripgrep 同理: 缺了它 Gemini CLI 会退回自带的慢速搜索并明说一句。
 
 # 三个 CLI 的版本钉死 —— "镜像变了就重建工作台"依赖镜像身份稳定 (见
 # workspace._spec_fingerprint)。升级前先 spike。

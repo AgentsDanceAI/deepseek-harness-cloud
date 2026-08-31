@@ -38,7 +38,7 @@ docker run --rm -u 0 --entrypoint bash "$REF" -c '
   echo "  ✓ 系统根证书: curl 走得通 TLS"
 
   # 2. 三个 CLI 都在 PATH 上且能跑起来 (不是只有文件在)。
-  for c in claude codex gemini code-server node npm git rg; do
+  for c in claude codex gemini code-server node npm git rg bwrap; do
     command -v "$c" >/dev/null || { echo "!! $c 不在 PATH 上" >&2; exit 1; }
   done
   echo "  ✓ claude: $(claude --version 2>&1 | head -1)"
