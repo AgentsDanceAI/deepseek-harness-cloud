@@ -12,6 +12,9 @@ import pathlib
 import subprocess
 
 ROOT = pathlib.Path(os.environ.get("DSH_WORKSPACE", "/workspace")).resolve()
+#: git 命令降权到哪个 uid 跑。0/空 = 不降权。
+AGENT_UID = int(os.environ.get("DSH_AGENT_UID", "0") or 0)
+AGENT_GID = int(os.environ.get("DSH_AGENT_GID", str(AGENT_UID)) or 0)
 
 #: 不进树的目录。放行的话 node_modules 一个就能让文件树卡死几十秒。
 SKIP_DIRS = {".git", "node_modules", "__pycache__", ".venv", "venv", "dist", "build",
@@ -70,24 +73,60 @@ def write(rel: str, text: str) -> dict:
     p = _safe(rel)
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(text, "utf-8")
+    # 属主交给 agent。服务以 root 跑, 不交的话这个文件 agent 之后改不动 ——
+    # 用户在界面里存一次, 之后让 agent 改它就失败, 而错误信息只会说 permission
+    # denied, 看不出是我们自己写坏的。
+    if AGENT_UID:
+        try:
+            os.chown(p, AGENT_UID, AGENT_GID)
+        except OSError:
+            pass
     return {"ok": True, "path": rel}
 
 
 def _git(*args: str, timeout: float = 20.0) -> tuple[int, str]:
+    """跑一条 git。**降权到 agent 用户** —— 与 agent 子进程保持一致。
+
+    服务本身以 root 起 (要写 NAS), 而 /workspace 的属主是 agent。以 root 跑 git
+    会撞上它的 dubious-ownership 保护:
+        fatal: detected dubious ownership in repository at '/workspace'
+    症状是「版本」标签页说"这不是一个 git 仓库", 而目录里 .git 明明在。
+    正解是降权, 不是拿 safe.directory 把 root 的访问硬开出来 —— 那等于让
+    以 root 跑的服务去写用户的仓库, 两边属主从此各写各的。
+    """
+    cmd = ["git", *args]
+    env = dict(os.environ)
+    if AGENT_UID:
+        cmd = ["setpriv", f"--reuid={AGENT_UID}", f"--regid={AGENT_GID}",
+               "--clear-groups", "--", *cmd]
+        # HOME 必须跟着降权后的 uid 走。继承服务的 HOME=/root 的话, git 每条命令
+        # 都会往 stderr 吐一句 "unable to access '/root/.config/git/ignore':
+        # Permission denied" —— 而那句会混进我们解析的输出里, 表现是分支名变成
+        # 一段错误文本、文件列表里冒出一行 "ning: unable to access…"。
+        env["HOME"] = os.environ.get("DSH_AGENT_HOME", "/home/agent")
     try:
         r = subprocess.run(
-            ["git", *args], cwd=ROOT, capture_output=True, text=True, timeout=timeout
+            cmd, cwd=ROOT, capture_output=True, text=True, timeout=timeout, env=env
         )
-        return r.returncode, (r.stdout or "") + (r.stderr or "")
     except (OSError, subprocess.TimeoutExpired) as e:
         return 1, str(e)
+    # **stdout 与 stderr 分开返回**。原先拼在一起, git 的任何一句警告都会污染
+    # 被解析的值 (分支名、porcelain 的每一行)。失败时才需要看 stderr。
+    if r.returncode != 0:
+        return r.returncode, (r.stdout or "") + (r.stderr or "")
+    return 0, r.stdout or ""
 
 
 def git_status() -> dict:
     code, _ = _git("rev-parse", "--is-inside-work-tree")
     if code != 0:
         return {"repo": False}
-    _, branch = _git("rev-parse", "--abbrev-ref", "HEAD")
+    # 空仓库 (刚 git init, 一次提交都没有) 没有 HEAD —— rev-parse 会失败并吐
+    # 一段"ambiguous argument"。用 symbolic-ref 拿"将要提交到哪个分支", 它在
+    # 空仓库上也答得出来。
+    code_b, branch = _git("symbolic-ref", "--short", "HEAD")
+    if code_b != 0:
+        branch = "main"
     _, porcelain = _git("status", "--porcelain")
     files = []
     for line in porcelain.splitlines():
