@@ -1317,6 +1317,78 @@ def _openclaw_boot() -> str:
     )
 
 
+#: 自研工作台的端口。单容器 —— 不需要 nginx 在前面, 因为没有别人的登录墙要绕。
+AGENTUI_PORT = 8080
+
+#: 每个坑位默认驱动哪个 CLI, 以及界面上能切换哪几个。
+_AGENTUI_SLOTS = {
+    "claude-code": ("claude", "claude,codex"),
+    "codex": ("codex", "codex,claude"),
+}
+
+
+def _agentui_boot(product_id: str) -> str:
+    """把 NAS 挂载点交给 agent 用户 -> 种掉各 CLI 的首跑向导 -> 起服务。
+
+    **chown 不是可有可无的**: Claude Code 拒绝以 root 跑放开权限的模式
+    ("--dangerously-skip-permissions cannot be used with root/sudo privileges"),
+    所以 agent 子进程降权到 uid 1000 跑 (见 main.py 的 _drop)。而 NAS 挂进来的
+    /root 与 /workspace 属主是 root —— 不交过去的话 agent 连自己的会话文件都写
+    不进去, 而它只在日志里抱怨一句然后照常跑, 用户是闲置回收之后才发现东西没了。
+
+    首跑向导同样要压掉: 拆了登录墙却把人放进一个"必填"表单, 对用户没区别。
+    只在文件不存在时写 —— 之后那是用户自己的偏好。
+    """
+    import json as _json
+
+    cli, _ = _AGENTUI_SLOTS[product_id]
+    gateway = config.PUBLIC_BASE.rstrip("/")
+    home = "/home/agent"
+    claude_seed = _json.dumps(
+        {
+            "hasCompletedOnboarding": True,
+            "theme": "dark",
+            "autoUpdates": False,
+            "projects": {"/workspace": {"hasTrustDialogAccepted": True}},
+        },
+        ensure_ascii=False,
+        indent=2,
+    )
+    codex_toml = (
+        f'model = "{_codecli_model("codex")}"\n'
+        'model_provider = "dshcloud"\n'
+        "\n"
+        "[model_providers.dshcloud]\n"
+        'name = "DSH Cloud"\n'
+        f'base_url = "{gateway}/llm/v1"\n'
+        'env_key = "OPENAI_API_KEY"\n'
+        # Codex 0.151 起**不认 chat 面**, 只能走 responses。
+        'wire_api = "responses"\n'
+        "\n"
+        '[projects."/workspace"]\n'
+        'trust_level = "trusted"\n'
+    )
+    return (
+        "set -e\n"
+        f"install -d -o 1000 -g 1000 {home} {home}/.claude {home}/.codex /workspace\n"
+        # -R 只在这两个挂载点上做。NAS 上文件可能很多, 但不交属主的话 agent
+        # 一个字都写不进去, 这个代价必须付。
+        f"chown -R 1000:1000 {home} /workspace 2>/dev/null || true\n"
+        f'if [ ! -f {home}/.claude.json ]; then\n'
+        f"cat > {home}/.claude.json <<'DSHEOF'\n" + claude_seed + "\nDSHEOF\n"
+        "fi\n"
+        # config.toml 每次重写: 里面有该用户的网关令牌路径与型号, 而令牌每次建
+        # 实例都会换 (上一张会被吊销), 沿用旧的必然 401。
+        f"cat > {home}/.codex/config.toml <<'DSHEOF'\n" + codex_toml + "DSHEOF\n"
+        f"chown -R 1000:1000 {home}\n"
+        # 没有 git 仓库的话「版本」标签页是空的 —— 建一个空仓库, 用户改了东西
+        # 立刻就能看到 diff。已经是仓库就不动。
+        "cd /workspace && (git rev-parse --git-dir >/dev/null 2>&1 || "
+        "setpriv --reuid=1000 --regid=1000 --clear-groups -- git init -q) || true\n"
+        f"exec uvicorn app.main:app --host 0.0.0.0 --port {AGENTUI_PORT}\n"
+    )
+
+
 #: CloudCLI 的端口。它绑回环, 前面压一个 nginx 主容器 (见 _cloudcli_boot)。
 CLOUDCLI_PORT = 3001
 
@@ -1973,43 +2045,44 @@ def registry() -> dict[str, Product]:
         # Open Design: 智能体编排壳 (上游官方镜像**不带任何 agent CLI**, 托管
         # 环境里干不了活 —— 衍生镜像 od-local 烤进了我们的 dsh, 见
         # deploy/workspace-opendesign)。单容器, 比 dsh 还轻 (实测空载 166MB)。
-        # Claude Code / Codex: 同一个镜像 (code-server + 三个 CLI, 见
-        # deploy/workspace-codecli), 区别只在 _codecli_boot 写进去的终端配置
-        # 与网关 env。选 code-server 而不是社区那几个 CLI 聊天前端, 理由见镜像
-        # 的 Dockerfile —— 一句话: 它们都自带账号体系, 而 code-server 有原生的
-        # --auth none。
-        # Claude Code 这一格用 **CloudCLI** 的聊天式外壳 (两容器: nginx 主容器 +
-        # 绑回环的 CloudCLI), Codex 那格保持 code-server 的编辑器形态 —— 老板要
-        # 两版摆一起比, 之后统一成哪种由他定。两边跑的是同一批 CLI、同一套网关
-        # 接线, 连 NAS 子路径都是同一份 (见 _cloudcli_stack)。
+        # Claude Code / Codex: 两格都跑**我们自己写的**工作台
+        # (deploy/workspace-agentui), 区别只在默认驱动哪个 CLI。
+        #
+        # 顶掉 CloudCLI 的理由 (老板 2026-08-31 拍板): 别人的界面里挂着别人的
+        # 引流入口 (Star / Join Community / Report Issue), 而用户付的是我们的钱;
+        # 更要紧的是**积分这个核心机制在别人的 UI 里没有位置** —— 余额、本轮
+        # 消耗、剩余分钟只有自己写才放得进去。附带好处: 为了绕开 CloudCLI 自带
+        # 的账号体系我写过四段补丁, 每段都可能被上游一次更新打掉。
         "claude-code": Product(
             id="claude-code",
             name="Claude Code",
-            image="nginx:1.27-alpine",
-            image_ref="nginx:1.27-alpine",
-            port=80,
+            image=config.AGENTUI_IMAGE_REF,
+            image_ref=config.AGENTUI_IMAGE_REF,
+            port=AGENTUI_PORT,
             mem_mb=config.CODECLI_MEM_LIMIT_MB,
             cpus=config.CODECLI_CPUS,
             domain=config.CLAUDE_CODE_DOMAIN,
             reports_presence=False,
             tab_grace_min=config.CODECLI_TAB_GRACE_MIN,
-            # 首页是前端静态资源, CloudCLI 的后端没起来它照样 200 —— 探活要打一条
-            # 真去后端的路径, 否则用户会在后端就绪前被放进一个坏页面 (Dify 那次
-            # 的教训)。/api/auth/status 无副作用, 且免登录流程本来就依赖它。
-            ready_path="/api/auth/status",
-            sidecars=_cloudcli_stack(),
+            # 首页是静态文件, 后端没起来它照样 200 —— 探针必须打一条真进后端的
+            # 路径 (2026-08-30 Dify 与 Coze 都栽过这个)。
+            ready_path="/api/health",
+            # NAS 挂进来的 /root 与 /workspace 属主是 root, 服务要以 root 起才
+            # 写得动; agent 子进程再由服务自己降权 (见 _agentui_boot)。
+            run_as_user=0,
         ),
         "codex": Product(
             id="codex",
             name="Codex",
-            image=config.CODECLI_IMAGE_REF,
-            image_ref=config.CODECLI_IMAGE_REF,
-            port=CODECLI_PORT,
+            image=config.AGENTUI_IMAGE_REF,
+            image_ref=config.AGENTUI_IMAGE_REF,
+            port=AGENTUI_PORT,
             mem_mb=config.CODECLI_MEM_LIMIT_MB,
             cpus=config.CODECLI_CPUS,
             domain=config.CODEX_DOMAIN,
             reports_presence=False,
             tab_grace_min=config.CODECLI_TAB_GRACE_MIN,
+            ready_path="/api/health",
             run_as_user=0,
         ),
         "open-design": Product(
@@ -2312,8 +2385,8 @@ _BOOTS = {
     "coze": _coze_boot,
     "openclaw": _openclaw_boot,
     "hermes": _hermes_boot,
-    "claude-code": _cloudcli_boot,
-    "codex": lambda: _codecli_boot("codex"),
+    "claude-code": lambda: _agentui_boot("claude-code"),
+    "codex": lambda: _agentui_boot("codex"),
     "agents-team": _agents_team_boot,
 }
 
@@ -2334,12 +2407,32 @@ def env_for(product_id: str, token: str, secret: str = "") -> dict[str, str]:
             "HERMES_USER": "owner",
             "HERMES_PASS": autologin_password(secret),
         }
-    if product_id == "claude-code":
-        # 主容器只是 nginx —— 业务 env 全在伴随容器上 (见 _cloudcli_stack)。
-        # 这里只给它替用户登录用的那副凭据 (见 _CLOUDCLI_AUTOLOGIN)。
+    if product_id in _AGENTUI_SLOTS:
+        cli, enabled = _AGENTUI_SLOTS[product_id]
+        model = _codecli_model("claude-code")
         return {
-            "DSH_AUTOLOGIN_USER": "owner",
-            "DSH_AUTOLOGIN_PASSWORD": autologin_password(secret),
+            # 服务以 root 起 (要写 NAS), agent 子进程降权到这个 uid 跑 ——
+            # Claude Code 拒绝以 root 跑放开权限的模式。
+            "HOME": "/root",
+            "DSH_AGENT_UID": "1000",
+            "DSH_AGENT_HOME": "/home/agent",
+            "DSH_WORKSPACE": "/workspace",
+            # 会话清单落 NAS —— 闲置回收会把容器整个删掉。
+            "DSH_STATE_DIR": "/home/agent/.dsh-agentui",
+            "DSH_DEFAULT_CLI": cli,
+            "DSH_ENABLED_CLIS": enabled,
+            # 界面上那个余额/消耗就靠这两个 (工作台令牌能查 /api/work/status)。
+            "DSH_CLOUD_TOKEN": token,
+            "DSH_GATEWAY_BASE": gateway,
+            "DSH_PRODUCT_ID": product_id,
+            # 各 CLI 的网关接线。型号必须钉在**在售目录**里 —— 网关只放行目录内
+            # 的, 而这些 CLI 的内置默认值都是厂商自己的名字, 不钉就是每次 404。
+            "ANTHROPIC_BASE_URL": f"{gateway}/llm/anthropic",
+            "ANTHROPIC_AUTH_TOKEN": token,
+            "ANTHROPIC_MODEL": model,
+            # 不设它的话后台任务去要 haiku, 而我们不卖那个名字。
+            "ANTHROPIC_SMALL_FAST_MODEL": model,
+            "OPENAI_API_KEY": token,
         }
     if product_id in _CODECLI_AGENTS:
         model = _codecli_model(product_id)
