@@ -134,3 +134,35 @@ def test_user_config_is_not_clobbered_every_boot(product_id):
     """
     boot = products.boot_script(product_id)
     assert "if [ ! -f /home/agent/.claude.json ]" in boot
+
+
+# ---- OpenClaw 的配置注入 -----------------------------------------------------
+
+
+def test_openclaw_config_has_no_retired_keys():
+    """OpenClaw 的 controlUi 是 strictObject —— **多一个键就整个启动失败**。
+
+    2026-08-31 升级到 2026.8.1 时踩到: allowInsecureAuth 被上游废弃了 (进了
+    TIER_EVAL_RETIRED_ROOT_PATHS), 而我们还在下发它, 结果是
+    `Config validation failed: gateway.controlUi: Unrecognized key`,
+    容器直接 Terminated —— 症状是实例建得出来但探活永远不过, 用户看到的只是
+    "云工作台启动中"转到超时。
+    """
+    boot = products.boot_script("openclaw")
+    for retired in ("allowInsecureAuth",):
+        assert retired not in boot, f"{retired} 已被上游废弃, 下发它会让容器起不来"
+
+
+def test_openclaw_still_removes_the_login_wall():
+    """这三处注入就是"不留登录墙"的实现, 少任何一处墙都会原样冒回来。
+
+    · trusted-proxy: 身份由边缘给定 (它拒绝"监听 LAN + 无鉴权");
+    · allowedOrigins: 少了它 WebSocket 被按来源拒, 页面退回一个要填
+      URL/令牌/密码的连接表单 —— 看着就是第二道登录墙;
+    · dangerouslyDisableDeviceAuth: 少了它要用户去主机上跑 devices approve,
+      而他既没有主机也不该有。
+    """
+    boot = products.boot_script("openclaw")
+    assert "trusted-proxy" in boot
+    assert "allowedOrigins" in boot
+    assert "dangerouslyDisableDeviceAuth" in boot

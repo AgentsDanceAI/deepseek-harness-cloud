@@ -1291,7 +1291,16 @@ def _openclaw_boot() -> str:
                     # 让用户去主机上跑 `openclaw devices approve <id>`, 而他既没有
                     # 主机也不该有。
                     "dangerouslyDisableDeviceAuth": True,
-                    "allowInsecureAuth": True,
+                    # allowInsecureAuth 在 2026.8.1 被废弃了 (进了上游的
+                    # TIER_EVAL_RETIRED_ROOT_PATHS), 而 controlUi 的 schema 是
+                    # strictObject —— **多一个键就整个启动失败**, 报
+                    # `Unrecognized key: "allowInsecureAuth"` 然后容器直接
+                    # Terminated。升级到 2026.8.1 时踩到, 症状是实例建得出来但
+                    # 探活永远不过。
+                    #
+                    # 去掉它不会把墙放回来: 设备配对那道由上面
+                    # dangerouslyDisableDeviceAuth 关掉, 来源那道由 allowedOrigins
+                    # 放行, 身份仍由 trusted-proxy 给定。
                 },
             },
             "models": {

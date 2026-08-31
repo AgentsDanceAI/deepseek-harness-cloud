@@ -1773,7 +1773,11 @@ def test_openclaw_allows_its_own_origin(monkeypatch):
     # 设备配对那道也得关: 它会让用户去主机上跑 `openclaw devices approve <id>`,
     # 而他既没有主机也不该有 —— 那是第三道墙, 长得同样不像登录墙。
     assert '"dangerouslydisabledeviceauth": true' in boot.lower()
-    assert '"allowinsecureauth": true' in boot.lower()
+    # 原先这里还断言 allowInsecureAuth —— 那个键在 2026.8.1 被上游废弃了
+    # (进了 TIER_EVAL_RETIRED_ROOT_PATHS), 而 controlUi 的 schema 是
+    # strictObject, 继续下发会让容器**直接起不来**。断言反过来了:
+    # 见 test_openclaw_config_has_no_retired_keys。
+    assert "allowinsecureauth" not in boot.lower()
 
 
 def test_openclaw_hidden_until_the_proxy_cidr_is_configured(monkeypatch):
