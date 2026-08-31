@@ -1403,6 +1403,11 @@ def _codecli_boot(product_id: str) -> str:
             f'base_url = "{gateway}/llm/v1"\n'
             'env_key = "OPENAI_API_KEY"\n'
             'wire_api = "responses"\n'
+            "\n"
+            # 不写这段, Codex 一起来就问"你信任这个目录吗" —— 而这是用户自己的
+            # 工作区, 问了只有一个答案。托管环境里每一道这样的确认都是白挡。
+            '[projects."/workspace"]\n'
+            'trust_level = "trusted"\n'
         )
         out += [
             'mkdir -p "$HOME/.codex"\n',
