@@ -149,7 +149,7 @@ def test_openclaw_config_has_no_retired_keys():
     "云工作台启动中"转到超时。
     """
     boot = products.boot_script("openclaw")
-    for retired in ("allowInsecureAuth",):
+    for retired in ("allowInsecureAuth", "dangerouslyDisableDeviceAuth"):
         assert retired not in boot, f"{retired} 已被上游废弃, 下发它会让容器起不来"
 
 
@@ -165,4 +165,4 @@ def test_openclaw_still_removes_the_login_wall():
     boot = products.boot_script("openclaw")
     assert "trusted-proxy" in boot
     assert "allowedOrigins" in boot
-    assert "dangerouslyDisableDeviceAuth" in boot
+    assert "deviceAutoApprove" in boot
