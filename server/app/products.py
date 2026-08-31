@@ -18,9 +18,12 @@ ComfyUI 的前端用绝对路径引资源, 塞不进子路径, 所以只能一�
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 
 from . import config, model_catalog
+
+logger = logging.getLogger(__name__)
 
 # dsh 的工作台键就是 user_id 本身 —— 见模块说明, 这是兼容性要求, 不是风格选择。
 DEFAULT = "dsh"
@@ -2495,7 +2498,7 @@ def env_for(product_id: str, token: str, secret: str = "") -> dict[str, str]:
     if product_id == "agents-team":
         # 我们自己的镜像, 所以不用占位符那一套 —— 令牌在这里就是真值 (env_for 拿到的
         # token 已经是该用户铸好的)。模型列表与在售目录一致, 前端下拉直接用。
-        return {
+        env = {
             "DSH_GATEWAY_BASE": f"{gateway}/llm/v1",
             "DSH_CLOUD_TOKEN": token,
             "DSH_DEFAULT_MODEL": model_catalog.default_model(),
@@ -2503,6 +2506,20 @@ def env_for(product_id: str, token: str, secret: str = "") -> dict[str, str]:
             # 以后改 Dify 的人不知道自己顺手也改了这里。
             "DSH_MODELS": _sh_list(model_catalog.catalog()),
         }
+        # 剧组要出图/出片 (2026-08-31): 型号取**在售目录的第一项**, 不硬编码 ——
+        # media.offered() 已经把未定价与供应商不可用的滤掉了, 这里写死型号名的话,
+        # 哪天下架就是每次 404, 而错误只会出现在容器里没人看的日志里。
+        try:
+            from . import media as _media
+
+            _off = _media.offered()
+            if _off.get("image"):
+                env["DSH_IMAGE_MODEL"] = _off["image"][0]["id"]
+            if _off.get("video"):
+                env["DSH_VIDEO_MODEL"] = _off["video"][0]["id"]
+        except Exception:  # noqa: BLE001 — 媒体目录读不出来不该拖垮整个工作台创建
+            logger.exception("agents-team: 媒体目录读取失败, 出图/出片工具将不可用")
+        return env
     if product_id == "open-design":
         return {
             # daemon 自身
