@@ -295,3 +295,52 @@ def test_ui_has_a_one_click_new_film_entry():
     web = (TEAM / "web" / "index.html").read_text(encoding="utf-8")
     assert 'id="newFilm"' in web
     assert "/api/rooms/crew" in web
+
+
+# ── 流式 Markdown 渲染 (2026-08-31 老板截图: 阿导整段发言是原始 markdown,
+# 引用/加粗/编号全是字面量) ─────────────────────────────────────────────
+WEB = (TEAM / "web" / "index.html").read_text(encoding="utf-8")
+
+
+def test_bot_output_is_markdown_rendered():
+    """照 AgentsDance 的 MarkdownText 搬 (零依赖自研, 可对流式增量反复渲染)。"""
+    assert "function mdRender" in WEB
+    for block in ("blockquote", "<hr>", "<pre><code>", "<table>"):
+        assert block in WEB, f"渲染器没覆盖 {block}"
+    # 列表的标签是拼出来的 (ordered ? "ol" : "ul"), 搜字面量搜不到 —— 钉语义
+    assert "ordered ? 'ol' : 'ul'" in WEB, "渲染器没覆盖有序/无序列表"
+    # 样式也得跟上, 否则渲染出来了却没排版
+    for css in (".txt blockquote", ".txt table", ".txt pre", ".txt ul,.txt ol"):
+        assert css in WEB, f"缺样式 {css}"
+
+
+def test_streaming_rerenders_from_accumulated_source():
+    """增量必须累加**原文**再整份重渲。
+
+    直接往 innerHTML 上拼渲染结果, 会在标记跨块断开时渲出半截标签
+    (`**加粗` 的后半截还没到)。整份重渲是纯函数, 便宜且永远自洽。
+    """
+    assert "dataset.raw" in WEB
+    i = WEB.index("setText(el, (el.dataset.raw")
+    assert i > 0, "流式没有走累加原文 + 重渲"
+    assert ".txt').textContent += ev.text" not in WEB, "还留着旧的纯文本累加"
+
+
+def test_bot_html_is_escaped_before_innerHTML():
+    """React 那边自动转义, 原生这边必须自己转 —— 机器人吐 <script> 就是 XSS。
+
+    实测过: <img onerror>/<script>/javascript: 四道全挡 (浏览器断言)。
+    """
+    assert "function esc(t)" in WEB
+    i = WEB.index("function mdInline")
+    seg = WEB[i : i + 400]
+    assert "esc(t)" in seg, "行内渲染没有先转义"
+    # 链接只放行 http(s) —— javascript: 伪协议是另一条 XSS 路
+    assert "https?:\\/\\/" in WEB or "https?:\\/" in WEB or "(https?:" in WEB
+
+
+def test_user_text_stays_literal():
+    """用户自己打的字不走 markdown —— 他打什么就该看到什么。"""
+    i = WEB.index("function setText")
+    seg = WEB[i : i + 300]
+    assert "isUser" in seg and "textContent" in seg
