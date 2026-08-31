@@ -92,6 +92,21 @@
           font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
   .tool .dot { width:6px; height:6px; border-radius:50%; background:var(--accent); flex:none; }
   .tool.done .dot { background:#34a853; }
+  /* 工具行折叠组: 默认只露一行摘要 (此刻在干嘛), 点开看全部 */
+  .toolbox { margin:5px 0; }
+  .toolbox .th { display:flex; align-items:center; gap:8px; width:100%; text-align:left;
+                 font-size:12.5px; color:var(--muted); background:var(--tool);
+                 border:0; border-radius:8px; padding:5px 9px; cursor:pointer;
+                 font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
+  .toolbox .th .dot { width:6px; height:6px; border-radius:50%; background:var(--accent); flex:none; }
+  .toolbox .sum { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .toolbox .chev { width:14px; height:14px; flex:none; opacity:.5; transition:transform .15s; }
+  .toolbox.open .chev { transform:rotate(180deg); }
+  .toolbox .tl { display:none; padding-left:10px; border-left:2px solid var(--line); margin:4px 0 0 4px; }
+  .toolbox.open .tl { display:block; }
+  /* 谁在工作要一眼看得出 —— 跑动中的那位气泡左侧亮一条 */
+  .msg.bot.running .body { border-left:2px solid var(--accent); padding-left:8px; }
+  .msg.bot.running .who::after { content:' · 工作中'; color:var(--accent); }
   .shot { max-width:100%; border-radius:10px; border:1px solid var(--line); margin:6px 0; }
   .err { color:var(--err); }
   footer { border-top:1px solid var(--line); background:var(--card); padding:12px 16px; flex:none; }
@@ -269,13 +284,48 @@ function msgEl(sender, text) {
   return d;
 }
 
+// 工具行折叠 (2026-08-31 老板: "屏幕有限, 用户很难捕捉哪个专家正在工作")。
+// 一个工位随手就是十几步, 平铺开来能把整屏占满 —— 谁在干活反而看不出来了。
+// 收成一行: 「⚙ 第 N 步 · 正在做什么 ⌄」, 点开看全部。跑动中始终露出**最后一行**
+// (那才是"此刻在干嘛"), 收尾后自动收起。
+function toolBox(container) {
+  let box = container.querySelector(':scope > .toolbox');
+  if (box) return box;
+  box = document.createElement('div');
+  box.className = 'toolbox';
+  box.innerHTML = '<button class="th" type="button">'
+                + '<span class="dot"></span><span class="sum"></span>'
+                + '<svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor"'
+                + ' stroke-width="2"><path d="M6 9l6 6 6-6"/></svg></button>'
+                + '<div class="tl"></div>';
+  box.querySelector('.th').onclick = () => {
+    box.classList.toggle('open');
+    if (box.classList.contains('open')) scroll();
+  };
+  container.appendChild(box);
+  return box;
+}
+
 function toolRow(container, label) {
+  const box = toolBox(container);
+  const list = box.querySelector('.tl');
   const t = document.createElement('div');
   t.className = 'tool';
   t.innerHTML = '<span class="dot"></span><span class="t"></span>';
   t.querySelector('.t').textContent = label;
-  container.appendChild(t); scroll();
+  list.appendChild(t);
+  syncToolSummary(box);
+  scroll();
   return t;
+}
+
+// 摘要永远反映**最后一行** —— 用户要的是"此刻在干嘛", 不是"一共干了多少"
+function syncToolSummary(box) {
+  const rows = box.querySelectorAll('.tl > .tool');
+  const last = rows[rows.length - 1];
+  const n = rows.length;
+  box.querySelector('.sum').textContent =
+    (last ? last.querySelector('.t').textContent : '') + (n > 1 ? ` · ${n} 步` : '');
 }
 
 async function api(path, opt) {
@@ -317,6 +367,7 @@ async function open(room) {
     const el = msgEl(m.sender, m.text);
     (m.tools || []).forEach(s => {
       const t = toolRow(el.querySelector('.body'), s); t.classList.add('done');
+      syncToolSummary(t.closest('.toolbox'));
     });
   });
   Array.from($('rooms').children).forEach((el, i) =>
@@ -337,7 +388,14 @@ async function submit() {
   const bubbles = new Map(), tools = new Map();
   const bubbleFor = id => {
     if (!bubbles.has(id)) bubbles.set(id, msgEl(id, ''));
-    return bubbles.get(id);
+    const el = bubbles.get(id);
+    // 谁在工作要一眼看得出: 只有**最新出现**的那位挂 running, 前面的摘掉。
+    // 接力模式下这就等于"当前这一棒是谁" —— 屏幕有限, 这比堆一屏工具行有用。
+    if (!el.classList.contains('running')) {
+      wrap.querySelectorAll('.msg.bot.running').forEach(x => x.classList.remove('running'));
+      el.classList.add('running');
+    }
+    return el;
   };
   try {
     const r = await fetch('/api/rooms/' + cur.id + '/send', {
@@ -373,6 +431,12 @@ async function submit() {
           const img = document.createElement('img');
           img.className = 'shot'; img.src = ev.data_uri; body.appendChild(img); scroll();
         } else if (ev.type === 'end') {
+          // 这一棒交了 —— 摘掉工作中标记, 工具组收起 (跑完了就不该再占屏)
+          const done = bubbles.get(ev.bot);
+          if (done) {
+            done.classList.remove('running');
+            done.querySelectorAll('.toolbox.open').forEach(b => b.classList.remove('open'));
+          }
           if (ev.note) $('hint').textContent = ev.note;
         } else if (ev.type === 'error') {
           const el = ev.bot ? bubbleFor(ev.bot) : msgEl('system', '');

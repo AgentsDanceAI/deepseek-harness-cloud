@@ -25,6 +25,11 @@ import httpx
 #: 就只是个环境变量派生的常量, 各算各的即可, 两边同源同值。
 WORKDIR = Path(os.environ.get("AGENTS_TEAM_WORKDIR", "/workspace"))
 
+#: ⚠️ 它**已经含 /llm/v1** (products.env_for 注入的是 f"{gateway}/llm/v1")。
+#: 所以这里一律拼 f"{GATEWAY_BASE}/images/generations" —— 再写 /v1/ 就是
+#: /llm/v1/v1/... , 上游 405, 而 agent 只会看到一句"出图失败"然后开始瞎试
+#: (2026-08-31 老板实测: 阿画连试十几次, 最后跑去 curl localhost:8080)。
+#: 对照 agent.py 的 f"{GATEWAY_BASE}/chat/completions" —— 同一个 base 同一种拼法。
 GATEWAY_BASE = os.environ.get("DSH_GATEWAY_BASE", "").rstrip("/")
 GATEWAY_TOKEN = os.environ.get("DSH_CLOUD_TOKEN", "")
 IMAGE_MODEL = os.environ.get("DSH_IMAGE_MODEL", "")
@@ -77,7 +82,7 @@ async def generate_image(prompt: str, path: str, size: str = "", model: str = ""
     if not body["model"]:
         return "没有可用的图像模型 (DSH_IMAGE_MODEL 未配置)。", "出图无模型"
     async with _client(300) as c:
-        r = await c.post(f"{GATEWAY_BASE}/v1/images/generations", headers=_headers(), json=body)
+        r = await c.post(f"{GATEWAY_BASE}/images/generations", headers=_headers(), json=body)
     if r.status_code >= 400:
         return f"出图失败 HTTP {r.status_code}: {_err_text(r)}", "出图失败"
     data = (r.json() or {}).get("data") or []
@@ -139,7 +144,7 @@ async def generate_video(prompt: str, path: str, duration: int = 5, resolution: 
             return f"参考图上传失败: {why}", "参考图上传失败"
         body["image_url"] = url
     async with _client(120) as c:
-        r = await c.post(f"{GATEWAY_BASE}/v1/videos/generations", headers=_headers(), json=body)
+        r = await c.post(f"{GATEWAY_BASE}/videos/generations", headers=_headers(), json=body)
     if r.status_code >= 400:
         return f"出片提交失败 HTTP {r.status_code}: {_err_text(r)}", "出片提交失败"
     job = (r.json() or {}).get("id") or ""
@@ -151,7 +156,7 @@ async def generate_video(prompt: str, path: str, duration: int = 5, resolution: 
     while time.time() < deadline:
         await asyncio.sleep(VIDEO_POLL_INTERVAL_S)
         async with _client(60) as c:
-            g = await c.get(f"{GATEWAY_BASE}/v1/videos/result/{job}", headers=_headers())
+            g = await c.get(f"{GATEWAY_BASE}/videos/result/{job}", headers=_headers())
         if g.status_code >= 400:
             return f"查询作业失败 HTTP {g.status_code}: {_err_text(g)}", "出片查询失败"
         d = g.json() or {}
@@ -183,7 +188,7 @@ async def _upload_blob(p: Path) -> tuple[str, str]:
     if not p.exists():
         return "", f"文件不存在: {p}"
     async with _client(60) as c:
-        r = await c.post(f"{GATEWAY_BASE}/v1/media/uploads", headers=_headers(),
+        r = await c.post(f"{GATEWAY_BASE}/media/uploads", headers=_headers(),
                          json={"content_type": "image/png", "size": p.stat().st_size})
         if r.status_code >= 400:
             return "", f"HTTP {r.status_code}: {_err_text(r)}"
@@ -248,7 +253,7 @@ async def media_models() -> tuple[str, str]:
     if bad:
         return bad, "查目录未配置"
     async with _client(60) as c:
-        r = await c.get(f"{GATEWAY_BASE}/v1/media/models", headers=_headers())
+        r = await c.get(f"{GATEWAY_BASE}/media/models", headers=_headers())
     if r.status_code >= 400:
         return f"查询失败 HTTP {r.status_code}: {_err_text(r)}", "查目录失败"
     return json.dumps(r.json(), ensure_ascii=False)[:4000], "查了媒体模型目录"
