@@ -1291,11 +1291,13 @@ map \$sent_http_content_type \$hm_c2 { ~*^text/html "$C2"; default ""; }
 map \$sent_http_content_type \$hm_c3 { ~*^text/html "$C3"; default ""; }
 # 上游方向也注入: 浏览器第一发 / 是没有 cookie 的, 只发 Set-Cookie 的话它会先
 # 吃一个 302 落到 /login —— 页面是"Sign in", 按规矩这就算露出登录界面了。
-# 注入之后第一发就直接 200, 登录页根本不出现。带了自己 cookie 的原样透传。
-map \$http_cookie \$hm_up {
-    "~*hermes_session_at="  \$http_cookie;
-    default                 "$V1; $V2; $V3";
-}
+#
+# **无条件注入, 不看浏览器带没带**。先前写成"带了自己的就透传", 于是浏览器里
+# 一份**失效**的 hermes_session_at (上一版发过带引号的坏值、或者实例重建换了
+# 密码) 仍然算"带了" —— 原样送上去被服务端拒掉, 又跳回登录页, 而且不清 cookie
+# 怎么刷新都没用。工作台只有一个账号, 不存在别人的会话要保住。
+# 与 Dify 那次是同一个判据错误: 该判的是能不能用, 不是有没有。
+map \$http_cookie \$hm_up { default "$V1; $V2; $V3"; }
 EOF
   # 先验再 reload, 并把结果记下来 —— 上一版无论成败都报"已下发", 于是配置没换
   # 也看不出来。

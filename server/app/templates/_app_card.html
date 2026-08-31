@@ -1,7 +1,10 @@
 {# 一张云空间产品卡。/apps 与主页共用 —— 两份必然漂, 漂的结果是主页说已上线
    而 /apps 说没有。上下文要求: app, apps_clickable, apps_base。 #}
 {% if app.live and apps_clickable %}
-<a class="card feature app-card is-live" href="{{ apps_base }}{{ '/work' if app.id == 'dsh' else '/work?product_id=' + app.id }}">
+{# 新标签打开: 云空间是长驻的工作界面, 点进去不该把用户从目录页顶掉 ——
+   他常要在几个产品之间来回。noopener 是安全默认 (被打开页拿不到 window.opener)。 #}
+<a class="card feature app-card is-live" target="_blank" rel="noopener"
+   href="{{ apps_base }}{{ '/work' if app.id == 'dsh' else '/work?product_id=' + app.id }}">
 {% else %}
 <div class="card feature app-card {{ 'is-live' if app.live else 'is-soon' }}">
 {% endif %}
