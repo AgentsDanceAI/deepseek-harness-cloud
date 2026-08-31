@@ -338,6 +338,18 @@ OPENCLAW_MEM_LIMIT_MB = _env_int("OPENCLAW_MEM_LIMIT_MB", 4096)
 OPENCLAW_CPUS = _env_float("OPENCLAW_CPUS", 2.0)
 OPENCLAW_TAB_GRACE_MIN = _env_int("OPENCLAW_TAB_GRACE_MIN", 10)
 
+# --- 编码智能体工作台 (Claude Code / Codex 共用一个镜像) ---------------------
+# 见 deploy/workspace-codecli。两个产品跑同一个镜像, 区别只在启动脚本写进去的
+# 终端配置与网关 env。
+CODECLI_IMAGE_REF = _env("CODECLI_IMAGE_REF", "ghcr.io/agentsdancepro/codecli-local:4.135.0-r1")
+CODECLI_MEM_LIMIT_MB = _env_int("CODECLI_MEM_LIMIT_MB", 4096)
+CODECLI_CPUS = _env_float("CODECLI_CPUS", 2.0)
+# code-server 冷启动实测 ~8 秒, 但用户在里面是**连续工作**的 (读代码、等 agent
+# 跑完), 关一下标签页再回来很常见 —— 留久一点, 与 ComfyUI 同理。
+CODECLI_TAB_GRACE_MIN = _env_int("CODECLI_TAB_GRACE_MIN", 10)
+CLAUDE_CODE_DOMAIN = _env("CLAUDE_CODE_DOMAIN", "")
+CODEX_DOMAIN = _env("CODEX_DOMAIN", "")
+
 # 反代所在主机的 IP/CIDR。OpenClaw 的 trusted-proxy 鉴权只认这个来源送来的身份头
 # —— 放宽等于让任何能连到容器的人自称是任意用户, 所以**不给默认值**: 没配就
 # 让这个产品不出现在目录里 (见 products.enabled), 而不是退回一个宽松值。

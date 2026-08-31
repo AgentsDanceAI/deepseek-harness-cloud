@@ -1317,6 +1317,111 @@ def _openclaw_boot() -> str:
     )
 
 
+#: 编码智能体工作台的端口 (code-server 的默认值)。
+CODECLI_PORT = 8080
+
+#: 每个坑位对应哪个 CLI。值是 (可执行文件, 终端里显示的名字)。
+_CODECLI_AGENTS = {
+    "claude-code": ("claude", "Claude Code"),
+    "codex": ("codex", "Codex"),
+}
+
+
+def _codecli_boot(product_id: str) -> str:
+    """写 code-server 与 CLI 的配置 -> 起 code-server。
+
+    三件事是**每次启动都重写**的 (它们是产品配置, 不是用户数据):
+      * code-server 的用户设置 —— 默认终端直接就是这个 agent, 用户不用先认识
+        一个 shell 再想起来敲命令。
+      * agent 自己的配置 (Codex 的 config.toml) —— 里面有该用户的网关令牌,
+        令牌每次建实例都会换 (workspace._mint_workspace_token 会吊销上一张),
+        沿用旧的必然 401。
+      * 那份 tasks.json **只在不存在时写**: 它落在 /workspace 上, 是用户自己
+        的目录, 每次覆盖等于把他改的东西抹掉。
+
+    HOME 用 /root 而不是镜像里的 /home/coder: NAS 就挂在 /root 与 /workspace
+    这两处 (见 workbackend 的 VolumeMount)。放别处的话 code-server 的设置、
+    会话历史、CLI 的登录态全落在容器里, 闲置回收一删就没了 —— 而这个错法不
+    报任何错, 用户只会发现"昨天的会话不见了"。
+    """
+    exe, label = _CODECLI_AGENTS[product_id]
+    settings = {
+        "workbench.startupEditor": "none",
+        "workbench.colorTheme": "Default Dark Modern",
+        "terminal.integrated.defaultProfile.linux": label,
+        "terminal.integrated.profiles.linux": {
+            label: {"path": f"/usr/local/bin/{exe}", "icon": "sparkle"},
+            "bash": {"path": "/bin/bash"},
+        },
+        # 工作区信任那道弹窗要用户点"是, 我信任作者" —— 这是他自己的目录,
+        # 问了也只有一个答案, 而在没点之前终端和任务都是禁用的。
+        "security.workspace.trust.enabled": False,
+        "telemetry.telemetryLevel": "off",
+    }
+    tasks = {
+        "version": "2.0.0",
+        "tasks": [
+            {
+                "label": label,
+                "type": "shell",
+                "command": f"/usr/local/bin/{exe}",
+                "presentation": {"reveal": "always", "panel": "dedicated", "focus": True},
+                "runOptions": {"runOn": "folderOpen"},
+                "problemMatcher": [],
+            }
+        ],
+    }
+    import json as _json
+
+    out = [
+        "set -e\n",
+        'export HOME=/root\n',
+        'mkdir -p "$HOME/.local/share/code-server/User" /workspace/.vscode\n',
+        "cat > \"$HOME/.local/share/code-server/User/settings.json\" <<'DSHEOF'\n",
+        _json.dumps(settings, ensure_ascii=False, indent=2) + "\n",
+        "DSHEOF\n",
+        # 只在不存在时写 —— /workspace 是用户自己的目录。
+        "if [ ! -f /workspace/.vscode/tasks.json ]; then\n",
+        "cat > /workspace/.vscode/tasks.json <<'DSHEOF'\n",
+        _json.dumps(tasks, ensure_ascii=False, indent=2) + "\n",
+        "DSHEOF\n",
+        "fi\n",
+    ]
+    if product_id == "codex":
+        gateway = config.PUBLIC_BASE.rstrip("/")
+        # Codex 已经**不认 chat 面**了 (0.151 起 wire_api="chat" 直接报不支持),
+        # 所以这里必须是 responses —— 见网关的 /llm/v1/responses。
+        toml = (
+            f'model = "{_codecli_model("codex")}"\n'
+            'model_provider = "dshcloud"\n'
+            "\n"
+            "[model_providers.dshcloud]\n"
+            'name = "DSH Cloud"\n'
+            f'base_url = "{gateway}/llm/v1"\n'
+            'env_key = "OPENAI_API_KEY"\n'
+            'wire_api = "responses"\n'
+        )
+        out += [
+            'mkdir -p "$HOME/.codex"\n',
+            "cat > \"$HOME/.codex/config.toml\" <<'DSHEOF'\n",
+            toml,
+            "DSHEOF\n",
+        ]
+    out.append(
+        f"exec code-server --auth none --bind-addr 0.0.0.0:{CODECLI_PORT} /workspace\n"
+    )
+    return "".join(out)
+
+
+def _codecli_model(product_id: str) -> str:
+    """这个坑位默认用哪个在售型号。
+
+    必须钉死: 网关只放行在售目录里的型号 (见 gateway 的 model_catalog.resolve),
+    而这些 CLI 各自的内置默认值都是它们厂商自己的型号名, 不钉就是每次 404。
+    """
+    return {"claude-code": "claude-sonnet-5", "codex": "gpt-5.6-luna"}[product_id]
+
+
 #: Hermes 的控制台端口。它只绑回环 —— 见 _hermes_stack。
 HERMES_PORT = 9119
 
@@ -1653,6 +1758,39 @@ def registry() -> dict[str, Product]:
         # Open Design: 智能体编排壳 (上游官方镜像**不带任何 agent CLI**, 托管
         # 环境里干不了活 —— 衍生镜像 od-local 烤进了我们的 dsh, 见
         # deploy/workspace-opendesign)。单容器, 比 dsh 还轻 (实测空载 166MB)。
+        # Claude Code / Codex: 同一个镜像 (code-server + 三个 CLI, 见
+        # deploy/workspace-codecli), 区别只在 _codecli_boot 写进去的终端配置
+        # 与网关 env。选 code-server 而不是社区那几个 CLI 聊天前端, 理由见镜像
+        # 的 Dockerfile —— 一句话: 它们都自带账号体系, 而 code-server 有原生的
+        # --auth none。
+        "claude-code": Product(
+            id="claude-code",
+            name="Claude Code",
+            image=config.CODECLI_IMAGE_REF,
+            image_ref=config.CODECLI_IMAGE_REF,
+            port=CODECLI_PORT,
+            mem_mb=config.CODECLI_MEM_LIMIT_MB,
+            cpus=config.CODECLI_CPUS,
+            domain=config.CLAUDE_CODE_DOMAIN,
+            reports_presence=False,
+            tab_grace_min=config.CODECLI_TAB_GRACE_MIN,
+            # 镜像里 USER 是 coder, 而 NAS 挂进来的 /root 与 /workspace 是 root
+            # 的 —— 与 OpenClaw 同一个坑。
+            run_as_user=0,
+        ),
+        "codex": Product(
+            id="codex",
+            name="Codex",
+            image=config.CODECLI_IMAGE_REF,
+            image_ref=config.CODECLI_IMAGE_REF,
+            port=CODECLI_PORT,
+            mem_mb=config.CODECLI_MEM_LIMIT_MB,
+            cpus=config.CODECLI_CPUS,
+            domain=config.CODEX_DOMAIN,
+            reports_presence=False,
+            tab_grace_min=config.CODECLI_TAB_GRACE_MIN,
+            run_as_user=0,
+        ),
         "open-design": Product(
             id="open-design",
             name="Open Design",
@@ -1921,6 +2059,8 @@ _BOOTS = {
     "coze": _coze_boot,
     "openclaw": _openclaw_boot,
     "hermes": _hermes_boot,
+    "claude-code": lambda: _codecli_boot("claude-code"),
+    "codex": lambda: _codecli_boot("codex"),
 }
 
 
@@ -1940,6 +2080,29 @@ def env_for(product_id: str, token: str, secret: str = "") -> dict[str, str]:
             "HERMES_USER": "owner",
             "HERMES_PASS": autologin_password(secret),
         }
+    if product_id in _CODECLI_AGENTS:
+        model = _codecli_model(product_id)
+        env = {
+            # NAS 就挂在 /root 与 /workspace —— HOME 指别处等于让 code-server 的
+            # 设置、会话历史和 CLI 登录态全落在容器里, 闲置回收一删就没了。
+            "HOME": "/root",
+            # 这几个 CLI 各自的内置默认型号都是厂商自己的名字, 网关只放行在售
+            # 目录里的 —— 不钉死就是每次 404。
+            "DSH_CLOUD_TOKEN": token,
+        }
+        if product_id == "claude-code":
+            env |= {
+                "ANTHROPIC_BASE_URL": f"{gateway}/llm/anthropic",
+                "ANTHROPIC_AUTH_TOKEN": token,
+                "ANTHROPIC_MODEL": model,
+                # 小模型也指同一个: 不设的话它去要 haiku, 而我们不卖那个名字。
+                "ANTHROPIC_SMALL_FAST_MODEL": model,
+            }
+        else:
+            # Codex 的 base_url / wire_api 在 config.toml 里 (见 _codecli_boot),
+            # 这里只给密钥 —— env_key 指的就是它。
+            env["OPENAI_API_KEY"] = token
+        return env
     if product_id == "coze":
         # 主容器只是 nginx —— 业务 env 全在伴随容器上 (见 _coze_stack)。
         # 免登录的账号密码由容器自己随机生成并存在 NAS 上 (Coze 可以随便建账号)。
