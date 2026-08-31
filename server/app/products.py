@@ -1361,19 +1361,6 @@ def _codecli_boot(product_id: str) -> str:
         "task.allowAutomaticTasks": "on",
         "telemetry.telemetryLevel": "off",
     }
-    tasks = {
-        "version": "2.0.0",
-        "tasks": [
-            {
-                "label": label,
-                "type": "shell",
-                "command": f"/usr/local/bin/{exe}",
-                "presentation": {"reveal": "always", "panel": "dedicated", "focus": True},
-                "runOptions": {"runOn": "folderOpen"},
-                "problemMatcher": [],
-            }
-        ],
-    }
     import json as _json
 
     out = [
@@ -1383,10 +1370,23 @@ def _codecli_boot(product_id: str) -> str:
         "cat > \"$HOME/.local/share/code-server/User/settings.json\" <<'DSHEOF'\n",
         _json.dumps(settings, ensure_ascii=False, indent=2) + "\n",
         "DSHEOF\n",
-        # 只在不存在时写 —— /workspace 是用户自己的目录。
-        "if [ ! -f /workspace/.vscode/tasks.json ]; then\n",
-        "cat > /workspace/.vscode/tasks.json <<'DSHEOF'\n",
-        _json.dumps(tasks, ensure_ascii=False, indent=2) + "\n",
+        # 压掉 CLI 的首跑向导。用户进来该看到的是一个能打字的 agent, 不是
+        # "选个主题"、"信任这个目录吗" —— 这些问题在托管环境里只有一个答案,
+        # 而问出来就等于让人在自己付了钱的产品里先做一遍配置。
+        # 只在不存在时写: 这个文件之后装的是用户自己的会话与偏好。
+        'if [ ! -f "$HOME/.claude.json" ]; then\n',
+        "cat > \"$HOME/.claude.json\" <<'DSHEOF'\n",
+        _json.dumps(
+            {
+                "hasCompletedOnboarding": True,
+                "theme": "dark",
+                "autoUpdates": False,
+                "hasSeenTasksHint": True,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
         "DSHEOF\n",
         "fi\n",
     ]
