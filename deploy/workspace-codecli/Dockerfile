@@ -56,6 +56,48 @@ RUN npm i -g --no-fund --no-audit \
       "@google/gemini-cli@${GEMINI_VERSION}" \
  && npm cache clean --force
 
+# 删掉自带的 Copilot 扩展。它给右侧那个 "Build with Agent" 面板供电, 而那个
+# 面板一点就要 GitHub OAuth (日志里明写 authorization_servers:
+# github.com/login/oauth) —— 等于我们自己的产品里又藏了一道登录墙, 正是老板
+# 明令不要的东西。而且它是多余的: 这个产品的 agent 就是终端里那个 CLI。
+RUN rm -rf /usr/lib/code-server/lib/vscode/extensions/copilot
+
+# 开箱即用的那一下: 启动就把 agent 开在终端里。
+#
+# 不用 VS Code 的 folderOpen 自动任务 —— 实测它不跑, 而且它的前置条件 (工作区
+# 信任、task.allowAutomaticTasks、窗口是不是"新开的") 每一条都可能让它静默不
+# 执行, 用户看到的就是一个空编辑器。内置扩展是确定的: 扩展宿主一起来就执行。
+RUN set -e; \
+    D=/usr/lib/code-server/lib/vscode/extensions/dsh-agent; \
+    mkdir -p "$D"; \
+    printf '%s\n' \
+      '{' \
+      '  "name": "dsh-agent",' \
+      '  "displayName": "DSH Cloud Agent",' \
+      '  "publisher": "dshcloud",' \
+      '  "version": "1.0.0",' \
+      '  "engines": { "vscode": "^1.60.0" },' \
+      '  "main": "./extension.js",' \
+      '  "activationEvents": ["onStartupFinished"],' \
+      '  "contributes": {}' \
+      '}' > "$D/package.json"; \
+    printf '%s\n' \
+      'const vscode = require("vscode");' \
+      'function activate() {' \
+      '  const cmd = process.env.DSH_AGENT_CMD;' \
+      '  if (!cmd) return;' \
+      '  const name = process.env.DSH_AGENT_NAME || "Agent";' \
+      '  // 重载窗口时 VS Code 会自己恢复上次的终端 —— 再开一个就是每刷新一次' \
+      '  // 多起一个 agent 进程 (各自烧着积分)。等它恢复完再判断。' \
+      '  setTimeout(() => {' \
+      '    if (vscode.window.terminals.length > 0) return;' \
+      '    const t = vscode.window.createTerminal({ name, shellPath: cmd, cwd: "/workspace" });' \
+      '    t.show();' \
+      '  }, 1500);' \
+      '}' \
+      'function deactivate() {}' \
+      'module.exports = { activate, deactivate };' > "$D/extension.js"
+
 # 工作目录挂 NAS (products.py 的 mounts)。这里先建出来, 免得 code-server
 # 打开一个不存在的目录时退回欢迎页。
 RUN mkdir -p /home/coder/workspace && chown -R coder:coder /home/coder
