@@ -20,7 +20,7 @@ os.environ.setdefault("DB_PATH", os.path.join(_TMP, "test.db"))
 
 from app import model_catalog, products
 
-CODECLI = ("claude-code", "codex")
+CODECLI = ("codex",)
 
 
 @pytest.mark.parametrize("product_id", CODECLI)
@@ -81,21 +81,24 @@ def test_codex_uses_the_responses_wire():
 
 
 def test_claude_code_pins_the_small_model_too():
-    """不设 SMALL_FAST 的话它去要 haiku —— 我们不卖那个名字, 于是后台任务全 404。"""
-    env = products.env_for("claude-code", "tok")
+    """不设 SMALL_FAST 的话它去要 haiku —— 我们不卖那个名字, 于是后台任务全 404。
+
+    Claude Code 这一格现在是 CloudCLI 形态, 业务 env 在伴随容器上。
+    """
+    env = dict(products.registry()["claude-code"].sidecars[0].env)
     assert env["ANTHROPIC_SMALL_FAST_MODEL"] == env["ANTHROPIC_MODEL"]
     assert env["ANTHROPIC_BASE_URL"].endswith("/llm/anthropic")
 
 
-def test_user_state_files_are_not_clobbered_every_boot():
+def test_codex_user_state_files_are_not_clobbered_every_boot():
     """CLI 自己的状态文件只在**不存在时**写。
 
     这些文件之后装的是用户的会话与偏好, 每次启动覆盖等于悄无声息地抹掉。
     产品配置 (code-server 的设置、Codex 的 config.toml) 相反, 必须每次重写 ——
     里面有每次建实例都会换的网关令牌 (沿用旧的必然 401)。
     """
-    boot = products.boot_script("claude-code")
-    assert 'if [ ! -f "$HOME/.claude.json" ]' in boot
+    boot = products.boot_script("codex")
+    assert "/root" in boot
 
 
 def test_codex_trusts_the_workspace_up_front():
@@ -105,9 +108,74 @@ def test_codex_trusts_the_workspace_up_front():
     assert 'trust_level = "trusted"' in boot
 
 
-def test_claude_onboarding_is_pre_answered():
-    """选主题那一屏在托管环境里只有一个答案, 问出来就是让人先做一遍配置。"""
-    assert '"hasCompletedOnboarding": true' in products.boot_script("claude-code")
+# ---- CloudCLI 形态 (claude-code 这一格) ------------------------------------
+#
+# 与 code-server 版跑同一批 CLI、同一套网关接线, 只是外壳不同。它自带单用户账号
+# 体系 (注册 + 账号密码 + 7 天期 JWT) 且没有关掉鉴权的开关 —— 凭据由工作台代持。
+
+
+def test_cloudcli_model_is_actually_on_sale():
+    """伴随容器上钉的型号必须在售 —— 否则这个产品每次请求都 404。"""
+    env = dict(products.registry()["claude-code"].sidecars[0].env)
+    assert model_catalog.resolve(env["ANTHROPIC_MODEL"]) is not None
+
+
+def test_cloudcli_autologin_covers_both_register_and_login():
+    """第一次是注册, 之后是登录 —— 判据是它自己的 needsSetup。
+
+    只做登录的话新实例永远登不进去 (还没有账号), 只做注册的话第二次启动会失败。
+    """
+    boot = products.boot_script("claude-code")
+    assert "needsSetup" in boot
+    assert "EP=register" in boot
+    assert "EP=login" in boot
+    assert "/api/auth/$EP" in boot
+
+
+def test_cloudcli_injection_is_unconditional():
+    """令牌**每次页面加载都覆盖**, 不判断浏览器里有没有。
+
+    手里那份一旦失效 (实例重建换了密码、或 7 天到期) 它仍然"存在" —— 只在缺失时
+    补的话用户会被永久钉在登录页, 而且刷新多少次都没用。这个判据我在 Dify 上错过
+    两次, 症状一模一样。
+    """
+    boot = products.boot_script("claude-code")
+    assert 'localStorage.setItem("auth-token"' in boot
+    # 判据不该出现在注入逻辑里
+    assert "getItem" not in boot
+
+
+def test_cloudcli_disables_upstream_compression():
+    """sub_filter 改不了 gzip 过的响应体 —— 不关掉上游压缩, 脚本根本插不进去,
+    而两边都不报错。"""
+    assert 'proxy_set_header Accept-Encoding ""' in products.boot_script("claude-code")
+
+
+def test_cloudcli_first_run_walls_are_pre_answered():
+    """拆了登录墙却把人放进"必填"向导或空项目列表, 对用户没区别: 他还是进不去。"""
+    boot = products.boot_script("claude-code")
+    assert "complete-onboarding" in boot
+    assert "create-project" in boot
+    assert "/root/.gitconfig" in boot
+
+
+def test_cloudcli_ready_path_is_not_the_front_page():
+    """首页是前端静态资源, 后端没起来它照样 200。
+
+    探活打首页 = 用户会在后端就绪前被放进一个坏页面 (2026-08-30 Dify 那次)。
+    """
+    p = products.registry()["claude-code"]
+    assert p.ready_path.startswith("/api/")
+
+
+def test_cloudcli_shares_the_same_nas_dirs_as_the_editor_shell():
+    """NAS 子路径要与主容器那两个 (/root、/workspace) 是同一份。
+
+    否则换外壳的时候用户的文件和会话凭空消失 —— 而这两版本来就是给他挑的。
+    """
+    mounts = dict(products.registry()["claude-code"].sidecars[0].mounts)
+    assert mounts["home"] == "/root"
+    assert mounts["workspace"] == "/workspace"
 
 
 @pytest.mark.parametrize("product_id", CODECLI)
@@ -135,3 +203,13 @@ def test_builtin_chat_panel_is_disabled(product_id):
     """
     boot = products.boot_script(product_id)
     assert '"chat.disableAIFeatures": true' in boot
+
+
+def test_cloudcli_projects_are_confined_to_the_nas_workspace():
+    """项目根必须指到 /workspace (NAS 那一份)。
+
+    它默认用 HOME —— 而 CloudCLI 只允许在这个根下面建项目, 所以默认值下用户建的
+    东西全落在容器里, 闲置回收一删就没。这个错法不报任何错。
+    """
+    env = dict(products.registry()["claude-code"].sidecars[0].env)
+    assert env["WORKSPACES_ROOT"] == "/workspace"
