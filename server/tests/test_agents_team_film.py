@@ -186,3 +186,37 @@ def test_generated_paths_are_confined_to_workspace():
     for fn in ("generate_image", "generate_video", "concat_videos"):
         j = MEDIA.index(f"async def {fn}")
         assert "_safe_rel" in MEDIA[j : j + 1500], f"{fn} 没有过路径收敛"
+
+
+def test_resolution_is_normalised_to_lowercase():
+    """自测抓到的真 bug: 目录里分辨率键是**小写**, 服务端不归一化。
+
+    传 "720P" 会让 price_of 查不到价 → 判成"未定价=不售卖"当场被拒, 而症状只是
+    "阿摄一出片就失败"。模型很容易照人话写成大写, 所以必须在容器侧兜住。
+    """
+    assert "_norm_resolution" in MEDIA
+    i = MEDIA.index("def _norm_resolution")
+    seg = MEDIA[i : i + 300]
+    assert ".lower()" in seg
+    # 代码里不许再有大写档位 (注释里出现是在解释这个 bug, 不算)
+    code = "\n".join(l for l in MEDIA.splitlines() if not l.lstrip().startswith("#"))
+    for bad in ('= "720P"', '= "480P"', '= "1080P"', 'or "720P"', "480P/720P/1080P"):
+        assert bad not in code, f"代码里还有大写档位: {bad}"
+    # 提交体里用的是归一化后的值, 不是原值
+    j = MEDIA.index('"resolution":')
+    assert "_norm_resolution(resolution)" in MEDIA[j : j + 120]
+
+
+def test_norm_resolution_behaviour():
+    """行为本身也钉一下 —— 光有函数名不代表它做对了。"""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("film_media", TEAM / "app" / "media.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    assert mod._norm_resolution("720P") == "720p"
+    assert mod._norm_resolution("1080P") == "1080p"
+    assert mod._norm_resolution("  480p ") == "480p"
+    # 认不出来的一律回落到 720p, 不许把垃圾透传给上游
+    assert mod._norm_resolution("4K") == "720p"
+    assert mod._norm_resolution("") == "720p"
