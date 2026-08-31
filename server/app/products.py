@@ -1385,6 +1385,9 @@ def _agentui_boot(product_id: str) -> str:
         # 立刻就能看到 diff。已经是仓库就不动。
         "cd /workspace && (git rev-parse --git-dir >/dev/null 2>&1 || "
         "setpriv --reuid=1000 --regid=1000 --clear-groups -- git init -q) || true\n"
+        # **回 /srv 再起**: 上一行把工作目录换到了 /workspace, 而 uvicorn 要从
+        # /srv 才 import 得到 app —— 不回来就是 ModuleNotFoundError, 容器起不来。
+        "cd /srv\n"
         f"exec uvicorn app.main:app --host 0.0.0.0 --port {AGENTUI_PORT}\n"
     )
 
