@@ -386,9 +386,19 @@ def test_gateway_anthropic_search_surface(gw_user, monkeypatch):
     r = fresh.post("/llm/anthropic/v1/messages", json={"model": "deepseek-v4-flash", "messages": []})
     assert r.status_code == 200
     assert _FakeClient.last_request["headers"]["x-api-key"] == "sk-upstream-test"
-    assert _FakeClient.last_request["url"].endswith("/anthropic/v1/messages")
+    # 2026-08-31 起转发目标跟着主上游走 (密钥是那家的; 指到别家会 401 -> 502),
+    # 所以是 <主上游>/messages 而不是写死的 /anthropic/v1/messages。
+    assert _FakeClient.last_request["url"].endswith("/messages")
+    assert _FakeClient.last_request["url"].startswith(config.UPSTREAM_BASE_URL.split("/v1")[0])
+    # 同日起这条路按**普通对话**计费 (kind=llm + 请求里的模型), 不再收搜索固定费
+    # —— 那是"这个接口只服务 web_search"时代的遗留, 真跑对话会让用户被按默认
+    # 模型计价再加一笔搜索费。
     spent = before - credits.balance(uid)
-    assert spent >= config.SEARCH_CALL_CREDITS  # flat search fee + token cost
+    assert spent > 0
+    row = db.query_one(
+        "SELECT kind, model FROM usage_log WHERE user_id=? ORDER BY created DESC LIMIT 1", (uid,)
+    )
+    assert row["kind"] == "llm" and row["model"] == "deepseek-v4-flash"
 
 
 def test_models_listing(gw_user):

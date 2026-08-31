@@ -112,7 +112,12 @@ ZHIPU_SEARCH_FALLBACKS = [
     e.strip() for e in _env("ZHIPU_SEARCH_FALLBACKS", "search_pro,search_std").split(",") if e.strip()
 ]
 ZHIPU_SEARCH_BASE = _env("ZHIPU_SEARCH_BASE", "https://open.bigmodel.cn/api/paas/v4")
-UPSTREAM_ANTHROPIC_BASE = _env("UPSTREAM_ANTHROPIC_BASE", "https://api.deepseek.com/anthropic/v1")
+# Anthropic 面转发到哪。**默认跟着 UPSTREAM_BASE_URL 走** —— 我们的密钥是那家的,
+# 指到别家去只会被 401, 而我们把 401 映射成 502, 于是表现成"上游挂了"。
+# 早先写死成 DeepSeek 是 web_search 走它家搜索时代的遗留; 现在搜索走智谱, 这个
+# 地址只服务普通对话转发, 跟着主上游才对 (千面自己就有原生 /v1/messages, 实测
+# x-api-key 打过去 200, 返回原生 content 块)。
+UPSTREAM_ANTHROPIC_BASE = _env("UPSTREAM_ANTHROPIC_BASE", "") or UPSTREAM_BASE_URL
 
 # --- pricing / credits ------------------------------------------------------
 # Which price table to serve: pricing.json (CNY) or pricing.usd.json (overseas).

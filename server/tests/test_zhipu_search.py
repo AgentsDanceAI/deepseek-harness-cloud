@@ -297,3 +297,17 @@ def test_forwarded_chat_is_billed_as_llm_on_the_requested_model(monkeypatch):
     assert "billed_model" in src, "没有按请求的模型计价"
     # 搜索那条路自己的计费不能被动掉
     assert 'kind="search"' in src and "SEARCH_CALL_CREDITS" in src
+
+
+def test_anthropic_upstream_follows_the_main_upstream():
+    """Anthropic 面的转发目标默认跟着主上游走。
+
+    我们的密钥是主上游那家的; 指到别家只会被 401, 而 401 被映射成 502 ——
+    表现成"上游挂了", 看不出是地址配错。2026-08-31 实测踩到: 它写死成
+    api.deepseek.com 而密钥是千面的, 正常对话全部 502。
+    """
+    from app import config
+
+    assert config.UPSTREAM_ANTHROPIC_BASE.startswith(config.UPSTREAM_BASE_URL.split("/v1")[0]), (
+        "Anthropic 面指向了主上游以外的地方 —— 密钥不通, 会全部 502"
+    )
