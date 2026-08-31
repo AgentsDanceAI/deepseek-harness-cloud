@@ -70,7 +70,7 @@
   "apps.tag.docqa": "Chat with your docs",
   "apps.tag.lobster": "Classic lobster",
   "apps.tag.memory": "Agent that remembers",
-  "apps.tag.native": "Our own agent",
+  "apps.tag.deepseek": "DeepSeek agent",
   "apps.tag.nodegraph": "Node-based imaging",
   "apps.tag.orchestrate": "App orchestration",
   "apps.tag.sketch": "Hand-drawn whiteboard",
