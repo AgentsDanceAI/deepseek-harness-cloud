@@ -62,8 +62,11 @@ def test_terminal_opens_straight_into_the_agent(product_id):
     """
     boot = products.boot_script(product_id)
     exe = products._CODECLI_AGENTS[product_id][0]
-    assert '"terminal.integrated.defaultProfile.linux"' in boot
     assert f"/usr/local/bin/{exe}" in boot
+    # 默认终端必须是 **bash** 而不是 agent: agent 由镜像里的扩展开在编辑器区,
+    # 这里若也设成 agent, VS Code 每实例化一次终端面板就按默认配置文件再起一个
+    # —— 屏幕上两个、账上两份 (实测过)。
+    assert '"terminal.integrated.defaultProfile.linux": "bash"' in boot
     # 自动开终端归镜像里那个 dsh-agent 扩展管 (见 test_agent_terminal_is_
     # wired_through_env)。**不再**走 VS Code 的 folderOpen 任务: 两条路同时
     # 生效, 实测起了两个终端、两个 agent 进程, 各自烧着积分。

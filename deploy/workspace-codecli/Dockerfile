@@ -95,6 +95,9 @@ RUN set -e; \
       '    // 右边那格是给 Chat 用的, Chat 已经关掉 (chat.disableAIFeatures),' \
       '    // 不收起来就剩一个写着 "Drag a view here to display" 的空壳。' \
       '    vscode.commands.executeCommand("workbench.action.closeAuxiliaryBar");' \
+      '    // 底部面板也收起来: agent 在编辑器区, 面板里那个是普通 shell,' \
+      '    // 开着只会让人以为有两个 agent。要用时 Ctrl+` 一按就有。' \
+      '    vscode.commands.executeCommand("workbench.action.closePanel");' \
       '    const found = vscode.window.terminals.find((t) => t.name === name);' \
       '    if (found) { found.show(); return; }' \
       '    // 关键是 location: Editor —— 把 agent 开在**编辑器区**而不是底部面板。' \

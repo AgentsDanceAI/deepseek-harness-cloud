@@ -1348,7 +1348,11 @@ def _codecli_boot(product_id: str) -> str:
     settings = {
         "workbench.startupEditor": "none",
         "workbench.colorTheme": "Default Dark Modern",
-        "terminal.integrated.defaultProfile.linux": label,
+        # 默认给 **bash**, 不是 agent。agent 由镜像里的 dsh-agent 扩展开在编辑器
+        # 区 (见 Dockerfile), 这里再把它设成默认的话, VS Code 每实例化一次终端
+        # 面板就按默认配置文件**再起一个 agent** —— 屏幕上两个、账上两份。
+        # 用户想要 shell 就该拿到 shell; 想再开一个 agent, 下拉框里也还在。
+        "terminal.integrated.defaultProfile.linux": "bash",
         "terminal.integrated.profiles.linux": {
             label: {"path": f"/usr/local/bin/{exe}", "icon": "sparkle"},
             "bash": {"path": "/bin/bash"},
