@@ -1359,6 +1359,13 @@ def _codecli_boot(product_id: str) -> str:
         # 没有这条, folderOpen 的自动任务**不会跑** —— 默认值是"问一下", 而那句
         # 询问只在通知区闪一下, 用户看到的就是一个空编辑器, 终端得自己开。
         "task.allowAutomaticTasks": "on",
+        # 关掉 VS Code 自带的 Chat/Agent 面板。它在 4.135 里是**内核 UI**, 删掉
+        # copilot 扩展也去不掉 —— 面板还在, 右下角照样挂着 "Sign In", 一点就要
+        # GitHub OAuth。等于我们自己的产品里又藏了一道登录墙, 正是老板明令不要
+        # 的东西。而且它是多余的: 这个产品的 agent 就是终端里那个 CLI。
+        "chat.disableAIFeatures": True,
+        # 连带把第二侧栏默认收起 —— 那格子本来就是给 Chat 用的。
+        "workbench.secondarySideBar.defaultVisibility": "hidden",
         "telemetry.telemetryLevel": "off",
     }
     import json as _json
