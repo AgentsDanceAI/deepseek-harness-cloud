@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>DSH Cloud 智能体工作台</title>
+<link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+<div id="app">
+  <aside id="side">
+    <header class="brand">
+      <span class="dot"></span>
+      <div>
+        <div class="brand-name">DSH Cloud</div>
+        <div class="brand-sub" id="cliName">—</div>
+      </div>
+      <button id="newBtn" title="新会话">＋</button>
+    </header>
+
+    <div id="credits" class="credits">
+      <div class="credits-row"><span>余额</span><b id="cBalance">—</b></div>
+      <div class="credits-row"><span>本轮消耗</span><b id="cTurn">0</b></div>
+      <div class="credits-row muted"><span id="cPlan">—</span><span id="cMinutes"></span></div>
+    </div>
+
+    <nav id="sessions"></nav>
+    <footer class="side-foot" id="sideFoot">按分钟计费 · 闲置自动回收</footer>
+  </aside>
+
+  <main id="main">
+    <div id="tabs">
+      <button id="menuBtn" title="会话">☰</button>
+      <button data-tab="chat" class="on">对话</button>
+      <button data-tab="shell">终端</button>
+      <button data-tab="files">文件</button>
+      <button data-tab="git">版本</button>
+      <div class="spacer"></div>
+      <select id="cliPick" title="切换 CLI"></select>
+    </div>
+
+    <section id="pane-chat" class="pane on">
+      <div id="log"></div>
+      <form id="composer">
+        <textarea id="input" rows="1" placeholder="说点什么…  (Enter 发送 · Shift+Enter 换行)"></textarea>
+        <button type="submit" id="sendBtn">发送</button>
+        <button type="button" id="stopBtn" hidden>停止</button>
+      </form>
+    </section>
+
+    <section id="pane-shell" class="pane"><div id="term"></div></section>
+
+    <section id="pane-files" class="pane">
+      <div id="fileWrap">
+        <div id="fileTree"></div>
+        <div id="fileView"><div class="empty">选一个文件</div></div>
+      </div>
+    </section>
+
+    <section id="pane-git" class="pane">
+      <div id="gitWrap">
+        <div id="gitSide">
+          <div id="gitBranch" class="muted">—</div>
+          <div id="gitFiles"></div>
+          <form id="commitForm">
+            <input id="commitMsg" placeholder="提交信息" />
+            <button type="submit">提交</button>
+          </form>
+        </div>
+        <pre id="gitDiff" class="empty">选一个改动看 diff</pre>
+      </div>
+    </section>
+  </main>
+</div>
+<script src="/static/vendor/xterm.js"></script>
+<script src="/static/vendor/marked.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>
