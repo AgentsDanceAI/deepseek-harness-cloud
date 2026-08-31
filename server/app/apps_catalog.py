@@ -33,6 +33,10 @@ CATALOG: tuple[AppEntry, ...] = (
         "dsh", "DSH Agent", "agent",
         '<path d="M17.5 19a4.5 4.5 0 1 0-.9-8.9 6 6 0 1 0-11.1 3.4"/><path d="M6 19h11.5"/>',
     ),
+    # DSH Operator (products.registry() 里已经有了) **故意还没进这张目录**:
+    # 这页是 4 列的网格, 16 个正好铺满四行, 第 17 个会多出一行只有一张卡的空排。
+    # 目录是愿景、registry 才是事实 —— 产品能不能用不取决于这里。等再攒够三个
+    # 一起上, 或者决定换掉其中一个, 那是一次布局决定, 不该由"顺手加一个"带出来。
     AppEntry(
         "comfyui", "ComfyUI", "media",
         '<rect x="3" y="4" width="7" height="6" rx="1.5"/><rect x="14" y="14" width="7" height="6" rx="1.5"/>'

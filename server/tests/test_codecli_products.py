@@ -62,7 +62,7 @@ def test_terminal_opens_straight_into_the_agent(product_id):
     """
     boot = products.boot_script(product_id)
     exe = products._CODECLI_AGENTS[product_id][0]
-    assert f'"terminal.integrated.defaultProfile.linux"' in boot
+    assert '"terminal.integrated.defaultProfile.linux"' in boot
     assert f"/usr/local/bin/{exe}" in boot
     assert '"runOn": "folderOpen"' in boot
 
