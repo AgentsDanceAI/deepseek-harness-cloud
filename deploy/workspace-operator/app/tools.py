@@ -16,7 +16,6 @@ import asyncio
 import base64
 import os
 import pathlib
-import shlex
 
 #: 工作目录。与 products.py 里的 mounts 一致 —— 改一处必须改另一处,
 #: 不然用户的文件写进容器本地, 实例一回收就没了 (而且不报错)。
@@ -95,7 +94,10 @@ async def read_file(path: str, max_bytes: int = 200_000) -> tuple[str, str]:
         text = data.decode("utf-8")
     except UnicodeDecodeError:
         # 二进制文件别硬塞给模型 —— 乱码会把上下文烧光, 而且它什么也读不出来。
-        return f"{p} 是二进制文件 ({p.stat().st_size} 字节), 没有按文本读取。", f"读 {path} (二进制)"
+        return (
+            f"{p} 是二进制文件 ({p.stat().st_size} 字节), 没有按文本读取。",
+            f"读 {path} (二进制)",
+        )
     return _truncate(text), f"读 {path}"
 
 
@@ -117,7 +119,11 @@ async def screenshot(display: str | None = None) -> tuple[str, str]:
         return "这个工作台没有图形桌面, 截图不可用。", "截图 (无桌面)"
     out = WORKDIR / ".operator-shot.png"
     proc = await asyncio.create_subprocess_exec(
-        "scrot", "-o", str(out), stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE
+        "scrot",
+        "-o",
+        str(out),
+        stdout=asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.PIPE,
     )
     _, err = await proc.communicate()
     if proc.returncode != 0 or not out.exists():
@@ -166,7 +172,10 @@ SCHEMAS = [
             "description": "把内容整份写进文件(覆盖)。父目录会自动建。",
             "parameters": {
                 "type": "object",
-                "properties": {"path": {"type": "string"}, "content": {"type": "string"}},
+                "properties": {
+                    "path": {"type": "string"},
+                    "content": {"type": "string"},
+                },
                 "required": ["path", "content"],
             },
         },
@@ -197,7 +206,10 @@ async def dispatch(name: str, args: dict) -> tuple[str, str]:
     """
     handler = _HANDLERS.get(name)
     if handler is None:
-        return f"没有名为 {name} 的工具。可用的是: {', '.join(_HANDLERS)}", f"未知工具 {name}"
+        return (
+            f"没有名为 {name} 的工具。可用的是: {', '.join(_HANDLERS)}",
+            f"未知工具 {name}",
+        )
     try:
         return await handler(args)
     except KeyError as e:
