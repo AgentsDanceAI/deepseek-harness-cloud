@@ -74,6 +74,16 @@ docker run --rm -u 0 --entrypoint bash "$REF" -c '
   code=$(curl -s -o /tmp/idx.html -w "%{http_code}" --max-time 10 http://127.0.0.1:18080/)
   test "$code" = "200" || { echo "!! 首页 $code" >&2; exit 1; }
   grep -q "DSH Cloud" /tmp/idx.html || { echo "!! 首页内容不对" >&2; exit 1; }
+
+  # 静态资源必须带内容指纹, 首页必须不缓存。
+  # 没有指纹的话新版发不出去: app.js 是固定文件名, 内容改了 URL 不变, 而
+  # StaticFiles 默认 max-age=14400 —— 浏览器四小时内一直跑旧版, 报的是早就删掉
+  # 的错误信息, 而线上线下都看不出是缓存 (2026-08-31 实测踩到)。
+  grep -qE "app\.js\?v=[0-9a-f]{6,}" /tmp/idx.html \
+    || { echo "!! 首页里的 app.js 没带指纹 —— 改了前端也发不出去" >&2; exit 1; }
+  curl -s -D- -o /dev/null --max-time 10 http://127.0.0.1:18080/ | grep -qi "cache-control: *no-store" \
+    || { echo "!! 首页可缓存 —— 它是唯一带指纹的入口, 缓存住等于指纹永远不更新" >&2; exit 1; }
+  echo "  ✓ 静态资源带指纹, 首页不缓存"
   for a in /static/app.js /static/style.css /static/vendor/xterm.js; do
     code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "http://127.0.0.1:18080$a")
     test "$code" = "200" || { echo "!! 静态资源 $a 返回 $code" >&2; exit 1; }
