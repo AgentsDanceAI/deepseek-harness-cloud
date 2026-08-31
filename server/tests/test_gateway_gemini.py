@@ -113,6 +113,11 @@ def gemini_user(monkeypatch):
     monkeypatch.setattr(gateway.config, "UPSTREAM_API_KEY", "test-upstream-key")
     monkeypatch.setattr(gateway.config, "UPSTREAM_GEMINI_BASE", "https://upstream.test")
     monkeypatch.setattr(gateway, "_admit", lambda _user: None)
+    monkeypatch.setattr(
+        gateway.model_catalog,
+        "resolve",
+        lambda mid: {"id": mid} if mid == "gemini-3-pro" else None,
+    )
     return {"id": "gemini-user", "device_id": "device"}
 
 
@@ -220,6 +225,45 @@ async def test_unknown_action_is_rejected(gemini_user, spends):
     )
     assert result.status_code == 404
     assert spends == []
+
+
+@pytest.mark.asyncio
+async def test_model_outside_the_catalog_is_rejected(gemini_user, spends):
+    """不在售的型号一律拒 —— 与 chat / responses 同口径。
+
+    放行有两处坏账: 上游按真价收我们, 而目录外的名字在 charge_credits 里走兜底价
+    (线上实测 gemini-3.1-pro-preview 被扣了 113 分), 用户为一个我们从没上架的型号
+    付了一个我们没标过的价。而 Gemini CLI **默认**就挑它自己的型号, 这是常态。
+    """
+    result = await gateway.gemini_generate(
+        "gemini-3.1-pro-preview:generateContent",
+        _request("/llm/gemini/v1beta/models/gemini-3.1-pro-preview:generateContent", {}),
+        gemini_user,
+    )
+    assert result.status_code == 404
+    assert spends == []
+
+
+@pytest.mark.asyncio
+async def test_upstream_model_name_is_used_in_the_path(gemini_user, monkeypatch):
+    """牌名与上游型号名可以不同 —— 打上游要用后者。"""
+    monkeypatch.setattr(
+        gateway.model_catalog,
+        "resolve",
+        lambda mid: {"id": mid, "upstream_model": "vendor-internal-name"} if mid == "gemini-3-pro" else None,
+    )
+    client = _Client(_Response(200, {"usageMetadata": {}}))
+    monkeypatch.setattr(gateway, "_upstream_client", lambda: client)
+    monkeypatch.setattr(gateway.model_catalog, "charge_credits", lambda *a: 0)
+    monkeypatch.setattr(gateway.credits, "spend", lambda *a, **kw: None)
+
+    await gateway.gemini_generate(
+        "gemini-3-pro:generateContent",
+        _request("/llm/gemini/v1beta/models/gemini-3-pro:generateContent", {"contents": []}),
+        gemini_user,
+    )
+
+    assert client.urls == ["https://upstream.test/v1beta/models/vendor-internal-name:generateContent"]
 
 
 # ---- 转发 ------------------------------------------------------------------

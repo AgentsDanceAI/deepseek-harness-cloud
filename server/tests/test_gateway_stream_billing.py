@@ -424,3 +424,58 @@ def test_responses_uses_the_responses_upstream_path():
 
     src = inspect.getsource(gateway.responses)
     assert 'rstrip("/") + "/responses"' in src
+
+
+# ---- Anthropic 面的在售校验 (2026-08-31) -----------------------------------
+
+
+@pytest.mark.asyncio
+async def test_anthropic_rejects_models_outside_the_catalog(gateway_user, monkeypatch):
+    """不在售的型号一律拒。
+
+    这面早先是放行的 —— 它诞生时只服务 web_search (走另一分支, 不转发), 转发是
+    后加的。放行的代价: 目录外的名字在 charge_credits 里走兜底价, 用户为一个我们
+    从没上架的型号付一个我们没标过的价 (同一个洞在 Gemini 面上实测到过一笔)。
+    Claude Code 允许用户 /model 随便打, 所以这是常态而非例外。
+    """
+    spends = []
+    monkeypatch.setattr(gateway.config, "SEARCH_PROVIDER", "upstream")
+    monkeypatch.setattr(gateway.model_catalog, "resolve", lambda _mid: None)
+    monkeypatch.setattr(gateway.credits, "spend", lambda *a, **kw: spends.append(kw))
+
+    result = await gateway.anthropic_messages(
+        _request(
+            "/llm/anthropic/v1/messages",
+            {"model": "claude-not-on-our-menu", "messages": [{"content": "hi"}]},
+        ),
+        gateway_user,
+    )
+
+    assert result.status_code == 404
+    assert spends == []
+
+
+@pytest.mark.asyncio
+async def test_anthropic_rewrites_the_model_to_the_upstream_name(gateway_user, monkeypatch):
+    """牌名与上游型号名不同的话, 转发的 body 里必须换成后者。"""
+    monkeypatch.setattr(gateway.config, "SEARCH_PROVIDER", "upstream")
+    monkeypatch.setattr(
+        gateway.model_catalog,
+        "resolve",
+        lambda mid: {"id": mid, "upstream_model": "vendor-internal"},
+    )
+    monkeypatch.setattr(gateway.model_catalog, "charge_credits", lambda *a: 0)
+    monkeypatch.setattr(gateway.credits, "spend", lambda *a, **kw: None)
+    client = _Client(_StreamResponse(200, [b"event: message_stop\n"]))
+    monkeypatch.setattr(gateway, "_upstream_client", lambda: client)
+
+    result = await gateway.anthropic_messages(
+        _request(
+            "/llm/anthropic/v1/messages",
+            {"model": "claude-sonnet-5", "stream": True, "messages": [{"content": "hi"}]},
+        ),
+        gateway_user,
+    )
+    [chunk async for chunk in result.body_iterator]
+
+    assert json.loads(client.last_kwargs["content"])["model"] == "vendor-internal"
