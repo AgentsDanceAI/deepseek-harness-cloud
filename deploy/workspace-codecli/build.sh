@@ -45,7 +45,14 @@ docker run --rm -u 0 --entrypoint bash "$REF" -c '
   echo "  ✓ codex:  $(codex --version 2>&1 | head -1)"
   echo "  ✓ gemini: $(gemini --version 2>&1 | head -1)"
 
-  # 3. code-server 的无鉴权模式确实生效 —— 这是我们选它的**唯一理由**
+  # 3. 开箱即用的那一下: 扩展在, 且 Copilot 那个要登 GitHub 的面板已经拿掉。
+  test -f /usr/lib/code-server/lib/vscode/extensions/dsh-agent/extension.js \
+    || { echo "!! dsh-agent 扩展不在 —— 用户进去只会看到一个空编辑器" >&2; exit 1; }
+  test ! -d /usr/lib/code-server/lib/vscode/extensions/copilot \
+    || { echo "!! Copilot 扩展还在 —— 右侧面板一点就要 GitHub 登录" >&2; exit 1; }
+  echo "  ✓ dsh-agent 扩展在位, Copilot 面板已移除"
+
+  # 4. code-server 的无鉴权模式确实生效 —— 这是我们选它的**唯一理由**
   #    (老板铁律: 接进来的应用不留登录墙)。上游哪天改了默认值, 这里要红。
   code-server --auth none --bind-addr 127.0.0.1:18080 /home/coder/workspace \
     > /tmp/cs.log 2>&1 &

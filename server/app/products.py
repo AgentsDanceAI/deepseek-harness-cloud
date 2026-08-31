@@ -1356,6 +1356,9 @@ def _codecli_boot(product_id: str) -> str:
         # 工作区信任那道弹窗要用户点"是, 我信任作者" —— 这是他自己的目录,
         # 问了也只有一个答案, 而在没点之前终端和任务都是禁用的。
         "security.workspace.trust.enabled": False,
+        # 没有这条, folderOpen 的自动任务**不会跑** —— 默认值是"问一下", 而那句
+        # 询问只在通知区闪一下, 用户看到的就是一个空编辑器, 终端得自己开。
+        "task.allowAutomaticTasks": "on",
         "telemetry.telemetryLevel": "off",
     }
     tasks = {
@@ -1803,6 +1806,24 @@ def registry() -> dict[str, Product]:
             reports_presence=False,
             tab_grace_min=config.OPEN_DESIGN_TAB_GRACE_MIN,
         ),
+        # Operator: 我们自己写的动手型智能体 (deploy/workspace-operator)。
+        # 与 codecli 那条线的分工: 那边给编辑器 + CLI, 用户自己敲; 这边交代一件事,
+        # 它自己在容器里做完。单容器, 前端和 API 都在 8710。
+        "operator": Product(
+            id="operator",
+            name="DSH Operator",
+            image=config.OPERATOR_IMAGE_REF,
+            image_ref=config.OPERATOR_IMAGE_REF,
+            port=8710,
+            mem_mb=config.OPERATOR_MEM_LIMIT_MB,
+            cpus=config.OPERATOR_CPUS,
+            domain=config.OPERATOR_DOMAIN,
+            reports_presence=False,
+            tab_grace_min=config.OPERATOR_TAB_GRACE_MIN,
+            # 首页是静态文件, 后端没起来照样 200 —— 探它等于没探 (见 ready_path
+            # 字段的说明)。/api/health 由 FastAPI 出, 后端不活就连不上。
+            ready_path="/api/health",
+        ),
     }
 # fmt: on
 
@@ -2051,6 +2072,20 @@ def _opendesign_patch_yaml() -> str:
     )
 
 
+def _operator_boot() -> str:
+    """Operator 是我们自己的镜像, 启动脚本因此很短 —— 配置全走 env。
+
+    仍要 mkdir: 工作目录是 NAS 挂进来的, 挂载点在容器里出现的时机不由我们定;
+    首轮 shell 落在一个不存在的 cwd 上会莫名其妙失败, 而报错里不会提"目录不存在"。
+    """
+    return (
+        "set -e\n"
+        "mkdir -p /workspace\n"
+        "cd /opt/operator\n"
+        "exec uvicorn app.main:app --host 0.0.0.0 --port 8710\n"
+    )
+
+
 _BOOTS = {
     DEFAULT: _dsh_boot,
     "comfyui": _comfyui_boot,
@@ -2061,6 +2096,7 @@ _BOOTS = {
     "hermes": _hermes_boot,
     "claude-code": lambda: _codecli_boot("claude-code"),
     "codex": lambda: _codecli_boot("codex"),
+    "operator": _operator_boot,
 }
 
 
@@ -2089,6 +2125,11 @@ def env_for(product_id: str, token: str, secret: str = "") -> dict[str, str]:
             # 这几个 CLI 各自的内置默认型号都是厂商自己的名字, 网关只放行在售
             # 目录里的 —— 不钉死就是每次 404。
             "DSH_CLOUD_TOKEN": token,
+            # 镜像里那个 dsh-agent 扩展照这两个变量开终端 (见
+            # deploy/workspace-codecli/Dockerfile)。少了它们, 用户进去看到的
+            # 是一个空编辑器 —— 而这个产品卖的就是"点开就能用"。
+            "DSH_AGENT_CMD": f"/usr/local/bin/{_CODECLI_AGENTS[product_id][0]}",
+            "DSH_AGENT_NAME": _CODECLI_AGENTS[product_id][1],
         }
         if product_id == "claude-code":
             env |= {
@@ -2129,6 +2170,17 @@ def env_for(product_id: str, token: str, secret: str = "") -> dict[str, str]:
             # 在售的全部模型 (含上面两个, provision 会跳过)。
             "DSH_MODELS": _dify_chat_models(),
             "DSH_EMBEDDING_MODELS": _dify_embedding_models(),
+        }
+    if product_id == "operator":
+        # 我们自己的镜像, 所以不用占位符那一套 —— 令牌在这里就是真值 (env_for 拿到的
+        # token 已经是该用户铸好的)。模型列表与在售目录一致, 前端下拉直接用。
+        return {
+            "DSH_GATEWAY_BASE": f"{gateway}/llm/v1",
+            "DSH_CLOUD_TOKEN": token,
+            "DSH_DEFAULT_MODEL": model_catalog.default_model(),
+            # 不复用 _dify_chat_models(): 那个名字属于 Dify 那条线, 借过来用会让
+            # 以后改 Dify 的人不知道自己顺手也改了这里。
+            "DSH_MODELS": _sh_list(model_catalog.catalog()),
         }
     if product_id == "open-design":
         return {

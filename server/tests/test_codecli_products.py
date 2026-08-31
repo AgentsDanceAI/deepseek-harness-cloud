@@ -85,3 +85,17 @@ def test_user_workspace_files_are_not_clobbered_every_boot():
     """tasks.json 落在 /workspace (用户自己的目录) —— 每次覆盖等于抹掉他的改动。"""
     boot = products.boot_script("claude-code")
     assert "if [ ! -f /workspace/.vscode/tasks.json ]" in boot
+
+
+@pytest.mark.parametrize("product_id", CODECLI)
+def test_agent_terminal_is_wired_through_env(product_id):
+    """镜像里那个 dsh-agent 扩展照这两个变量开终端。
+
+    少了它们用户进去是一个空编辑器 —— 这个产品卖的就是"点开就能用"。
+    (原先靠 VS Code 的 folderOpen 自动任务, 实测不跑: 它的前置条件太多,
+    每一条都可能让它静默不执行。)
+    """
+    env = products.env_for(product_id, "tok")
+    exe = products._CODECLI_AGENTS[product_id][0]
+    assert env["DSH_AGENT_CMD"] == f"/usr/local/bin/{exe}"
+    assert env["DSH_AGENT_NAME"]
