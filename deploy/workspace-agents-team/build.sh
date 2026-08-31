@@ -93,6 +93,10 @@ if curl -s "https://ghcr.io/token?scope=repository:${IMAGE#ghcr.io/}:pull&servic
   echo "    匿名可拉 ✓"
 else
   echo "!! 这个包是**私有**的, ECI 拉不动 (会卡 Pending, 且不报私有)。" >&2
-  echo "   去网页改成 public: https://github.com/orgs/AgentsDancePro/packages" >&2
+  # AgentsDancePro 是**个人账号**, 不是组织 —— 所以是 /users/ 不是 /orgs/。
+  # (组织是 AgentsDanceAI, 那是放代码的; 镜像推的是个人账号的命名空间。)
+  # 写错成 /orgs/ 会得到一个 404, 而人会以为是包没推上去。
+  echo "   去网页改成 public (AgentsDancePro 是个人账号, 路径是 /users/):" >&2
+  echo "   https://github.com/users/AgentsDancePro/packages/container/$(basename "$IMAGE")/settings" >&2
   exit 1
 fi
