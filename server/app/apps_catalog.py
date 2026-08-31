@@ -60,7 +60,7 @@ CATALOG: tuple[AppEntry, ...] = (
     # OpenClaw 顶掉了 Aider: 命令行编码 agent 这一格我们自己的 dsh 已经覆盖,
     # 而 OpenClaw 是"一个网关接几十个聊天渠道"的常驻个人助理, 是另一类东西。
     AppEntry(
-        "openclaw", "OpenClaw", "lobster",
+        "openclaw", "OpenClaw 2.0", "lobster",
         '<path d="M7 10V6.5a2 2 0 1 1 4 0V10M11 10V5.5a2 2 0 1 1 4 0V10M15 10V7a2 2 0 1 1 4 0v7'
         'a7 7 0 0 1-7 7h-1a7 7 0 0 1-7-7v-3a2 2 0 1 1 4 0"/>',
     ),

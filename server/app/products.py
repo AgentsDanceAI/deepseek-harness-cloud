@@ -2019,7 +2019,7 @@ def registry() -> dict[str, Product]:
         # Telegram/Discord/Slack 等几十个渠道, 自带控制台 UI。单容器。
         "openclaw": Product(
             id="openclaw",
-            name="OpenClaw",
+            name="OpenClaw 2.0",
             image=config.OPENCLAW_IMAGE_REF,
             image_ref=config.OPENCLAW_IMAGE_REF,
             port=OPENCLAW_PORT,
