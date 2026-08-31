@@ -53,7 +53,35 @@
         display:flex; align-items:center; justify-content:center; font-size:16px; }
   .body { min-width:0; flex:1; }
   .who { font-size:12px; color:var(--muted); margin-bottom:2px; }
-  .txt { white-space:pre-wrap; word-wrap:break-word; }
+  /* 机器人正文走 markdown 渲染 —— pre-wrap 会让块级元素之间多出空行,
+     所以只给用户气泡保留 (他打的换行就该原样保留)。 */
+  .txt { word-wrap:break-word; }
+  .msg.user .txt { white-space:pre-wrap; }
+  /* markdown 排版: 字重按 AgentsDance 的口径减到 600 —— 模型爱整段加粗,
+     700 在满屏中文里像一堵黑墙。标题要拉开层级, 否则一屏望过去分不出结构。 */
+  .txt h1,.txt h2,.txt h3,.txt h4,.txt h5,.txt h6 { margin:.7em 0 .35em; font-weight:600; line-height:1.35; }
+  .txt h1 { font-size:1.35em; } .txt h2 { font-size:1.2em; } .txt h3 { font-size:1.08em; }
+  .txt h4,.txt h5,.txt h6 { font-size:1em; }
+  .txt p { margin:.45em 0; }
+  .txt strong { font-weight:600; }
+  .txt ul,.txt ol { margin:.45em 0; padding-left:1.5em; }
+  .txt li { margin:.2em 0; }
+  .txt blockquote { margin:.5em 0; padding:.1em 0 .1em .8em;
+                    border-left:3px solid var(--line); color:var(--muted); }
+  .txt code { padding:.1em .3em; border-radius:4px; background:rgba(127,127,127,.14);
+              font-family:ui-monospace,Menlo,Consolas,monospace; font-size:.88em; word-break:break-all; }
+  .txt pre { margin:.5em 0; padding:.7em .8em; border-radius:8px; overflow-x:auto;
+             background:rgba(127,127,127,.12); }
+  .txt pre code { padding:0; background:none; font-size:.85em; }
+  .txt hr { margin:.8em 0; border:0; border-top:1px solid var(--line); }
+  .txt a { color:#4c6ef5; }
+  /* 窄屏横滚: 表格自己滚, 页面不横滚 */
+  .txt .tw { overflow-x:auto; margin:.5em 0; }
+  .txt table { border-collapse:collapse; font-size:.94em; }
+  .txt th,.txt td { border:1px solid var(--line); padding:.35em .6em; text-align:left; }
+  .txt th { font-weight:600; background:rgba(127,127,127,.08); }
+  /* 首尾元素不要额外撑高气泡 */
+  .txt > :first-child { margin-top:0; } .txt > :last-child { margin-bottom:0; }
   .msg.user { flex-direction:row-reverse; }
   .msg.user .body { max-width:78%; }
   .msg.user .who { text-align:right; }
@@ -64,6 +92,21 @@
           font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
   .tool .dot { width:6px; height:6px; border-radius:50%; background:var(--accent); flex:none; }
   .tool.done .dot { background:#34a853; }
+  /* 工具行折叠组: 默认只露一行摘要 (此刻在干嘛), 点开看全部 */
+  .toolbox { margin:5px 0; }
+  .toolbox .th { display:flex; align-items:center; gap:8px; width:100%; text-align:left;
+                 font-size:12.5px; color:var(--muted); background:var(--tool);
+                 border:0; border-radius:8px; padding:5px 9px; cursor:pointer;
+                 font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
+  .toolbox .th .dot { width:6px; height:6px; border-radius:50%; background:var(--accent); flex:none; }
+  .toolbox .sum { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .toolbox .chev { width:14px; height:14px; flex:none; opacity:.5; transition:transform .15s; }
+  .toolbox.open .chev { transform:rotate(180deg); }
+  .toolbox .tl { display:none; padding-left:10px; border-left:2px solid var(--line); margin:4px 0 0 4px; }
+  .toolbox.open .tl { display:block; }
+  /* 谁在工作要一眼看得出 —— 跑动中的那位气泡左侧亮一条 */
+  .msg.bot.running .body { border-left:2px solid var(--accent); padding-left:8px; }
+  .msg.bot.running .who::after { content:' · 工作中'; color:var(--accent); }
   .shot { max-width:100%; border-radius:10px; border:1px solid var(--line); margin:6px 0; }
   .err { color:var(--err); }
   footer { border-top:1px solid var(--line); background:var(--card); padding:12px 16px; flex:none; }
@@ -88,6 +131,7 @@
   <h2>房间</h2>
   <div class="rooms" id="rooms"></div>
   <button id="newRoom">＋ 拉个群</button>
+  <button id="newFilm">🎬 开新片</button>
 </aside>
 
 <main>
@@ -124,6 +168,109 @@ const at = () => log.scrollHeight - log.scrollTop - log.clientHeight < 80;
 const scroll = f => { if (f || at()) log.scrollTop = log.scrollHeight; };
 const botOf = id => BOTS[id] || { name: id, emoji: '🤖' };
 
+// ── 轻量 Markdown 渲染 (照 AgentsDance 的 MarkdownText 搬, 零依赖) ──────────
+// 覆盖 LLM 常用子集: 标题/有序·无序列表/加粗·斜体·行内代码/链接/引用/分割线/
+// 代码块/表格/段落。**可对流式增量文本反复渲染** —— 每来一块就整份重渲, 因为
+// 函数是纯的且便宜; 增量拼 HTML 反而会在标记跨块断开时渲染出半截标签。
+//
+// ⚠️ React 那边自动转义, 原生这边**必须自己先转义再拼 HTML** —— 机器人的输出
+// 里出现 <script> 或 <img onerror> 就是 XSS, 而它的输出我们控制不了。
+// 所以: 一切进入 innerHTML 的文本, 都先过 esc()。
+function esc(t) {
+  return String(t == null ? '' : t)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+// 行内: `代码` **粗** [文字](链接) *斜* —— 输入已转义, 这里只认标记
+function mdInline(t) {
+  let h = esc(t);
+  h = h.replace(/`([^`]+)`/g, (_, c) => '<code>' + c + '</code>');
+  h = h.replace(/\*\*([\s\S]+?)\*\*/g, '<strong>$1</strong>');
+  // 链接只放行 http(s): —— javascript: 伪协议是另一条 XSS 路
+  h = h.replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g,
+                '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+  h = h.replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<em>$2</em>');
+  return h;
+}
+
+function mdRender(src) {
+  const lines = String(src || '').split('\n');
+  const out = [];
+  let i = 0;
+  while (i < lines.length) {
+    const ln = lines[i];
+    // 代码块 ```lang ... ```  (流式期间可能还没收到闭合行 —— 收到多少渲染多少)
+    if (/^\s*```/.test(ln)) {
+      const buf = [];
+      i++;
+      while (i < lines.length && !/^\s*```/.test(lines[i])) buf.push(lines[i++]);
+      i++;
+      out.push('<pre><code>' + esc(buf.join('\n')) + '</code></pre>');
+      continue;
+    }
+    if (!ln.trim()) { i++; continue; }
+    if (/^\s*(---|\*\*\*|___)\s*$/.test(ln)) { out.push('<hr>'); i++; continue; }
+    const h = /^(#{1,6})\s+(.*)$/.exec(ln);
+    if (h) {
+      const lv = h[1].length;
+      out.push('<h' + lv + '>' + mdInline(h[2]) + '</h' + lv + '>');
+      i++; continue;
+    }
+    // 引用块: 连续的 > 行并成一块 (截图里阿导整段发言就是这个形状)
+    if (/^\s*>\s?/.test(ln)) {
+      const buf = [];
+      while (i < lines.length && /^\s*>\s?/.test(lines[i])) {
+        buf.push(lines[i].replace(/^\s*>\s?/, ''));
+        i++;
+      }
+      out.push('<blockquote>' + mdRender(buf.join('\n')) + '</blockquote>');
+      continue;
+    }
+    // 表格: 必须有分隔行才算 —— 否则正文里一句带竖线的话会被误吞
+    if (/^\s*\|.*\|\s*$/.test(ln) && i + 1 < lines.length
+        && /^\s*\|?[\s:|-]+\|[\s:|-]*$/.test(lines[i + 1])) {
+      const cells = r => r.trim().replace(/^\||\|$/g, '').split('|').map(c => c.trim());
+      const head = cells(lines[i]);
+      i += 2;
+      const body = [];
+      while (i < lines.length && /^\s*\|.*\|\s*$/.test(lines[i])) body.push(cells(lines[i++]));
+      out.push('<div class="tw"><table><thead><tr>'
+        + head.map(c => '<th>' + mdInline(c) + '</th>').join('')
+        + '</tr></thead><tbody>'
+        + body.map(r => '<tr>' + r.map(c => '<td>' + mdInline(c) + '</td>').join('') + '</tr>').join('')
+        + '</tbody></table></div>');
+      continue;
+    }
+    // 有序 / 无序列表
+    const ordered = /^\s*\d+[.)]\s+/.test(ln);
+    if (ordered || /^\s*[-*+]\s+/.test(ln)) {
+      const tag = ordered ? 'ol' : 'ul';
+      const re = ordered ? /^\s*\d+[.)]\s+/ : /^\s*[-*+]\s+/;
+      const items = [];
+      while (i < lines.length && re.test(lines[i])) items.push(lines[i++].replace(re, ''));
+      out.push('<' + tag + '>' + items.map(x => '<li>' + mdInline(x) + '</li>').join('') + '</' + tag + '>');
+      continue;
+    }
+    // 段落: 吃到空行为止, 行内换行保留
+    const para = [];
+    while (i < lines.length && lines[i].trim()
+           && !/^\s*(#{1,6}\s|>|```|[-*+]\s|\d+[.)]\s)/.test(lines[i])
+           && !/^\s*(---|\*\*\*|___)\s*$/.test(lines[i])) para.push(lines[i++]);
+    if (para.length) out.push('<p>' + mdInline(para.join('\n')).replace(/\n/g, '<br>') + '</p>');
+    else i++;
+  }
+  return out.join('');
+}
+
+// 机器人正文一律走 markdown; 用户自己打的字保持原样 (他打什么就是什么)
+function setText(el, text, isUser) {
+  el.dataset.raw = text || '';
+  if (isUser) el.textContent = text || '';
+  else el.innerHTML = mdRender(text || '');
+}
+
+
 function msgEl(sender, text) {
   const isUser = sender === 'user', b = botOf(sender);
   const d = document.createElement('div');
@@ -132,18 +279,53 @@ function msgEl(sender, text) {
               + '<div class="txt"></div></div>';
   d.querySelector('.av').textContent = isUser ? '🙂' : b.emoji;
   d.querySelector('.who').textContent = isUser ? '你' : b.name;
-  d.querySelector('.txt').textContent = text || '';
+  setText(d.querySelector('.txt'), text, isUser);
   wrap.appendChild(d); scroll(true);
   return d;
 }
 
+// 工具行折叠 (2026-08-31 老板: "屏幕有限, 用户很难捕捉哪个专家正在工作")。
+// 一个工位随手就是十几步, 平铺开来能把整屏占满 —— 谁在干活反而看不出来了。
+// 收成一行: 「⚙ 第 N 步 · 正在做什么 ⌄」, 点开看全部。跑动中始终露出**最后一行**
+// (那才是"此刻在干嘛"), 收尾后自动收起。
+function toolBox(container) {
+  let box = container.querySelector(':scope > .toolbox');
+  if (box) return box;
+  box = document.createElement('div');
+  box.className = 'toolbox';
+  box.innerHTML = '<button class="th" type="button">'
+                + '<span class="dot"></span><span class="sum"></span>'
+                + '<svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor"'
+                + ' stroke-width="2"><path d="M6 9l6 6 6-6"/></svg></button>'
+                + '<div class="tl"></div>';
+  box.querySelector('.th').onclick = () => {
+    box.classList.toggle('open');
+    if (box.classList.contains('open')) scroll();
+  };
+  container.appendChild(box);
+  return box;
+}
+
 function toolRow(container, label) {
+  const box = toolBox(container);
+  const list = box.querySelector('.tl');
   const t = document.createElement('div');
   t.className = 'tool';
   t.innerHTML = '<span class="dot"></span><span class="t"></span>';
   t.querySelector('.t').textContent = label;
-  container.appendChild(t); scroll();
+  list.appendChild(t);
+  syncToolSummary(box);
+  scroll();
   return t;
+}
+
+// 摘要永远反映**最后一行** —— 用户要的是"此刻在干嘛", 不是"一共干了多少"
+function syncToolSummary(box) {
+  const rows = box.querySelectorAll('.tl > .tool');
+  const last = rows[rows.length - 1];
+  const n = rows.length;
+  box.querySelector('.sum').textContent =
+    (last ? last.querySelector('.t').textContent : '') + (n > 1 ? ` · ${n} 步` : '');
 }
 
 async function api(path, opt) {
@@ -185,6 +367,7 @@ async function open(room) {
     const el = msgEl(m.sender, m.text);
     (m.tools || []).forEach(s => {
       const t = toolRow(el.querySelector('.body'), s); t.classList.add('done');
+      syncToolSummary(t.closest('.toolbox'));
     });
   });
   Array.from($('rooms').children).forEach((el, i) =>
@@ -205,7 +388,14 @@ async function submit() {
   const bubbles = new Map(), tools = new Map();
   const bubbleFor = id => {
     if (!bubbles.has(id)) bubbles.set(id, msgEl(id, ''));
-    return bubbles.get(id);
+    const el = bubbles.get(id);
+    // 谁在工作要一眼看得出: 只有**最新出现**的那位挂 running, 前面的摘掉。
+    // 接力模式下这就等于"当前这一棒是谁" —— 屏幕有限, 这比堆一屏工具行有用。
+    if (!el.classList.contains('running')) {
+      wrap.querySelectorAll('.msg.bot.running').forEach(x => x.classList.remove('running'));
+      el.classList.add('running');
+    }
+    return el;
   };
   try {
     const r = await fetch('/api/rooms/' + cur.id + '/send', {
@@ -227,7 +417,11 @@ async function submit() {
         const ev = JSON.parse(frame.slice(6));
         const body = ev.bot ? bubbleFor(ev.bot).querySelector('.body') : null;
         if (ev.type === 'text') {
-          bubbleFor(ev.bot).querySelector('.txt').textContent += ev.text; scroll();
+          {
+            const el = bubbleFor(ev.bot).querySelector('.txt');
+            setText(el, (el.dataset.raw || '') + ev.text, false);
+            scroll();
+          }
         } else if (ev.type === 'tool') {
           tools.set(ev.bot + ':' + ev.id, toolRow(body, '正在' + ev.name));
         } else if (ev.type === 'result') {
@@ -237,6 +431,12 @@ async function submit() {
           const img = document.createElement('img');
           img.className = 'shot'; img.src = ev.data_uri; body.appendChild(img); scroll();
         } else if (ev.type === 'end') {
+          // 这一棒交了 —— 摘掉工作中标记, 工具组收起 (跑完了就不该再占屏)
+          const done = bubbles.get(ev.bot);
+          if (done) {
+            done.classList.remove('running');
+            done.querySelectorAll('.toolbox.open').forEach(b => b.classList.remove('open'));
+          }
           if (ev.note) $('hint').textContent = ev.note;
         } else if (ev.type === 'error') {
           const el = ev.bot ? bubbleFor(ev.bot) : msgEl('system', '');
@@ -280,6 +480,18 @@ $('newRoom').onclick = async () => {
   const d = await api('/api/rooms', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ members: m }),
+  });
+  if (d.room) { cur = d.room; await loadRooms(d.room.id); }
+};
+
+// 开新片: 剧组五个工位按接力顺序自动入群 —— 用户提一个想法就该开工, 不该先手工
+// 拉五个人, 更不该自己记住谁先谁后。
+$('newFilm').onclick = async () => {
+  const name = prompt('这部片叫什么？(可留空)', '') ?? null;
+  if (name === null) return;
+  const d = await api('/api/rooms/crew', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name }),
   });
   if (d.room) { cur = d.room; await loadRooms(d.room.id); }
 };

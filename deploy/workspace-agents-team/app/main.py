@@ -17,7 +17,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import agent, rooms
+from . import agent, rooms, tools
 
 WEB_DIR = pathlib.Path(__file__).resolve().parent.parent / "web"
 
@@ -84,6 +84,18 @@ async def create_room(request: Request) -> dict:
     return {"room": asdict(store.create_room(name, members))}
 
 
+@app.post("/api/rooms/crew")
+async def create_crew(request: Request) -> dict:
+    """开一部新片: 剧组五个工位按接力顺序入群, 房间是 relay 模式。
+
+    对应千问那个"自动组队" —— 用户提一个想法就该开工, 不该先手工拉五个人,
+    更不该自己记住谁先谁后。
+    """
+    body = await request.json() if await request.body() else {}
+    name = (body.get("name") or "").strip()
+    return {"room": asdict(store.create_crew_room(name))}
+
+
 @app.post("/api/rooms/{room_id}/members")
 async def set_members(room_id: str, request: Request) -> dict:
     """拉人进群 / 请人出群。
@@ -103,6 +115,46 @@ async def set_members(room_id: str, request: Request) -> dict:
 @app.get("/api/rooms/{room_id}/messages")
 def messages(room_id: str) -> dict:
     return {"messages": [asdict(m) for m in store.transcript(room_id)]}
+
+
+async def _run_relay(room: rooms.Room, model: str | None):
+    """接力: 按 members 顺序**逐棒**跑, 后一位看得见前一位这一轮刚说的话。
+
+    这是流水线成立的前提。并行模式下几个成员拿到的是同一份旧记录, 谁也看不见谁
+    —— 美术读不到导演刚写的讲戏本, 分镜读不到美术刚出的资产清单, 五个人对着
+    同一句"做个短剧"各说各话。接力把每一棒的产出**先落进记录再传棒**, 下一位
+    render_for 时自然就看见了。
+
+    两处会停:
+      · 有人调了 wait_for_user —— 人审闸。后面的工位这一轮不开工 (最典型的是
+        分镜交完镜头表: 下一棒就要烧钱出片了)。用工具而不是文本标记来判定,
+        是因为标记会漏会被改写, 而工具调用漏不了。
+      · 有人炸了 —— 半截的产物传下去只会让后面的人基于错的东西接着做。
+    """
+    for bot_id in room.members:
+        bot = store.bots.get(bot_id)
+        if bot is None:
+            continue
+        halted = False
+        try:
+            view = store.render_for(bot, room.id)
+            async for ev in agent.run_turn(bot.id, view, bot.model or model):
+                if ev["type"] == "end":
+                    text = (ev.get("text") or "").strip()
+                    used = ev.get("tools") or []
+                    if text:
+                        # **先落记录再传棒** —— 下一位的 render_for 要读得到
+                        store.add(room.id, ev["bot"], text, used)
+                    if any(tools.HALT_TOOL in str(t) for t in used):
+                        halted = True
+                yield ev
+        except Exception as e:  # noqa: BLE001 — 一棒炸了就停, 别让下游基于半成品接着做
+            yield {"type": "error", "bot": bot_id, "message": f"{type(e).__name__}: {e}"}
+            break
+        if halted:
+            yield {"type": "halted", "bot": bot_id}
+            break
+    store.save()
 
 
 async def _run_room(room: rooms.Room, model: str | None):
@@ -167,7 +219,8 @@ async def send(room_id: str, request: Request) -> StreamingResponse:
         async with _turn_lock:
             store.add(room_id, "user", text)
             store.save()
-            async for ev in _run_room(room, model):
+            runner = _run_relay if room.mode == "relay" else _run_room
+            async for ev in runner(room, model):
                 yield _sse(ev)
 
     return StreamingResponse(
