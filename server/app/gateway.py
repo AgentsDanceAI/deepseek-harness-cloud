@@ -429,7 +429,44 @@ def _sse_error_bytes(status: int, detail: bytes) -> bytes:
     return b"data: " + json.dumps(payload).encode() + b"\n\ndata: [DONE]\n\n"
 
 
-# --- Anthropic Messages passthrough (dsh web_search) ------------------------
+# --- Anthropic Messages ------------------------------------------------------
+
+
+def _is_web_search(body: object) -> bool:
+    """这一发是不是 dsh 的 web_search。
+
+    以前这个接口**无条件**当搜索处理 (只看 SEARCH_PROVIDER), 因为它当初就是为
+    web_search 建的。于是任何 Anthropic 客户端 (Claude Code 这类) 指过来跑正常
+    对话, 每一发都只会拿到一份搜索结果 —— 而且不报错, 看着像模型犯傻。
+    2026-08-31 评估接入 Claude Code 时发现。
+
+    dsh 发搜索有**两种**形状, 两种都要认 (漏一种就是把真搜索当对话转发出去,
+    上游没有 web_search 工具, 用户那边表现为搜索功能整个失灵):
+      1. tools 里带一个 name=web_search 的服务端工具;
+      2. 用户消息以 "Perform a web search for the query:" 开头 (zhipu_search
+         的 _QUERY_PREFIX 认的就是它)。
+    """
+    if not isinstance(body, dict):
+        return False
+    for t in body.get("tools") or []:
+        if not isinstance(t, dict):
+            continue
+        if t.get("name") == "web_search" or str(t.get("type", "")).startswith("web_search"):
+            return True
+    for m in body.get("messages") or []:
+        if not isinstance(m, dict) or m.get("role") != "user":
+            continue
+        c = m.get("content")
+        text = (
+            c
+            if isinstance(c, str)
+            else " ".join(
+                b.get("text", "") for b in (c or []) if isinstance(b, dict) and b.get("type") == "text"
+            )
+        )
+        if zhipu_search._QUERY_PREFIX.match(text or ""):
+            return True
+    return False
 
 
 @router.post("/anthropic/v1/messages")
@@ -448,7 +485,11 @@ async def anthropic_messages(request: Request, user: dict = Depends(resolve_user
     # Zhipu-backed web_search: translate the Anthropic request to a Zhipu
     # search call and synthesize the native result blocks dsh expects. Avoids
     # DeepSeek's paid search endpoint entirely.
-    if config.SEARCH_PROVIDER == "zhipu":
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        parsed = None
+    if config.SEARCH_PROVIDER == "zhipu" and _is_web_search(parsed):
         if not config.ZHIPU_SEARCH_API_KEY:
             raise HTTPException(503, "search_not_configured")
         try:
@@ -508,14 +549,19 @@ async def anthropic_messages(request: Request, user: dict = Depends(resolve_user
             known_output = max(known_output, fallback_output)
         inp = int(u.get("input_tokens") or 0)
         out = known_output
-        amount = config.SEARCH_CALL_CREDITS
+        # 这条路是**普通对话**的转发 (搜索走上面那个分支, 自己结自己的账)。
+        # 早先这里写死成 kind="search" + 搜索固定费 + 默认模型的价 —— 那是整个
+        # 接口只服务 web_search 时代的遗留。真跑对话的话, 用户会被按默认模型
+        # 计价再加一笔搜索费, 而他用的可能是贵十倍的 claude-opus-5。
+        billed_model = str((parsed or {}).get("model") or "") or model_catalog.default_model()
+        amount = 0
         if inp or out:
-            amount += model_catalog.charge_credits(model_catalog.default_model(), inp, 0, out)
+            amount = model_catalog.charge_credits(billed_model, inp, 0, out)
         credits.spend(
             user["id"],
             amount,
-            kind="search",
-            model="web_search",
+            kind="llm",
+            model=billed_model,
             device_id=user.get("device_id", ""),
             uncached_input=inp,
             output=out,
