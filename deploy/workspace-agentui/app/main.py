@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
 import pathlib
@@ -23,7 +24,7 @@ import shlex
 
 import httpx
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from . import adapters, sessions, workspace_fs
@@ -419,6 +420,34 @@ async def terminal_ws(ws: WebSocket) -> None:
 app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")
 
 
+def _asset_tag() -> str:
+    """本次镜像里前端文件的指纹, 拼在静态资源 URL 后面。
+
+    **不加这个的话新版发不出去**: app.js / style.css 是固定文件名, 内容改了
+    URL 不变, 而 StaticFiles 默认发 max-age=14400 —— 浏览器四小时内一直用旧的。
+    2026-08-31 实测踩到: 线上明明已经是 ttyd 版, 老板浏览器里跑的还是上一版
+    手写终端, 报的是一句早就删掉的错误信息, 而两边都看不出是缓存。
+    (同一天在 CloudCLI 那边踩的是它的孪生兄弟: 带令牌的页面被缓存重放。)
+    """
+    h = hashlib.sha256()
+    for name in ("app.js", "style.css", "index.html"):
+        f = WEB_DIR / name
+        try:
+            h.update(f.read_bytes())
+        except OSError:
+            pass
+    return h.hexdigest()[:12]
+
+
+_ASSET_TAG = _asset_tag()
+
+
 @app.get("/")
-def index() -> FileResponse:
-    return FileResponse(WEB_DIR / "index.html")
+def index() -> HTMLResponse:
+    html = (WEB_DIR / "index.html").read_text("utf-8")
+    html = html.replace("/static/app.js", f"/static/app.js?v={_ASSET_TAG}")
+    html = html.replace("/static/style.css", f"/static/style.css?v={_ASSET_TAG}")
+    html = html.replace("/static/vendor/marked.js", f"/static/vendor/marked.js?v={_ASSET_TAG}")
+    # 首页本身**永不缓存** —— 它是唯一带着指纹的入口, 它被缓存住的话指纹就永远
+    # 更新不了, 加指纹这件事整个失效。
+    return HTMLResponse(html, headers={"Cache-Control": "no-store"})
