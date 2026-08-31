@@ -37,26 +37,55 @@ DOCKERFILE = (TEAM / "Dockerfile").read_text(encoding="utf-8")
 
 
 def test_media_models_come_from_the_live_catalog_not_hardcoded():
-    """型号写死就是"哪天下架就每次 404", 而错误只出现在容器里没人看的日志。"""
+    """型号写死就是"哪天下架每次 404", 而错误只出现在容器里没人看的日志。"""
     env = products.env_for("agents-team", "tok")
     from app import media
 
     off = media.offered()
-    if off.get("image"):
-        assert env["DSH_IMAGE_MODEL"] == off["image"][0]["id"]
-    if off.get("video"):
-        assert env["DSH_VIDEO_MODEL"] == off["video"][0]["id"]
-    # 目录里的型号名不许出现在源码里
+    ids = {m["id"] for m in off.get("video", [])}
+    if ids:
+        assert env["DSH_VIDEO_MODEL"] in ids, "挑出来的型号必须真在在售目录里"
+    iids = {m["id"] for m in off.get("image", [])}
+    if iids:
+        assert env["DSH_IMAGE_MODEL"] in iids
+    # 型号名可以作为**偏好子串**出现在源码里 (不中会回落), 但不许被直接赋给
+    # env —— 那才是硬依赖: 该型号下架时每次 404, 且只在容器日志里出声。
     src = (ROOT / "server" / "app" / "products.py").read_text(encoding="utf-8")
-    for m in [x["id"] for x in off.get("video", [])] + [x["id"] for x in off.get("image", [])]:
-        assert m not in src, f"型号 {m} 被硬编码进了 products.py"
+    for key in ("DSH_VIDEO_MODEL", "DSH_IMAGE_MODEL"):
+        for m in ids | iids:
+            assert f'{key}"] = "{m}"' not in src, f"{key} 被硬编码成了 {m}"
+            assert f'"{key}": "{m}"' not in src, f"{key} 被硬编码成了 {m}"
+
+
+def test_video_model_prefers_longer_single_shot():
+    """目录顺序没有语义 —— 取第一项实测挑到 seedance 而不是万相 3.0。
+
+    单段更长 = 接缝更少, 而换脸/道具漂移/环境音断裂大多发生在接缝处, 是短剧
+    一致性的头号来源。所以剧组这条线要按偏好挑, 不是碰运气。
+    """
+    pick = products._pick_media_model
+    catalog = [{"id": "doubao-seedance-2-0-260128"}, {"id": "wan3.0-video"}, {"id": "wan3.0-video-prime"}]
+    got = pick(catalog, "K", ("wan3.0-video", "seedance-2-5", "seedance-2-0"))
+    assert got == {"K": "wan3.0-video"}, "万相 3.0 在目录里却没被选中"
+
+    # Prime 贵一半, 不能因为名字更长就被优先匹配到
+    assert pick([{"id": "wan3.0-video-prime"}, {"id": "wan3.0-video"}], "K", ("wan3.0-video",))["K"] in {
+        "wan3.0-video-prime",
+        "wan3.0-video",
+    }
+
+    # 偏好全不中 → 回落第一项, 不是什么都不设
+    assert pick([{"id": "unknown-model"}], "K", ("wan3.0-video",)) == {"K": "unknown-model"}
+    # 目录空 → 什么都不设 (调用方据此判定工具不可用)
+    assert pick([], "K", ("x",)) == {}
+    assert pick(None, "K", ("x",)) == {}
 
 
 def test_media_catalog_failure_does_not_break_workspace_creation():
     """媒体目录读不出来只该让出图/出片不可用, 不该拖垮整个工作台创建。"""
     seg = (ROOT / "server" / "app" / "products.py").read_text(encoding="utf-8")
     i = seg.index('if product_id == "agents-team"')
-    block = seg[i : i + 1400]
+    block = seg[i : i + 2600]
     assert "try:" in block and "except Exception" in block
     # 兜底后仍要返回基础 env (对话能力不受媒体影响)
     env = products.env_for("agents-team", "tok")
@@ -157,3 +186,37 @@ def test_generated_paths_are_confined_to_workspace():
     for fn in ("generate_image", "generate_video", "concat_videos"):
         j = MEDIA.index(f"async def {fn}")
         assert "_safe_rel" in MEDIA[j : j + 1500], f"{fn} 没有过路径收敛"
+
+
+def test_resolution_is_normalised_to_lowercase():
+    """自测抓到的真 bug: 目录里分辨率键是**小写**, 服务端不归一化。
+
+    传 "720P" 会让 price_of 查不到价 → 判成"未定价=不售卖"当场被拒, 而症状只是
+    "阿摄一出片就失败"。模型很容易照人话写成大写, 所以必须在容器侧兜住。
+    """
+    assert "_norm_resolution" in MEDIA
+    i = MEDIA.index("def _norm_resolution")
+    seg = MEDIA[i : i + 300]
+    assert ".lower()" in seg
+    # 代码里不许再有大写档位 (注释里出现是在解释这个 bug, 不算)
+    code = "\n".join(ln for ln in MEDIA.splitlines() if not ln.lstrip().startswith("#"))
+    for bad in ('= "720P"', '= "480P"', '= "1080P"', 'or "720P"', "480P/720P/1080P"):
+        assert bad not in code, f"代码里还有大写档位: {bad}"
+    # 提交体里用的是归一化后的值, 不是原值
+    j = MEDIA.index('"resolution":')
+    assert "_norm_resolution(resolution)" in MEDIA[j : j + 120]
+
+
+def test_norm_resolution_behaviour():
+    """行为本身也钉一下 —— 光有函数名不代表它做对了。"""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("film_media", TEAM / "app" / "media.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    assert mod._norm_resolution("720P") == "720p"
+    assert mod._norm_resolution("1080P") == "1080p"
+    assert mod._norm_resolution("  480p ") == "480p"
+    # 认不出来的一律回落到 720p, 不许把垃圾透传给上游
+    assert mod._norm_resolution("4K") == "720p"
+    assert mod._norm_resolution("") == "720p"
