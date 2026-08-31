@@ -48,6 +48,12 @@ ENABLED_CLIS = [c for c in os.environ.get("DSH_ENABLED_CLIS", DEFAULT_CLI).split
 app = FastAPI(title="DSH Cloud Agent")
 
 
+def _agent_exe() -> str:
+    """这一格默认驱动的那个 CLI 的可执行文件。"""
+    ad = adapters.ADAPTERS.get(DEFAULT_CLI)
+    return ad().exe if ad else "/usr/local/bin/claude"
+
+
 def _drop(argv: list[str]) -> list[str]:
     """把 argv 包一层 setpriv, 降到非 root 跑。
 
@@ -329,8 +335,13 @@ async def _ensure_ttyd() -> None:
         "--max-clients", "0",
         "--cwd", WORKSPACE,
         # **启动命令是必填的** —— 漏了它 ttyd 直接 "missing start command" 退出,
-        # 而我们这边只看到反代 503。-l 让它是登录 shell, 用户的 PATH/别名才对。
-        "bash", "-l",
+        # 而我们这边只看到反代 503。
+        #
+        # 直接进这一格对应的 agent, 不落一个要用户自己敲命令的 shell: 这个产品
+        # 卖的就是"点开就能用", 让人先认出提示符再想起来敲 claude 是多一道坎。
+        # agent 退出后 `exec bash -l` 兜住 —— 否则退出即断线, 用户想在同一个终端
+        # 里跑个 git 都得重开标签页。
+        "bash", "-lc", f"{_agent_exe()}; exec bash -l",
     ]
     if AGENT_UID:
         # 与 agent 子进程同一个身份: 用户在终端里手敲 claude 时会撞上同一堵
