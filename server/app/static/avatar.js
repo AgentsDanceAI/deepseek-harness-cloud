@@ -16,7 +16,7 @@
   const RT_CODEC = 'video/mp4; codecs="avc1.42E01E, mp4a.40.2"';
   const st = {
     sess: null, cfg: null, ws: null, ear: null, history: [], sid: 0,
-    ms: null, sb: null, queue: [], playing: false,
+    ms: null, sb: null, url: null, queue: [], speaking: false,
     t0: null, timer: null, rate: 0,
   };
 
@@ -99,6 +99,13 @@
     v.style.width = crop.w * 100 + "%";
     v.style.height = crop.h * 100 + "%";
   }
+  $("#avSay").addEventListener("keydown", (e) => {
+    if (e.key !== "Enter") return;
+    const said = e.target.value.trim();
+    e.target.value = "";
+    if (said) reply(said);
+  });
+
   // 换形象要**同时**换背景和重算视频层位置 —— 只换一个就是错位。
   $("#avPerson").addEventListener("change", () => { loadBg(); layout(); });
 
@@ -128,17 +135,47 @@
   function openMedia() {
     const MS = mediaSource();
     if (!MS) { status(t("avatar.no_mse", "这个浏览器不支持实时视频，换 Chrome 或新版 Safari"), true); return false; }
-    st.ms = new MS();
     const v = $("#avVideo");
-    v.src = URL.createObjectURL(st.ms);
+    // ManagedMediaSource (Safari) 硬性要求关掉远程投播, 否则 addSourceBuffer 直接抛。
+    if (!window.MediaSource?.isTypeSupported?.(RT_CODEC)) v.disableRemotePlayback = true;
+    st.ms = new MS();
+    st.url = URL.createObjectURL(st.ms);
+    v.src = st.url;
     st.ms.addEventListener("sourceopen", () => {
       // mode="sequence": 我们灌的是一段段独立的 fMP4, 让浏览器按到达顺序接续,
       // 不去解读各段自己的时间戳 (那些段之间本来就不连续)。
       st.sb = st.ms.addSourceBuffer(RT_CODEC);
       st.sb.mode = "sequence";
+      // ⚠️ 直播流**必须**显式 duration=Infinity。不设的话 MediaSource 的 duration
+      // 等于已缓冲的末尾, 播到那儿浏览器就判定"流结束"派发 ended, 此后新到的分片
+      // 只进缓冲不再播 —— 表现是字节在收、计时在走、账也在扣, 画面一帧不动。
+      // 她说话是不定长的续写流, 语义上本就没有 duration。
+      try { st.ms.duration = Infinity; } catch { /* 老实现不认 */ }
       st.sb.addEventListener("updateend", pump);
+      pump();
     }, { once: true });
+    // 在**点击这一跳里**起播: 自动播放策略认的是用户手势, 等到第一帧再 play
+    // 就晚了 (而失败是静默的)。
+    v.play().catch(() => { /* 数据还没来, 到货后 pump 里再试 */ });
     return true;
+  }
+
+  /* 打断她 = **整管重建 MSE**, 不只是清队列: 半路截断的 fMP4 会把 SourceBuffer
+     弄进错误态, 之后灌什么都不播。重建的同时画面回到静止背景 —— 那正是"她闭嘴"
+     该有的样子 (静止图就是模型的中性帧, 与视频同源)。 */
+  function rebuildMedia() {
+    const v = $("#avVideo");
+    if (st.url) { try { URL.revokeObjectURL(st.url); } catch { /* 忽略 */ } st.url = null; }
+    st.sb = null; st.ms = null; st.queue = [];
+    try { v.pause(); v.removeAttribute("src"); v.load(); } catch { /* 忽略 */ }
+    showVideo(false);
+    return openMedia();
+  }
+
+  /* 她不说话时露静止背景, 说话时才盖上视频层。不切的话最后一帧会僵在那儿。 */
+  function showVideo(on) {
+    $("#avVideo").style.opacity = on ? "1" : "0";
+    st.speaking = on;
   }
 
   function pump() {
@@ -173,8 +210,9 @@
       if (typeof e.data !== "string") {
         st.queue.push(new Uint8Array(e.data));
         pump();
+        if (!st.speaking) showVideo(true);
         const v = $("#avVideo");
-        if (v.paused) v.play().catch(() => { /* 需要用户手势, 已经点过了 */ });
+        if (v.paused) v.play().catch(() => { /* 起播被拒, 下一块再试 */ });
         if (!st.t0) startTimer();
         return;
       }
@@ -189,6 +227,8 @@
         status(t("avatar.busy", "通道占线，稍后再试"), true); stopCall();
       } else if (m.type === "error") {
         status(m.message || t("avatar.error", "出错了"), true);
+      } else if (m.type === "end" || m.type === "idle") {
+        showVideo(false);                    // 说完了, 回静止背景
       } else if (m.type === "ready") {
         // 上游接通了才开始听 —— 早于这一刻识别出来的话没地方发。
         status(t("avatar.listening", "说话吧，她在听"));
@@ -204,8 +244,9 @@
      做对的一件事 (自己按静音时长切, 要么把人话腰斩, 要么等到尴尬)。
      代价是 Firefox 没有 —— 那种情况下明说, 别让人对着屏幕干等。 */
   function listen() {
+    $("#avSay").hidden = false;              // 打字这条路通话期间一直开着
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SR) { status(t("avatar.no_asr", "这个浏览器没有语音识别 — 请用 Chrome / Safari 打开"), true); return; }
+    if (!SR) { status(t("avatar.no_asr", "这个浏览器没有语音识别 — 打字也可以"), true); return; }
     const ear = new SR();
     ear.lang = document.documentElement.lang === "en" ? "en-US" : "zh-CN";
     ear.continuous = true;
@@ -226,7 +267,12 @@
      出声, 而且她说的已经是上一轮的答案了。 */
   async function reply(said) {
     if (!st.ws) return;
-    try { st.ws.send(JSON.stringify({ type: "stop" })); } catch { /* 连接没了 */ }
+    // 她还在说就真的打断: 发 stop 并**重建 MSE** —— 只发 stop 的话半截 fMP4 会
+    // 把 SourceBuffer 弄进错误态, 后面一句也播不出来。
+    if (st.speaking) {
+      try { st.ws.send(JSON.stringify({ type: "stop" })); } catch { /* 连接没了 */ }
+      rebuildMedia();
+    }
     st.history.push({ role: "user", content: said });
     status(said);
     const r = await api("/api/avatar/say", {
@@ -257,6 +303,7 @@
 
   function stopCall() {
     if (st.ws) { try { st.ws.close(); } catch { /* 忽略 */ } st.ws = null; }
+    $("#avSay").hidden = true;
     if (st.ear) { const e = st.ear; st.ear = null; e.onend = null; try { e.stop(); } catch { /* 已停 */ } }
     st.history = [];
     if (st.timer) { clearInterval(st.timer); st.timer = null; }
