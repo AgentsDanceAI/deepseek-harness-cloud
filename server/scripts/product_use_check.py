@@ -64,20 +64,19 @@ USE = {
         "send": "只回我两个字",
         # 判据落在"发出去的话进了对话" + 页面长出了新内容 (见 driver 里的 grew)。
         "want": ["只回我两个字"],
-        # 连上又断开也不算能用。**这条目前是红的** —— 见 docs 里那条已知问题:
-        # 沙箱与模型两跳都实测通 (接口建对话 10 秒 READY), 卡在前端那一跳,
-        # 而浏览器控制台干净、没有失败请求、连 WebSocket 都没发起。
-        "fail_extra2": ["已断开连接"],
-        # 沙箱起不来时页面停在"等待沙盒", 那不算能用 —— 判据要落在它真回了话上。
-        # "正在连接…"同样不算能用 —— 它比"等待沙盒"晚一步, 但用户照样干不了事。
+        # 模型那一跳断了的样子: 它把上游异常原样贴在对话里。这几条**必须当失败**,
+        # 否则"页面长出新东西"会把一条报错当成回话。
+        "fail_extra2": ["LLMAuthenticationError", "AuthenticationError", "LLM profile"],
+        # 首启向导没免掉的样子 (那是我们注入前端要解决的事), 以及模型没配上时
+        # 它自己给的那句提示。
         # **"加载中"不能当失败词**: 右侧那块面板常驻这三个字, 拿它判等于永远红。
-        "fail_extra": ["等待沙盒", "waiting for sandbox", "正在连接"],
-        "why": "点新对话就 500: Agent Server Failed to start properly / 一直等待沙盒",
+        "fail_extra": ["isn't set up yet", "Add LLM API key", "Accept the terms"],
+        "why": "首启向导挡着 / 建对话报 LLM profile not found",
     },
 }
 
 DRIVER = r"""
-import json, pathlib
+import json, pathlib, re
 from playwright.sync_api import sync_playwright
 
 spec = json.loads(pathlib.Path("/work/spec.json").read_text())
@@ -142,40 +141,32 @@ with sync_playwright() as p:
                 e["text"] = page.inner_text("body")[-1500:]
 
             elif kind == "openhands":
-                # **有现成对话就点它**。沙箱是**按对话**建的, 点"新对话"要现建一个
-                # (实测四分钟以上); 而容器启动时已经预热了一个 (见
-                # products._openhands_boot), 侧栏里就有 —— 用户回到工作台看到的
-                # 也是它。这条才是常态路径。
-                try:
-                    page.get_by_text("Conversation", exact=False).first.click(timeout=8000)
-                except Exception:
-                    page.get_by_role("button", name="新对话").first.click(timeout=15000)
-                # 沙箱起来要时间, 起来之后还要真发一句、等它回。**不能只等"页面
-                # 变了"就算过** —— "等待沙盒 / 加载中" 也是变了, 而那正是坏的样子。
-                # 冷启动 + 起沙箱 + 前端连上, 实测要 **270 秒**。等不够久就会把
-                # "还在起"报成"起不来" —— 那是假故障, 比漏报更耽误事 (为这个白判了
-                # 好几轮)。给到 8 分钟, 反正它自己界面上也写着"这可能需要 1-2 分钟"。
-                for _ in range(160):
-                    page.wait_for_timeout(3000)
-                    body = page.inner_text("body")
-                    if all(w not in body for w in ("等待沙盒", "Waiting for sandbox", "正在连接")):
-                        break
-                try:
-                    box = page.get_by_placeholder("你想要构建什么?").first
-                    box.click(timeout=10000)
-                    box.fill(prod["send"])
-                    page.keyboard.press("Enter")
-                except Exception:
-                    # 输入框还没出来 —— 让判读去看 text 里的"等待沙盒"报错
-                    pass
-                # 发完之后**盯着页面长没长出新东西** —— 那才是"她回话了"。
-                # 光看"没有失败词"不够: 消息没发出去时页面也很干净。
+                # agent-canvas (all-in-one) 的首页就是一个输入框, 打字发出去即建
+                # 对话 —— 不再有"沙箱"这一层 (小镜像那套是应用 + 子进程沙箱, 前端
+                # 拿到的是 http://localhost:<端口>, 托管部署下浏览器连的是用户
+                # 自己的机器, 永远连不上)。所以这里不再等沙箱, 也没有侧栏预热对话。
+                #
+                # 两个**实测**出来的坑, 都会让能用的产品看起来是坏的:
+                #   1. 输入框不是 <textarea> 而是 contenteditable —— fill() 直接抛;
+                #   2. **回车不发送**。敲完 Enter 那句话原地不动躺在框里, 页面
+                #      一点没变, 看起来就像"发不出去"。要点右边那个圆形 ↑。
+                box = page.locator("[contenteditable='true']").first
+                box.click(timeout=60000)
+                page.keyboard.type(prod["send"])
+                page.wait_for_timeout(500)
                 before = len(page.inner_text("body"))
-                for _ in range(40):
+                # 提交键没有可见文字, 按可及名字找; 找不到就回退到"输入框右边最近
+                # 的那个按钮", 别用坐标猜。
+                try:
+                    page.get_by_role("button", name=re.compile("send|submit|发送", re.I)).first.click(timeout=8000)
+                except Exception:
+                    box.press("Meta+Enter")
+                # 建对话 + 模型作答。冷启动时第一句慢, 给到 5 分钟。
+                for _ in range(60):
                     page.wait_for_timeout(5000)
                     if len(page.inner_text("body")) > before + 20:
                         break
-                page.wait_for_timeout(5000)
+                page.wait_for_timeout(8000)
                 e["text"] = page.inner_text("body")[-2000:]
                 e["grew"] = len(page.inner_text("body")) - before
 
