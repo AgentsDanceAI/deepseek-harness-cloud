@@ -245,6 +245,19 @@ def test_norm_resolution_behaviour():
 MAIN = (TEAM / "app" / "main.py").read_text(encoding="utf-8")
 
 
+def _fn(src: str, name: str) -> str:
+    """取一个顶层函数的完整正文。
+
+    别用固定字符数切片: 函数一长断言就假红 (2026-08-31 加续跑时四条集体红,
+    全是 _run_relay 从 2200 长到 2553 字符, 不是真回归)。
+    """
+    i = src.index(name)
+    j = src.find("\nasync def ", i + len(name))
+    k = src.find("\ndef ", i + len(name))
+    ends = [x for x in (j, k) if x > 0]
+    return src[i : min(ends)] if ends else src[i:]
+
+
 def test_crew_room_is_relay_not_parallel():
     """顺序即依赖: 讲戏本 → 角色资产 → 镜头表 →(人审)→ 片段 → 成片。"""
     assert 'CREW = ("director", "artist", "storyboard", "videographer", "editor")' in ROOMS
@@ -255,13 +268,14 @@ def test_crew_room_is_relay_not_parallel():
 
 def test_relay_writes_each_turn_before_passing_the_baton():
     """接力的**全部要害**: 先落记录再传棒, 下一位 render_for 才读得到。"""
-    i = MAIN.index("async def _run_relay")
-    seg = MAIN[i : i + 2200]
+    seg = _fn(MAIN, "async def _run_relay")
     add_at = seg.index("store.add(room.id, ev[")
     render_at = seg.index("store.render_for(bot, room.id)")
     # render 在循环体开头, add 在同一轮的 end 事件里 —— 两者都在, 且循环是逐棒的
     assert add_at > render_at
-    assert "for bot_id in room.members" in seg, "必须按成员顺序逐棒, 不是并发"
+    # 逐棒 = 按成员顺序取下标跑 (续跑要从中间起, 所以是带下标的形式)
+    assert "for idx in range(start, len(members))" in seg, "必须按成员顺序逐棒, 不是并发"
+    assert "members[idx]" in seg
     assert "asyncio.create_task" not in seg, "接力里不许再起并发任务"
 
 
@@ -269,24 +283,22 @@ def test_halt_is_a_tool_not_a_prompt_hope():
     """闸门靠工具调用判定 —— 文本标记会漏、会被改写、会混进正文。"""
     assert 'HALT_TOOL = "wait_for_user"' in TOOLS
     assert "async def wait_for_user" in TOOLS
-    i = MAIN.index("async def _run_relay")
-    seg = MAIN[i : i + 2200]
+    seg = _fn(MAIN, "async def _run_relay")
     assert "tools.HALT_TOOL" in seg, "调度器没有按工具判定叫停"
-    assert "break" in seg
+    assert "return" in seg, "叫停后必须真的不再往下传棒"
 
 
 def test_halted_stops_downstream_stages():
-    i = MAIN.index("async def _run_relay")
-    seg = MAIN[i : i + 2200]
+    seg = _fn(MAIN, "async def _run_relay")
     assert '"type": "halted"' in seg, "叫停要有事件, 否则前端不知道在等人"
 
 
 def test_one_stage_failure_does_not_feed_downstream():
     """一棒炸了就停 —— 半截产物传下去只会让后面基于错的东西接着做。"""
-    i = MAIN.index("async def _run_relay")
-    seg = MAIN[i : i + 2200]
+    seg = _fn(MAIN, "async def _run_relay")
     j = seg.index("except Exception")
-    assert "break" in seg[j : j + 300]
+    # break 还是 return 是实现细节, 要钉的是"不再往下传棒"
+    assert "return" in seg[j : j + 400], "一棒炸了还继续跑下游"
 
 
 def test_parallel_mode_survives():
@@ -394,3 +406,47 @@ def test_finished_stage_stops_occupying_screen():
     seg = WEB[i : i + 500]
     assert "classList.remove('running')" in seg
     assert "toolbox.open" in seg
+
+
+# ── 续跑 (2026-08-31 老板: "中间还会停顿吗") ────────────────────────────
+# 查出来两处**非设计**的停顿, 都比"停一下"更糟:
+#   · 用户回话后接力从头重来 —— 美术会照字面再出一遍图, 那是真花钱
+#   · 三十步通用上限把逐镜头出片的工位掐在半路 (三分钟片 ≈ 三四十个镜头)
+AGENT = (TEAM / "app" / "agent.py").read_text(encoding="utf-8")
+
+
+def test_relay_resumes_instead_of_restarting():
+    """人审后从**下一棒**续跑 —— 重跑美术 = 再花一遍出图钱。"""
+    assert "resume_at" in ROOMS, "Room 没有记住停在哪一棒"
+    seg = _fn(MAIN, "async def _run_relay")
+    assert "room.resume_at" in seg
+    assert "for idx in range(start, len(members))" in seg, "还是从头遍历"
+    assert '"type": "resume"' in seg, "续跑要有事件, 否则用户不知道跳过了几棒"
+
+
+def test_capped_stage_resumes_itself_not_the_next():
+    """撞上限 = 这一棒没干完 → 重跑**本棒**; 人审 = 交了活 → 跑**下一棒**。"""
+    seg = _fn(MAIN, "async def _run_relay")
+    assert "nxt = idx if capped_here else idx + 1" in seg
+    assert 'ev.get("capped")' in seg, "没有识别撞上限"
+
+
+def test_failed_stage_resumes_itself():
+    seg = _fn(MAIN, "async def _run_relay")
+    j = seg.index("except Exception")
+    assert "room.resume_at = idx" in seg[j : j + 300], "炸了要停在本棒"
+
+
+def test_shot_by_shot_roles_get_a_higher_step_cap():
+    """三分钟片 ≈ 三四十个镜头, 三十步必然掐在半路。"""
+    assert "LONG_RUN_BOTS" in AGENT
+    assert "videographer" in AGENT and "artist" in AGENT
+    assert "max_steps = LONG_RUN_STEPS if bot_id in LONG_RUN_BOTS else MAX_STEPS" in AGENT
+    # 通用上限不许为了一个特例整体放开 —— 它是防跑飞的
+    assert 'os.environ.get("AGENTS_TEAM_MAX_STEPS", "30")' in AGENT
+
+
+def test_capped_turn_tells_the_user_it_is_unfinished():
+    """被掐时正文往往看着像正常收尾 —— 必须说清楚"还没干完"。"""
+    assert "回一句「继续」可以接着干" in AGENT
+    assert '"capped": True' in AGENT
