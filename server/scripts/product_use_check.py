@@ -242,6 +242,9 @@ with sync_playwright() as p:
                 page.screenshot(path=str(out / (prod["id"] + ".png")))
             except Exception:
                 pass
+        # **把这一轮真正问的那道题带回去**: 题目每次随机, 而判读那边看到的
+        # USE 表里还是模板 ("{sum}") —— 不带回来就是拿模板去比对, 永远不匹配。
+        e["want"] = prod.get("want")
         results.append(e)
         page.close()
     browser.close()
@@ -356,7 +359,8 @@ def main() -> int:
         text = (e.get("text") or "").lower()
         extra = (USE[pid].get("fail_extra") or []) + (USE[pid].get("fail_extra2") or [])
         hits = [f for f in FAIL_PHRASES + extra if f in text]
-        want = USE[pid].get("want")
+        # 优先用**这一轮真正问的那道题** (随机出的); 回退到表里的写法。
+        want = e.get("want") or USE[pid].get("want")
         # 逐段查, 且**把空白全抹掉再比** —— 终端里的换行/折行不该算差异
         # (第一版拿整串比, 把 "USE-OK\n/opt/venv-..." 判成了失败, 而产品是好的)。
         flat = "".join(text.split())
