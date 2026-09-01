@@ -64,6 +64,10 @@ USE = {
         "send": "只回我两个字",
         # 判据落在"发出去的话进了对话" + 页面长出了新内容 (见 driver 里的 grew)。
         "want": ["只回我两个字"],
+        # 连上又断开也不算能用。**这条目前是红的** —— 见 docs 里那条已知问题:
+        # 沙箱与模型两跳都实测通 (接口建对话 10 秒 READY), 卡在前端那一跳,
+        # 而浏览器控制台干净、没有失败请求、连 WebSocket 都没发起。
+        "fail_extra2": ["已断开连接"],
         # 沙箱起不来时页面停在"等待沙盒", 那不算能用 —— 判据要落在它真回了话上。
         # "正在连接…"同样不算能用 —— 它比"等待沙盒"晚一步, 但用户照样干不了事。
         # **"加载中"不能当失败词**: 右侧那块面板常驻这三个字, 拿它判等于永远红。
@@ -263,7 +267,8 @@ def main() -> int:
             bad += 1
             continue
         text = (e.get("text") or "").lower()
-        hits = [f for f in FAIL_PHRASES + (USE[pid].get("fail_extra") or []) if f in text]
+        extra = (USE[pid].get("fail_extra") or []) + (USE[pid].get("fail_extra2") or [])
+        hits = [f for f in FAIL_PHRASES + extra if f in text]
         want = USE[pid].get("want")
         # 逐段查, 且**把空白全抹掉再比** —— 终端里的换行/折行不该算差异
         # (第一版拿整串比, 把 "USE-OK\n/opt/venv-..." 判成了失败, 而产品是好的)。
