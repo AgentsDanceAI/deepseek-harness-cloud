@@ -174,19 +174,30 @@ def test_a_websocket_from_another_site_is_refused(secret, monkeypatch):
     assert accounts._cookie_write_allowed(_EvilWS()) is False
 
 
-def _fake_upstream(monkeypatch, capture: dict):
-    """把上游 chat/completions 换成假的, 把请求体留下来看。"""
+def _fake_upstream(monkeypatch, capture: dict, deltas=("你好呀。", "今天怎么样？")):
+    """把上游 chat/completions 换成假的**流式**响应, 把请求体留下来看。"""
+    import json as _json
+
     import httpx
 
     class _R:
         status_code = 200
 
-        @staticmethod
-        def json():
-            return {
-                "choices": [{"message": {"content": "我在呢。"}}],
-                "usage": {"prompt_tokens": 120, "completion_tokens": 8},
-            }
+        async def aiter_lines(self):
+            for d in deltas:
+                yield "data: " + _json.dumps({"choices": [{"delta": {"content": d}}]}, ensure_ascii=False)
+            yield "data: " + _json.dumps({"usage": {"prompt_tokens": 120, "completion_tokens": 8}})
+            yield "data: [DONE]"
+
+        async def aread(self):
+            return b""
+
+    class _Stream:
+        async def __aenter__(self):
+            return _R()
+
+        async def __aexit__(self, *a):
+            return False
 
     class _C:
         async def __aenter__(self):
@@ -195,16 +206,37 @@ def _fake_upstream(monkeypatch, capture: dict):
         async def __aexit__(self, *a):
             return False
 
-        async def post(self, url, json=None, headers=None):
+        def stream(self, method, url, json=None, headers=None):
             capture["url"] = url
             capture["body"] = json
-            return _R()
+            return _Stream()
 
     monkeypatch.setattr(httpx, "AsyncClient", lambda *a, **kw: _C())
 
 
-def test_say_replies_and_bills(secret, monkeypatch):
-    """她说什么由服务端出, 并且**照常计费** —— 否则通话里的模型消耗是白送的。"""
+def _say(client, **body):
+    """打一次 /api/avatar/say, 把 SSE 里的句子收成一个列表。"""
+    import json as _json
+
+    r = client.post("/api/avatar/say", json=body)
+    assert r.status_code == 200, r.text
+    out = []
+    for line in r.text.splitlines():
+        if not line.startswith("data: "):
+            continue
+        raw = line[6:].strip()
+        if raw == "[DONE]":
+            continue
+        out.append(_json.loads(raw))
+    return out
+
+
+def test_say_replies_by_sentence_and_bills(secret, monkeypatch):
+    """她说什么由服务端出, **按句下发**, 并且照常计费。
+
+    按句下发是这通电话像不像电话的分界: 上游出全文实测 4~16 秒不等, 等整段说完
+    再开口, 那几秒用户会以为断了。计费不能少 —— 否则通话里的模型消耗是白送的。
+    """
     from fastapi.testclient import TestClient
 
     from app import config, credits
@@ -219,9 +251,9 @@ def test_say_replies_and_bills(secret, monkeypatch):
 
     with TestClient(app) as c:
         signup(c, "avatar-say@example.com")
-        r = c.post("/api/avatar/say", json={"text": "在吗"})
-    assert r.status_code == 200, r.text
-    assert r.json()["text"] == "我在呢。"
+        got = _say(c, text="在吗")
+    assert [d["text"] for d in got] == ["你好呀。", "今天怎么样？"], got
+    assert cap["body"]["stream"] is True, "没开流式, 她就得等整段才开口"
     assert spent and spent[0] > 0, "出了回复却没计费"
 
 
@@ -241,11 +273,29 @@ def test_say_caps_the_history_the_client_sends(secret, monkeypatch):
     long_history = [{"role": "user", "content": "x" * 5000} for _ in range(50)]
     with TestClient(app) as c:
         signup(c, "avatar-hist@example.com")
-        r = c.post("/api/avatar/say", json={"text": "在吗", "history": long_history})
-    assert r.status_code == 200, r.text
+        _say(c, text="在吗", history=long_history)
     msgs = cap["body"]["messages"]
     assert len(msgs) == 10, f"system + 8 条历史 + 这句, 实得 {len(msgs)}"
     assert all(len(m["content"]) <= 600 for m in msgs[1:]), "单条没截断"
+
+
+def test_a_run_on_reply_still_gets_broken_up(secret, monkeypatch):
+    """模型一逗到底也要切开 —— 否则第一句要等到整段说完才发得出去。"""
+    from fastapi.testclient import TestClient
+
+    from app import config, credits
+    from app.main import app
+
+    monkeypatch.setattr(config, "UPSTREAM_BASE_URL", "https://upstream.test/v1")
+    monkeypatch.setattr(config, "UPSTREAM_API_KEY", "k")
+    _fake_upstream(monkeypatch, {}, deltas=("好" * 130,))
+    monkeypatch.setattr(credits, "spend", lambda *a, **kw: None)
+
+    with TestClient(app) as c:
+        signup(c, "avatar-runon@example.com")
+        got = _say(c, text="在吗")
+    assert len(got) >= 2, f"一逗到底没被切开: {got}"
+    assert "".join(d["text"] for d in got) == "好" * 130, "切开时把字弄丢了"
 
 
 def test_say_needs_something_to_say(secret, monkeypatch):
