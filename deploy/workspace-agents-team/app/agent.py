@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 from collections.abc import AsyncIterator
@@ -51,11 +52,21 @@ SHARED_RULES = """
 """
 
 
+#: 值得重试的网关故障 —— **瞬时**的那些。
+#: 502/503/504 = 上游或反代抖了一下 (2026-09-01 实测: 部署时容器换 IP, Caddy 的
+#: DNS 缓存还指着旧地址, 出现约一秒的窗口, 正好把阿摄和阿剪打断);
+#: 429 = 限流, 退避正是它要的;
+#: 连接类异常 = 读到一半对端关了 ("incomplete chunked read" 就是这个)。
+#: 400/401/403 不重试 —— 请求本身有问题, 重试一百次也一样。
+_RETRY_STATUS = (429, 500, 502, 503, 504)
+GATEWAY_TRIES = int(os.environ.get("AGENTS_TEAM_GATEWAY_TRIES", "4"))
+
+
 class GatewayError(RuntimeError):
     pass
 
 
-async def _stream(
+async def _stream_once(
     client: httpx.AsyncClient, model: str, messages: list[dict]
 ) -> AsyncIterator[dict]:
     """要一次流式补全。
@@ -81,7 +92,9 @@ async def _stream(
     ) as r:
         if r.status_code != 200:
             body = (await r.aread()).decode("utf-8", "replace")[:300]
-            raise GatewayError(f"网关返回 {r.status_code}: {body}")
+            err = GatewayError(f"网关返回 {r.status_code}: {body}")
+            err.status = r.status_code
+            raise err
         async for line in r.aiter_lines():
             if not line.startswith("data:"):
                 continue
@@ -92,6 +105,33 @@ async def _stream(
                 yield json.loads(data)
             except json.JSONDecodeError:
                 continue  # 网关偶尔插一行非 JSON 心跳; 跳过比炸掉整轮好
+
+
+async def _stream(client, model: str, messages: list[dict]) -> AsyncIterator[dict]:
+    """带退避重试的流式补全。
+
+    重试放在**这一层**而不是调用方的循环里, 有两个原因:
+      · 调用方那个 for 是**步数**循环, 在那里 continue 会把网络抖动记成"干了一步
+        活" —— 三次抖动就吃掉三格步数上限;
+      · 重试只在**还没吐出任何 chunk** 时才安全: 已经流出去的 token 用户看到了,
+        重来会重复。这个条件只有在这一层才判得干净 (yielded 标志)。
+
+    2026-09-01 起: 一次 502 不该让一整棒的活作废。阿摄读镜头表读到一半撞上部署
+    窗口 (容器换 IP, Caddy DNS 缓存约一秒不同步), 整棒当场废掉, 而后台其实什么
+    都没坏 —— 退避重发一次就好。
+    """
+    for attempt in range(GATEWAY_TRIES):
+        yielded = False
+        try:
+            async for chunk in _stream_once(client, model, messages):
+                yielded = True
+                yield chunk
+            return
+        except (GatewayError, httpx.HTTPError) as e:
+            transient = isinstance(e, httpx.HTTPError) or getattr(e, "status", 0) in _RETRY_STATUS
+            if yielded or not transient or attempt + 1 >= GATEWAY_TRIES:
+                raise
+            await asyncio.sleep(min(1.5 * 2**attempt, 8.0))
 
 
 async def run_turn(
