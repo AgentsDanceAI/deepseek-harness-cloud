@@ -2185,6 +2185,37 @@ def registry() -> dict[str, Product]:
             reports_presence=False,
             tab_grace_min=config.OPENHANDS_TAB_GRACE_MIN,
         ),
+        # AutoGen Studio: 单进程 (FastAPI 同时出前端和 API)。
+        "autogen": Product(
+            id="autogen",
+            name="AutoGen Studio",
+            image=config.AUTOGEN_IMAGE_REF,
+            image_ref=config.AUTOGEN_IMAGE_REF,
+            port=8081,
+            mem_mb=config.AUTOGEN_MEM_LIMIT_MB,
+            cpus=config.AUTOGEN_CPUS,
+            domain=config.AUTOGEN_DOMAIN,
+            reports_presence=False,
+            tab_grace_min=config.AUTOGEN_TAB_GRACE_MIN,
+            # 首页是打包好的静态站, 后端没起来照样 200 —— 探它等于没探。
+            ready_path="/api/health",
+        ),
+        # LangChain: 前端 + LangGraph 一个容器, 前面 node 反代分流。
+        "langchain": Product(
+            id="langchain",
+            name="LangChain",
+            image=config.LANGCHAIN_IMAGE_REF,
+            image_ref=config.LANGCHAIN_IMAGE_REF,
+            port=3000,
+            mem_mb=config.LANGCHAIN_MEM_LIMIT_MB,
+            cpus=config.LANGCHAIN_CPUS,
+            domain=config.LANGCHAIN_DOMAIN,
+            reports_presence=False,
+            tab_grace_min=config.LANGCHAIN_TAB_GRACE_MIN,
+            # 探**后端**那一侧: 前端起得比 LangGraph 快得多, 探首页等于只探到
+            # Next.js 起没起来 —— 而没有后端的聊天界面是个死壳。
+            ready_path="/langgraph/info",
+        ),
     }
 # fmt: on
 
@@ -2496,6 +2527,37 @@ def _openhands_boot() -> str:
     )
 
 
+def _autogen_boot() -> str:
+    """AutoGen Studio: 直接起。
+
+    它**本来就没有登录墙** (进去是 Guest User 的 Playground), 模型也在构建期就
+    换成读环境变量了 —— 所以这里不用像 OpenHands 那样起完再灌一遍设置。
+
+    状态落 /data (NAS 挂在这儿): 队伍、会话、图库都在 SQLite 里, 落容器里的话
+    闲置回收一删就没了。
+    """
+    return "set -e\nmkdir -p /data\nexec autogenstudio ui --host 0.0.0.0 --port 8081 --appdir /data\n"
+
+
+def _langchain_boot() -> str:
+    """LangChain: 一个容器里三个进程 —— LangGraph、前端、前置反代。
+
+    顺序不讲究 (前端连的是浏览器发过来的请求, LangGraph 慢起几秒无非是头一条
+    消息重试), 但**反代必须在前台**: 它是对外那个端口, 它退出容器就该退出。
+
+    LangGraph 用 `dev` 模式跑: 它自带内存版检查点, 不用再挂一个 Postgres ——
+    一人一容器, 会话本来就不跨容器共享。
+    """
+    return (
+        "set -e\n"
+        "mkdir -p /data\n"
+        "cd /opt/agent\n"
+        "langgraph dev --host 127.0.0.1 --port 2024 --no-browser >/tmp/langgraph.log 2>&1 &\n"
+        "PORT=3001 HOSTNAME=127.0.0.1 node /opt/web/server.js >/tmp/web.log 2>&1 &\n"
+        "exec node /opt/front.mjs\n"
+    )
+
+
 _BOOTS = {
     DEFAULT: _dsh_boot,
     "comfyui": _comfyui_boot,
@@ -2508,6 +2570,8 @@ _BOOTS = {
     "codex": lambda: _agentui_boot("codex"),
     "agents-team": _agents_team_boot,
     "openhands": _openhands_boot,
+    "autogen": _autogen_boot,
+    "langchain": _langchain_boot,
 }
 
 
@@ -2543,6 +2607,20 @@ def env_for(product_id: str, token: str, secret: str = "") -> dict[str, str]:
         return {
             "HERMES_USER": "owner",
             "HERMES_PASS": autologin_password(secret),
+        }
+    if product_id == "langchain":
+        return {
+            # graph.py 认这三个。型号要钉在在售目录里 —— 网关只放行目录内的。
+            "DSH_MODEL": _codecli_model("codex"),
+            "OPENAI_BASE_URL": f"{gateway}/llm/v1",
+            "OPENAI_API_KEY": token,
+        }
+    if product_id == "autogen":
+        return {
+            # 镜像里那个补丁认这三个 (见 deploy/workspace-autogen/patch_models.py)。
+            "DSH_MODEL": _codecli_model("codex"),
+            "OPENAI_BASE_URL": f"{gateway}/llm/v1",
+            "OPENAI_API_KEY": token,
         }
     if product_id == "openhands":
         return {

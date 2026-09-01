@@ -318,6 +318,25 @@ OPENHANDS_MEM_LIMIT_MB = _env_int("OPENHANDS_MEM_LIMIT_MB", 4096)
 OPENHANDS_CPUS = _env_float("OPENHANDS_CPUS", 2.0)
 OPENHANDS_TAB_GRACE_MIN = _env_int("OPENHANDS_TAB_GRACE_MIN", 10)
 
+# AutoGen Studio —— 微软的多智能体搭建台 (2026-09-01)。上游没有官方镜像, 这是
+# 我们打的 (deploy/workspace-autogen)。镜像里打了补丁把写死的模型名换成读环境
+# 变量 —— 它默认写的是 gpt-4o-mini, 而网关只放行在售目录里的型号。
+AUTOGEN_DOMAIN = _env("AUTOGEN_DOMAIN", "")
+AUTOGEN_IMAGE_REF = _env("AUTOGEN_IMAGE_REF", "")
+AUTOGEN_MEM_LIMIT_MB = _env_int("AUTOGEN_MEM_LIMIT_MB", 2048)
+AUTOGEN_CPUS = _env_float("AUTOGEN_CPUS", 1.0)
+AUTOGEN_TAB_GRACE_MIN = _env_int("AUTOGEN_TAB_GRACE_MIN", 10)
+
+# LangChain —— 官方对话前端 (agent-chat-ui) + 跑在 LangGraph 上的智能体
+# (2026-09-01)。两半在同一个容器里, 前面一个 node 反代把 /langgraph 分给后端 ——
+# 前端是**浏览器**去连 LangGraph 的, 走同源前缀最省事 (不用开跨域, 也不用给
+# LangGraph 再要一个域名和一套鉴权)。见 deploy/workspace-langchain。
+LANGCHAIN_DOMAIN = _env("LANGCHAIN_DOMAIN", "")
+LANGCHAIN_IMAGE_REF = _env("LANGCHAIN_IMAGE_REF", "")
+LANGCHAIN_MEM_LIMIT_MB = _env_int("LANGCHAIN_MEM_LIMIT_MB", 2048)
+LANGCHAIN_CPUS = _env_float("LANGCHAIN_CPUS", 1.0)
+LANGCHAIN_TAB_GRACE_MIN = _env_int("LANGCHAIN_TAB_GRACE_MIN", 10)
+
 # Dify —— 云空间的 LLM 应用搭建坑位 (多容器栈, 10 个容器)。
 DIFY_DOMAIN = _env("DIFY_DOMAIN", "")
 DIFY_VERSION = _env("DIFY_VERSION", "1.17.0")

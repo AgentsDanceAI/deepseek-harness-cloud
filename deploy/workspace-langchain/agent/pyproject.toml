@@ -1,0 +1,9 @@
+[project]
+name = "dsh-langchain-agent"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = ["langgraph>=0.2", "langchain-openai>=0.2", "langchain-core>=0.3"]
+
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
