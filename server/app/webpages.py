@@ -428,7 +428,12 @@ def avatar_page(request: Request):
     与其它产品不同, 它**不是一个云工作台** —— 没有每用户容器可开, 页面就在主站
     这里, 通话经 /api/avatar/* 转发到我们自己的 GPU 节点。所以它不走
     /work/... 那条路, 也不出现在工作台的启动/回收逻辑里。
+
+    未登录先送去登录: 页面上**每一个**动作都要账号 (形象清单、背景图、通话本身
+    全挂 resolve_user)。让人先看到界面再一路 401, 只会像是坏了。
     """
+    if try_resolve_user(request) is None:
+        return RedirectResponse("/login?next=/avatar", status_code=303)
     return _render(request, "avatar.html", "avatar")
 
 
