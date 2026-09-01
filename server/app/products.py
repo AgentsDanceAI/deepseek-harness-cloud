@@ -18,6 +18,7 @@ ComfyUI 的前端用绝对路径引资源, 塞不进子路径, 所以只能一�
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from dataclasses import dataclass
 
@@ -2178,12 +2179,18 @@ def registry() -> dict[str, Product]:
             name="OpenHands",
             image=config.OPENHANDS_IMAGE_REF,
             image_ref=config.OPENHANDS_IMAGE_REF,
-            port=3000,
+            port=8000,
             mem_mb=config.OPENHANDS_MEM_LIMIT_MB,
             cpus=config.OPENHANDS_CPUS,
             domain=config.OPENHANDS_DOMAIN,
             reports_presence=False,
             tab_grace_min=config.OPENHANDS_TAB_GRACE_MIN,
+            # 首页是 SPA, 后端没起来照样 200 —— 探它等于没探。
+            ready_path="/health",
+            # **必须以 root 起**: 开局要改 /opt 下的前端 (注入免向导的那段脚本),
+            # 而镜像里的 USER 是 openhands, 写不动 —— 容器会当场退出。
+            # 注入完由镜像自己的 entrypoint 降权, 应用照旧不是 root 在跑。
+            run_as_user=0,
             # **host.docker.internal 必须解析到本机**。它起沙箱时按"我在容器里 ->
             # 把 localhost 换成 host.docker.internal"探活 (app_server/utils/
             # docker_utils.py) —— 那是给"OpenHands 在容器、沙箱在宿主"那种拓扑写
@@ -2526,92 +2533,35 @@ def _agents_team_boot() -> str:
 
 
 def _openhands_boot() -> str:
-    """OpenHands: 起服务, 然后**用它自己的接口把设置灌进去**。
+    """OpenHands: 用 **all-in-one 镜像**, 开局三件事都在 deploy/workspace-openhands-boot.py。
 
-    首屏本来是一道硬墙 ("To continue, connect an OpenAI, Anthropic, or other LLM
-    account", 没有跳过)。实测:
-      · `LLM_MODEL` / `LLM_BASE_URL` / `LLM_API_KEY` 三个环境变量**不管用** ——
-        它读的是存下来的设置 (容器内的 SQLite), 不是环境;
-      · `POST /api/v1/settings` 灌一次, 墙当场消失, 进的是真正的应用。
-    所以只能等服务起来再灌 —— 灌在服务起来之前会连不上, 而那是静默的
-    (curl 失败, 脚本照常往下走, 用户开门见墙)。
+    **为什么不是那个小镜像 (openhands/openhands)**: 它是"应用 + 子进程沙箱"的形态,
+    前端拿**应用给的 agent server 地址**去拼 WebSocket, 而那个地址是
+    `http://localhost:<port>` —— 在用户自己电脑上跑成立 (端口就在本机), 托管部署时
+    浏览器的 localhost 是用户自己的机器, 于是界面永远"正在连接…"。那是这个模式的
+    固有假设, 不是接线问题。为查清它我在小镜像上依次修掉了四层 (host.docker.internal
+    解析、沙箱里的 VSCode 与工具预载拖过 120 秒、上游把"就绪"判成了"此刻在占 CPU"、
+    灌设置用错了字段), 每层都是真 bug, 但最后一跳绕不过去。
+    all-in-one 把 agent server 放进同一个进程 (它的 openapi 里一个 /api/sandboxes
+    都没有), 前端与它同源 —— 这条路实测走通了。
 
-    沙箱用 **local runtime**: 默认那个要挂宿主的 docker socket 起第二个容器,
-    ECI 上给不了。而我们本来就是一人一容器 —— 这个容器就是他的沙箱, 正合适。
+    代价是镜像大 (解开约 5.8GB), 换来的是少一整条会卡死的链路。
 
-    遥测默认**关**: 隐私偏好一律选最保守的那个。
+    顺序不能乱: 先写密钥、注入前端, **再**起应用, 最后灌模型档案。密钥要在应用
+    启动前落盘 —— 它读一次就放内存里了, 之后再写文件它不认 (表现是我们调它的
+    接口一律 401)。
     """
     return (
         "set -e\n"
         "mkdir -p /workspace\n"
-        # **host.docker.internal 必须指回本机**。它起沙箱时用的是"我在容器里 ->
-        # 把 localhost 换成 host.docker.internal"这条规则 (app_server/utils/
-        # docker_utils.py), 那是给"OpenHands 在容器里、沙箱在宿主"那种拓扑写的。
-        # 我们是一人一容器、沙箱就在同一个容器内, 而这个名字在容器里**根本解析
-        # 不了** —— 探活 30 秒必然超时, 用户看到的是
-        # "500: Agent Server Failed to start properly", 而首页一切正常。
-        # **上游把"沙箱是否就绪"判错了**, 启动时打个补丁。
-        # 它用 psutil 看进程状态: 只有 STATUS_RUNNING (此刻正占着 CPU) 才算就绪,
-        # 否则一律 STARTING。而一个起好之后在 epoll 上等请求的 uvicorn 是
-        # sleeping —— 于是永远 STARTING, exposed_urls 永远不填, 界面永远
-        # "等待沙盒"。实测: 沙箱在 8000 上 /alive 返回 200 (名字与回环都通),
-        # 进程却被判成没起来。
-        #
-        # 改成"活着且没被停就算 RUNNING" —— 真正的就绪由紧跟其后的 /alive 探活
-        # 判定, 那一步本来就在, 而且判得对。
-        #
-        # 用 base64 送进去: 补丁里全是引号, 而这段脚本要穿过 sh -c, 直写必翻车
-        # (翻过两次)。补丁自带锚点断言, 上游改了那几行会**当场报错**, 而不是
-        # 悄悄跑在没打补丁的代码上。
-        "echo aW1wb3J0IHBhdGhsaWIKCnAgPSBwYXRobGliLlBhdGgoIi9hcHAvb3BlbmhhbmRzL2FwcF9zZXJ2ZXIvc2FuZGJveC9wcm9jZXNzX3NhbmRib3hfc2VydmljZS5weSIpCnMgPSBwLnJlYWRfdGV4dCgpCm9sZCA9ICgKICAgICIgICAgICAgICAgICBpZiBwcm9jZXNzLmlzX3J1bm5pbmcoKTpcbiIKICAgICIgICAgICAgICAgICAgICAgc3RhdHVzID0gcHJvY2Vzcy5zdGF0dXMoKVxuIgogICAgIiAgICAgICAgICAgICAgICBpZiBzdGF0dXMgPT0gcHN1dGlsLlNUQVRVU19SVU5OSU5HOlxuIgogICAgIiAgICAgICAgICAgICAgICAgICAgcmV0dXJuIFNhbmRib3hTdGF0dXMuUlVOTklORyIKKQpuZXcgPSAoCiAgICAiICAgICAgICAgICAgaWYgcHJvY2Vzcy5pc19ydW5uaW5nKCk6XG4iCiAgICAiICAgICAgICAgICAgICAgIHN0YXR1cyA9IHByb2Nlc3Muc3RhdHVzKClcbiIKICAgICIgICAgICAgICAgICAgICAgaWYgc3RhdHVzICE9IHBzdXRpbC5TVEFUVVNfU1RPUFBFRDpcbiIKICAgICIgICAgICAgICAgICAgICAgICAgIHJldHVybiBTYW5kYm94U3RhdHVzLlJVTk5JTkciCikKYXNzZXJ0IG9sZCBpbiBzLCAiRFNIOiDkuIrmuLjmlLnov4cgX2dldF9wcm9jZXNzX3N0YXR1cywg6L+Z5Liq6KGl5LiB5aSx5pWI5LqGIgpwLndyaXRlX3RleHQocy5yZXBsYWNlKG9sZCwgbmV3LCAxKSkKcHJpbnQoIltkc2hdIOaymeeuseWwsee7quWIpOaNruW3suS/ruatoyIpCg== | base64 -d > /tmp/dsh_oh_patch.py\n"
-        "python3 /tmp/dsh_oh_patch.py\n"
-        # **必须 cd /app**: 前端那堆静态文件是按工作目录找的, 在别处起 uvicorn
-        # 的话首页直接 404 —— 而且是 `{"detail":"Not Found"}` 这种 API 式的 404,
-        # 看着像路由没配, 其实是 cwd 不对 (镜像的 WorkingDir 就是 /app, 我们绕过
-        # 它的 entrypoint 自己起, 就得自己把这条补上)。2026-09-01 线上撞到。
-        "cd /app\n"
-        # 服务先起, 灌设置要等它应答 —— 后台起, 前台等
-        "uvicorn openhands.server.listen:app --host 0.0.0.0 --port 3000 &\n"
+        "echo IiIiYWdlbnQtY2FudmFzIOeahOW8gOWxgDog5a6a5q275Lya6K+d5a+G6ZKlIC0+IOeBjOaooeWei+iuvue9riAtPiDlhY3mjonpppblkK/lkJHlr7zjgIIKCuS4uuS7gOS5iOaNouaIkOi/meS4qiBhbGwtaW4tb25lIOmVnOWDjyAo5bCP6ZWc5YOP6YKj5p2h6Lev6LWw5LiN6YCaKToK5bCP6ZWc5YOP5pivIuW6lOeUqCArIOWtkOi/m+eoi+aymeeusSLnmoTlvaLmgIEsIOWJjeerr+aLvyoq5bqU55So57uZ55qEIGFnZW50IHNlcnZlciDlnLDlnYAqKuWOu+aLvApXZWJTb2NrZXQsIOiAjOmCo+S4quWcsOWdgOaYryBgaHR0cDovL2xvY2FsaG9zdDo8cG9ydD5gIOKAlOKAlCDlnKjnlKjmiLfoh6rlt7HnlLXohJHkuIrot5HmiJDnq4sKKOerr+WPo+WwseWcqOacrOacuiksIOaJmOeuoemDqOe9suaXtua1j+iniOWZqOeahCBsb2NhbGhvc3Qg5piv55So5oi36Ieq5bex55qE5py65Zmo44CC6L+Z5piv6YKj5Liq5qih5byP55qECuWbuuacieWBh+iuviwg5LiN5piv5o6l57q/6Zeu6aKY44CCYWxsLWluLW9uZSDmioogYWdlbnQgc2VydmVyIOaUvui/m+WQjOS4gOS4qui/m+eoiywg5rKh5pyJ5rKZ566xCuamguW/tSAo5a6D55qEIG9wZW5hcGkg6YeM5LiA5LiqIC9hcGkvc2FuZGJveGVzIOmDveayoeaciSksIOWJjeerr+S4juWug+WQjOa6kOOAggoK5LiJ5Lu25LqLOgoxLiAqKuWvhumSpeWFiOWGmeatuyoq44CC5a6D55qEIEFQSSDorqQgWC1TZXNzaW9uLUFQSS1LZXksIOWvhumSpeaYr+mmluasoeWQr+WKqOaXtumaj+acuueUn+aIkOiQveWcqAogICBhZ2VudC1jYW52YXMvYXBpLWtleS50eHQg6YeM55qE44CC5oiR5Lus5YWI5YaZ5aW9LCDmnI3liqHnq6/lkozms6jlhaXnu5nliY3nq6/nmoTlsLHmmK/lkIzkuIDmiorjgIIKMi4g55So6L+Z5oqK5a+G6ZKl54GM5qih5Z6L6K6+572uIOKAlOKAlCDngYzlrowqKuWbnuivu+agoemqjCoqLCDov5Tlm54gMjAwIOS4jeetieS6jueUn+aViCAo5bCP6ZWc5YOP6YKj6L65CiAgIOWwseaYr+i/meS5iOmql+i/h+aIkeS4gOi9rueahCnjgIIKMy4g6aaW5ZCv5ZCR5a+86K6w5ZyoKirmtY/op4jlmaggbG9jYWxTdG9yYWdlKiosIOacjeWKoeerr+mihOe9ruS4jeaOiSDigJTigJQg5b6A5a6D55qEIGluZGV4Lmh0bWwg6YeMCiAgIOazqOWFpeS4gOauteiEmuacrOaKiumUruenjeS4iuOAgumBpea1i+enjeaIkOaLkue7nSwg5LiN5piv5ZCM5oSP44CCCiIiIgppbXBvcnQganNvbgppbXBvcnQgb3MKaW1wb3J0IHBhdGhsaWIKaW1wb3J0IHRpbWUKaW1wb3J0IHVybGxpYi5lcnJvcgppbXBvcnQgdXJsbGliLnJlcXVlc3QKCkhPTUUgPSBwYXRobGliLlBhdGgoIi9ob21lL29wZW5oYW5kcy8ub3BlbmhhbmRzIikKS0VZID0gb3MuZW52aXJvbi5nZXQoIkRTSF9BQ19LRVkiKSBvciAiZHNoIiArIG9zLnVyYW5kb20oMTYpLmhleCgpCkJBU0UgPSAiaHR0cDovLzEyNy4wLjAuMTo4MDAwIgoKCmRlZiBzZWVkX2tleSgpIC0+IE5vbmU6CiAgICAiIiLlr4bpkqXkuI3nlKjmiJHku6zlhpnmlofku7Yg4oCU4oCUIOWug+eahCBlbnRyeXBvaW50IOiHquW4piBgTE9DQUxfQkFDS0VORF9BUElfS0VZYCDov5nkuKrlj6PlrZDjgIIKCiAgICDlhYjliY3miJHlvoAgYWdlbnQtY2FudmFzL2FwaS1rZXkudHh0IOmHjOWGmSwg5bqU55So54Wn5qC35ZueIDQwMTog6YKj5Liq5paH5Lu25Y+q5ZyoCiAgICAqKuS4pOS4queOr+Wig+WPmOmHj+mDveS4uuepuioq5pe25omN6KKr6K+7ICjop4EgZW50cnlwb2ludC5zaCDnmoQgaWYpLCDogIzkuJTml7bluo/kuIrkuZ/pmr7kv50KICAgIOWGmeWcqOW6lOeUqOivu+S5i+WJjeOAgueUqOeOr+Wig+WPmOmHj+aYr+WumOaWueaUr+aMgeeahOWBmuazlSwg5bCR5LiA5bGC54yc5rWL44CCCiAgICDov5nkuKrlh73mlbDnlZnnnYDlj6rkuLrmiornirbmgIHnm67lvZXlu7rlpb3lubbkuqTlm57lupTnlKjnlKjmiLcg4oCU4oCUIOi/meS4gOatpeS7pSByb290IOi3kSAo6KaB5pS5CiAgICAvb3B0IOS4i+eahOWJjeerryksIHJvb3Qg5bu65Ye65p2l55qE55uu5b2V5bqU55So55So5oi35YaZ5LiN5YqoLCDogIzlroPlj6rkvJrlnKjml6Xlv5fph4zmirHmgKjkuIDlj6UKICAgIOeEtuWQjueFp+W4uOi1t+adpSwg5LqO5piv55So5oi355qE5Lic6KW/5YWo5LiiICjlkIzkuIDkuKrlnZEgYWdlbnR1aSDpgqPovrnouKnov4cp44CCCiAgICAiIiIKICAgIGltcG9ydCBwd2QKCiAgICBkID0gSE9NRSAvICJhZ2VudC1jYW52YXMiCiAgICBkLm1rZGlyKHBhcmVudHM9VHJ1ZSwgZXhpc3Rfb2s9VHJ1ZSkKICAgIHRyeToKICAgICAgICB1ID0gcHdkLmdldHB3bmFtKCJvcGVuaGFuZHMiKQogICAgICAgIGZvciBwYXRoIGluIChIT01FLCBkKToKICAgICAgICAgICAgb3MuY2hvd24ocGF0aCwgdS5wd191aWQsIHUucHdfZ2lkKQogICAgZXhjZXB0IChLZXlFcnJvciwgUGVybWlzc2lvbkVycm9yKToKICAgICAgICBwYXNzCgoKZGVmIGNhbGwocGF0aCwgZGF0YT1Ob25lKToKICAgIHJlcSA9IHVybGxpYi5yZXF1ZXN0LlJlcXVlc3QoCiAgICAgICAgQkFTRSArIHBhdGgsCiAgICAgICAgZGF0YT1qc29uLmR1bXBzKGRhdGEpLmVuY29kZSgpIGlmIGRhdGEgaXMgbm90IE5vbmUgZWxzZSBOb25lLAogICAgICAgIGhlYWRlcnM9eyJDb250ZW50LVR5cGUiOiAiYXBwbGljYXRpb24vanNvbiIsICJYLVNlc3Npb24tQVBJLUtleSI6IEtFWX0sCiAgICAgICAgbWV0aG9kPSJQT1NUIiBpZiBkYXRhIGlzIG5vdCBOb25lIGVsc2UgIkdFVCIsCiAgICApCiAgICB3aXRoIHVybGxpYi5yZXF1ZXN0LnVybG9wZW4ocmVxLCB0aW1lb3V0PTMwKSBhcyByOgogICAgICAgIGJvZHkgPSByLnJlYWQoKS5kZWNvZGUoKQogICAgICAgIHJldHVybiBqc29uLmxvYWRzKGJvZHkpIGlmIGJvZHkuc3RyaXAoKSBlbHNlIHt9CgoKZGVmIGluamVjdF9mcm9udGVuZCgpIC0+IE5vbmU6CiAgICAiIiLmiorlhY3lkJHlr7znmoTplK7np43ov5sgaW5kZXguaHRtbCDigJTigJQg6YKj5piv5rWP6KeI5Zmo5L6n55qE54q25oCBLCDmnI3liqHnq6/ngYzkuI3ov5vljrvjgIIiIiIKICAgICMg6L+Z5Yeg5Liq6ZSu5pivKirlrp7mtYvmipPnmoQqKjog54K55a6M5ZCR5a+85LmL5ZCO5rWP6KeI5Zmo6YeM5a2Y55qE5bCx5piv6L+Z5LqbICjnhafmioQsIOS4jeiHhumAoCnjgIIKICAgICMgwrcgb3BlbmhhbmRzLW9uYm9hcmRlZD0xIOWFjeaOieS4ieatpeWQkeWvvDsKICAgICMgwrcgYWdlbnQtY2FudmFzLWNvbnNlbnQ9MSArIHRlbGVtZXRyeS1jb25zZW50IOWFjeaOiemBpea1i+WQjOaEj+ahhiDigJTigJQg5rOo5oSP5bqU55SoCiAgICAjICAg5ZCv5Yqo5pe25Lya5oqKIGNvbnNlbnQg6YeN572u5oiQICcwJywg5omA5Lul6L+Y6KaB5riF5o6JIGZpcnN0LXVzZSDpgqPkuKrmoIforrAsIOWQpuWImeahhgogICAgIyAgIOeFp+agt+W8uSAo56ys5LiA54mI5Y+q56eNIGNvbnNlbnQsIOeZveenjeS6hinjgIIKICAgICMg6YGl5rWL56eN5oiQIGRlbmllZCDogIzkuI3mmK8gZ3JhbnRlZDog6ZqQ56eB5YGP5aW95LiA5b6L6YCJ5pyA5L+d5a6I55qE44CCCiAgICBzY3JpcHQgPSAoCiAgICAgICAgIjxzY3JpcHQ+dHJ5eyIKICAgICAgICAibG9jYWxTdG9yYWdlLnNldEl0ZW0oJ29wZW5oYW5kcy1vbmJvYXJkZWQnLCcxJyk7IgogICAgICAgICJsb2NhbFN0b3JhZ2Uuc2V0SXRlbSgnYWdlbnQtY2FudmFzLWNvbnNlbnQnLCcxJyk7IgogICAgICAgICJsb2NhbFN0b3JhZ2Uuc2V0SXRlbSgnb3BlbmhhbmRzLXRlbGVtZXRyeS1jb25zZW50JywnZGVuaWVkJyk7IgogICAgICAgICJsb2NhbFN0b3JhZ2UucmVtb3ZlSXRlbSgnb3BlbmhhbmRzLXRlbGVtZXRyeS1maXJzdC11c2UnKTsiCiAgICAgICAgIn1jYXRjaChlKXt9PC9zY3JpcHQ+IgogICAgKQogICAgaGl0cyA9IDAKICAgIGZvciBwIGluIHBhdGhsaWIuUGF0aCgiL29wdC9hZ2VudC1jYW52YXMvZnJvbnRlbmQiKS5yZ2xvYigiaW5kZXguaHRtbCIpOgogICAgICAgIHMgPSBwLnJlYWRfdGV4dCgpCiAgICAgICAgaWYgIm9wZW5oYW5kcy1vbmJvYXJkZWQiIGluIHM6CiAgICAgICAgICAgIGhpdHMgKz0gMQogICAgICAgICAgICBjb250aW51ZQogICAgICAgIHAud3JpdGVfdGV4dChzLnJlcGxhY2UoIjwvaGVhZD4iLCBzY3JpcHQgKyAiPC9oZWFkPiIsIDEpCiAgICAgICAgICAgICAgICAgICAgIGlmICI8L2hlYWQ+IiBpbiBzIGVsc2Ugc2NyaXB0ICsgcykKICAgICAgICBoaXRzICs9IDEKICAgIHByaW50KGYiW2RzaF0g6aaW5ZCv5ZCR5a+85bey5YWN5o6JICh7aGl0c30g5LiqIGluZGV4Lmh0bWwpIikKCgpkZWYgbWFpbigpIC0+IE5vbmU6CiAgICAjICoq6L+Z6YeM5LiN5YaN56Kw5a+G6ZKl5ZKM5YmN56uvKiog4oCU4oCUIOmCo+S4pOS7tuS6i+WcqOW6lOeUqOWQr+WKqCoq5LmL5YmNKirnlLEgcHJlIOmYtuauteWBmuWujOS6hgogICAgIyAo5ZCv5Yqo6ISa5pys6YeM5Y2V54us6LCDIHNlZWRfa2V5L2luamVjdF9mcm9udGVuZCnjgILlnKjov5nlhL/ph43ot5HkuIDpgY3kvJrmiorlupTnlKjlt7Lnu48KICAgICMg6K+76L+b5YaF5a2Y55qE5a+G6ZKl6KaG55uW5o6JLCDkuo7mmK/lkI7pnaLosIPmjqXlj6PkuIDlvosgNDAxICjlrp7mtYvmkp7liLAp44CCCiAgICAjIOetieW6lOeUqOecn+ato+i1t+adpeOAgioqNDAxIOS4jeiDveW9k+aIkCLlr4bpkqXplJnkuoYi5bCx6YCA5Ye6Kiog4oCU4oCUIOW6lOeUqOWQr+WKqOaXqeacnwogICAgIyAo6L+Y5rKh6K+75Yiw5a+G6ZKl5paH5Lu25pe2KSDkuZ/kvJrlm54gNDAxLCDogIzpgqPml7bpgIDlh7rnrYnkuo7miooi6LW35b6X5oWiIuW9k+aIkCLphY3plJnkuoYiLAogICAgIyDkuo7mmK/mqKHlnovmoaPmoYjmsLjov5zngYzkuI3kuIosIOeVjOmdouS4gOebtOivtCBMTE0g5rKh6YWN5aW944CC5a6e5rWL5pKe5Yiw5Lik6L2u44CCCiAgICByZWFkeSA9IEZhbHNlCiAgICBmb3IgXyBpbiByYW5nZSgxODApOgogICAgICAgIHRyeToKICAgICAgICAgICAgY2FsbCgiL2FwaS9zZXR0aW5ncyIpCiAgICAgICAgICAgIHJlYWR5ID0gVHJ1ZQogICAgICAgICAgICBicmVhawogICAgICAgIGV4Y2VwdCB1cmxsaWIuZXJyb3IuSFRUUEVycm9yIGFzIGU6CiAgICAgICAgICAgIGlmIGUuY29kZSA9PSA0MDQ6ICAgICAgICAjIOi/mOayoeacieiuvue9ruiusOW9lSwg5L2G5pyN5Yqh5Zyo5bqU562UCiAgICAgICAgICAgICAgICByZWFkeSA9IFRydWUKICAgICAgICAgICAgICAgIGJyZWFrCiAgICAgICAgICAgIHRpbWUuc2xlZXAoMikgICAgICAgICAgICAjIDQwMS80MDM6IOWkmuWNiui/mOWcqOWQr+WKqCwg5YaN562JCiAgICAgICAgZXhjZXB0ICh1cmxsaWIuZXJyb3IuVVJMRXJyb3IsIE9TRXJyb3IpOgogICAgICAgICAgICB0aW1lLnNsZWVwKDIpCiAgICBpZiBub3QgcmVhZHk6CiAgICAgICAgcmFpc2UgU3lzdGVtRXhpdCgiW2RzaF0g562J5LiN5Yiw5bqU55So5bqU562UIOKAlOKAlCDmqKHlnovmoaPmoYjmsqHngYzkuIoiKQoKICAgIG1vZGVsLCBiYXNlID0gb3MuZW52aXJvblsiRFNIX0xMTV9NT0RFTCJdLCBvcy5lbnZpcm9uWyJEU0hfTExNX0JBU0UiXQoKICAgICMgKirmqKHlnovotbAgTExNIOaho+ahiCAoL2FwaS9wcm9maWxlcyksIOS4jeaYryBhZ2VudF9zZXR0aW5ncy5sbG0qKuOAggogICAgIyDngYzov5sgYWdlbnRfc2V0dGluZ3MubGxtIOS8muWbnuivu+aIkOWKn+OAgeeVjOmdouS5n+aKiiJBZGQgTExNIEFQSSBrZXki5omT5LiK5Yu+LCDkvYblu7oKICAgICMg5a+56K+d5pe25oqlIGBMTE0gcHJvZmlsZSAnZGVmYXVsdCcgbm90IGZvdW5kYCDigJTigJQg6ICM55WM6Z2i5LiK6YKj5Y+lCiAgICAjICJZb3VyIExMTSBpc24ndCBzZXQgdXAgeWV0IiDku47lpLTliLDlsL7pg73mmK/lr7nnmoQsIOaYr+aIkeeBjOmUmeS6huWcsOaWueOAggogICAgY2FsbCgiL2FwaS9wcm9maWxlcy9kZWZhdWx0IiwgewogICAgICAgICJsbG0iOiB7Im1vZGVsIjogbW9kZWwsICJiYXNlX3VybCI6IGJhc2UsICJhcGlfa2V5Ijogb3MuZW52aXJvblsiRFNIX0NMT1VEX1RPS0VOIl19CiAgICB9KQogICAgY2FsbCgiL2FwaS9wcm9maWxlcy9kZWZhdWx0L2FjdGl2YXRlIiwge30pCgogICAgZ290ID0gY2FsbCgiL2FwaS9wcm9maWxlcyIpCiAgICBwcm9mID0gbmV4dCgocCBmb3IgcCBpbiBnb3QuZ2V0KCJwcm9maWxlcyIsIFtdKSBpZiBwLmdldCgibmFtZSIpID09ICJkZWZhdWx0IiksIHt9KQogICAgb2sgPSAocHJvZi5nZXQoIm1vZGVsIikgPT0gbW9kZWwgYW5kIHByb2YuZ2V0KCJiYXNlX3VybCIpID09IGJhc2UKICAgICAgICAgIGFuZCBwcm9mLmdldCgiYXBpX2tleV9zZXQiKSBhbmQgZ290LmdldCgiYWN0aXZlX3Byb2ZpbGUiKSA9PSAiZGVmYXVsdCIpCiAgICBwcmludChmIltkc2hdIOaooeWei+aho+ahiHsn5bey55Sf5pWIJyBpZiBvayBlbHNlICcqKuayoeeUn+aViCoqJ306IHtwcm9mLmdldCgnbW9kZWwnKX0gQCB7cHJvZi5nZXQoJ2Jhc2VfdXJsJyl9IikKCiAgICAjIOmBpea1i+WFs+aOiSDigJTigJQg6ZqQ56eB5YGP5aW95LiA5b6L6YCJ5pyA5L+d5a6I55qE44CCCiAgICB0cnk6CiAgICAgICAgY2FsbCgiL2FwaS9zZXR0aW5ncyIsIHsibWlzY19zZXR0aW5nc19kaWZmIjogeyJ1c2VyX2NvbnNlbnRzX3RvX2FuYWx5dGljcyI6IEZhbHNlfX0pCiAgICBleGNlcHQgdXJsbGliLmVycm9yLkhUVFBFcnJvcjoKICAgICAgICBwYXNzCgoKbWFpbigpCg== | base64 -d > /tmp/dsh_ac_boot.py\n"
+        # 前两步要 root (改 /opt 下的前端), 脚本自己会把属主交回应用用户
+        'DSH_STAGE=pre python3 -c "import os,pathlib;'
+        "src=pathlib.Path('/tmp/dsh_ac_boot.py').read_text().split('def main()')[0];"
+        "ns={};exec(src,ns);ns['seed_key']();ns['inject_frontend']()\"\n"
+        "/opt/agent-canvas/entrypoint.sh &\n"
         "srv=$!\n"
-        # 最多等 90 秒。它启动时要跑数据库迁移, 冷启动实测 ~25 秒。
-        "for i in $(seq 1 90); do\n"
-        "  curl -fsS -o /dev/null http://127.0.0.1:3000/ 2>/dev/null && break\n"
-        "  sleep 1\n"
-        "done\n"
-        # 灌设置。**必须成功** —— 失败就是用户开门见墙。
-        # 用它自己的结构灌: 先 GET 拿回来、只改 llm 那几个字段再 POST 回去。
-        # 先前那版用老式扁平字段 (llm_model/llm_base_url/llm_api_key), 服务端
-        # **回 200 却什么也没存** —— 设置里 model 仍是 gpt-5.5、api_key 是 null,
-        # 而"200"让我一路以为这步是好的, 去查了半天沙箱。返回码不等于生效。
-        "echo IiIi5oyJKirlvZPliY3niYjmnKzopoHnmoTlvaLlvI8qKueBjCBPcGVuSGFuZHMg55qE5qih5Z6L6K6+572uLCDlubblm57or7vmoKHpqozjgIIKCuS4ieWkhOmDveaYr+Wunua1i+aSnuWHuuadpeeahCwg5q+P5LiA5aSE6YO95Lya6K6pIuWbniAyMDAg5L2G5rKh55Sf5pWIIjoKICAxLiDlhajmlrDlrrnlmajkuIogR0VUIC9hcGkvdjEvc2V0dGluZ3Mg5pivICoqNDA0Kiog4oCU4oCUIOmCo+S4jeaYr+mUmeivrywg5pivIui/mOayoeaciSI7CiAgMi4g5pW05Lu9IFBPU1Qg5Zue5Y675LyaIDQyMiwg5pyN5Yqh56uv5piO6K+0IGBVc2UgKl9kaWZmIG5lc3RlZCBzZXR0aW5ncyBwYXlsb2FkcwogICAgIGluc3RlYWQgb2YgbGVnYWN5IGtleXNgIOKAlOKAlCDopoHnlKggYWdlbnRfc2V0dGluZ3NfZGlmZjsKICAzLiDogIHniYjnmoTmiYHlubPlrZfmrrUgKGxsbV9tb2RlbCAvIGxsbV9iYXNlX3VybCAvIGxsbV9hcGlfa2V5KSDov5nkuKrniYjmnKwqKueFp+aUtiAyMDAKICAgICDljbTku4DkuYjkuZ/kuI3lrZgqKiDigJTigJQg5oiR5Li65q2k5LiA6Lev5Y675p+l5LqG5rKZ566xLCDnmb3mjJblpb3lh6Dova7jgIIKCuaJgOS7peacgOWQjuS4gOWumuimgSoq5Zue6K+7Kio6IOi/lOWbnueggeS4jeetieS6jueUn+aViOOAguWvhumSpeWbnuivu+aYr+iEseaVj+eahCwg55So5a6D6Ieq5bex55qECmxsbV9hcGlfa2V5X3NldCDliKTmlq3jgIIKIiIiCmltcG9ydCBqc29uCmltcG9ydCBvcwppbXBvcnQgdXJsbGliLmVycm9yCmltcG9ydCB1cmxsaWIucmVxdWVzdAoKQkFTRSA9ICJodHRwOi8vMTI3LjAuMC4xOjMwMDAiCgoKZGVmIGNhbGwocGF0aCwgZGF0YT1Ob25lKToKICAgIHJlcSA9IHVybGxpYi5yZXF1ZXN0LlJlcXVlc3QoCiAgICAgICAgQkFTRSArIHBhdGgsCiAgICAgICAgZGF0YT1qc29uLmR1bXBzKGRhdGEpLmVuY29kZSgpIGlmIGRhdGEgaXMgbm90IE5vbmUgZWxzZSBOb25lLAogICAgICAgIGhlYWRlcnM9eyJDb250ZW50LVR5cGUiOiAiYXBwbGljYXRpb24vanNvbiJ9LAogICAgICAgIG1ldGhvZD0iUE9TVCIgaWYgZGF0YSBpcyBub3QgTm9uZSBlbHNlICJHRVQiLAogICAgKQogICAgd2l0aCB1cmxsaWIucmVxdWVzdC51cmxvcGVuKHJlcSwgdGltZW91dD0zMCkgYXMgcjoKICAgICAgICBib2R5ID0gci5yZWFkKCkuZGVjb2RlKCkKICAgICAgICByZXR1cm4ganNvbi5sb2Fkcyhib2R5KSBpZiBib2R5LnN0cmlwKCkgZWxzZSB7fQoKCm1vZGVsID0gb3MuZW52aXJvblsiRFNIX0xMTV9NT0RFTCJdCmJhc2UgPSBvcy5lbnZpcm9uWyJEU0hfTExNX0JBU0UiXQpjYWxsKCIvYXBpL3YxL3NldHRpbmdzIiwgewogICAgImFnZW50X3NldHRpbmdzX2RpZmYiOiB7CiAgICAgICAgImxsbSI6IHsibW9kZWwiOiBtb2RlbCwgImJhc2VfdXJsIjogYmFzZSwgImFwaV9rZXkiOiBvcy5lbnZpcm9uWyJEU0hfQ0xPVURfVE9LRU4iXX0KICAgIH0sCiAgICAjIOmakOengeWBj+WlveS4gOW+i+mAieacgOS/neWuiOeahOmCo+S4quOAggogICAgInVzZXJfY29uc2VudHNfdG9fYW5hbHl0aWNzIjogRmFsc2UsCn0pCgp0cnk6CiAgICBiYWNrID0gY2FsbCgiL2FwaS92MS9zZXR0aW5ncyIpCmV4Y2VwdCB1cmxsaWIuZXJyb3IuSFRUUEVycm9yIGFzIGU6CiAgICByYWlzZSBTeXN0ZW1FeGl0KGYiW2RzaF0g54GM5a6M6K+75LiN5Zue5p2lOiBIVFRQIHtlLmNvZGV9IikgZnJvbSBOb25lCmxsbSA9IGJhY2suZ2V0KCJhZ2VudF9zZXR0aW5ncyIsIHt9KS5nZXQoImxsbSIsIHt9KQpvayA9IGxsbS5nZXQoIm1vZGVsIikgPT0gbW9kZWwgYW5kIGxsbS5nZXQoImJhc2VfdXJsIikgPT0gYmFzZSBhbmQgYmFjay5nZXQoImxsbV9hcGlfa2V5X3NldCIpCnByaW50KGYiW2RzaF0g5qih5Z6L6K6+572ueyflt7LnlJ/mlYgnIGlmIG9rIGVsc2UgJyoq5rKh55Sf5pWIKionfToge2xsbS5nZXQoJ21vZGVsJyl9IEAge2xsbS5nZXQoJ2Jhc2VfdXJsJyl9ICIKICAgICAgZiLlr4bpkqU9eyfmnIknIGlmIGJhY2suZ2V0KCdsbG1fYXBpX2tleV9zZXQnKSBlbHNlICfml6AnfSIpCnJhaXNlIFN5c3RlbUV4aXQoMCBpZiBvayBlbHNlIDEpCg== | base64 -d > /tmp/dsh_oh_settings.py\n"
-        "for i in 1 2 3; do python3 /tmp/dsh_oh_settings.py && break; sleep 5; done\n"
-        # **把沙箱也预热起来**。沙箱不是随容器起的, 是用户点"新对话"时才现建 ——
-        # 起进程、装工具、等就绪, 实测四分钟以上, 界面一直是"正在连接…"。用户
-        # 不知道那是正常的, 只会以为坏了。放后台, 不挡开页面。
-        "echo IiIi5byA5LiA5Liq5a+56K+d5oqK5rKZ566x5YWI5bu66LW35p2lIOKAlOKAlCDnlKjmiLfov5vmnaXml7blsLHkuI3nlKjnrYnpgqPlm5vliLDlhavliIbpkp/jgIIKCuaymeeuseS4jeaYr+maj+WuueWZqOi1t+eahCwg5pivKirnlKjmiLfngrki5paw5a+56K+dIuaXtuaJjeeOsOW7uioqOiDotbcgYWdlbnQgc2VydmVyIOi/m+eoi+OAgeijheW3peWFt+OAgQrnrYnlroPlsLHnu6osIOWunua1i+Wbm+WIhumSn+S7peS4iiwg55WM6Z2i5LiK5LiA55u05pivIuato+WcqOi/nuaOpeKApiLjgILnlKjmiLfkuI3nn6XpgZPov5nmmK/mraPluLjnmoQsIOWPquS8mgrku6XkuLrlnY/kuoYgKOiAgeadv+esrOS4gOasoeeCueW8gOWwseaYr+i/meS4quS9k+mqjCnjgIIKCuaUvuWQjuWPsOi3kSwg5LiN5oyh5a655Zmo5ZCv5Yqo44CC5aSx6LSl5Y+q6K6w5LiA6KGMIOKAlOKAlCDpooTng63kuI3miJDpobblpJrmmK/mhaIsIOS4jeivpeiuqeWuueWZqOi1t+S4jeadpeOAggoiIiIKaW1wb3J0IGpzb24KaW1wb3J0IHVybGxpYi5lcnJvcgppbXBvcnQgdXJsbGliLnJlcXVlc3QKCkJBU0UgPSAiaHR0cDovLzEyNy4wLjAuMTozMDAwIgpyZXEgPSB1cmxsaWIucmVxdWVzdC5SZXF1ZXN0KAogICAgQkFTRSArICIvYXBpL3YxL2FwcC1jb252ZXJzYXRpb25zIiwKICAgIGRhdGE9anNvbi5kdW1wcyh7ImluaXRpYWxfdXNlcl9tc2ciOiAiaGkifSkuZW5jb2RlKCksCiAgICBoZWFkZXJzPXsiQ29udGVudC1UeXBlIjogImFwcGxpY2F0aW9uL2pzb24ifSwKICAgIG1ldGhvZD0iUE9TVCIsCikKdHJ5OgogICAgd2l0aCB1cmxsaWIucmVxdWVzdC51cmxvcGVuKHJlcSwgdGltZW91dD0zMDApIGFzIHI6CiAgICAgICAgZCA9IGpzb24ubG9hZHMoci5yZWFkKCkuZGVjb2RlKCkgb3IgInt9IikKICAgIHByaW50KGYiW2RzaF0g5rKZ566x6aKE54Ot5bey5Y+R6LW3OiB7ZC5nZXQoJ2lkJywgJz8nKX0iKQpleGNlcHQgKHVybGxpYi5lcnJvci5VUkxFcnJvciwgT1NFcnJvcikgYXMgZToKICAgIHByaW50KGYiW2RzaF0g5rKZ566x6aKE54Ot5rKh5oiQICh7dHlwZShlKS5fX25hbWVfX30pIOKAlOKAlCDnlKjmiLfpppbmrKHov5vmnaXkvJrlpJrnrYnlh6DliIbpkp8iKQo= | base64 -d > /tmp/dsh_oh_prewarm.py\n"
-        "(python3 /tmp/dsh_oh_prewarm.py) &\n"
-        # **把 agent server 的 import 预热一遍**。用户点"新对话"时它会另起一个进程
-        # 跑 `python -m openhands.agent_server`, 而应用只等 120 秒。2 核冷盘上那堆
-        # import 走不完 —— 线上表现是页面一直"等待沙盒", 而本机 (缓存热、核多) 七秒
-        # 就起来了, 于是"本地好好的、线上不行", 最费时间的那种。
-        # 预热之后页缓存是热的, 真起沙箱快得多。放后台, 不挡用户开页面。
-        '(/app/.venv/bin/python -c "import openhands.agent_server" >/dev/null 2>&1 '
-        '&& echo "[dsh] agent server 已预热") &\n'
-        # 沙箱起不来时它会**把目录连同日志一起删掉**, 最该看的东西正好没了。看门狗
-        # 一发现就 tail 到**标准输出** —— 写文件没用: ECI 的容器进不去, 只有容器
-        # 日志读得到 (这一条是排障时才想明白的, 白跑了一轮)。
-        "(while :; do f=$(find /tmp /root /workspace -name '.openhands-agent-server.log' "
-        '2>/dev/null | head -1); if [ -n "$f" ]; then timeout 25 tail -n +1 -F "$f" '
-        "| sed 's/^/[sandbox] /'; fi; sleep 2; done) 2>/dev/null &\n"
-        # 探活自检, **放在循环里反复打**: ECI 的日志接口最多给 2000 行, 而这个应用
-        # 的 SQL 日志几十秒就把 2000 行刷满 —— 只在启动时打一次的东西, 等你去看时
-        # 早被冲掉了 (为这个白跑了两轮)。
-        # 两个地址都测: 名字解析不了、与沙箱没在那个端口上应答, 是两回事。
-        '(while :; do echo "[dsh] 名字=$(curl -s -o /dev/null -w %{http_code} '
-        "--max-time 3 http://host.docker.internal:8000/alive 2>/dev/null || echo 打不通)"
-        " 回环=$(curl -s -o /dev/null -w %{http_code} --max-time 3 "
-        "http://127.0.0.1:8000/alive 2>/dev/null || echo 打不通)"
-        ' 解析=$(getent hosts host.docker.internal | head -1 || echo 无)"; sleep 20; done) &\n'
+        "(python3 /tmp/dsh_ac_boot.py) &\n"
         "wait $srv\n"
     )
 
@@ -2802,29 +2752,16 @@ def env_for(product_id: str, token: str, secret: str = "") -> dict[str, str]:
         }
     if product_id == "openhands":
         return {
-            # 一人一容器, 容器本身就是沙箱 —— 默认 runtime 要挂宿主 docker socket
-            # 再起一个容器, ECI 上做不到。
-            "RUNTIME": "local",
-            # **关掉沙箱里的 VSCode 与 VNC**。agent server 起来时这三个服务是
-            # 并发起的 (vscode / desktop / 工具预载), 而应用只等 120 秒 —— 冷盘上
-            # openvscode-server 那一坨拖过了线, 表现是页面一直"等待沙盒"。本机盘热
-            # 所以看不出来, 又是"本地好好的、线上不行"。
-            # 我们这一格卖的是对话界面, 沙箱里的编辑器和远程桌面本来也用不上。
-            # 它的配置认 OH_* 前缀的环境变量 (agent_server/config.py: load_config)。
-            "OH_ENABLE_VSCODE": "false",
-            "OH_ENABLE_VNC": "false",
-            # 工具预载也关: 它要初始化浏览器工具, 而镜像里没有 Chromium ——
-            # 那一步在冷盘上耗掉的正是我们没有的时间 (日志停在这儿再没下文)。
-            # 真要用浏览器时它会自己按需初始化, 预载只是想让第一次快一点。
-            "OH_PRELOAD_TOOLS": "false",
-            # 开 debug: 沙箱探活失败时它只在 **debug** 级别打印"打的是哪个地址、
-            # 什么异常" (sandbox_service._check_agent_server_alive)。不开的话
-            # 只剩一句"failed to start within 120s", 等于让人猜。
-            "DEBUG": "true",
-            "SANDBOX_VOLUMES": "/workspace:/workspace:rw",
-            # 灌设置那一步要用 (见 _openhands_boot)。型号必须钉在**在售目录**里 ——
-            # 它内置的默认值是厂商自己的名字, 网关只放行目录内的, 不钉就是 404。
+            # 会话密钥: 我们**先写死**再起应用, 这样调它的接口才认 (见
+            # deploy/workspace-openhands-boot.py 里 seed_key 的说明)。
+            # 按用户派生, 不同用户不共用一把。
+            # 它的 entrypoint 认这个 (LOCAL_BACKEND_API_KEY) —— 官方口子, 比我们
+            # 往 api-key.txt 里写可靠: 那个文件只在环境变量为空时才被读。
+            # 按用户令牌派生, 不同用户不共用一把。
+            "LOCAL_BACKEND_API_KEY": "dsh" + hashlib.sha256((token or "x").encode()).hexdigest()[:32],
+            "DSH_AC_KEY": "dsh" + hashlib.sha256((token or "x").encode()).hexdigest()[:32],
             "DSH_CLOUD_TOKEN": token,
+            # 型号必须钉在**在售目录**里 —— 网关只放行目录内的。
             "DSH_LLM_MODEL": f"openai/{_codecli_model('codex')}",
             "DSH_LLM_BASE": f"{gateway}/llm/v1",
         }
