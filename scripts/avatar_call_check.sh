@@ -30,8 +30,10 @@ docker cp "$CONTAINER:/tmp/avcall/spec.json" "$WORK/spec.json" >/dev/null
 docker cp "$CONTAINER:/tmp/avcall/driver.py" "$WORK/driver.py" >/dev/null
 
 echo "==> 起浏览器打电话 (她要先想再合成, 最多等 60 秒)"
+# 装**真 Chrome**: 镜像自带的 Chromium 没有 H.264 (专有编解码被编译掉了), 拿它
+# 跑只会得到一个永远红的假故障。装一次约 30 秒。
 docker run --rm -v "$WORK:/work" "$IMAGE" bash -c \
-  "pip install -q playwright==1.49.0 >/dev/null 2>&1 && python /work/driver.py"
+  "pip install -q playwright==1.49.0 >/dev/null 2>&1 && playwright install chrome >/dev/null 2>&1 && python /work/driver.py"
 
 echo "==> 判读"
 docker cp "$WORK/results.json" "$CONTAINER:/tmp/avcall/results.json" >/dev/null
