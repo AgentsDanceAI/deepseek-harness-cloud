@@ -609,6 +609,9 @@ class EciBackend(Backend):
                 p[f"Container.{ci}.VolumeMount.{j}.MountPath"] = path
                 if sub:
                     p[f"Container.{ci}.VolumeMount.{j}.SubPath"] = sub
+        # 私有仓库的镜像要带凭据才拉得动 (见 config.registry_credential)。空配置
+        # 时这里什么都不加, 行为与从前一致。
+        p |= config.registry_credential()
         body = await self._call("CreateContainerGroup", p)
         # 每台实例都自动创建一个 EIP, 所以这一行就是"谁在什么时候占了一个 EIP"的
         # 唯一自有记录。没有它, 想回答"最近这些 EIP 都是谁申请的"只能去翻操作审计

@@ -697,3 +697,28 @@ def test_docker_backend_refuses_stack_products():
                 sidecars=(Sidecar(name="db", image_ref="postgres:15"),),
             )
         )
+
+
+def test_private_images_are_pulled_with_credentials(monkeypatch):
+    """配了仓库凭据就要**带上去** —— 不带的话私有镜像拉不动。
+
+    ghcr 上新建的包默认私有, 而改可见性**没有 REST 接口** (网页端专有)。所以
+    带凭据拉是唯一能自动化的路; 少了这几行, 每接一个自建镜像的产品都得有人去
+    网页上点一次, 而忘了点的表现是冷启动一直失败、报错只说"拉取失败"。
+    """
+    from app import config
+
+    monkeypatch.setattr(config, "WORK_REGISTRY_SERVER", "ghcr.io")
+    monkeypatch.setattr(config, "WORK_REGISTRY_USERNAME", "someone")
+    monkeypatch.setattr(config, "WORK_REGISTRY_PASSWORD", "secret")
+    cred = config.registry_credential()
+    assert cred == {
+        "ImageRegistryCredential.1.Server": "ghcr.io",
+        "ImageRegistryCredential.1.UserName": "someone",
+        "ImageRegistryCredential.1.Password": "secret",
+    }
+
+    # 三样缺任何一样都不能半吊子地发上去 —— 阿里云会拒掉整个请求, 而那时坏的是
+    # **所有**产品的冷启动, 不只是私有镜像那个。
+    monkeypatch.setattr(config, "WORK_REGISTRY_PASSWORD", "")
+    assert config.registry_credential() == {}

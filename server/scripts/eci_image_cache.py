@@ -292,6 +292,9 @@ def _build_one(refs, stale: list[str]) -> int:
                 "EipInstanceId": alloc,
                 "ImageCacheSize": 20,
                 "RetentionDays": 90,
+                # 私有仓库的镜像要带凭据才拉得动 (见 config.registry_credential)。
+                # 不带的话缓存会一直卡在 Failed, 而报错只说"拉取失败"。
+                **config.registry_credential(),
             },
         )
         cid = made["ImageCacheId"]

@@ -348,6 +348,32 @@ FRAMEWORKS_MEM_LIMIT_MB = _env_int("FRAMEWORKS_MEM_LIMIT_MB", 2048)
 FRAMEWORKS_CPUS = _env_float("FRAMEWORKS_CPUS", 1.0)
 FRAMEWORKS_TAB_GRACE_MIN = _env_int("FRAMEWORKS_TAB_GRACE_MIN", 10)
 
+# 私有镜像仓库的凭据 (2026-09-01)。空 = 不带凭据, 只能拉公开镜像。
+#
+# 为什么需要: ghcr 上**新建的包默认是私有的**, 而 ECI 拉不动私有镜像 —— 表现是
+# 冷启动一直失败。此前每接一个自建镜像的产品, 都要人去 GitHub 网页上点一次
+# "Change visibility → Public"; 而改可见性**没有 REST 接口** (试过 PATCH/PUT/POST
+# 三种方法, 一律 404, 那是网页端专有的)。带凭据拉是唯一能自动化的路, 顺带我们的
+# 产品镜像也不必对全世界公开。
+#
+# ⚠️ 这里放的应当是**只读**令牌 (read:packages)。目前用的是 144 上那把推送用的
+# (write:packages) —— 能用但权限过大, 有条件应当换成只读的。
+WORK_REGISTRY_SERVER = _env("WORK_REGISTRY_SERVER", "")
+WORK_REGISTRY_USERNAME = _env("WORK_REGISTRY_USERNAME", "")
+WORK_REGISTRY_PASSWORD = _env("WORK_REGISTRY_PASSWORD", "")
+
+
+def registry_credential() -> dict[str, str]:
+    """拼给阿里云 ECI 的镜像仓库凭据 (扁平参数)。没配就返回空 dict。"""
+    if not (WORK_REGISTRY_SERVER and WORK_REGISTRY_USERNAME and WORK_REGISTRY_PASSWORD):
+        return {}
+    return {
+        "ImageRegistryCredential.1.Server": WORK_REGISTRY_SERVER,
+        "ImageRegistryCredential.1.UserName": WORK_REGISTRY_USERNAME,
+        "ImageRegistryCredential.1.Password": WORK_REGISTRY_PASSWORD,
+    }
+
+
 # Dify —— 云空间的 LLM 应用搭建坑位 (多容器栈, 10 个容器)。
 DIFY_DOMAIN = _env("DIFY_DOMAIN", "")
 DIFY_VERSION = _env("DIFY_VERSION", "1.17.0")
