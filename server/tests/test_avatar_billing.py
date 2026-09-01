@@ -260,3 +260,28 @@ def test_say_needs_something_to_say(secret, monkeypatch):
     with TestClient(app) as c:
         signup(c, "avatar-empty@example.com")
         assert c.post("/api/avatar/say", json={"text": "   "}).status_code == 400
+
+
+def test_the_call_page_may_load_blob_media_and_open_the_mic():
+    """通话页的两处安全头例外**必须在**, 否则通话静默失灵。
+
+    · `media-src blob:` —— 视频源是 MediaSource 的 blob: URL。少了它,
+      default-src 'self' 会挡掉, 而表现是"画面一帧不动": WebSocket 照常收字节、
+      计时照走、积分照扣, 只有控制台里一行 CSP 违规。线上真栽过。
+    · `microphone=(self)` —— 这一页靠说话用。
+
+    其余页面维持全关 —— 这两条是**给这一页开的口子**, 不是全站放开。
+    """
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+
+    with TestClient(app) as c:
+        signup(c, "avatar-csp@example.com")  # 未登录会 303 走掉, 那是张没有 CSP 的空响应
+        av = c.get("/avatar")
+        home = c.get("/")
+    assert "media-src 'self' blob:" in av.headers.get("content-security-policy", "")
+    assert "microphone=(self)" in av.headers.get("permissions-policy", "")
+    # 别的页面不该跟着放开
+    assert "blob:" not in home.headers.get("content-security-policy", "")
+    assert "microphone=()" in home.headers.get("permissions-policy", "")
