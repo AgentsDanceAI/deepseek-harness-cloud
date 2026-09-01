@@ -45,8 +45,11 @@ USE = {
         # 要走用户真正会走的那条路。
         "kind": "chat",
         "placeholder": "说点什么",
-        "send": "473 加 268 等于几? 只回数字, 不要解释",
-        "want": ["741"],
+        "send": "{a} 加 {b} 等于几? 只回数字, 不要解释",
+        "want": ["{sum}"],
+        # 这一轮跑完的标志: 「停止」按钮收起来。不等它就可能在半路截屏, 而那时
+        # 用量还是 0、答案可能还没到 —— 判到的是上一轮的残留。
+        "busy_hidden": "#stopBtn",
         # **"本轮消耗 0↑ 0↓" 当失败**: 用量键名拼错时界面一切正常, 只是这个数
         # 永远是 0 —— 不报错、不变红, 而积分是这个产品的核心机制。
         "fail_extra2": ["0↑ 0↓"],
@@ -55,8 +58,9 @@ USE = {
     "crewai": {
         "kind": "chat",
         "placeholder": "说点什么",
-        "send": "473 加 268 等于几? 只回数字, 不要解释",
-        "want": ["741"],
+        "send": "{a} 加 {b} 等于几? 只回数字, 不要解释",
+        "want": ["{sum}"],
+        "busy_hidden": "#stopBtn",
         # 型号没钉的样子: litellm 拿它自己的默认 gpt-4o-mini 去问网关, 回 404。
         "fail_extra2": ["gpt-4o-mini", "NotFoundError", "0↑ 0↓"],
         "why": "发一句话回 404 (litellm 用了它自己的默认型号)",
@@ -66,8 +70,8 @@ USE = {
         "placeholder": "Type your message...",
         # 同 openhands: 出一道答案不可能出现在题面里的题。先前只问"只回我两个字",
         # 判据就只剩"没出现失败词"——而消息压根没发出去时页面也很干净。
-        "send": "473 加 268 等于几? 只回数字, 不要解释",
-        "want": ["741"],
+        "send": "{a} 加 {b} 等于几? 只回数字, 不要解释",
+        "want": ["{sum}"],
         "why": '一发消息就 "cannot be parsed as a URL"',
     },
     "autogen": {
@@ -75,8 +79,8 @@ USE = {
         # 它的输入框是 "Type your message here...", 比 langchain 那个多两个词 ——
         # 拿 langchain 的选择器去找它是找不到的 (子串方向反了)。
         "placeholder": "Type your message here",
-        "send": "473 加 268 等于几? 只回数字, 不要解释",
-        "want": ["741"],
+        "send": "{a} 加 {b} 等于几? 只回数字, 不要解释",
+        "want": ["{sum}"],
         # 队伍/会话没预热成的样子。两者都会让用户进来对着一个空壳。
         "fail_extra": ["No session selected", "Create a team to get started"],
         "why": "侧栏空的 / 首屏没有会话, 用户得自己走一遍新建弹窗",
@@ -90,8 +94,8 @@ USE = {
         # 换成算术: 屏幕上出现 13, 就只可能是她算的。
         # 数字挑大一点、别是常见数: "13" 那种在时间戳、侧栏、版本号里都可能撞上,
         # 撞上就是**假绿** —— 比假红更坏。
-        "send": "473 加 268 等于几? 只回数字, 不要解释",
-        "want": ["741"],
+        "send": "{a} 加 {b} 等于几? 只回数字, 不要解释",
+        "want": ["{sum}"],
         # 模型那一跳断了的样子: 它把上游异常原样贴在对话里。这几条**必须当失败**,
         # 否则"页面长出新东西"会把一条报错当成回话。
         "fail_extra2": ["LLMAuthenticationError", "AuthenticationError", "LLM profile"],
@@ -181,9 +185,18 @@ with sync_playwright() as p:
                 # **等答案出现**, 不是干等一个固定秒数: 答得快就早走, 答得慢
                 # (冷启动第一句) 也不会被腰斩。最多三分钟。
                 want = ["".join(w.split()) for w in (prod.get("want") or [])]
+                busy = prod.get("busy_hidden")
                 for _ in range(36):
                     page.wait_for_timeout(5000)
-                    if want and all(w in "".join(page.inner_text("body").split()) for w in want):
+                    got = want and all(w in "".join(page.inner_text("body").split()) for w in want)
+                    if not got:
+                        continue
+                    # 有「这一轮还在跑」的标志就必须等它收起来 —— 否则可能在半路
+                    # 截屏: 那时用量还是 0, 而看到的答案可能是上一轮留下的。
+                    if not busy:
+                        break
+                    loc = page.locator(busy)
+                    if loc.count() and loc.first.is_hidden():
                         break
                 e["text"] = page.inner_text("body")[-1500:]
 
@@ -294,6 +307,21 @@ def main() -> int:
                 f"!! 机时不够 ({left} < {need})。跑下去会把'没配额'验成'产品坏了' —— "
                 f"先给 {args.email} 补一包机时再来。"
             )
+        # **每次换一道题**。会话记录落在 NAS 上跨实例留着 —— 题目固定的话, 上一轮
+        # 的答案就明晃晃挂在屏幕上, 这一轮什么都不干也能"验过"。2026-09-02 的
+        # 截图里就是这样: 741 是上一轮留下的, 而这一轮还在跑。
+        # 假绿比假红严重: 假红我会去看图, 假绿谁也不会再看。
+        import random
+
+        a, b = random.randint(211, 899), random.randint(211, 899)
+        for pr in prods:
+            for k in ("send", "type"):
+                if isinstance(pr.get(k), str) and "{a}" in pr[k]:
+                    pr[k] = pr[k].format(a=a, b=b, sum=a + b)
+            if pr.get("want"):
+                pr["want"] = [w.format(a=a, b=b, sum=a + b) if "{" in w else w for w in pr["want"]]
+        print(f"==> 这轮的题: {a} + {b} = {a + b} (每次换 —— 上一轮的答案还在屏幕上)")
+
         spec = {
             "cookie_name": config.SESSION_COOKIE,
             "token": security.sign_token(user["id"], epoch=user["session_epoch"]),
