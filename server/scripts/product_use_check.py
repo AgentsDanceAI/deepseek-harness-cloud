@@ -235,6 +235,22 @@ def main() -> int:
         user = db.query_one("SELECT * FROM users WHERE email=?", (args.email,))
         if user is None:
             raise SystemExit(f"没有这个账号: {args.email}")
+
+        # **先看机时够不够**。机时耗尽时工作台会把浏览器打回定价页, 而这个脚本
+        # 看到的是"元素找不到" —— 于是把"没配额"报成"产品坏了"。2026-09-01 为这个
+        # 误判过两轮: 三个刚验过能用的产品一起跑时全红, 只因为跑到一半机时归零。
+        # 每个产品要冷启动一次, 这活儿本来就费机时。
+        from app import work_access
+
+        state = work_access.state(user["id"])
+        left = state.get("minutes_left", state.get("remaining_minutes", 0)) or 0
+        need = len(prods) * 10
+        print(f"==> 机时余量 {left} 分钟 (这轮大约要 {need} 分钟)")
+        if left < need:
+            raise SystemExit(
+                f"!! 机时不够 ({left} < {need})。跑下去会把'没配额'验成'产品坏了' —— "
+                f"先给 {args.email} 补一包机时再来。"
+            )
         spec = {
             "cookie_name": config.SESSION_COOKIE,
             "token": security.sign_token(user["id"], epoch=user["session_epoch"]),
