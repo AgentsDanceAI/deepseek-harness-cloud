@@ -2779,6 +2779,10 @@ def env_for(product_id: str, token: str, secret: str = "") -> dict[str, str]:
             # 它的配置认 OH_* 前缀的环境变量 (agent_server/config.py: load_config)。
             "OH_ENABLE_VSCODE": "false",
             "OH_ENABLE_VNC": "false",
+            # 工具预载也关: 它要初始化浏览器工具, 而镜像里没有 Chromium ——
+            # 那一步在冷盘上耗掉的正是我们没有的时间 (日志停在这儿再没下文)。
+            # 真要用浏览器时它会自己按需初始化, 预载只是想让第一次快一点。
+            "OH_PRELOAD_TOOLS": "false",
             "SANDBOX_VOLUMES": "/workspace:/workspace:rw",
             # 灌设置那一步要用 (见 _openhands_boot)。型号必须钉在**在售目录**里 ——
             # 它内置的默认值是厂商自己的名字, 网关只放行目录内的, 不钉就是 404。
