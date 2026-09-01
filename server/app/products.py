@@ -2550,6 +2550,21 @@ def _openhands_boot() -> str:
         # 我们是一人一容器、沙箱就在同一个容器内, 而这个名字在容器里**根本解析
         # 不了** —— 探活 30 秒必然超时, 用户看到的是
         # "500: Agent Server Failed to start properly", 而首页一切正常。
+        # **上游把"沙箱是否就绪"判错了**, 启动时打个补丁。
+        # 它用 psutil 看进程状态: 只有 STATUS_RUNNING (此刻正占着 CPU) 才算就绪,
+        # 否则一律 STARTING。而一个起好之后在 epoll 上等请求的 uvicorn 是
+        # sleeping —— 于是永远 STARTING, exposed_urls 永远不填, 界面永远
+        # "等待沙盒"。实测: 沙箱在 8000 上 /alive 返回 200 (名字与回环都通),
+        # 进程却被判成没起来。
+        #
+        # 改成"活着且没被停就算 RUNNING" —— 真正的就绪由紧跟其后的 /alive 探活
+        # 判定, 那一步本来就在, 而且判得对。
+        #
+        # 用 base64 送进去: 补丁里全是引号, 而这段脚本要穿过 sh -c, 直写必翻车
+        # (翻过两次)。补丁自带锚点断言, 上游改了那几行会**当场报错**, 而不是
+        # 悄悄跑在没打补丁的代码上。
+        "echo aW1wb3J0IHBhdGhsaWIKCnAgPSBwYXRobGliLlBhdGgoIi9hcHAvb3BlbmhhbmRzL2FwcF9zZXJ2ZXIvc2FuZGJveC9wcm9jZXNzX3NhbmRib3hfc2VydmljZS5weSIpCnMgPSBwLnJlYWRfdGV4dCgpCm9sZCA9ICgKICAgICIgICAgICAgICAgICBpZiBwcm9jZXNzLmlzX3J1bm5pbmcoKTpcbiIKICAgICIgICAgICAgICAgICAgICAgc3RhdHVzID0gcHJvY2Vzcy5zdGF0dXMoKVxuIgogICAgIiAgICAgICAgICAgICAgICBpZiBzdGF0dXMgPT0gcHN1dGlsLlNUQVRVU19SVU5OSU5HOlxuIgogICAgIiAgICAgICAgICAgICAgICAgICAgcmV0dXJuIFNhbmRib3hTdGF0dXMuUlVOTklORyIKKQpuZXcgPSAoCiAgICAiICAgICAgICAgICAgaWYgcHJvY2Vzcy5pc19ydW5uaW5nKCk6XG4iCiAgICAiICAgICAgICAgICAgICAgIHN0YXR1cyA9IHByb2Nlc3Muc3RhdHVzKClcbiIKICAgICIgICAgICAgICAgICAgICAgaWYgc3RhdHVzICE9IHBzdXRpbC5TVEFUVVNfU1RPUFBFRDpcbiIKICAgICIgICAgICAgICAgICAgICAgICAgIHJldHVybiBTYW5kYm94U3RhdHVzLlJVTk5JTkciCikKYXNzZXJ0IG9sZCBpbiBzLCAiRFNIOiDkuIrmuLjmlLnov4cgX2dldF9wcm9jZXNzX3N0YXR1cywg6L+Z5Liq6KGl5LiB5aSx5pWI5LqGIgpwLndyaXRlX3RleHQocy5yZXBsYWNlKG9sZCwgbmV3LCAxKSkKcHJpbnQoIltkc2hdIOaymeeuseWwsee7quWIpOaNruW3suS/ruatoyIpCg== | base64 -d > /tmp/dsh_oh_patch.py\n"
+        "python3 /tmp/dsh_oh_patch.py\n"
         # **必须 cd /app**: 前端那堆静态文件是按工作目录找的, 在别处起 uvicorn
         # 的话首页直接 404 —— 而且是 `{"detail":"Not Found"}` 这种 API 式的 404,
         # 看着像路由没配, 其实是 cwd 不对 (镜像的 WorkingDir 就是 /app, 我们绕过
