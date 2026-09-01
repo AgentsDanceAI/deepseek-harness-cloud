@@ -142,6 +142,17 @@ async def generate_video(prompt: str, path: str, duration: int = 5, resolution: 
     if bad:
         return bad, "出片未配置"
     out = _safe_rel(path)
+    # ⚠️ 同一路径已有成片就**不再重跑**。2026-09-01 实测: 阿摄在同一个镜头 S01
+    # 上反复调用二十多次, 一小时烧掉一千多积分 —— 它以为自己在"修 duration
+    # 参数", 而每一次都真下单真扣钱。模型看不见账单, 这道闸必须在工具里。
+    # 真要重做就先删掉那个文件 (人格里写了), 那是一个明确的动作。
+    if out.exists() and out.stat().st_size > 0:
+        mb = out.stat().st_size / 1024 / 1024
+        rel = out.relative_to(WORKDIR)
+        msg = (f"{rel} 已经有成片了 ({mb:.1f} MB), **没有重新出片** —— 出片是要花钱的, "
+               f"同一个镜头不重复跑。确实要重做请先删掉这个文件 (shell: rm '{rel}'), "
+               f"或者换一个 path。")
+        return msg, f"跳过 {rel.name} (已存在)"
     body: dict = {
         "model": model or VIDEO_MODEL,
         "prompt": prompt,
@@ -363,8 +374,16 @@ SCHEMAS = [
                 "properties": {
                     "prompt": {"type": "string", "description": "镜头描述: 画面内容 + 运镜 + 情绪"},
                     "path": {"type": "string", "description": "存到哪, 如 项目/片段/01.mp4"},
-                    "duration": {"type": "number", "description": "秒; 省略 5"},
-                    "resolution": {"type": "string", "description": "480p/720p/1080p (小写); 省略 720p"},
+                    "duration": {
+                        "type": "number",
+                        "description": ("时长秒数, **必填**。照镜头表里那一镜的时长写 —— "
+                                        "省略会变成 5 秒, 而镜头表写 10 秒的镜头出成 5 秒"
+                                        "是废片, 还照样扣钱。2-30 秒。"),
+                    },
+                    "resolution": {
+                        "type": "string",
+                        "description": "480p / 720p / 1080p (**小写**), 必填。720p 是常用档。",
+                    },
                     "ratio": {"type": "string", "description": "如 16:9 / 9:16"},
                     "image": {
                         "description": ("参考图的工作区路径。**给一张还是多张, 语义不同**: "
@@ -377,9 +396,15 @@ SCHEMAS = [
                             {"type": "array", "items": {"type": "string"}},
                         ],
                     },
-                    "model": {"type": "string", "description": "省略用工作台默认视频模型"},
+                    # model 刻意**不开放**给模型选: 2026-09-01 实测阿摄自己挑了
+                    # wan3.0-video-prime (15 积分/秒), 比默认的 wan3.0-video (10)
+                    # 贵一半, 而它并不知道自己在花谁的钱。型号由工作台注入,
+                    # 要换档是用户/平台的决定。
                 },
-                "required": ["prompt", "path"],
+                # duration/resolution 进 required: 描述里写"省略 5"等于告诉模型
+                # 可以不写, 它就真不写 —— 十几条镜头全出成 5 秒 (2026-09-01 实测,
+                # 阿摄自己都发现"每次发的 JSON 里只有 prompt/path/ratio/model")。
+                "required": ["prompt", "path", "duration", "resolution"],
             },
         },
     },
