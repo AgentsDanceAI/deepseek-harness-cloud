@@ -44,8 +44,10 @@ PROBE = ("() => { const v = document.querySelector('#avVideo');"
          " buf: v.buffered.length, hasSrc: !!v.currentSrc}; }")
 
 
+# 等到 want(探针) 为真; 返回最后一次探到的状态。
+# (这里只能用注释: 整段 driver 装在外层的 r\"\"\"...\"\"\" 里, 嵌一个三引号
+#  docstring 会把外层字符串提前截断 —— 推过一次坏文件, 就栽在这上面。)
 def wait_for(page, want, secs=60):
-    """等到 want(探针) 为真; 返回最后一次探到的状态。"""
     v = page.evaluate(PROBE)
     for _ in range(secs):
         if want(v):
@@ -154,9 +156,11 @@ def main() -> int:
     for key, label in (("greet", "接通后的招呼"), ("reply", "她对我那句话的回复")):
         v = res.get(key) or {}
         after = res.get(key + "_after") or {}
-        print(f"    {label}: currentTime={v.get('t')} {v.get('w')}x{v.get('h')} "
-              f"opacity={v.get('op')} readyState={v.get('ready')} err={v.get('err')} "
-              f"-> 说完 opacity={after.get('op')}")
+        print(
+            f"    {label}: currentTime={v.get('t')} {v.get('w')}x{v.get('h')} "
+            f"opacity={v.get('op')} readyState={v.get('ready')} err={v.get('err')} "
+            f"-> 说完 opacity={after.get('op')}"
+        )
         if not (v.get("t") or 0) > 0.3 or not (v.get("w") or 0) > 0:
             bad.append(f"{label}: 画面没动 —— 字节可能在收但没在播")
         if v.get("muted"):
