@@ -580,5 +580,8 @@ def test_avatar_page_renders_for_a_signed_in_user(client, monkeypatch):
     monkeypatch.setattr(config, "AVATAR_TOKEN_SECRET", "s" * 32)
     signup(client, "avatar-page@example.com")
     body = client.get("/avatar").text
-    for hook in ("avPerson", "avVoice", "avCall", "avBg", "avTimer", "/static/avatar.js"):
+    # 只有**一个**选择器 (成套预设), 没有单独的音色选择 —— 分开选会出现"男样子
+    # 配女嗓音"。少了这条断言, 谁把音色选择加回来都没人拦。
+    assert "avVoice" not in body, "音色不该能单独选 — 它跟着人走"
+    for hook in ("avPerson", "avCall", "avBg", "avTimer", "/static/avatar.js"):
         assert hook in body, f"通话页少了 {hook}"

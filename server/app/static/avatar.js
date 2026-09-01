@@ -14,15 +14,19 @@
   const t = (k, d) => T[k] || d;
 
   const RT_CODEC = 'video/mp4; codecs="avc1.42E01E, mp4a.40.2"';
-  /* 形象的显示名。键是形象库里的文件名 —— 上游只知道 id, 名字是我们这边的事。
-     加形象时这里要跟着加, 不然它不会出现在选单里 (这是故意的: 选单只放我们
-     校对过的那些)。 */
-  const PERSON_NAMES = {
-    "source-v3-head": t("avatar.p.default", "初雪 · 温柔"),
-    "lin": t("avatar.p.lin", "林 · 安静"),
-    "yue": t("avatar.p.yue", "悦 · 干练"),
-    "chen": t("avatar.p.chen", "晨 · 沉稳"),
-    "hao": t("avatar.p.hao", "皓 · 阳光"),
+  /* **成套的预设**: 一个人 = 一张脸 + 一副嗓子, 绑死, 不给自由组合。
+     老板 2026-09-01 定的, 起因是他选了男形象配上女嗓音, 出来一个女头贴在男身上。
+     那不是配错了参数, 是这个产品本来就不该让人配 —— 样子、声音、静止图、说话时
+     的画面, 四样必须是同一个人。
+
+     键是形象库里的文件名; 名字与嗓音是我们这边的事 (上游只知道 id)。加人要在
+     这里加一行, 这是故意的: 选单里只放校对过的。 */
+  const PRESETS = {
+    "source-v3-head": { name: t("avatar.p.default", "初雪 · 温柔"), voice: "xiaoya" },
+    "lin": { name: t("avatar.p.lin", "林 · 安静"), voice: "xiaoxiao" },
+    "yue": { name: t("avatar.p.yue", "悦 · 干练"), voice: "hsiaochen" },
+    "chen": { name: t("avatar.p.chen", "晨 · 沉稳"), voice: "yunjian" },
+    "hao": { name: t("avatar.p.hao", "皓 · 阳光"), voice: "yunxi" },
   };
   const st = {
     sess: null, cfg: null, ws: null, ear: null, history: [], sid: 0,
@@ -82,14 +86,11 @@
     const c = await api(`/api/avatar/config`);
     if (!c.ok) { status(t("avatar.unavailable", "数字人暂时不可用"), true); return; }
     st.cfg = c.d;
-    // **只列我们自己做的形象**。用户上传那条路已经撤掉 (见 avatar.py 的说明),
-    // 但上游库里可能还留着以前传的, 它们只有一串随机 id, 摆在选单里既看不懂也
-    // 不该再鼓励使用。一个都对不上时才整份列出 —— 免得别的部署选单空掉。
-    const known = (c.d.persons || []).filter(p => PERSON_NAMES[p]);
-    fill($("#avPerson"), known.length ? known : (c.d.persons || []), c.d.person_default,
-         PERSON_NAMES);
-    fill($("#avVoice"), (c.d.voices || []).map(v => v.id), c.d.voice_default,
-         (c.d.voices || []).reduce((m, v) => (m[v.id] = v.name, m), {}));
+    // 只列我们做好的那几套。上游库里可能还留着别的 (口袋专家那条线在用), 但
+    // 没配成套的不该出现在这里。
+    const known = Object.keys(PRESETS).filter(p => (c.d.persons || []).includes(p));
+    fill($("#avPerson"), known, c.d.person_default,
+         Object.fromEntries(known.map(p => [p, PRESETS[p].name])));
     loadBg();
     layout();
   }
@@ -134,7 +135,7 @@
     if (said) reply(said);
   });
 
-  // 换形象要**同时**换背景和重算视频层位置 —— 只换一个就是错位。
+  // 换人要**同时**换背景和重算视频层位置 —— 只换一个就是错位。
   $("#avPerson").addEventListener("change", () => { loadBg(); layout(); });
 
   /* ---------- 上传形象 ---------- */
@@ -223,6 +224,11 @@
   }
 
   /* ---------- 通话 ---------- */
+  /* 通话中锁住换人。**这不是省事, 是必须**: 形象与嗓音是随 WebSocket 建立时的
+     查询串定下的, 中途改只能换掉背景图, 说话的还是接通时那个人 —— 于是女头贴在
+     男身上 (2026-09-01 老板撞到的正是这个)。想换人就挂断再打。 */
+  function lockPicker(on) { $("#avPerson").disabled = on; }
+
   async function startCall() {
     if (st.ws) return stopCall();
     if (!openMedia()) return;
@@ -230,7 +236,7 @@
     $("#avCall").textContent = t("avatar.hangup", "挂断");
 
     const person = $("#avPerson").value;
-    const voice = $("#avVoice").value;
+    const voice = (PRESETS[person] || {}).voice || "";   // 嗓音跟着人走, 不单选
     const q = new URLSearchParams({ token: st.sess.token });
     if (person) q.set("person", person);
     if (voice) q.set("voice", voice);
@@ -281,6 +287,7 @@
      代价是 Firefox 没有 —— 那种情况下明说, 别让人对着屏幕干等。 */
   function listen() {
     $("#avSay").hidden = false;              // 打字这条路通话期间一直开着
+    lockPicker(true);
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SR) { status(t("avatar.no_asr", "这个浏览器没有语音识别 — 打字也可以"), true); return; }
     const ear = new SR();
@@ -361,6 +368,7 @@
   function stopCall() {
     if (st.ws) { try { st.ws.close(); } catch { /* 忽略 */ } st.ws = null; }
     $("#avSay").hidden = true;
+    lockPicker(false);
     clearInterval(st.watch); st.watch = null;
     showVideo(false);
     if (st.ear) { const e = st.ear; st.ear = null; e.onend = null; try { e.stop(); } catch { /* 已停 */ } }
