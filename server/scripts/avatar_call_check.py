@@ -30,7 +30,9 @@ import pathlib
 PROMPT = "你好，请只回我两个字。"
 #: 用**非默认**形象打这通电话。默认那个是回落值 —— 拿它打, "选了形象不生效"
 #: 这个故障永远不会被这个脚本抓到 (2026-09-01 就是这么漏过去的)。
-PERSON = "lin"
+#: 特意用**男形象**: 声音和默认形象都是女的, 一旦回落到默认, 男女不符一眼就看出来。
+#: (2026-09-01 老板就是这么发现的: 选了男的, 出来一个女头像盖在男身子上。)
+PERSON = "hao"
 
 DRIVER = r"""
 import json, pathlib
@@ -73,6 +75,13 @@ with sync_playwright() as p:
         "domain": "." + spec["base_domain"], "path": "/", "secure": True,
     }])
     page = ctx.new_page()
+    # 记下页面真正连的 WebSocket 地址。形象是**跟着连接的查询串**过去的, 而这条
+    # 链路上"形象没跟过去"与"形象跟过去了但上游没认"从外面看一模一样。
+    page.add_init_script(
+        "window.__ws = []; const W = window.WebSocket;"
+        " window.WebSocket = function(u, p) { window.__ws.push(String(u));"
+        " return p === undefined ? new W(u) : new W(u, p); };"
+        " window.WebSocket.prototype = W.prototype;")
     page.on("console", lambda m: res.setdefault("console", []).append(f"{m.type}: {m.text}"[:200]))
     # 4xx/5xx 要**带着是哪个 URL** 记下来 —— 光看到"404"没法判断是我们的东西坏了
     # 还是第三方探针。
@@ -112,9 +121,7 @@ with sync_playwright() as p:
             " return {img: (s.maskImage || s.webkitMaskImage || '').slice(0, 40),"
             " comp: s.maskComposite || s.webkitMaskComposite || ''}; }")
         res["reply_after"] = wait_for(page, lambda v: v["op"] == "0", 30)
-        res["ws_person"] = page.evaluate(
-            "() => (performance.getEntriesByType('resource').map(e => e.name)"
-            " .find(n => n.includes('/api/avatar/ws')) || '')")
+        res["ws_url"] = page.evaluate("() => (window.__ws || []).join(' | ')")
         res["log"] = page.inner_text("#avLog")[:400]
         res["log_grew"] = len(res["log"]) > len(before)
         res["status"] = page.inner_text("#avStatus")[:200]
@@ -191,6 +198,9 @@ def main() -> int:
         if after.get("op") != "0":
             bad.append(f"{label}: 说完了图层没藏 —— 最后一帧僵在背景上就是重影")
     print(f"    背景图: {(res.get('bg_src') or '')[-60:]!r}")
+    print(f"    通话连接: {(res.get('ws_url') or '')[-90:]!r}")
+    if f"person={PERSON}" not in (res.get("ws_url") or ""):
+        bad.append(f"通话连接里没带 person={PERSON} —— 选了形象说话的还是默认那个")
     if f"person={PERSON}" not in (res.get("bg_src") or ""):
         bad.append(f"选了 {PERSON} 背景却没跟着换 —— 形象与背景是两张图, 错开就是张冠李戴")
     print(f"    状态栏: {res.get('status', '')!r}")
