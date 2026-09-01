@@ -2589,7 +2589,22 @@ def _autogen_boot() -> str:
         "done\n"
         'curl -fsS -o /dev/null "http://127.0.0.1:8081/api/gallery/?user_id=guestuser@gmail.com" || true\n'
         'curl -fsS -o /dev/null "http://127.0.0.1:8081/api/teams/?user_id=guestuser@gmail.com" || true\n'
-        'echo "[dsh] autogen 默认队伍已预热"\n'
+        # 队伍有了还不够: 首屏是"No session selected. Create or select a session
+        # from the sidebar." —— 用户还得自己点 New Session 再走一遍弹窗。会话跟
+        # 队伍一样该替他建好, 进来就能说话。
+        # **只在一个会话都没有时建**: /data 挂的是 NAS, 状态跨重启留着, 每次开机
+        # 建一个就会攒出一串"开始对话"。
+        "U=guestuser@gmail.com\n"
+        'n=$(curl -fsS "http://127.0.0.1:8081/api/sessions/?user_id=$U" '
+        "| python3 -c \"import sys,json;print(len(json.load(sys.stdin).get('data') or []))\" 2>/dev/null || echo x)\n"
+        'if [ "$n" = "0" ]; then\n'
+        '  tid=$(curl -fsS "http://127.0.0.1:8081/api/teams/?user_id=$U" '
+        "| python3 -c \"import sys,json;d=json.load(sys.stdin)['data'];print(d[0]['id'] if d else '')\" 2>/dev/null)\n"
+        '  [ -n "$tid" ] && curl -fsS -o /dev/null -X POST http://127.0.0.1:8081/api/sessions/ '
+        '-H "Content-Type: application/json" '
+        '-d "{\\"user_id\\":\\"$U\\",\\"name\\":\\"开始对话\\",\\"team_id\\":$tid}" || true\n'
+        "fi\n"
+        'echo "[dsh] autogen 默认队伍与会话已预热"\n'
         "wait $srv\n"
     )
 
