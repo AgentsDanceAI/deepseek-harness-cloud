@@ -109,8 +109,11 @@ async def avatar_meter(request: Request):
         amount,
         kind="llm",
         model="avatar:live",
-        # 同一分钟窗口重投不会重复扣 —— GPU 侧网络抖动时会重试。
-        request_id=f"avatar-{tenant}-{ts[:-2] if len(ts) > 2 else ts}",
+        # 幂等键取**精确秒 + 分钟数**, 不做时间分桶: 同一份回报重投时 ts 与
+        # minutes 都不变 -> 认得出来; 而背靠背的两通短通话 ts 必然不同 ->
+        # 两笔都收得到。先前按 100 秒分桶, 后一种会被当成重投白吞掉。
+        # (GPU 侧失败不重试, 所以这里防的是重复投递, 不需要更宽的窗口。)
+        request_id=f"avatar-{tenant}-{ts}-{mins}",
     )
     log.info("[avatar] 计费 user=%s 分钟=%s 积分=%s", user_id, mins, amount)
     return {"ok": True, "charged": amount}
