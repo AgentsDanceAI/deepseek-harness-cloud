@@ -14,6 +14,16 @@
   const t = (k, d) => T[k] || d;
 
   const RT_CODEC = 'video/mp4; codecs="avc1.42E01E, mp4a.40.2"';
+  /* 形象的显示名。键是形象库里的文件名 —— 上游只知道 id, 名字是我们这边的事。
+     加形象时这里要跟着加, 不然它不会出现在选单里 (这是故意的: 选单只放我们
+     校对过的那些)。 */
+  const PERSON_NAMES = {
+    "source-v3-head": t("avatar.p.default", "初雪 · 温柔"),
+    "lin": t("avatar.p.lin", "林 · 安静"),
+    "yue": t("avatar.p.yue", "悦 · 干练"),
+    "chen": t("avatar.p.chen", "晨 · 沉稳"),
+    "hao": t("avatar.p.hao", "皓 · 阳光"),
+  };
   const st = {
     sess: null, cfg: null, ws: null, ear: null, history: [], sid: 0,
     ms: null, sb: null, url: null, queue: [], speaking: false, watch: null,
@@ -72,7 +82,12 @@
     const c = await api(`/api/avatar/config`);
     if (!c.ok) { status(t("avatar.unavailable", "数字人暂时不可用"), true); return; }
     st.cfg = c.d;
-    fill($("#avPerson"), c.d.persons || [], c.d.person_default);
+    // **只列我们自己做的形象**。用户上传那条路已经撤掉 (见 avatar.py 的说明),
+    // 但上游库里可能还留着以前传的, 它们只有一串随机 id, 摆在选单里既看不懂也
+    // 不该再鼓励使用。一个都对不上时才整份列出 —— 免得别的部署选单空掉。
+    const known = (c.d.persons || []).filter(p => PERSON_NAMES[p]);
+    fill($("#avPerson"), known.length ? known : (c.d.persons || []), c.d.person_default,
+         PERSON_NAMES);
     fill($("#avVoice"), (c.d.voices || []).map(v => v.id), c.d.voice_default,
          (c.d.voices || []).reduce((m, v) => (m[v.id] = v.name, m), {}));
     loadBg();
@@ -123,27 +138,6 @@
   $("#avPerson").addEventListener("change", () => { loadBg(); layout(); });
 
   /* ---------- 上传形象 ---------- */
-  $("#avUpload").addEventListener("change", async (e) => {
-    const f = e.target.files?.[0];
-    e.target.value = "";                 // 同一张图连传两次也要触发
-    if (!f || !st.sess) return;
-    $("#avUploadText").textContent = t("avatar.uploading", "上传中…");
-    const id = "p" + Date.now().toString(36);
-    const r = await fetch(`/api/avatar/persons?id=${id}`, { method: "POST", body: f });
-    const d = await r.json().catch(() => ({}));
-    $("#avUploadText").textContent = t("avatar.upload", "传张照片");
-    if (!r.ok) { status(d.error || t("avatar.upload_failed", "上传失败"), true); return; }
-    // 服务端已经热加载好, 直接选中 —— 传完就能用, 不让人再点一次。
-    st.cfg.persons = d.persons || st.cfg.persons;
-    (st.cfg.person_crops = st.cfg.person_crops || {})[d.id] = d.crop;
-    fill($("#avPerson"), st.cfg.persons, st.cfg.person_default);
-    $("#avPerson").value = d.id;
-    bgVer[d.id] = Date.now();            // 刚传的图, 别让缓存吐上一张
-    loadBg();
-    layout();
-    status(t("avatar.upload_ok", "形象已就绪"));
-  });
-
   /* ---------- 播放 ---------- */
   function openMedia() {
     const MS = mediaSource();

@@ -48,9 +48,6 @@
 
 .av-field { display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
 .av-field select { padding: 7px 10px; border-radius: 8px; border: 1px solid var(--line, #e6e6e9); }
-.av-upload { display: inline-block; text-align: center; padding: 8px 12px; cursor: pointer;
-             border: 1px dashed var(--line, #c9c9cf); border-radius: 8px; font-size: 13px; }
-.av-call { padding: 11px 16px; border: 0; border-radius: 10px; cursor: pointer;
            background: #2563eb; color: #fff; font: inherit; }
 .av-call:disabled { opacity: .5; cursor: default; }
 .av-say { padding: 9px 12px; border-radius: 8px; border: 1px solid var(--line, #e6e6e9);

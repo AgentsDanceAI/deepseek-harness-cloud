@@ -28,6 +28,9 @@ import pathlib
 
 #: 她要说的那句。短 —— 这是验收不是聊天, 而每分钟都在烧 GPU 和积分。
 PROMPT = "你好，请只回我两个字。"
+#: 用**非默认**形象打这通电话。默认那个是回落值 —— 拿它打, "选了形象不生效"
+#: 这个故障永远不会被这个脚本抓到 (2026-09-01 就是这么漏过去的)。
+PERSON = "lin"
 
 DRIVER = r"""
 import json, pathlib
@@ -78,6 +81,11 @@ with sync_playwright() as p:
     try:
         page.goto(spec["url"], timeout=60000, wait_until="domcontentloaded")
         page.wait_for_timeout(4000)
+        # **换一个非默认形象再打** —— 坏掉过的正是这条 (选了不生效, 说话的还是
+        # 默认那个)。用默认形象打这通电话, 恰恰验不到它。
+        page.select_option("#avPerson", spec["person"])
+        page.wait_for_timeout(500)
+        res["bg_src"] = page.get_attribute("#avBg", "src") or ""
         page.click("#avCall")
         # 打字那一栏出现 = 上游 ready 已到。接通后她会先说一句招呼。
         page.wait_for_selector("#avSay:not([hidden])", timeout=30000)
@@ -104,6 +112,9 @@ with sync_playwright() as p:
             " return {img: (s.maskImage || s.webkitMaskImage || '').slice(0, 40),"
             " comp: s.maskComposite || s.webkitMaskComposite || ''}; }")
         res["reply_after"] = wait_for(page, lambda v: v["op"] == "0", 30)
+        res["ws_person"] = page.evaluate(
+            "() => (performance.getEntriesByType('resource').map(e => e.name)"
+            " .find(n => n.includes('/api/avatar/ws')) || '')")
         res["log"] = page.inner_text("#avLog")[:400]
         res["log_grew"] = len(res["log"]) > len(before)
         res["status"] = page.inner_text("#avStatus")[:200]
@@ -140,6 +151,7 @@ def main() -> int:
             "base_domain": base.split("//")[-1],
             "url": f"{base}/avatar",
             "prompt": PROMPT,
+            "person": PERSON,
         }
         target = pathlib.Path(args.emit_spec)
         target.mkdir(parents=True, exist_ok=True)
@@ -178,6 +190,9 @@ def main() -> int:
             bad.append(f"{label}: 视频层是透明的 —— 用户看不到她")
         if after.get("op") != "0":
             bad.append(f"{label}: 说完了图层没藏 —— 最后一帧僵在背景上就是重影")
+    print(f"    背景图: {(res.get('bg_src') or '')[-60:]!r}")
+    if f"person={PERSON}" not in (res.get("bg_src") or ""):
+        bad.append(f"选了 {PERSON} 背景却没跟着换 —— 形象与背景是两张图, 错开就是张冠李戴")
     print(f"    状态栏: {res.get('status', '')!r}")
     print(f"    字幕: {(res.get('log') or '')!r}")
     mask = res.get("mask") or {}
