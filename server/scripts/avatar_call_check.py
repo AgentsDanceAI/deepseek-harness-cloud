@@ -94,6 +94,8 @@ with sync_playwright() as p:
         page.fill("#avSay", spec["prompt"])
         page.press("#avSay", "Enter")
         res["reply"] = wait_for(page, lambda v: v["t"] > (res["greet_after"]["t"] + 0.3), 60)
+        # 单独截舞台那一块: 整页截图里视频层只占一小格, 边缘化没化开根本看不出来。
+        page.locator(".av-stage").screenshot(path=str(out / "stage.png"))
         res["reply_after"] = wait_for(page, lambda v: v["op"] == "0", 30)
         res["log"] = page.inner_text("#avLog")[:400]
         res["log_grew"] = len(res["log"]) > len(before)
