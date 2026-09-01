@@ -596,3 +596,46 @@ def test_upload_sends_only_fields_the_server_reads():
     body = MEDIA[j : j + 1200]
     assert '"content_type": ctype' in body and '"file_name": p.name' in body
     assert '"size"' not in body, "还在发服务端不读的 size"
+
+
+# ── 等待可见性 + 房间可辨识 (2026-09-01 老板: "切出去再回来消息就没了？以及
+# 发消息半天不回有没有个计数器以及阶段说明") ─────────────────────────────
+def test_waiting_shows_who_and_how_long():
+    """一棒能跑好几分钟, 而屏幕上此前只有一片静止 —— 分不出在干活还是死了。"""
+    assert "function statusStart" in WEB and "function statusSet" in WEB
+    assert ".statusbar" in WEB, "缺样式, 渲染出来也没形"
+    # 发出去就起, 收尾必摘 (否则残留一个永远转的圈)
+    assert "statusStart('已发出" in WEB
+    i = WEB.index("} finally {")
+    assert "statusStop()" in WEB[i : i + 200], "收尾没摘状态条"
+
+
+def test_elapsed_resets_only_when_the_baton_changes():
+    """一棒里要跑十几个工具。每次工具调用都重置的话秒数被反复清零,
+    永远看不出"这一棒已经跑了多久" —— 而那正是用户要的。(浏览器实测过:
+    同一人换工具 3→4 秒不清零, 换人才回到 1 秒。)"""
+    i = WEB.index("function statusSet")
+    seg = WEB[i : i + 700]
+    assert "botId !== statusWho" in seg, "换工具也会清零"
+    assert "statusFrom = Date.now()" in seg
+
+
+def test_relay_step_number_is_shown():
+    """第几棒只在剧组房间有意义 —— 别的房间成员不是流水线。"""
+    i = WEB.index("function statusSet")
+    seg = WEB[i : i + 700]
+    assert "CREW_ORDER" in seg
+    assert "cur.mode === 'relay'" in seg, "非流水线房间也标棒次会误导"
+    # 顺序必须与服务端 Store.CREW 一致, 否则棒次是错的
+    assert "['director', 'artist', 'storyboard', 'videographer', 'editor']" in WEB
+    assert 'CREW = ("director", "artist", "storyboard", "videographer", "editor")' in ROOMS
+
+
+def test_rooms_are_distinguishable():
+    """开新片不再弹 prompt 问名字 —— 几个房间在侧栏长得一模一样, 切出去再回来
+    会以为"消息没了", 其实是切到了另一个同名房间。"""
+    assert "prompt('这部片叫什么" not in WEB, "还在弹 prompt"
+    assert "新片 ${n}" in WEB, "名字没有序号"
+    # 侧栏第二行带消息数 —— 重名时唯一分得出"哪个是我刚才那个"的线索
+    assert "r.count" in WEB
+    assert '"count": len(store.transcript(r.id))' in MAIN, "服务端没返回 count"
