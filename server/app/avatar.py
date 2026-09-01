@@ -197,6 +197,34 @@ _SENTENCE_END = "。！？!?…\n"
 _CHUNK_MAX = 48
 
 
+#: 有些模型把思考过程当正文吐出来, 裹在这对标记里。
+_THINK_OPEN, _THINK_CLOSE = "<think>", "</think>"
+
+
+def _speakable(buf: str) -> tuple[str, str]:
+    """摘掉推理块。返回 (可以念的, 还没闭合要接着攒的)。
+
+    不摘的话她会**把标记念出来** —— 2026-09-01 线上抓到一句"你好</think>你好"。
+    比念错更糟的是把思考过程本身念出来: 那是给模型自己看的草稿。
+
+    未闭合的一律攒着而不是先念: 流式下"<think>"到了、闭合还没到时, 后面跟的
+    正是不该出口的内容。
+    """
+    out, i = "", 0
+    while True:
+        j = buf.find(_THINK_OPEN, i)
+        if j < 0:
+            out += buf[i:]
+            break
+        out += buf[i:j]
+        k = buf.find(_THINK_CLOSE, j)
+        if k < 0:
+            return out.replace(_THINK_CLOSE, ""), buf[j:]
+        i = k + len(_THINK_CLOSE)
+    # 只有闭合没有开头的情况也见过 (开头那半截走了 reasoning_content 字段)
+    return out.replace(_THINK_CLOSE, ""), ""
+
+
 def _chunks(buf: str) -> tuple[list[str], str]:
     """把已到的文字切成"能念的句子" + 还没成句的尾巴。"""
     out, cur = [], ""
@@ -259,7 +287,9 @@ async def avatar_say(request: Request, user: dict = Depends(resolve_user)):
     uid, dev = user["id"], user.get("device_id", "")
 
     async def gen():
-        buf, usage, said_anything = "", {}, False
+        # 名字不能叫 raw —— 下面解析 SSE 那行已经占了这个名字, 撞上就把原始
+        # JSON 当成她要说的话 (测试当场抓到)。
+        pending, buf, usage, said_anything = "", "", {}, False
         try:
             async with httpx.AsyncClient(timeout=httpx.Timeout(90.0, connect=10.0)) as c:
                 async with c.stream(
@@ -292,7 +322,9 @@ async def avatar_say(request: Request, user: dict = Depends(resolve_user)):
                         delta = ((d.get("choices") or [{}])[0].get("delta") or {}).get("content") or ""
                         if not delta:
                             continue
-                        buf += delta
+                        pending += delta
+                        speakable, pending = _speakable(pending)
+                        buf += speakable
                         ready, buf = _chunks(buf)
                         for piece in ready:
                             said_anything = True
