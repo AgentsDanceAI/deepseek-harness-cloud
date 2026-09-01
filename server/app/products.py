@@ -2783,6 +2783,10 @@ def env_for(product_id: str, token: str, secret: str = "") -> dict[str, str]:
             # 那一步在冷盘上耗掉的正是我们没有的时间 (日志停在这儿再没下文)。
             # 真要用浏览器时它会自己按需初始化, 预载只是想让第一次快一点。
             "OH_PRELOAD_TOOLS": "false",
+            # 开 debug: 沙箱探活失败时它只在 **debug** 级别打印"打的是哪个地址、
+            # 什么异常" (sandbox_service._check_agent_server_alive)。不开的话
+            # 只剩一句"failed to start within 120s", 等于让人猜。
+            "DEBUG": "true",
             "SANDBOX_VOLUMES": "/workspace:/workspace:rw",
             # 灌设置那一步要用 (见 _openhands_boot)。型号必须钉在**在售目录**里 ——
             # 它内置的默认值是厂商自己的名字, 网关只放行目录内的, 不钉就是 404。
