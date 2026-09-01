@@ -495,3 +495,51 @@ def test_asyncio_is_imported_for_the_backoff():
     assert "import asyncio" in AGENT
     i = AGENT.index("async def _stream(")
     assert "asyncio.sleep" in AGENT[i : i + 1200]
+
+
+# ── 字段名必须与服务端实际返回一致 (2026-09-01: 我今晚第三次栽在"想当然") ──
+# 上传返回体的字段是 download_url, 我写成了 url —— 于是上传**全部成功**却取到
+# 空串, 报"参考图上传失败"且原因为空。阿摄被这个假错误折腾了十几步 (换绝对
+# 路径、换 jpg、验 PNG 魔数), 全是白费。
+#
+# 这条测试跨文件比对: 从服务端 media.py 里读出真实字段, 再断言容器侧在用它。
+# 光看容器侧的源码永远发现不了 —— 那边写什么都"看起来对"。
+SERVER_MEDIA = (ROOT / "server" / "app" / "media.py").read_text(encoding="utf-8")
+
+
+def test_upload_response_fields_match_the_server():
+    i = SERVER_MEDIA.index('"upload_url": f"{base}')
+    seg = SERVER_MEDIA[i - 200 : i + 400]
+    assert '"download_url"' in seg, "服务端改了字段名, 这条测试的前提没了"
+    # 容器侧必须用同一对字段
+    assert 'd.get("upload_url")' in MEDIA
+    assert 'd.get("download_url")' in MEDIA
+    assert 'd.get("url")' not in MEDIA, "又在用不存在的 url 字段"
+
+
+def test_video_job_fields_match_the_server():
+    assert '"id": job_id, "model": model, "task_status": "PROCESSING"' in SERVER_MEDIA
+    assert '"video_result": [{"url": job["url"]' in SERVER_MEDIA
+    # 容器侧: 提交读 id, 轮询读 task_status + video_result[0].url
+    assert '.get("id")' in MEDIA
+    assert 'd.get("task_status")' in MEDIA
+    assert '"video_result"' in MEDIA
+
+
+def test_upload_failure_always_says_why():
+    """空原因比报错更糟 —— 模型拿到"失败但没说为什么"只能瞎试。"""
+    i = MEDIA.index("async def _upload_blob")
+    seg = MEDIA[i : i + 1600]
+    # 每一条失败出口都要带上原因
+    assert 'return "", f"文件不存在' in seg
+    assert "申请上传位 HTTP" in seg
+    assert "实际字段" in seg, "字段对不上时要报出实际字段名, 而不是回空"
+    assert "上传 HTTP" in seg
+    # 调用方兜底: 万一还是空原因也要说人话
+    assert "没有返回失败原因" in MEDIA
+
+
+def test_upload_content_type_follows_the_suffix():
+    """一律报 image/png 会让 jpg 存成 png —— 没必要赌上游按魔数纠错。"""
+    assert "_CTYPE" in MEDIA
+    assert '".jpg": "image/jpeg"' in MEDIA

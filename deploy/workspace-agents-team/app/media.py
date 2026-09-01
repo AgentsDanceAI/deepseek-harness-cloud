@@ -141,7 +141,10 @@ async def generate_video(prompt: str, path: str, duration: int = 5, resolution: 
         # 首帧参考图: 上传进资产库换一个可被上游取到的 url
         url, why = await _upload_blob(_safe_rel(image))
         if not url:
-            return f"参考图上传失败: {why}", "参考图上传失败"
+            # 兜底: 万一还是空原因, 至少把路径报出来, 别让模型对着一句
+            # "失败" 猜半天 (2026-09-01 实测它会连试十几种路径写法)
+            return (f"参考图上传失败 ({image}): {why or '没有返回失败原因 — 这是个 bug, 请报告'}",
+                    "参考图上传失败")
         body["image_url"] = url
     async with _client(120) as c:
         r = await c.post(f"{GATEWAY_BASE}/videos/generations", headers=_headers(), json=body)
@@ -183,23 +186,40 @@ async def generate_video(prompt: str, path: str, duration: int = 5, resolution: 
             f"出片 {rel.name}")
 
 
+#: 按后缀给 content_type —— 资产库按它决定怎么存/怎么回, 一律报 image/png
+#: 会让 jpg 存成 png (上游取图时按魔数解码, 大多能过, 但没必要赌)。
+_CTYPE = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+          ".webp": "image/webp", ".gif": "image/gif"}
+
+
 async def _upload_blob(p: Path) -> tuple[str, str]:
-    """把本地文件放进 DSH 资产库, 换一个上游能取到的 url。"""
+    """把本地文件放进 DSH 资产库, 换一个上游能取到的 url。
+
+    ⚠️ 返回体的字段是 **download_url**, 不是 url (见 media.create_upload:
+    {"id", "upload_url", "download_url"})。2026-09-01 我照着想当然写了 url,
+    于是: 上传其实**全部成功**, 但取到空串 → 报"参考图上传失败"且原因为空 ——
+    阿摄被这个假错误折腾了十几步 (换绝对路径、换 jpg、验 PNG 魔数), 全是白费。
+    """
     if not p.exists():
         return "", f"文件不存在: {p}"
+    ctype = _CTYPE.get(p.suffix.lower(), "application/octet-stream")
     async with _client(60) as c:
         r = await c.post(f"{GATEWAY_BASE}/media/uploads", headers=_headers(),
-                         json={"content_type": "image/png", "size": p.stat().st_size})
+                         json={"content_type": ctype, "size": p.stat().st_size,
+                               "file_name": p.name})
         if r.status_code >= 400:
-            return "", f"HTTP {r.status_code}: {_err_text(r)}"
+            return "", f"申请上传位 HTTP {r.status_code}: {_err_text(r)}"
         d = r.json() or {}
-        put, get = d.get("upload_url") or "", d.get("url") or ""
-        if not put:
-            return "", "资产库没有返回上传地址"
+        put = d.get("upload_url") or ""
+        get = d.get("download_url") or ""
+        if not put or not get:
+            # 字段名对不上要**说出来**, 不能回一个空原因 —— 那正是这次的坑:
+            # 模型拿到"失败但没说为什么", 只能瞎试。
+            return "", f"资产库返回里没有 upload_url/download_url, 实际字段: {sorted(d)}"
         up = await c.put(put, content=p.read_bytes(),
-                         headers={**_headers(), "Content-Type": "image/png"})
+                         headers={**_headers(), "Content-Type": ctype})
         if up.status_code >= 400:
-            return "", f"上传 HTTP {up.status_code}"
+            return "", f"上传 HTTP {up.status_code}: {_err_text(up)}"
     return get, ""
 
 
