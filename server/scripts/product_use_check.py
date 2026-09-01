@@ -1,0 +1,220 @@
+"""**真动手用一遍**每个产品, 而不是只看首屏渲染出来没有。
+
+为什么非要这个
+--------------
+workspace_visual_check 只证明"页面渲染出来了、没有登录墙"。2026-09-01 老板逐个
+点开新接的四个产品, **四个全废**, 而那个脚本对它们全报 ✓ —— 因为三个毛病全都
+发生在**用户动手之后**:
+
+  * OpenManus / CrewAI: 首屏是漂亮的终端, 敲 python 就
+    `ModuleNotFoundError: No module named 'pydantic'` (ttyd 起的是登录 shell,
+    把我们 export 的 PATH 冲掉了);
+  * LangChain: 聊天界面好好的, 一发消息就红
+    `"/langgraph/threads" cannot be parsed as a URL`;
+  * OpenHands: 首页写着"让我们开始开发", 点新对话就
+    `500: Agent Server Failed to start properly`。
+
+这套错法没有一个能靠"页面上有没有出现某些字"发现。判据只能是**动手之后有没有
+真回应**。
+
+同一条教训这个会话里栽过两次: 数字人那次是"字节在收、计时在走、画面一帧不动",
+补了 avatar_call_check 去真打一通电话; 接产品时又退回只看首屏。
+
+用法::
+
+    bash scripts/product_use_check.sh                    # 全部会用的产品
+    bash scripts/product_use_check.sh openmanus crewai   # 只试这几个
+
+退出码 0 = 都真的能用。
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import pathlib
+
+#: 每个产品"动手"的方式与"算数"的判据。
+#:
+#: 终端类的判据是**敲一条命令看输出**, 不是看提示符在不在 —— 提示符在而命令跑不了
+#: 正是老板撞到的那个形状。
+USE = {
+    "openmanus": {
+        "kind": "terminal",
+        # 敲一条能立刻见分晓的: 解释器指向哪、关键依赖在不在。
+        "type": "python -c 'import pydantic,sys;print(\"USE-OK\",sys.executable)'\n",
+        "want": "USE-OK /opt/venv-openmanus",
+        "why": "敲 python 报 ModuleNotFoundError —— 登录 shell 把 PATH 冲掉了",
+    },
+    "crewai": {
+        "kind": "terminal",
+        "type": "crewai --version && echo USE-OK\n",
+        "want": "USE-OK",
+        "why": "敲 crewai 找不到命令 —— 登录 shell 把 PATH 冲掉了",
+    },
+    "langchain": {
+        "kind": "chat",
+        "send": "只回我两个字",
+        "why": '一发消息就 "cannot be parsed as a URL"',
+    },
+    "openhands": {
+        "kind": "openhands",
+        "why": "点新对话就 500: Agent Server Failed to start properly",
+    },
+}
+
+DRIVER = r"""
+import json, pathlib
+from playwright.sync_api import sync_playwright
+
+spec = json.loads(pathlib.Path("/work/spec.json").read_text())
+out = pathlib.Path("/work/out"); out.mkdir(parents=True, exist_ok=True)
+results = []
+
+
+# 冷启动: 我们自己的启动页会轮询, 等它跳走。
+def wait_started(page):
+    for _ in range(90):
+        if "/work/starting" not in page.url and "启动中" not in page.title():
+            return
+        page.wait_for_timeout(2000)
+
+
+with sync_playwright() as p:
+    browser = p.chromium.launch(args=["--no-sandbox"])
+    ctx = browser.new_context(viewport={"width": 1440, "height": 900}, locale="zh-CN")
+    ctx.add_cookies([{
+        "name": spec["cookie_name"], "value": spec["token"],
+        "domain": "." + spec["base_domain"], "path": "/", "secure": True,
+    }])
+    for prod in spec["products"]:
+        page = ctx.new_page()
+        e = {"id": prod["id"]}
+        try:
+            page.goto(prod["url"], timeout=60000, wait_until="domcontentloaded")
+            wait_started(page)
+            page.wait_for_timeout(8000)
+            kind = prod["kind"]
+
+            if kind == "terminal":
+                # ttyd 的 xterm 收键盘: 点一下画布拿到焦点, 再逐字敲。
+                page.click("body")
+                page.wait_for_timeout(1000)
+                page.keyboard.type(prod["type"], delay=25)
+                page.wait_for_timeout(12000)
+                e["text"] = page.inner_text("body")[-1500:]
+
+            elif kind == "chat":
+                box = page.get_by_placeholder("Type your message...")
+                box.click(); box.fill(prod["send"])
+                page.keyboard.press("Enter")
+                # 模型要想一会儿; 出错的话红框几秒就弹出来。
+                page.wait_for_timeout(45000)
+                e["text"] = page.inner_text("body")[-1500:]
+
+            elif kind == "openhands":
+                # "新对话" 那个按钮 —— 点它才会去起沙箱, 而沙箱起不来正是那个 500。
+                page.get_by_role("button", name="新对话").first.click(timeout=15000)
+                page.wait_for_timeout(50000)
+                e["text"] = page.inner_text("body")[-1500:]
+
+            page.screenshot(path=str(out / (prod["id"] + ".png")))
+        except Exception as ex:
+            e["error"] = f"{type(ex).__name__}: {ex}"[:300]
+            try:
+                page.screenshot(path=str(out / (prod["id"] + ".png")))
+            except Exception:
+                pass
+        results.append(e)
+        page.close()
+    browser.close()
+
+pathlib.Path("/work/results.json").write_text(json.dumps(results, ensure_ascii=False))
+"""
+
+#: 动手之后**屏幕上出现这些就是没用成**。与首屏检查的词表分开: 这些字只有在
+#: 用户动过手之后才可能出现。
+FAIL_PHRASES = [
+    "modulenotfounderror",
+    "command not found",
+    "cannot be parsed as a url",
+    "an error occurred",
+    "failed to start properly",
+    "traceback (most recent call last)",
+    "no such file or directory",
+]
+
+
+def _products(only: list[str]) -> tuple[list[dict], str]:
+    from app import config, products
+
+    base = config.PUBLIC_BASE.rstrip("/").split("//")[-1]
+    out = []
+    for p in products.enabled():
+        if p.id not in USE or not p.domain or (only and p.id not in only):
+            continue
+        out.append({"id": p.id, "url": f"https://{p.domain}/", **USE[p.id]})
+    if not out:
+        raise SystemExit("没有可试的产品")
+    return out, base
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("products", nargs="*")
+    ap.add_argument("--email", default="qa-verify@dshcloud.online")
+    ap.add_argument("--emit-spec")
+    ap.add_argument("--read-results")
+    args = ap.parse_args()
+
+    from app import config, db, security
+
+    if args.emit_spec:
+        prods, base = _products(args.products)
+        user = db.query_one("SELECT * FROM users WHERE email=?", (args.email,))
+        if user is None:
+            raise SystemExit(f"没有这个账号: {args.email}")
+        spec = {
+            "cookie_name": config.SESSION_COOKIE,
+            "token": security.sign_token(user["id"], epoch=user["session_epoch"]),
+            "base_domain": base,
+            "products": prods,
+        }
+        t = pathlib.Path(args.emit_spec)
+        t.mkdir(parents=True, exist_ok=True)
+        (t / "spec.json").write_text(json.dumps(spec, ensure_ascii=False))
+        (t / "driver.py").write_text(DRIVER)
+        print(f"==> {len(prods)} 个产品要真动手试 (账号 {args.email})")
+        for p in prods:
+            print(f"      {p['id']:12s} {p['kind']:9s} 防的是: {p['why']}")
+        return 0
+
+    if not args.read_results:
+        raise SystemExit("要么 --emit-spec, 要么 --read-results (见 product_use_check.sh)")
+
+    results = json.loads((pathlib.Path(args.read_results) / "results.json").read_text())
+    bad = 0
+    print()
+    for e in results:
+        pid = e["id"]
+        if e.get("error"):
+            print(f"  ✗ {pid:12s} 动不了: {e['error']}")
+            bad += 1
+            continue
+        text = (e.get("text") or "").lower()
+        hits = [f for f in FAIL_PHRASES if f in text]
+        want = USE[pid].get("want")
+        if hits:
+            print(f"  ✗ {pid:12s} 动手之后报错: {hits}")
+            bad += 1
+        elif want and want.lower() not in text:
+            print(f"  ✗ {pid:12s} 没看到预期回应 {want!r}")
+            bad += 1
+        else:
+            tail = " ".join((e.get("text") or "").split())[-90:]
+            print(f"  ✓ {pid:12s} 真的用上了 … {tail}")
+    return 1 if bad else 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
