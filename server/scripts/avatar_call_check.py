@@ -54,6 +54,7 @@ with sync_playwright() as p:
     # 404/5xx 要**带着是哪个 URL** 记下来 —— 光看到"404"完全没法判断是我们的东西
     # 坏了还是第三方探针。
     page.on("response", lambda r: r.status >= 400 and res.setdefault("bad", []).append(f"{r.status} {r.url}"[:160]))
+    page.on("requestfailed", lambda r: res.setdefault("bad", []).append(f"failed {r.url}"[:160]))
     try:
         page.goto(spec["url"], timeout=60000, wait_until="domcontentloaded")
         page.wait_for_timeout(4000)
