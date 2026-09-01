@@ -121,7 +121,10 @@
           <span>Seedance 2.5</span><span>Wan 3.0</span><span>Qwen-Image</span><span>GPT-Image</span>
         </div>
         {% if apps_clickable %}
-        <a class="btn btn-primary" href="{{ apps_base }}/work?product_id=comfyui" style="margin-top:auto">{{ t("home.flag.comfy_cta") }}</a>
+        {# 新标签, 与产品卡一致 (_app_card.html): 工作台是长驻界面, 点进去不该
+           把人从主页顶掉。这里漏了 target 就成了两种行为, 而它们看起来一模一样。 #}
+        <a class="btn btn-primary" href="{{ apps_base }}/work?product_id=comfyui"
+           target="_blank" rel="noopener" style="margin-top:auto">{{ t("home.flag.comfy_cta") }}</a>
         {% else %}
         <a class="btn btn-ghost" href="/apps" style="margin-top:auto">{{ t("home.apps.cta") }}</a>
         {% endif %}

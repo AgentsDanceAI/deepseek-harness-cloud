@@ -108,11 +108,10 @@ def test_app_links_open_in_a_new_tab(client, monkeypatch):
 
     for path in ("/apps", "/"):
         body = client.get(path).text
-        # 只看产品卡 (16 格那些)。主页旗舰区另有一个"进入"按钮也指向工作台,
-        # 它一直是原地跳走的 —— 那是另一回事, 别混进这条断言里。
-        links = [
-            a for a in re.findall(r"<a\b[^>]*>", body) if "app-card is-live" in a or "hero-app is-live" in a
-        ]
+        # 指向工作台的链接**一个都不许漏**。早先这里只挑产品卡, 把主页旗舰区
+        # 那个"进入"按钮排除在外 —— 于是同一个去处有了两种行为, 而它们在页面上
+        # 看起来一模一样 (都是一个按钮)。现在按去处筛, 不按长相筛。
+        links = re.findall(r"<a\b[^>]*>", body)
         work = [a for a in links if "/work?product_id=" in a]
         assert work, f"{path}: 找不到工作台链接"
         for a in work:
@@ -585,3 +584,20 @@ def test_avatar_page_renders_for_a_signed_in_user(client, monkeypatch):
     assert "avVoice" not in body, "音色不该能单独选 — 它跟着人走"
     for hook in ("avPerson", "avCall", "avBg", "avTimer", "/static/avatar.js"):
         assert hook in body, f"通话页少了 {hook}"
+
+
+def test_tab_icon_is_wired_up(client):
+    """标签页图标: link 标签要有, /favicon.ico 也要真能拿到东西。
+
+    图标文件一直都在 (手机壳那套 PWA 图标), 只是从来没接到网页上 —— 结果全站
+    每一页都白吃一个 /favicon.ico 404, 标签页上是个空白方块。这类毛病不报错、
+    不变红, 只在网络面板里留一行, 所以拿测试钉住。
+    """
+    body = client.get("/").text
+    assert 'rel="icon"' in body
+    assert 'rel="apple-touch-icon"' in body
+
+    ico = client.get("/favicon.ico")
+    assert ico.status_code == 200
+    assert ico.headers["content-type"].startswith("image/")
+    assert len(ico.content) > 500

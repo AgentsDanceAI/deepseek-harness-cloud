@@ -6,6 +6,11 @@
 <title>{% block title %}DSH Cloud{% endblock %}</title>
 <meta name="description" content="{{ t('meta.description') }}">
 <link rel="stylesheet" href="/static/app.css?v={{ asset_v }}">
+{# 不写这两行, 浏览器就去要 /favicon.ico —— 全站每一页白吃一个 404, 标签页上
+   还是一个空白方块。图标是现成的 (手机壳那套 PWA 图标), 只是从来没挂到网页上。
+   /favicon.ico 那条路由也留着: 爬虫和部分客户端不看 link 标签, 照要不误。 #}
+<link rel="icon" href="/pwa/icon-192.png?v={{ asset_v }}">
+<link rel="apple-touch-icon" href="/pwa/icon-180.png?v={{ asset_v }}">
 <script>window.__T=JSON.parse({{ js_i18n | tojson | tojson }});window.__LANG="{{ lang }}";</script>
   <script src="/static/app.js?v={{ asset_v }}" defer></script>
 {% block head %}{% endblock %}

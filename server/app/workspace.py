@@ -1128,6 +1128,22 @@ async def pwa_sw():
     )
 
 
+@router.get("/favicon.ico")
+async def favicon():
+    """图标现成就有 —— 只是从来没人把它接到 /favicon.ico 上。
+
+    模板里已经写了 <link rel="icon">, 但爬虫、书签、部分客户端不看标签, 照样
+    直接来要这个路径。给的是 PNG (内容嗅探认内容不认扩展名, 浏览器都吃)。
+    """
+    from fastapi.responses import FileResponse
+
+    return FileResponse(
+        _pwa_path("icon-192.png"),
+        media_type="image/png",
+        headers={"cache-control": "public, max-age=86400"},
+    )
+
+
 @router.get("/pwa/{name}")
 async def pwa_asset(name: str):
     from fastapi.responses import FileResponse
