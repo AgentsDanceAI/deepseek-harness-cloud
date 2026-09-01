@@ -294,7 +294,20 @@ class JsonlRunnerAdapter(Adapter):
         if not isinstance(ev, dict) or "t" not in ev:
             return [{"t": "raw", "line": line[:400]}]
         if ev["t"] == "done":
-            self.usage = ev.get("usage") or {}
+            # **用量的键名必须是 input/output** —— 前端读的就是这两个。写成各家
+            # API 那套 *_tokens / prompt_tokens 不会报任何错, 只是"本轮消耗"
+            # 永远显示 0↑0↓ (2026-09-02 上线当天就是这么漏出去的)。
+            # runner 已按约定吐, 这里再兜一层: 它哪天漂了也不至于静默归零。
+            u = dict(ev.get("usage") or {})
+            for house, aliases in (("input", ("input_tokens", "prompt_tokens")),
+                                   ("output", ("output_tokens", "completion_tokens"))):
+                if house not in u:
+                    for a in aliases:
+                        if a in u:
+                            u[house] = u[a]
+                            break
+            self.usage = u
+            ev["usage"] = u
         return [ev]
 
 

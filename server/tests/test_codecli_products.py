@@ -279,3 +279,7 @@ def test_framework_terminal_does_not_drop_into_a_python_repl(product_id):
     # runner 吐的就是统一事件, 认不出的行不许丢 —— 丢掉的症状是"偶尔少半句话"。
     assert ad.feed('{"t":"text","text":"x"}') == [{"t": "text", "text": "x"}]
     assert ad.feed("不是 json")[0]["t"] == "raw"
+    # **用量的键名是 input/output**。写成各家 API 那套 *_tokens 不会报错, 只是
+    # 界面上"本轮消耗"永远 0↑0↓ —— 上线当天就是这么漏出去的。
+    done = ad.feed('{"t":"done","usage":{"input_tokens":7,"output_tokens":3}}')[0]
+    assert done["usage"]["input"] == 7 and done["usage"]["output"] == 3

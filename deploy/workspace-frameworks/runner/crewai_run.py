@@ -82,10 +82,12 @@ def main() -> int:
     usage = getattr(out, "token_usage", None)
     u = {}
     if usage is not None:
+        # 键名按**工作台的约定**来 (input/output), 不是 litellm 的 prompt/completion
+        # —— 前端读的就是这两个, 拼错了不会报错, 只是"本轮消耗"永远是 0↑0↓。
         u = {
-            "input_tokens": getattr(usage, "prompt_tokens", 0),
-            "output_tokens": getattr(usage, "completion_tokens", 0),
-            "total_tokens": getattr(usage, "total_tokens", 0),
+            "input": getattr(usage, "prompt_tokens", 0),
+            "output": getattr(usage, "completion_tokens", 0),
+            "total": getattr(usage, "total_tokens", 0),
         }
     emit({"t": "done", "usage": u})
     return 0

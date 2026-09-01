@@ -64,9 +64,9 @@ def _translate(msg: str, level: str) -> list[dict]:
 
     m = _TOKENS.search(msg)
     if m:
-        _USAGE.update(
-            {"input_tokens": int(m.group(1)), "output_tokens": int(m.group(2)), "total_tokens": int(m.group(3))}
-        )
+        # 键名按**工作台的约定**来 (input/output), 不是各家 API 的 *_tokens ——
+        # 前端读的就是这两个, 拼错了不会报错, 只是"本轮消耗"永远是 0↑0↓。
+        _USAGE.update({"input": int(m.group(1)), "output": int(m.group(2)), "total": int(m.group(3))})
         return []
 
     m = _THOUGHTS.search(msg)

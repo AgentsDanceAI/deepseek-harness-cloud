@@ -47,6 +47,9 @@ USE = {
         "placeholder": "说点什么",
         "send": "473 加 268 等于几? 只回数字, 不要解释",
         "want": ["741"],
+        # **"本轮消耗 0↑ 0↓" 当失败**: 用量键名拼错时界面一切正常, 只是这个数
+        # 永远是 0 —— 不报错、不变红, 而积分是这个产品的核心机制。
+        "fail_extra2": ["0↑ 0↓"],
         "why": "发一句话没反应 (它的日志走 stderr, 外壳只读 stdout)",
     },
     "crewai": {
@@ -55,7 +58,7 @@ USE = {
         "send": "473 加 268 等于几? 只回数字, 不要解释",
         "want": ["741"],
         # 型号没钉的样子: litellm 拿它自己的默认 gpt-4o-mini 去问网关, 回 404。
-        "fail_extra2": ["gpt-4o-mini", "NotFoundError"],
+        "fail_extra2": ["gpt-4o-mini", "NotFoundError", "0↑ 0↓"],
         "why": "发一句话回 404 (litellm 用了它自己的默认型号)",
     },
     "langchain": {
