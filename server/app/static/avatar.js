@@ -160,6 +160,13 @@
     // 就晚了 (而失败是静默的)。
     v.play().catch((e) => console.info("[avatar] 首次 play 被拒 (到货后再试):", e.name));
     v.addEventListener("error", () => console.error("[avatar] video 元素报错:", v.error?.code));
+    // **她说完没说完由播放本身说了算**, 不看上游的文字队列: 上游的 idle 意思是
+    // "没有待念的文字了", 而这时缓冲里还有好几秒视频在播 —— 拿它藏图层, 她会在
+    // 自己话说到一半时消失。缓冲播空浏览器就发 waiting, 那才是她真的停了。
+    // 延后一点再藏: 网络打个嗝也会 waiting, 而闪一下比晚藏 200ms 难看得多。
+    const hideSoon = () => { st.hide = setTimeout(() => showVideo(false), 250); };
+    v.addEventListener("waiting", hideSoon);
+    v.addEventListener("ended", hideSoon);
     return true;
   }
 
@@ -241,11 +248,6 @@
         status(t("avatar.busy", "通道占线，稍后再试"), true); stopCall();
       } else if (m.type === "error") {
         status(m.message || t("avatar.error", "出错了"), true);
-      } else if (m.type === "idle") {
-        // **只认 idle, 不认 end**: end 是"这一句念完了", 而我们按句下发, 句与句
-        // 之间用它藏图层就是一路闪。idle 才是上游说的"没话说了"。
-        // 仍然延后一下: 下一句可能正在路上, 空档里藏了再露一样是闪。
-        st.hide = setTimeout(() => showVideo(false), 500);
       } else if (m.type === "ready") {
         // 上游接通了才开始听 —— 早于这一刻识别出来的话没地方发。
         status(t("avatar.listening", "说话吧，她在听"));
