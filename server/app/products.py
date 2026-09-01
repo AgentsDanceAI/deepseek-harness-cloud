@@ -2171,6 +2171,20 @@ def registry() -> dict[str, Product]:
             # 字段的说明)。/api/health 由 FastAPI 出, 后端不活就连不上。
             ready_path="/api/health",
         ),
+        # OpenHands: 自主编码智能体。单容器 (uvicorn 同时出前端和 API), 沙箱走
+        # local runtime —— 默认那个要挂 docker socket 起第二个容器, ECI 上给不了。
+        "openhands": Product(
+            id="openhands",
+            name="OpenHands",
+            image=config.OPENHANDS_IMAGE_REF,
+            image_ref=config.OPENHANDS_IMAGE_REF,
+            port=3000,
+            mem_mb=config.OPENHANDS_MEM_LIMIT_MB,
+            cpus=config.OPENHANDS_CPUS,
+            domain=config.OPENHANDS_DOMAIN,
+            reports_presence=False,
+            tab_grace_min=config.OPENHANDS_TAB_GRACE_MIN,
+        ),
     }
 # fmt: on
 
@@ -2433,6 +2447,50 @@ def _agents_team_boot() -> str:
     )
 
 
+def _openhands_boot() -> str:
+    """OpenHands: 起服务, 然后**用它自己的接口把设置灌进去**。
+
+    首屏本来是一道硬墙 ("To continue, connect an OpenAI, Anthropic, or other LLM
+    account", 没有跳过)。实测:
+      · `LLM_MODEL` / `LLM_BASE_URL` / `LLM_API_KEY` 三个环境变量**不管用** ——
+        它读的是存下来的设置 (容器内的 SQLite), 不是环境;
+      · `POST /api/v1/settings` 灌一次, 墙当场消失, 进的是真正的应用。
+    所以只能等服务起来再灌 —— 灌在服务起来之前会连不上, 而那是静默的
+    (curl 失败, 脚本照常往下走, 用户开门见墙)。
+
+    沙箱用 **local runtime**: 默认那个要挂宿主的 docker socket 起第二个容器,
+    ECI 上给不了。而我们本来就是一人一容器 —— 这个容器就是他的沙箱, 正合适。
+
+    遥测默认**关**: 隐私偏好一律选最保守的那个。
+    """
+    return (
+        "set -e\n"
+        "mkdir -p /workspace\n"
+        # 服务先起, 灌设置要等它应答 —— 后台起, 前台等
+        "uvicorn openhands.server.listen:app --host 0.0.0.0 --port 3000 &\n"
+        "srv=$!\n"
+        # 最多等 90 秒。它启动时要跑数据库迁移, 冷启动实测 ~25 秒。
+        "for i in $(seq 1 90); do\n"
+        "  curl -fsS -o /dev/null http://127.0.0.1:3000/ 2>/dev/null && break\n"
+        "  sleep 1\n"
+        "done\n"
+        # 灌设置。**必须成功** —— 失败就是用户开门见墙, 所以留痕并重试几次。
+        "for i in 1 2 3; do\n"
+        '  code=$(curl -s -o /tmp/oh_set.log -w "%{http_code}" -X POST '
+        "http://127.0.0.1:3000/api/v1/settings -H 'Content-Type: application/json' "
+        '-d "{\\"llm_model\\":\\"$DSH_LLM_MODEL\\",'
+        '\\"llm_base_url\\":\\"$DSH_LLM_BASE\\",'
+        '\\"llm_api_key\\":\\"$DSH_CLOUD_TOKEN\\",'
+        '\\"agent\\":\\"CodeActAgent\\",'
+        '\\"enable_default_condenser\\":true,'
+        '\\"user_consents_to_analytics\\":false}") || true\n'
+        '  [ "$code" = "200" ] && { echo "[dsh] openhands 设置已灌入"; break; }\n'
+        '  echo "[dsh] 灌设置失败 (HTTP $code), 重试"; cat /tmp/oh_set.log; sleep 3\n'
+        "done\n"
+        "wait $srv\n"
+    )
+
+
 _BOOTS = {
     DEFAULT: _dsh_boot,
     "comfyui": _comfyui_boot,
@@ -2444,6 +2502,7 @@ _BOOTS = {
     "claude-code": lambda: _agentui_boot("claude-code"),
     "codex": lambda: _agentui_boot("codex"),
     "agents-team": _agents_team_boot,
+    "openhands": _openhands_boot,
 }
 
 
@@ -2479,6 +2538,18 @@ def env_for(product_id: str, token: str, secret: str = "") -> dict[str, str]:
         return {
             "HERMES_USER": "owner",
             "HERMES_PASS": autologin_password(secret),
+        }
+    if product_id == "openhands":
+        return {
+            # 一人一容器, 容器本身就是沙箱 —— 默认 runtime 要挂宿主 docker socket
+            # 再起一个容器, ECI 上做不到。
+            "RUNTIME": "local",
+            "SANDBOX_VOLUMES": "/workspace:/workspace:rw",
+            # 灌设置那一步要用 (见 _openhands_boot)。型号必须钉在**在售目录**里 ——
+            # 它内置的默认值是厂商自己的名字, 网关只放行目录内的, 不钉就是 404。
+            "DSH_CLOUD_TOKEN": token,
+            "DSH_LLM_MODEL": f"openai/{_codecli_model('codex')}",
+            "DSH_LLM_BASE": f"{gateway}/llm/v1",
         }
     if product_id in _AGENTUI_SLOTS:
         cli, enabled = _AGENTUI_SLOTS[product_id]
