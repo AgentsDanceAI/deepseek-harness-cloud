@@ -20,7 +20,7 @@ import time
 import uuid
 from dataclasses import asdict, dataclass, field
 
-from . import tools
+from . import filmdir, tools
 
 STATE_PATH = tools.WORKDIR / ".agents-team" / "rooms.json"
 
@@ -58,6 +58,11 @@ class Room:
     #: 并行时大家拿到的是同一份旧记录, 谁也看不见谁, 接不上力。
     #: 老 rooms.json 没有这个键, 给默认值即可向后兼容。
     mode: str = "parallel"
+    #: 这部片自己的目录 (相对工作区根)。空 = 用扁平的根目录 —— 老 rooms.json 里
+    #: 没有这个键, 读出来就是空, 于是老房间原地不动, 不用迁移。新片各自一个目录:
+    #: 共用一个目录时, 第二部片会继承第一部的角色图和成片, 美术拒绝重做、出片
+    #: 去重闸整片跳过, 而全程不报错 (见 filmdir.py)。
+    dir: str = ""
     #: 接力停在了哪一棒 (成员下标)。用户回话后**从这一棒续跑**, 不从头重来 ——
     #: 从头重来的代价不只是慢: 美术会照着"再做一遍资产"的字面意思**再出一遍图**,
     #: 那是真花钱。-1 = 没有待续的棒 (下一轮从头开始, 即一部新片/新需求)。
@@ -236,7 +241,8 @@ class Store:
     def create_room(self, name: str, members: list[str], mode: str = "parallel") -> Room:
         rid = uuid.uuid4().hex[:8]
         room = Room(rid, name, [m for m in members if m in self.bots], _now(),
-                    mode if mode in ("parallel", "relay") else "parallel")
+                    mode if mode in ("parallel", "relay") else "parallel",
+                    filmdir.slug_for(rid, name))
         self.rooms[rid] = room
         self.save()
         return room

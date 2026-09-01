@@ -17,7 +17,7 @@ import base64
 import os
 import pathlib
 
-from . import browser, media
+from . import browser, filmdir, media
 
 #: 工作目录。与 products.py 里的 mounts 一致 —— 改一处必须改另一处,
 #: 不然用户的文件写进容器本地, 实例一回收就没了 (而且不报错)。
@@ -42,13 +42,13 @@ def _truncate(text: str) -> str:
 
 
 def _resolve(path: str) -> pathlib.Path:
-    """相对路径一律相对 WORKDIR 解析; 绝对路径原样放行。
+    """相对路径一律相对**当前这部片的目录**解析; 绝对路径原样放行。
 
     放行绝对路径是故意的: 智能体要能读 /etc/os-release、跑 /usr/bin 里的东西。
     隔离靠容器, 不靠这一行 (见模块开头)。
     """
     p = pathlib.Path(path)
-    return p if p.is_absolute() else (WORKDIR / p)
+    return p if p.is_absolute() else (filmdir.current() / p)
 
 
 async def run_shell(command: str, timeout: float | None = None) -> tuple[str, str]:
@@ -58,10 +58,11 @@ async def run_shell(command: str, timeout: float | None = None) -> tuple[str, st
     stderr 上的报错当成"没有输出"继续往下走。
     """
     limit = SHELL_TIMEOUT_S if timeout is None else timeout
-    WORKDIR.mkdir(parents=True, exist_ok=True)
+    here = filmdir.current()   # 每部片自己的目录 (老房间还是根)
+    here.mkdir(parents=True, exist_ok=True)
     proc = await asyncio.create_subprocess_shell(
         command,
-        cwd=str(WORKDIR),
+        cwd=str(here),
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.STDOUT,
     )

@@ -184,9 +184,15 @@ def test_media_tools_registered():
 
 
 def test_media_module_does_not_import_tools():
-    """media 与 tools 互相引用会成环 (tools 合并工具表时 import media)。"""
+    """media 与 tools 互相引用会成环 (tools 合并工具表时 import media)。
+
+    落盘位置改由 filmdir 说了算之后, 这里不再各读一次 env: 两边各算各的常量时,
+    "当前是哪部片"这种**会变的**状态同步不了 —— 读写落在片目录、出片落在根上,
+    症状是"图明明生成了却读不到"。filmdir 谁也不 import, 所以两边都能用它。
+    """
     assert "from . import tools" not in MEDIA
-    assert "AGENTS_TEAM_WORKDIR" in MEDIA, "WORKDIR 要自己从同一个 env 派生"
+    assert "filmdir" in MEDIA, "落盘位置要走 filmdir, 不许自己再派生一份"
+    assert "AGENTS_TEAM_WORKDIR" not in MEDIA, "不该再各读一次 env 算自己的根"
 
 
 def test_generated_paths_are_confined_to_workspace():
@@ -222,11 +228,9 @@ def test_resolution_is_normalised_to_lowercase():
 
 def test_norm_resolution_behaviour():
     """行为本身也钉一下 —— 光有函数名不代表它做对了。"""
-    import importlib.util
-
-    spec = importlib.util.spec_from_file_location("film_media", TEAM / "app" / "media.py")
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
+    # 必须按包加载: media.py 里有 `from . import filmdir`, 单文件 exec 会
+    # ImportError (attempted relative import with no known parent package)。
+    mod = _crew("media")
     assert mod._norm_resolution("720P") == "720p"
     assert mod._norm_resolution("1080P") == "1080p"
     assert mod._norm_resolution("  480p ") == "480p"
@@ -942,3 +946,78 @@ def test_a_bot_that_produces_nothing_does_not_pass_the_baton():
     seg = seg[: seg.index("yield ev")]
     assert "capped_here = True" in seg, "空棒续跑没停在本棒上 —— 它的活没干完"
     assert '"type": "error"' in seg, "空棒没发 error 事件, 用户看不见为什么停了"
+
+
+# ── 每部片一个目录 (2026-09-01 验收跑废在这里) ────────────────────────────────
+
+
+def test_each_film_gets_its_own_directory():
+    """两部片不许落进同一个目录, 老房间不许被搬走。
+
+    共用一个目录的代价不是"文件乱": 第二部片开机就看见第一部的 角色/ 和 S01..S20,
+    于是美术照"同一角色只做一张权威图"**拒绝重做** (它判断没错, 它只是不知道那是
+    上一部的人), 出片去重闸把旧成片当成"这镜出过了"整片跳过 —— 新片跑完等于把旧片
+    重剪一遍, **全程不报错**。
+    """
+    filmdir = _crew("filmdir")
+
+    # 老房间: dir 为空 -> 还用扁平的根, 不迁移 (用户手上跑到 S20 的片不能消失)
+    assert filmdir.resolve("") == filmdir.ROOT
+
+    # 两部同名的片必须分开 —— 片名可以重复, 所以目录名要带 room id
+    a = filmdir.slug_for("aaa11111", "新片")
+    b = filmdir.slug_for("bbb22222", "新片")
+    assert a != b, f"两部都叫'新片'却落进同一个目录: {a}"
+    assert a.startswith(filmdir.FILMS + "/") and b.startswith(filmdir.FILMS + "/")
+
+    # 片名是用户随手起的: 空格、引号、斜杠都正常, 不能直接当目录名
+    dirty = filmdir.slug_for("cc33", '外卖骑手/暴雨夜 "最后一单"')
+    assert "/" not in dirty[len(filmdir.FILMS) + 1 :], f"片名里的斜杠穿出去了: {dirty}"
+    assert '"' not in dirty
+
+
+def test_tools_and_media_both_follow_the_current_film():
+    """工具落盘要跟着片走, 而且穿越照样得挡住。
+
+    两个模块各有一套路径解析 (media 故意不 import tools, 否则成环) —— 只改一边
+    的话, 读写在片目录里而出片落在根上, 症状是"图明明生成了却读不到"。
+    """
+    import tempfile
+
+    os.environ["AGENTS_TEAM_WORKDIR"] = tempfile.mkdtemp(prefix="film-test-")
+    filmdir = _crew("filmdir")
+    tools_m = _crew("tools")
+    media_m = _crew("media")
+
+    rel = filmdir.slug_for("dd44", "验收片")
+    filmdir.use(filmdir.resolve(rel))
+    here = filmdir.ROOT / rel
+
+    got = tools_m._resolve("讲戏本.md")
+    assert str(got).startswith(str(here)), f"read/write 没跟着片走: {got}"
+    got = media_m._safe_rel("片段/S01.mp4")
+    assert str(got).startswith(str(here.resolve())), f"出片落盘没跟着片走: {got}"
+
+    # 片目录换了, 穿越闸不能跟着松掉
+    try:
+        media_m._safe_rel("../../etc/passwd")
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("路径穿越没挡住")
+
+
+def test_old_rooms_json_still_loads():
+    """老 rooms.json 没有 dir 键 —— 读不进来的话用户的房间全没了。"""
+    rooms_m = _crew("rooms")
+    r = rooms_m.Room(
+        **{
+            "id": "old1",
+            "name": "旧片",
+            "members": ["director"],
+            "created": 1.0,
+            "mode": "relay",
+            "resume_at": -1,
+        }
+    )
+    assert r.dir == "", "老房间该落在根上 (空 dir), 不该被搬进新目录"

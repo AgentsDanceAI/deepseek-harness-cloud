@@ -21,9 +21,10 @@ from pathlib import Path
 
 import httpx
 
-#: 不 import tools —— 它会反过来 import 本模块 (工具表合并), 成环。WORKDIR 本来
-#: 就只是个环境变量派生的常量, 各算各的即可, 两边同源同值。
-WORKDIR = Path(os.environ.get("AGENTS_TEAM_WORKDIR", "/workspace"))
+from . import filmdir
+
+#: 落盘位置由 filmdir 说了算 (每部片一个目录)。这里不 import tools —— 它会反过来
+#: import 本模块 (工具表合并), 成环; filmdir 谁也不 import, 所以两边都能用它。
 
 #: ⚠️ 它**已经含 /llm/v1** (products.env_for 注入的是 f"{gateway}/llm/v1")。
 #: 所以这里一律拼 f"{GATEWAY_BASE}/images/generations" —— 再写 /v1/ 就是
@@ -67,8 +68,9 @@ def _unconfigured() -> str | None:
 
 def _safe_rel(path: str) -> Path:
     """把模型给的相对路径钉在 /workspace 里 —— 它偶尔会写 ../ 或绝对路径。"""
-    p = (WORKDIR / path).resolve()
-    if not str(p).startswith(str(WORKDIR.resolve())):
+    base = filmdir.current()
+    p = (base / path).resolve()
+    if not str(p).startswith(str(base.resolve())):
         raise ValueError(f"路径越界: {path}")
     return p
 
@@ -111,7 +113,7 @@ async def generate_image(prompt: str, path: str, size: str = "", model: str = ""
         out.write_bytes(got.content)
     else:
         return "上游返回里既没有 url 也没有 b64_json。", "出图无结果"
-    rel = out.relative_to(WORKDIR)
+    rel = out.relative_to(filmdir.current())
     kb = out.stat().st_size // 1024
     return f"已出图并存到 {rel} ({kb} KB)。下游可以用这个路径当参考图。", f"出图 {rel.name}"
 
@@ -148,7 +150,7 @@ async def generate_video(prompt: str, path: str, duration: int = 5, resolution: 
     # 真要重做就先删掉那个文件 (人格里写了), 那是一个明确的动作。
     if out.exists() and out.stat().st_size > 0:
         mb = out.stat().st_size / 1024 / 1024
-        rel = out.relative_to(WORKDIR)
+        rel = out.relative_to(filmdir.current())
         msg = (f"{rel} 已经有成片了 ({mb:.1f} MB), **没有重新出片** —— 出片是要花钱的, "
                f"同一个镜头不重复跑。确实要重做请先删掉这个文件 (shell: rm '{rel}'), "
                f"或者换一个 path。")
@@ -237,7 +239,7 @@ async def generate_video(prompt: str, path: str, duration: int = 5, resolution: 
         with out.open("wb") as f:
             async for chunk in resp.aiter_bytes():
                 f.write(chunk)
-    rel = out.relative_to(WORKDIR)
+    rel = out.relative_to(filmdir.current())
     mb = out.stat().st_size / 1024 / 1024
     return (f"已出片并存到 {rel} ({mb:.1f} MB, {duration}秒 {_norm_resolution(resolution)})。",
             f"出片 {rel.name}")
@@ -320,7 +322,7 @@ async def concat_videos(clips: list[str], path: str, audio: str = "") -> tuple[s
     if proc.returncode != 0 or not outp.exists():
         tail = (err or b"").decode("utf-8", "replace")[-400:]
         return f"拼片失败: {tail}", "拼片失败"
-    rel = outp.relative_to(WORKDIR)
+    rel = outp.relative_to(filmdir.current())
     mb = outp.stat().st_size / 1024 / 1024
     return f"已拼成 {rel} ({len(paths)} 段, {mb:.1f} MB)。", f"拼片 {rel.name}"
 

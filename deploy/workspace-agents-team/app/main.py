@@ -18,7 +18,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import agent, rooms, tools
+from . import agent, filmdir, rooms, tools
 
 WEB_DIR = pathlib.Path(__file__).resolve().parent.parent / "web"
 
@@ -127,6 +127,18 @@ def messages(room_id: str) -> dict:
     return {"messages": [asdict(m) for m in store.transcript(room_id)]}
 
 
+def _enter_film_dir(room: rooms.Room) -> None:
+    """把这一轮钉进**这部片自己的目录**, 并保证它存在。
+
+    不 reset: 这两个函数是异步生成器, 每个房间的一轮跑在自己的任务里, contextvar
+    本来就不跨任务泄漏; 而在生成器里 reset 要靠 finally, 浏览器一断开生成器被丢弃
+    时未必跑得到 —— 那正是轮次锁卡死过的形状 (见 send 里的注释)。
+    """
+    here = filmdir.resolve(getattr(room, "dir", "") or "")
+    here.mkdir(parents=True, exist_ok=True)
+    filmdir.use(here)
+
+
 async def _run_relay(room: rooms.Room, model: str | None):
     """接力: 按 members 顺序**逐棒**跑, 后一位看得见前一位这一轮刚说的话。
 
@@ -145,6 +157,7 @@ async def _run_relay(room: rooms.Room, model: str | None):
     从头重来的代价不只是慢 —— 美术会照着"再做一遍资产"的字面意思**再出一遍图**,
     那是真花钱; 分镜也可能把用户刚确认过的表重写一遍。
     """
+    _enter_film_dir(room)
     members = list(room.members)
     start = room.resume_at if 0 <= room.resume_at < len(members) else 0
     if start:
@@ -212,6 +225,7 @@ async def _run_room(room: rooms.Room, model: str | None):
     再发一轮 (那时上一轮的话已经在记录里了)。这是"同时出结果"换来的, 不是 bug;
     改成串行就变回"排队发言", 那正是我们不想要的形态。
     """
+    _enter_film_dir(room)
     members = [store.bots[m] for m in room.members if m in store.bots]
     queue: asyncio.Queue = asyncio.Queue()
 
