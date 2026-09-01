@@ -90,10 +90,14 @@ CATALOG: tuple[AppEntry, ...] = (
         '<circle cx="12" cy="11" r="7.5"/><path d="M9 10h.01M15 10h.01M9.5 13.5a3.5 3.5 0 0 0 5 0"/>'
         '<path d="M12 18.5V21M8 20l1-1.8M16 20l-1-1.8"/>',
     ),
+    # 数字人顶掉了 n8n: 后者的 Sustainable Use 许可证**明确禁止把它作为服务
+    # 转售**, 而我们正是这个模式 —— 那一格本来就接不了, 一直空占着。
+    # 数字人反过来是我们最独特的一块: 实时口型 + 用户自定义形象 + 定制音色,
+    # 零件全在自己手上 (SoulX-FlashHead 跑在我们的 GPU 节点上)。
     AppEntry(
-        "n8n", "n8n", "automation",
-        '<circle cx="5" cy="12" r="2.5"/><circle cx="19" cy="6" r="2.5"/><circle cx="19" cy="18" r="2.5"/>'
-        '<path d="M7.5 12h4M16.6 6.8 11 10.7M16.6 17.2 11 13.3"/>',
+        "avatar", "数字人", "avatar",
+        '<circle cx="12" cy="8" r="4"/><path d="M4.5 20a7.5 7.5 0 0 1 15 0"/>'
+        '<path d="M19 5.5a5 5 0 0 1 0 5M21.5 3.5a8.5 8.5 0 0 1 0 9"/>',
     ),
     # Open Design 顶替 SD WebUI: 生图已被 ComfyUI 覆盖, 而 open-design 是老板
     # 点名的 (nexu-io/open-design —— AI 设计智能体, 里面跑的就是我们的 dsh)。
