@@ -25,13 +25,11 @@
       <div class="av-row av-muted"><span id="avTimer">00:00</span><span id="avCost"></span></div>
     </div>
 
+    {# 一个选择, 不是两个: 一套预设 = 一张脸 + 一副嗓子。分开选就会出现
+       "男的样子配女的嗓音"这种事 —— 而它看起来还很像产品坏了。 #}
     <label class="av-field">
-      <span>{{ t('avatar.look') }}</span>
+      <span>{{ t('avatar.who') }}</span>
       <select id="avPerson"></select>
-    </label>
-    <label class="av-field">
-      <span>{{ t('avatar.voice') }}</span>
-      <select id="avVoice"></select>
     </label>
     <button id="avCall" class="av-call">{{ t('avatar.start') }}</button>
     {# 打字也能说。不只是给没有语音识别的浏览器 (Firefox) 兜底 —— 安静的场合
