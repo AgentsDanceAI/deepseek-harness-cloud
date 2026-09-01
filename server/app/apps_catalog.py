@@ -25,6 +25,10 @@ class AppEntry:
     # (Codex 与 Claude Code、Open WebUI 与 Lobe Chat), 省得同一句话在 i18n 里写两遍。
     tag: str
     icon: str  # 24x24 viewBox 下的 SVG 内部标记 (stroke 图标)
+    # 本站页面路径。非空 = 这个产品**不是云工作台**, 它就住在主站上, 卡片直接
+    # 指过去 (数字人: 没有每用户容器可开, 通话页在 /avatar, 走 /api/avatar/*
+    # 转发到我们自己的 GPU 节点)。空 = 老路, /work?product_id=<id>。
+    href: str = ""
 
 
 # 排布顺序即页面顺序: 已上线的两个放最前, 其余按"编码 -> 应用搭建 -> 媒体 ->
@@ -98,6 +102,7 @@ CATALOG: tuple[AppEntry, ...] = (
         "avatar", "数字人", "avatar",
         '<circle cx="12" cy="8" r="4"/><path d="M4.5 20a7.5 7.5 0 0 1 15 0"/>'
         '<path d="M19 5.5a5 5 0 0 1 0 5M21.5 3.5a8.5 8.5 0 0 1 0 9"/>',
+        href="/avatar",
     ),
     # Open Design 顶替 SD WebUI: 生图已被 ComfyUI 覆盖, 而 open-design 是老板
     # 点名的 (nexu-io/open-design —— AI 设计智能体, 里面跑的就是我们的 dsh)。
@@ -133,9 +138,29 @@ CATALOG: tuple[AppEntry, ...] = (
 # fmt: on
 
 
+def site_apps() -> set[str]:
+    """住在主站上的产品里, 本实例**真配好了**的那些 —— 与 products.enabled()
+    对云工作台的作用相同, 只是判据不在 registry 里 (它们没有容器)。
+
+    数字人要能签令牌才算上线: 没有 AVATAR_TOKEN_SECRET 就建立不了通话, 而失败
+    发生在点了"开始通话"之后 —— 卡片却一路都是亮的。宁可不亮。
+    """
+    from . import config
+
+    live = bool(config.AVATAR_GPU_URL and config.AVATAR_TOKEN_SECRET)
+    return {"avatar"} if live else set()
+
+
 def entries_with_status(enabled_ids: set[str]) -> list[dict]:
     """给模板用: 目录 + 实时上线状态。live 的判据只有一个 —— registry 里启用了."""
     return [
-        {"id": a.id, "name": a.name, "tag": a.tag, "icon": a.icon, "live": a.id in enabled_ids}
+        {
+            "id": a.id,
+            "name": a.name,
+            "tag": a.tag,
+            "icon": a.icon,
+            "href": a.href,
+            "live": a.id in enabled_ids,
+        }
         for a in CATALOG
     ]

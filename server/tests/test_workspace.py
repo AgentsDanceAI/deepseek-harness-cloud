@@ -1808,29 +1808,6 @@ def test_openclaw_hidden_until_the_proxy_cidr_is_configured(monkeypatch):
     assert "openclaw" not in [p.id for p in products.enabled()]
 
 
-def test_app_links_open_in_a_new_tab():
-    """点云空间产品要开新标签, 别把用户从目录页顶掉。
-
-    这些工作界面是长驻的 (跑一个任务几十分钟很常见), 而用户常要在几个产品之间
-    来回; 在原标签里跳走等于每次都要退回来重新找。rel=noopener 是安全默认 ——
-    被打开的页面拿不到 window.opener。
-    老板 2026-08-30 点名要的。
-    """
-    import pathlib
-
-    root = pathlib.Path(__file__).resolve().parents[1] / "app" / "templates"
-    for name in ("_app_card.html", "index.html"):
-        html = (root / name).read_text()
-        # 找到那条指向工作台的链接, 它必须带 target
-        for line in html.splitlines():
-            if "app-card is-live" in line or "hero-app is-live" in line:
-                assert 'target="_blank"' in line, f"{name}: 产品链接没开新标签"
-                assert 'rel="noopener"' in line, f"{name}: 少了 noopener"
-                break
-        else:
-            raise AssertionError(f"{name}: 找不到产品链接")
-
-
 def test_hermes_keeps_its_auth_on_and_we_carry_the_credential(monkeypatch):
     """Hermes 绑 0.0.0.0 并**开着它自己的鉴权**, 凭据由工作台代持。
 

@@ -23,9 +23,10 @@
     <div class="hero-apps">
       {% for app in apps %}
       {% if app.live and apps_clickable %}
-      {# 新标签打开, 理由同 _app_card.html #}
-      <a class="hero-app is-live" target="_blank" rel="noopener"
-         href="{{ apps_base }}{{ '/work' if app.id == 'dsh' else '/work?product_id=' + app.id }}">
+      {# 新标签打开 (本站页面除外), 理由同 _app_card.html #}
+      {% set app_href = app.href or ('/work' if app.id == 'dsh' else '/work?product_id=' + app.id) %}
+      <a class="hero-app is-live" href="{{ apps_base }}{{ app_href }}"
+         {% if not app.href %}target="_blank" rel="noopener"{% endif %}>
       {% else %}
       <a class="hero-app soon" href="/apps">
       {% endif %}
