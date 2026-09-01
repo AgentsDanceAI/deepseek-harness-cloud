@@ -56,8 +56,23 @@ USE = {
     },
     "langchain": {
         "kind": "chat",
-        "send": "只回我两个字",
+        "placeholder": "Type your message...",
+        # 同 openhands: 出一道答案不可能出现在题面里的题。先前只问"只回我两个字",
+        # 判据就只剩"没出现失败词"——而消息压根没发出去时页面也很干净。
+        "send": "473 加 268 等于几? 只回数字, 不要解释",
+        "want": ["741"],
         "why": '一发消息就 "cannot be parsed as a URL"',
+    },
+    "autogen": {
+        "kind": "chat",
+        # 它的输入框是 "Type your message here...", 比 langchain 那个多两个词 ——
+        # 拿 langchain 的选择器去找它是找不到的 (子串方向反了)。
+        "placeholder": "Type your message here",
+        "send": "473 加 268 等于几? 只回数字, 不要解释",
+        "want": ["741"],
+        # 队伍/会话没预热成的样子。两者都会让用户进来对着一个空壳。
+        "fail_extra": ["No session selected", "Create a team to get started"],
+        "why": "侧栏空的 / 首屏没有会话, 用户得自己走一遍新建弹窗",
     },
     "openhands": {
         "kind": "openhands",
@@ -152,11 +167,17 @@ with sync_playwright() as p:
                     " return out.join('\\n'); }")[-1500:]
 
             elif kind == "chat":
-                box = page.get_by_placeholder("Type your message...")
+                # 占位符按产品给 —— 两家的文案差两个词, 写死一个就永远找不到另一个。
+                box = page.get_by_placeholder(prod.get("placeholder") or "Type your message...")
                 box.click(); box.fill(prod["send"])
                 page.keyboard.press("Enter")
-                # 模型要想一会儿; 出错的话红框几秒就弹出来。
-                page.wait_for_timeout(45000)
+                # **等答案出现**, 不是干等一个固定秒数: 答得快就早走, 答得慢
+                # (冷启动第一句) 也不会被腰斩。最多三分钟。
+                want = ["".join(w.split()) for w in (prod.get("want") or [])]
+                for _ in range(36):
+                    page.wait_for_timeout(5000)
+                    if want and all(w in "".join(page.inner_text("body").split()) for w in want):
+                        break
                 e["text"] = page.inner_text("body")[-1500:]
 
             elif kind == "openhands":
