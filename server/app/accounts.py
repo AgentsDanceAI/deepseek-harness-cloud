@@ -86,7 +86,13 @@ def _write_origins() -> set[str]:
 
 
 def _cookie_write_allowed(request: Request) -> bool:
-    if request.method.upper() not in _UNSAFE_METHODS:
+    # WebSocket 没有 .method。**当作不安全方法查来源**, 而不是放行 —— 建立一通
+    # 数字人通话要烧 GPU、按分钟扣积分, 与 POST 同性质; 而 WS 握手不受 CORS
+    # 约束, 跨站页面照样发得出来。
+    # (直接 request.method 会 AttributeError, 表现是通话一连就断 —— 页面本身
+    # 好好的, 只有"点了开始通话没反应"。踩过。)
+    is_ws = not hasattr(request, "method")
+    if not is_ws and request.method.upper() not in _UNSAFE_METHODS:
         return True
     origin = request.headers.get("origin", "").rstrip("/")
     # 没有 Origin 的一律放行: 非浏览器客户端 (桌面端、CLI) 不发这个头, 而浏览器
@@ -138,7 +144,7 @@ def try_resolve_user(request: Request, *, cookie_only: bool = False) -> dict | N
     if from_cookie and not _cookie_write_allowed(request):
         log.warning(
             "[auth] 拒绝跨源 cookie 写入: %s %s origin=%r",
-            request.method,
+            getattr(request, "method", "WEBSOCKET"),
             request.url.path,
             request.headers.get("origin", ""),
         )

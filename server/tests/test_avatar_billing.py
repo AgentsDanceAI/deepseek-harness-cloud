@@ -140,3 +140,34 @@ def test_a_redelivered_report_is_not_charged_twice(secret):
     assert first > 0, "第一次该收钱"
     assert again == 0, f"重投不该再收, 实得 {again}"
     assert len(spent) == 1, f"只该扣一次款, 实际扣了 {len(spent)} 次: {spent}"
+
+
+def test_a_websocket_can_authenticate_by_cookie(secret):
+    """WS 握手要能用会话 cookie 认出人来, 别在检查里崩掉。
+
+    线上实测栽过: `_cookie_write_allowed` 直接读 request.method, 而 WebSocket
+    没有这个属性 -> AttributeError -> 连上就断。页面本身好好的, 只有"点了开始
+    通话没反应" —— 与网络不好、与 GPU 忙, 从外面看一模一样。
+    """
+    from app import accounts
+
+    class _FakeWS:  # WebSocket: 有 headers/cookies, 没有 method
+        headers = {"origin": ""}
+        cookies: dict = {}
+
+    assert accounts._cookie_write_allowed(_FakeWS()) is True
+
+
+def test_a_websocket_from_another_site_is_refused(secret, monkeypatch):
+    """跨站页面发起的 WS 握手要挡掉。
+
+    WS 握手**不受 CORS 约束**, 而建立通话要烧 GPU、按分钟扣积分 —— 与跨源
+    POST 同性质, 所以按不安全方法查来源, 不是因为"是 WS"就放行。
+    """
+    from app import accounts
+
+    class _EvilWS:
+        headers = {"origin": "https://evil.example"}
+        cookies: dict = {}
+
+    assert accounts._cookie_write_allowed(_EvilWS()) is False
