@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import hmac
+import json
 import logging
 import time
 import uuid
@@ -26,7 +27,7 @@ from urllib.parse import urlencode
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 
 from . import config, credits, db, model_catalog
 from .accounts import resolve_user, try_resolve_user
@@ -189,16 +190,39 @@ _PERSONA = (
 )
 
 
+#: 一句话到哪儿算完。够一句就发上去让她开口 —— 电话里等整段说完再开口, 等的
+#: 那几秒用户会以为断了。
+_SENTENCE_END = "。！？!?…\n"
+#: 没碰到标点也不能无限攒 (模型偶尔一逗到底)。
+_CHUNK_MAX = 48
+
+
+def _chunks(buf: str) -> tuple[list[str], str]:
+    """把已到的文字切成"能念的句子" + 还没成句的尾巴。"""
+    out, cur = [], ""
+    for ch in buf:
+        cur += ch
+        if ch in _SENTENCE_END or len(cur) >= _CHUNK_MAX:
+            if cur.strip():
+                out.append(cur.strip())
+            cur = ""
+    return out, cur
+
+
 @router.post("/api/avatar/say")
 async def avatar_say(request: Request, user: dict = Depends(resolve_user)):
-    """用户说了一句话 -> 她该回什么。
+    """用户说了一句话 -> 她该回什么。**流式按句下发。**
+
+    为什么不是等整段回完再返回: 上游实测 4~16 秒不等 (偶尔更久), 而电话里等
+    十几秒等于"没反应" —— 用户会挂断重打。按句下发之后, 她在第一句成形时就开口,
+    后面几句接着排进上游的 say 队列, 听感是连贯的一段话。
 
     **回复在服务端出, 不在浏览器**: 浏览器要调模型就得有网关密钥, 而那把密钥
-    能干的事远不止聊天。这里顺带也把这次调用照常计了费 (与 /llm 那条路同一个
-    算法), 否则通话里的模型消耗就是白送的。
+    能干的事远不止聊天。这里顺带把这次调用照常计了费 (与 /llm 那条路同一个算法),
+    否则通话里的模型消耗就是白送的。
 
-    只出文本, 不碰 WebSocket —— 让她说话的是前端把这段文字沿通话发上去 (上游的
-    say)。分开的好处是: 模型慢/超时只是这一句没回, 通话本身不受影响。
+    只出文本, 不碰 WebSocket —— 让她说话的是前端把每句沿通话发上去。分开的好处
+    是: 模型慢/断了只是这一句没回, 通话本身不受影响。
     """
     if not config.UPSTREAM_BASE_URL or not config.UPSTREAM_API_KEY:
         raise HTTPException(503, "upstream_not_configured")
@@ -221,47 +245,95 @@ async def avatar_say(request: Request, user: dict = Depends(resolve_user)):
     entry = model_catalog.resolve(model_id) or {}
     payload = {
         "model": entry.get("upstream_model", model_id),
-        "messages": [{"role": "system", "content": _PERSONA}, *history, {"role": "user", "content": text}],
+        "messages": [
+            {"role": "system", "content": _PERSONA},
+            *history,
+            {"role": "user", "content": text},
+        ],
         # 电话里的一句话。放开了她会说成一段稿子, 而那要读上一分钟 (还按分钟计费)。
         "max_tokens": 200,
         "temperature": 0.7,
+        "stream": True,
+        "stream_options": {"include_usage": True},
     }
-    try:
-        async with httpx.AsyncClient(timeout=30.0) as c:
-            r = await c.post(
-                config.UPSTREAM_BASE_URL.rstrip("/") + "/chat/completions",
-                json=payload,
-                headers={
-                    "authorization": f"Bearer {config.UPSTREAM_API_KEY}",
-                    "content-type": "application/json",
-                },
-            )
-    except httpx.HTTPError:
-        raise HTTPException(502, "upstream_unreachable") from None
-    if r.status_code != 200:
-        log.warning("[avatar] 上游 %s", r.status_code)
-        raise HTTPException(502, "upstream_error")
-    data = r.json()
-    reply = ((data.get("choices") or [{}])[0].get("message") or {}).get("content", "").strip()
+    uid, dev = user["id"], user.get("device_id", "")
 
-    u = data.get("usage") or {}
-    cache_read = int(
-        u.get("prompt_cache_hit_tokens") or (u.get("prompt_tokens_details") or {}).get("cached_tokens") or 0
+    async def gen():
+        buf, usage, said_anything = "", {}, False
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(90.0, connect=10.0)) as c:
+                async with c.stream(
+                    "POST",
+                    config.UPSTREAM_BASE_URL.rstrip("/") + "/chat/completions",
+                    json=payload,
+                    headers={
+                        "authorization": f"Bearer {config.UPSTREAM_API_KEY}",
+                        "content-type": "application/json",
+                        "accept": "text/event-stream",
+                    },
+                ) as r:
+                    if r.status_code != 200:
+                        await r.aread()
+                        log.warning("[avatar] 上游 %s", r.status_code)
+                        yield 'data: {"error":"upstream_error"}\n\n'
+                        return
+                    async for line in r.aiter_lines():
+                        if not line.startswith("data: "):
+                            continue
+                        raw = line[6:].strip()
+                        if raw == "[DONE]":
+                            break
+                        try:
+                            d = json.loads(raw)
+                        except ValueError:
+                            continue
+                        if d.get("usage"):
+                            usage = d["usage"]
+                        delta = ((d.get("choices") or [{}])[0].get("delta") or {}).get("content") or ""
+                        if not delta:
+                            continue
+                        buf += delta
+                        ready, buf = _chunks(buf)
+                        for piece in ready:
+                            said_anything = True
+                            yield "data: " + json.dumps({"text": piece}, ensure_ascii=False) + "\n\n"
+            if buf.strip():  # 收尾那半句
+                said_anything = True
+                yield "data: " + json.dumps({"text": buf.strip()}, ensure_ascii=False) + "\n\n"
+        except httpx.HTTPError as e:
+            # **一定要留痕**: 先前这条路是静默的, 表现只是"她不说话" —— 而那与
+            # 模型没话说、与网络慢, 从外面看一模一样。
+            log.warning("[avatar] 取回复失败: %s", type(e).__name__)
+            if not said_anything:
+                yield 'data: {"error":"upstream_unreachable"}\n\n'
+        finally:
+            # 已经出过字就一定要计费 —— 中途断了不是免单的理由。
+            cache_read = int(
+                usage.get("prompt_cache_hit_tokens")
+                or (usage.get("prompt_tokens_details") or {}).get("cached_tokens")
+                or 0
+            )
+            uncached = max(0, int(usage.get("prompt_tokens") or 0) - cache_read)
+            output = int(usage.get("completion_tokens") or 0)
+            if said_anything or uncached or output:
+                credits.spend(
+                    uid,
+                    model_catalog.charge_credits(model_id, uncached, cache_read, output),
+                    kind="llm",
+                    model=model_id,
+                    device_id=dev,
+                    uncached_input=uncached,
+                    cache_read=cache_read,
+                    output=output,
+                    request_id=f"avatar-say-{uuid.uuid4().hex[:16]}",
+                )
+        yield "data: [DONE]\n\n"
+
+    return StreamingResponse(
+        gen(),
+        media_type="text/event-stream",
+        headers={"cache-control": "no-store", "x-accel-buffering": "no"},
     )
-    uncached = max(0, int(u.get("prompt_tokens") or 0) - cache_read)
-    output = int(u.get("completion_tokens") or 0)
-    credits.spend(
-        user["id"],
-        model_catalog.charge_credits(model_id, uncached, cache_read, output),
-        kind="llm",
-        model=model_id,
-        device_id=user.get("device_id", ""),
-        uncached_input=uncached,
-        cache_read=cache_read,
-        output=output,
-        request_id=f"avatar-say-{uuid.uuid4().hex[:16]}",
-    )
-    return {"text": reply}
 
 
 @router.get("/api/avatar/bg.png")

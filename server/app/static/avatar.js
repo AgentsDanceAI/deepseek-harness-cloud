@@ -287,16 +287,36 @@
     }
     st.history.push({ role: "user", content: said });
     status(said);
-    const r = await api("/api/avatar/say", {
+    // **按句读, 来一句发一句**: 上游出全文要好几秒, 而电话里等整段等于"没反应"。
+    const r = await fetch("/api/avatar/say", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ text: said, history: st.history.slice(0, -1) }),
     });
-    if (!r.ok || !r.d.text) { status(t("avatar.think_failed", "她没想出该说什么"), true); return; }
-    st.history.push({ role: "assistant", content: r.d.text });
+    if (!r.ok || !r.body) { status(t("avatar.think_failed", "她没想出该说什么"), true); return; }
+    const reader = r.body.getReader(), dec = new TextDecoder();
+    let tail = "", whole = "";
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      tail += dec.decode(value, { stream: true });
+      const lines = tail.split("\n");
+      tail = lines.pop();                     // 最后一截可能是半行
+      for (const ln of lines) {
+        if (!ln.startsWith("data: ")) continue;
+        const raw = ln.slice(6).trim();
+        if (raw === "[DONE]") continue;
+        let d; try { d = JSON.parse(raw); } catch { continue; }
+        if (d.error) { status(t("avatar.think_failed", "她没想出该说什么"), true); continue; }
+        if (!d.text) continue;
+        whole += d.text;
+        if (!st.ws) return;                   // 说到一半挂断了
+        st.ws.send(JSON.stringify({ type: "say", sid: ++st.sid, text: d.text }));
+      }
+    }
+    if (!whole) { status(t("avatar.think_failed", "她没想出该说什么"), true); return; }
+    st.history.push({ role: "assistant", content: whole });
     if (st.history.length > 16) st.history.splice(0, st.history.length - 16);
-    if (!st.ws) return;                       // 等回复的这几秒里挂断了
-    st.ws.send(JSON.stringify({ type: "say", sid: ++st.sid, text: r.d.text }));
   }
 
   /* 计时与花费: 从**第一帧视频**起算 — 与服务端的计费口径一致, 排队不计。
