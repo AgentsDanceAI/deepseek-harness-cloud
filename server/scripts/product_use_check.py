@@ -95,6 +95,10 @@ with sync_playwright() as p:
     for prod in spec["products"]:
         page = ctx.new_page()
         e = {"id": prod["id"]}
+        # **浏览器打不通的请求要记下来**: 有一类故障是应用把只有服务端才通的地址
+        # (localhost:xxxx) 交给浏览器 —— 服务端自检全绿, 而用户那边一直转圈。
+        page.on("requestfailed", lambda r: e.setdefault("bad", []).append(f"failed {r.url}"[:150]))
+        page.on("response", lambda r: r.status >= 400 and e.setdefault("bad", []).append(f"{r.status} {r.url}"[:150]))
         try:
             page.goto(prod["url"], timeout=60000, wait_until="domcontentloaded")
             wait_started(page)
@@ -228,6 +232,8 @@ def main() -> int:
     print()
     for e in results:
         pid = e["id"]
+        for b in list(dict.fromkeys(e.get("bad") or []))[-6:]:
+            print(f"      浏览器打不通 | {b}")
         if e.get("error"):
             print(f"  ✗ {pid:12s} 动不了: {e['error']}")
             bad += 1
