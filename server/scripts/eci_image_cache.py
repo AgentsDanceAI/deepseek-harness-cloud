@@ -276,6 +276,8 @@ def _build_one(refs, stale: list[str]) -> int:
     alloc, addr = eip["AllocationId"], eip["EipAddress"]
     print(f"    {alloc}  {addr}")
 
+    cid = ""  # finally 要用; CreateImageCache 本身就失败时它得有值
+    ready = False
     try:
         name = "dsh-" + hashlib.sha256("|".join(refs).encode()).hexdigest()[:10]
         print(f"==> 建缓存 {name}")
@@ -298,11 +300,13 @@ def _build_one(refs, stale: list[str]) -> int:
             },
         )
         cid = made["ImageCacheId"]
+        ready = False
         t0 = time.time()
         while time.time() - t0 < 1800:
             cur = [c for c in _caches() if c.get("ImageCacheId") == cid]
             st = cur[0].get("Status") if cur else "?"
             if st == "Ready":
+                ready = True
                 print(f"    Ready @ {int(time.time() - t0)}s")
                 break
             if st == "?":
@@ -315,7 +319,20 @@ def _build_one(refs, stale: list[str]) -> int:
         else:
             raise RuntimeError("等了 30 分钟仍未 Ready")
     finally:
-        # 无论成败都释放 —— 一个忘了释放的 EIP 会一直计费, 而它没有任何提示
+        # **没建成就把半成品缓存一起删掉。**
+        # 下面那句"无论成败都释放 EIP"是对的 (漏一个会一直计费), 但只释放不清理会
+        # 留下一个**永远 Creating 的幽灵**: 缓存还在建、出网能力被抽走, 阿里云侧不
+        # 会报错也不会结束, 而 check 从此把这个产品报成"没有整组 Ready 的缓存"。
+        # 2026-09-01 实测: prepare 被超时打断一次, 0.7.5 的缓存就这么卡了二十分钟,
+        # 没有任何一行日志说出了什么事 —— 连"重新 prepare"都会被上面那句
+        # "building 就等它" 拦住, 于是每次重试都在等一个永远不会好的东西。
+        # 打断 (KeyboardInterrupt / 超时被杀) 也走 finally, 所以清理放这里才管用。
+        if not ready and cid:
+            print(f"==> 缓存没建成, 删掉半成品 {cid} (免得留下永远 Creating 的幽灵)")
+            try:
+                _drop(cid)
+            except Exception as e:  # noqa: BLE001
+                print(f"!! 半成品缓存删除失败, 请手动删 {cid}: {e}", file=sys.stderr)
         print("==> 释放临时 EIP")
         try:
             _call("vpc", "2016-04-28", "ReleaseEipAddress", {"AllocationId": alloc})
