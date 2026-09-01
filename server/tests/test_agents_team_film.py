@@ -847,3 +847,98 @@ def test_time_is_imported_for_the_stale_check():
     """
     assert "\nimport time\n" in MAIN2
     assert "time.time()" in MAIN2
+
+
+# ── 空流 / 空棒 (2026-09-01 端到端首跑炸出来的) ────────────────────────────────
+# 这一组和本文件其余部分不同: **不读源码文本, 跑真行为**。源码断言对 bug 和正解
+# 同时成立 —— 首跑那天 60+ 条全绿, 而炸出来的十个问题一条都没接住。
+
+
+def _crew(mod: str):
+    """把容器里的 app 包挂成 crew_app 再 import。
+
+    不能直接 `from app import agent` —— 服务端自己也有个 app 包, 名字撞车; 而
+    容器侧 agent.py 写的是 `from . import tools`, 必须以包的形式加载才解析得了。
+    """
+    import importlib
+    import sys
+    import types
+
+    if "crew_app" not in sys.modules:
+        pkg = types.ModuleType("crew_app")
+        pkg.__path__ = [str(TEAM / "app")]
+        sys.modules["crew_app"] = pkg
+    return importlib.import_module(f"crew_app.{mod}")
+
+
+class _NoBackoff:
+    """只把 sleep 换成立即返回, 其余属性照转给真 asyncio。"""
+
+    def __init__(self, real_sleep):
+        import asyncio as _a
+
+        self._a = _a
+        self._real = real_sleep
+
+    def __getattr__(self, k):
+        return getattr(self._a, k)
+
+    async def sleep(self, *_a, **_k):
+        await self._real(0)
+
+
+def test_empty_stream_is_a_failure_not_an_empty_answer():
+    """网关 200 + 零 chunk 必须重发, 重发还空就往上抛。
+
+    干净 EOF 不抛异常, 所以它躲过了所有 except 分支: `_stream` 只看到循环正常
+    结束就 return, 调用方于是发一个 text=""、tools=[]、usage={} 的 end, 接力照常
+    传棒 —— 这正是 2026-09-01 首跑导演那一棒的形状。
+    """
+    import asyncio
+
+    agent = _crew("agent")
+    tries = []
+
+    async def _empty(client, model, messages):
+        tries.append(model)
+        return
+        yield {}  # 这行到不了 — 只是让它成为 async generator
+
+    async def _go():
+        agent._stream_once = _empty
+        # ⚠️ agent.asyncio **就是** asyncio 本尊 (同一个模块对象), 直接赋 lambda
+        # 会把全局 sleep 换成调自己的函数 → RecursionError。要先接住原件。
+        real_sleep = asyncio.sleep
+        agent.asyncio = _NoBackoff(real_sleep)
+        got = []
+        with_err = None
+        try:
+            async for c in agent._stream(None, "m", []):
+                got.append(c)
+        except agent.GatewayError as e:
+            with_err = e
+        return got, with_err
+
+    got, err = asyncio.run(_go())
+    assert got == [], "空流不该吐出任何 chunk"
+    assert err is not None, "空流被当成了'他没话说' —— 必须当故障抛出来"
+    assert isinstance(err, agent.EmptyStreamError), f"抛的是 {type(err).__name__}"
+    assert len(tries) == agent.GATEWAY_TRIES, (
+        f"空流只试了 {len(tries)} 次 —— 它是瞬时故障, 该按 GATEWAY_TRIES 重发"
+    )
+
+
+def test_a_bot_that_produces_nothing_does_not_pass_the_baton():
+    """空棒必须停住, 且续跑重跑**本棒**。
+
+    传下去的代价不是"少一段话": 后面的人会对着从没被写出来的产物开工。首跑那天
+    导演空棒之后, 美术和分镜读了十几次不存在的讲戏本, 全程无一处报错。
+    """
+    src = (TEAM / "app" / "main.py").read_text(encoding="utf-8")
+    body = src[src.index("async def _run_relay") : src.index("async def _run_room")]
+    # 空棒判定必须在 store.add 之后、传棒之前, 且走"重跑本棒"那条路
+    assert "not text and not used" in body, "接力层没有空棒判定"
+    seg = body[body.index("not text and not used") :]
+    seg = seg[: seg.index("yield ev")]
+    assert "capped_here = True" in seg, "空棒续跑没停在本棒上 —— 它的活没干完"
+    assert '"type": "error"' in seg, "空棒没发 error 事件, 用户看不见为什么停了"

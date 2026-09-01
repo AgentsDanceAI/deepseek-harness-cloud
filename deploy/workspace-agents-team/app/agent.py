@@ -66,6 +66,17 @@ class GatewayError(RuntimeError):
     pass
 
 
+class EmptyStreamError(GatewayError):
+    """网关回了 200, 流却一个 chunk 都没有 —— 干净 EOF。
+
+    这**不是"他没话说"**, 是这一棒根本没跑成。2026-09-01 端到端首跑就栽在这里:
+    导演那一棒 `usage` 是 `{}`、`text` 是 `""`、工具零次, 而接力照常传棒 —— 后面
+    美术、分镜对着一份从没被写出来的讲戏本摸黑干了几十步, 表面上却全程"正常"。
+
+    干净 EOF 不抛异常, 所以它躲过了所有 except: 必须显式判"一个 chunk 都没吐"。
+    """
+
+
 async def _stream_once(
     client: httpx.AsyncClient, model: str, messages: list[dict]
 ) -> AsyncIterator[dict]:
@@ -126,9 +137,15 @@ async def _stream(client, model: str, messages: list[dict]) -> AsyncIterator[dic
             async for chunk in _stream_once(client, model, messages):
                 yielded = True
                 yield chunk
+            if not yielded:
+                # 200 + 零 chunk: 当**故障**重发, 而不是当"空回复"往下走
+                raise EmptyStreamError("网关接通了却没吐任何内容 (空流)")
             return
         except (GatewayError, httpx.HTTPError) as e:
-            transient = isinstance(e, httpx.HTTPError) or getattr(e, "status", 0) in _RETRY_STATUS
+            transient = (
+                isinstance(e, (httpx.HTTPError, EmptyStreamError))
+                or getattr(e, "status", 0) in _RETRY_STATUS
+            )
             if yielded or not transient or attempt + 1 >= GATEWAY_TRIES:
                 raise
             await asyncio.sleep(min(1.5 * 2**attempt, 8.0))

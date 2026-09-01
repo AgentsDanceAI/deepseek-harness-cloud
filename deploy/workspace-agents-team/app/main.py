@@ -167,6 +167,18 @@ async def _run_relay(room: rooms.Room, model: str | None):
                         store.add(room.id, ev["bot"], text, used)
                     if any(tools.HALT_TOOL in str(t) for t in used):
                         halted = True
+                    # **空棒**: 一个字没说、一个工具没动 = 这一棒根本没跑成 (最常见
+                    # 的成因是网关空流)。传下去等于让后面的人对着不存在的产物开工
+                    # —— 2026-09-01 首跑: 导演空棒, 美术和分镜读了十几次从没写出来
+                    # 的讲戏本, 全程无一处报错。当"没干完"处理: 停住, 且续跑重跑本棒。
+                    elif not text and not used:
+                        yield {
+                            "type": "error",
+                            "bot": bot_id,
+                            "message": "这一棒是空的 (没说话, 也没动工具) — 已停住, 没往下传棒",
+                        }
+                        halted = True
+                        capped_here = True
                     # 撞步数上限 = 这一棒**没干完**, 也要停 (别让下游拿半成品接着做),
                     # 且续跑要重跑**这一棒** —— 它还有活没干完。
                     if ev.get("capped"):
