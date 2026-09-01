@@ -16,7 +16,7 @@
   const RT_CODEC = 'video/mp4; codecs="avc1.42E01E, mp4a.40.2"';
   const st = {
     sess: null, cfg: null, ws: null, ear: null, history: [], sid: 0,
-    ms: null, sb: null, url: null, queue: [], speaking: false, hide: null,
+    ms: null, sb: null, url: null, queue: [], speaking: false, watch: null,
     t0: null, timer: null, rate: 0,
   };
 
@@ -27,6 +27,19 @@
     if (w.MediaSource?.isTypeSupported?.(RT_CODEC)) return w.MediaSource;
     if (w.ManagedMediaSource?.isTypeSupported?.(RT_CODEC)) return w.ManagedMediaSource;
     return null;
+  }
+
+  /* 对话字幕落在**画面上**, 和她在一起 —— 挤在右栏的状态行里, 眼睛要在屏幕两头
+     来回跑, 而这本来就是一通电话, 字幕就该在脸下面。 */
+  function say2log(who, text) {
+    const box = $("#avLog");
+    const line = document.createElement("div");
+    line.className = "av-line av-" + who;
+    line.textContent = text;
+    box.appendChild(line);
+    while (box.children.length > 30) box.removeChild(box.firstChild);
+    box.scrollTop = box.scrollHeight;
+    box.hidden = false;
   }
 
   function status(msg, bad) {
@@ -160,13 +173,19 @@
     // 就晚了 (而失败是静默的)。
     v.play().catch((e) => console.info("[avatar] 首次 play 被拒 (到货后再试):", e.name));
     v.addEventListener("error", () => console.error("[avatar] video 元素报错:", v.error?.code));
-    // **她说完没说完由播放本身说了算**, 不看上游的文字队列: 上游的 idle 意思是
-    // "没有待念的文字了", 而这时缓冲里还有好几秒视频在播 —— 拿它藏图层, 她会在
-    // 自己话说到一半时消失。缓冲播空浏览器就发 waiting, 那才是她真的停了。
-    // 延后一点再藏: 网络打个嗝也会 waiting, 而闪一下比晚藏 200ms 难看得多。
-    const hideSoon = () => { st.hide = setTimeout(() => showVideo(false), 250); };
-    v.addEventListener("waiting", hideSoon);
-    v.addEventListener("ended", hideSoon);
+    // **她说完没说完, 看画面动没动** —— 不看事件也不看上游的文字队列:
+    //   · 上游的 idle 只是"没有待念的文字了", 那时缓冲里还有好几秒在播, 拿它藏
+    //     图层她会在话说一半时消失;
+    //   · waiting/ended 这类事件在缓冲耗尽时**不一定发**, 而漏一次的后果是最后
+    //     一帧僵在背景上、与静止图错开半分 —— 就是老板说的"重影, 好吓人"。
+    // 直接比 currentTime: 连着两拍没往前走就是停了, 这个判据不依赖任何事件。
+    clearInterval(st.watch);
+    let last = -1;
+    st.watch = setInterval(() => {
+      const now = v.currentTime;
+      if (now !== last) { last = now; showVideo(true); return; }
+      if (st.speaking) showVideo(false);      // 画面不动了 = 她说完了
+    }, 200);
     return true;
   }
 
@@ -184,7 +203,7 @@
 
   /* 她不说话时露静止背景, 说话时才盖上视频层。不切的话最后一帧会僵在那儿。 */
   function showVideo(on) {
-    if (st.hide) { clearTimeout(st.hide); st.hide = null; }
+    if (on === st.speaking) return;
     $("#avVideo").style.opacity = on ? "1" : "0";
     st.speaking = on;
   }
@@ -230,8 +249,7 @@
       if (typeof e.data !== "string") {
         st.queue.push(new Uint8Array(e.data));
         pump();
-        if (st.hide) { clearTimeout(st.hide); st.hide = null; }   // 又有话了
-        if (!st.speaking) showVideo(true);
+        showVideo(true);                     // 又有话了
         const v = $("#avVideo");
         if (v.paused) v.play().catch(() => { /* 起播被拒, 下一块再试 */ });
         if (!st.t0) startTimer();
@@ -254,7 +272,9 @@
         listen();
         // **她先开口**。固定一句, 不走模型: 立刻就能说 (模型要好几秒), 而接通后
         // 双方干等的那几秒, 用户只会以为点了没反应。
-        ws.send(JSON.stringify({ type: "say", sid: ++st.sid, text: t("avatar.hello", "喂，我在呢，你说。") }));
+        const hi = t("avatar.hello", "喂，我在呢，你说。");
+        say2log("her", hi);
+        ws.send(JSON.stringify({ type: "say", sid: ++st.sid, text: hi }));
       }
     };
     ws.onclose = () => stopCall();
@@ -296,7 +316,7 @@
       rebuildMedia();
     }
     st.history.push({ role: "user", content: said });
-    status(said);
+    say2log("me", said);
     // **按句读, 来一句发一句**: 上游出全文要好几秒, 而电话里等整段等于"没反应"。
     const r = await fetch("/api/avatar/say", {
       method: "POST",
@@ -321,6 +341,7 @@
         if (!d.text) continue;
         whole += d.text;
         if (!st.ws) return;                   // 说到一半挂断了
+        say2log("her", d.text);
         st.ws.send(JSON.stringify({ type: "say", sid: ++st.sid, text: d.text }));
       }
     }
@@ -346,6 +367,8 @@
   function stopCall() {
     if (st.ws) { try { st.ws.close(); } catch { /* 忽略 */ } st.ws = null; }
     $("#avSay").hidden = true;
+    clearInterval(st.watch); st.watch = null;
+    showVideo(false);
     if (st.ear) { const e = st.ear; st.ear = null; e.onend = null; try { e.stop(); } catch { /* 已停 */ } }
     st.history = [];
     if (st.timer) { clearInterval(st.timer); st.timer = null; }

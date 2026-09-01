@@ -74,6 +74,16 @@ with sync_playwright() as p:
             if v["t"] > 0.3 and v["w"] > 0:
                 break
         res["video"] = v
+        # **说完之后还要再看一眼**: 露出来验过了, 藏没藏一直没验 —— 而漏藏的后果
+        # 是最后一帧僵在背景上变成重影。等她把缓冲播完 (说一句约几秒)。
+        for _ in range(20):
+            page.wait_for_timeout(1000)
+            after = page.evaluate("() => { const v = document.querySelector('#avVideo');"
+                                  " return {t: v.currentTime, op: getComputedStyle(v).opacity}; }")
+            if after["op"] == "0":
+                break
+        res["after"] = after
+        res["log"] = page.inner_text("#avLog")[:300]
         res["status"] = page.inner_text("#avStatus")[:200]
         res["timer"] = page.inner_text("#avTimer")
         page.screenshot(path=str(out / "call.png"))
@@ -146,6 +156,13 @@ def main() -> int:
         bad.append("视频是静音的 —— 一通哑巴电话")
     if (v.get("op") or "0") == "0":
         bad.append("视频层是透明的 —— 用户看不到她")
+    after = res.get("after") or {}
+    print(f"    说完之后: currentTime={after.get('t')} opacity={after.get('op')}")
+    print(f"    字幕: {(res.get('log') or '')[:120]!r}")
+    if after.get("op") != "0":
+        bad.append("她说完了图层没藏 —— 最后一帧僵在背景上就是重影")
+    if not (res.get("log") or "").strip():
+        bad.append("画面上没有字幕")
     for b in bad:
         print(f"  ✗ {b}")
     if not bad:

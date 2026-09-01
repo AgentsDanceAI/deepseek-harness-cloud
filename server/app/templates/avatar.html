@@ -13,6 +13,9 @@
     <img id="avBg" class="av-bg" alt="">
     <video id="avVideo" class="av-video" playsinline></video>
     <div id="avHint" class="av-hint">{{ t('avatar.tap_to_start') }}</div>
+    {# 字幕压在画面下沿 —— 这是一通电话, 说的话就该在脸下面, 而不是在右栏里
+       让眼睛在屏幕两头来回跑。 #}
+    <div id="avLog" class="av-log" hidden></div>
   </div>
 
   <div class="av-side">
