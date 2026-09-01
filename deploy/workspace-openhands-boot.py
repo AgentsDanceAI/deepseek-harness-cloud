@@ -63,18 +63,22 @@ def call(path, data=None):
 
 def inject_frontend() -> None:
     """把免向导的键种进 index.html —— 那是浏览器侧的状态, 服务端灌不进去。"""
-    # 这几个键是**实测抓的**: 点完向导之后浏览器里存的就是这些 (照抄, 不臆造)。
+    # 这几个键是**实测抓的**, 手法值得记下来: 拿浏览器把弹窗真点一遍, 点前点后
+    # 各 dump 一次 localStorage, 差集就是它。别去 JS 包里 grep 猜 —— 那包里塞着
+    # 一整份公共后缀表, 关键词全是噪声。
+    #
     # · openhands-onboarded=1 免掉三步向导;
-    # · agent-canvas-consent=1 + telemetry-consent 免掉遥测同意框 —— 注意应用
-    #   启动时会把 consent 重置成 '0', 所以还要清掉 first-use 那个标记, 否则框
-    #   照样弹 (第一版只种 consent, 白种了)。
-    # 遥测种成 denied 而不是 granted: 隐私偏好一律选最保守的。
+    # · **openhands-telemetry-consent-pending-cloud-sync 才是遥测框的开关**。
+    #   先前种的 agent-canvas-consent=1 是白种: 应用一启动就把它重置回 '0',
+    #   连 openhands-telemetry-first-use 也被它写回 'true' —— 我们清了也没用。
+    #   实测点掉弹窗后**只多出这一个键**, 那它就是判据。
+    # 遥测一律 denied 而不是 granted: 这框默认勾着"发送匿名使用数据", 而我们是
+    # 替用户托管, 替他做的选择只能挑最保守的那个。
     script = (
         "<script>try{"
         "localStorage.setItem('openhands-onboarded','1');"
-        "localStorage.setItem('agent-canvas-consent','1');"
         "localStorage.setItem('openhands-telemetry-consent','denied');"
-        "localStorage.removeItem('openhands-telemetry-first-use');"
+        "localStorage.setItem('openhands-telemetry-consent-pending-cloud-sync','denied');"
         "}catch(e){}</script>"
     )
     hits = 0
