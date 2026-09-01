@@ -2523,6 +2523,13 @@ def _openhands_boot() -> str:
     return (
         "set -e\n"
         "mkdir -p /workspace\n"
+        # **host.docker.internal 必须指回本机**。它起沙箱时用的是"我在容器里 ->
+        # 把 localhost 换成 host.docker.internal"这条规则 (app_server/utils/
+        # docker_utils.py), 那是给"OpenHands 在容器里、沙箱在宿主"那种拓扑写的。
+        # 我们是一人一容器、沙箱就在同一个容器内, 而这个名字在容器里**根本解析
+        # 不了** —— 探活 30 秒必然超时, 用户看到的是
+        # "500: Agent Server Failed to start properly", 而首页一切正常。
+        'grep -q host.docker.internal /etc/hosts || echo "127.0.0.1 host.docker.internal" >> /etc/hosts\n'
         # **必须 cd /app**: 前端那堆静态文件是按工作目录找的, 在别处起 uvicorn
         # 的话首页直接 404 —— 而且是 `{"detail":"Not Found"}` 这种 API 式的 404,
         # 看着像路由没配, 其实是 cwd 不对 (镜像的 WorkingDir 就是 /app, 我们绕过
@@ -2607,7 +2614,8 @@ _FRAMEWORK_HELLO = {
         "OpenManus —— 开源版 Manus, 一个通用智能体。模型和网关已经配好 "
         "(config/config.toml), 直接开聊:\n"
         "    cd /opt/openmanus && python main.py\n"
-        "换个跑法: python run_flow.py (多智能体编排) / python run_mcp.py (MCP 服务)\n"
+        "换个跑法 (都要先 cd /opt/openmanus): python run_flow.py 多智能体编排 / "
+        "python run_mcp.py MCP 服务\n"
     ),
     "crewai": (
         "CrewAI —— 把智能体组成一支船员队, 各有角色和任务。模型和网关已配好 "
@@ -2648,9 +2656,12 @@ def _frameworks_boot(product_id: str) -> str:
         "> /opt/openmanus/config/config.toml\n"
         f"printf '%s' '{hello}' > /etc/motd\n"
         # ttyd: -W 允许写入 (只读终端没法用), 起始目录是 NAS 上的 /workspace
-        # **各自的虚拟环境放进 PATH**: 两个框架要的 openai 版本不兼容, 镜像里
-        # 是两个 venv (见 Dockerfile)。不设 PATH 的话用户敲 crewai 找不到命令,
-        # 敲 python 用的是系统那个 —— 两样都不对。
+        # **PATH 必须写进 /etc/profile.d, 不能只在这里 export**: ttyd 起的是
+        # `bash -l` (登录 shell), 它会重新加载 /etc/profile 把我们 export 的 PATH
+        # 冲掉 —— 用户敲 python 用的是系统那个, 于是
+        # "ModuleNotFoundError: No module named 'pydantic'" (2026-09-01 老板实测撞到)。
+        # 写进 profile.d 之后, 他后面开的每一个 shell 也都对。
+        f"printf 'export PATH=/opt/venv-{venv}/bin:$PATH\\n' > /etc/profile.d/dsh-venv.sh\n"
         f"export PATH=/opt/venv-{venv}/bin:$PATH\n"
         "exec ttyd -W -p 7681 -t titleFixed='DSH Cloud' "
         "bash -lc 'cat /etc/motd; cd /workspace; exec bash'\n"

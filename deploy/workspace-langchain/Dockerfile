@@ -15,7 +15,12 @@ RUN git clone --depth 1 https://github.com/langchain-ai/agent-chat-ui .
 # NEXT_PRIVATE_STANDALONE: 逼 Next 输出 standalone。上游的 next.config 里没开
 # 这个 (他们是给人 pnpm dev 用的), 而不开的话产物没有自带 server, 只能把整个
 # node_modules 一起搬进运行镜像 —— 那是 1GB 起。
-ENV NEXT_PUBLIC_API_URL=/langgraph \
+# **必须是绝对 URL**: LangGraph 的 JS SDK 用 new URL() 解析这个值, 相对路径直接
+# 抛 `"/langgraph/threads" cannot be parsed as a URL` —— 页面能开、一发消息就红。
+# (2026-09-01 老板实测撞到。我原以为同源相对路径最省事, 那是想当然。)
+# 域名要跟着部署走, 所以做成构建参数。
+ARG PUBLIC_ORIGIN=https://langchain.dshcloud.online
+ENV NEXT_PUBLIC_API_URL=${PUBLIC_ORIGIN}/langgraph \
     NEXT_PUBLIC_ASSISTANT_ID=agent \
     NEXT_TELEMETRY_DISABLED=1 \
     NEXT_PRIVATE_STANDALONE=true
