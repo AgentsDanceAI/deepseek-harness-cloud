@@ -181,14 +181,19 @@ async def avatar_config(user: dict = Depends(resolve_user)):
 
 
 @router.get("/api/avatar/bg.png")
-async def avatar_bg(user: dict = Depends(resolve_user)):
-    """静止背景。它是模型自渲染的中性帧合成图 —— 视频起播时不跳脸靠的就是它。"""
+async def avatar_bg(person: str = "", user: dict = Depends(resolve_user)):
+    """静止背景。内置形象是模型自渲染的中性帧合成图 —— 视频起播不跳脸靠的就是它;
+    用户上传的形象则是他自己那张照片。
+
+    **person 必须透传**: 视频层是按这个形象的脸框贴上去的, 而上传形象的脸框是
+    图内坐标 —— 背景取错就是一张脸浮在不属于它的身体上。
+    """
     if not config.AVATAR_TOKEN_SECRET:
         raise HTTPException(503, "avatar_not_configured")
     tok = sign_token(user["id"])
     try:
         async with httpx.AsyncClient(timeout=20.0) as c:
-            r = await c.get(f"{config.AVATAR_GPU_URL}/bg.png", params={"token": tok})
+            r = await c.get(f"{config.AVATAR_GPU_URL}/bg.png", params={"token": tok, "person": person})
         return Response(
             content=r.content,
             status_code=r.status_code,
