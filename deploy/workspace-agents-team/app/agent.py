@@ -241,7 +241,25 @@ async def run_turn(
                         "name": c["name"],
                         "args": args,
                     }
-                    body, summary = await tools.dispatch(c["name"], args)
+                    # 长工具 (出片一条几分钟) 的进度: 工具是同步语义, 中间没法
+                    # yield。用队列桥接 —— 工具在自己的线程里往队列丢, 这边边等
+                    # 边把队列里的心跳发出去。不这么做, 用户面对的是几分钟静止。
+                    pq: asyncio.Queue = asyncio.Queue()
+                    loop = asyncio.get_running_loop()
+                    # 默认参数显式绑定 —— 循环里的 lambda 直接引用 pq/loop 的话,
+                    # 几个工具调用会全都指向**最后一次**的队列 (ruff B023)。
+                    tools.media.set_progress(
+                        lambda msg, _q=pq, _l=loop: _l.call_soon_threadsafe(_q.put_nowait, msg))
+                    task = asyncio.create_task(tools.dispatch(c["name"], args))
+                    while not task.done():
+                        try:
+                            msg = await asyncio.wait_for(pq.get(), timeout=1.0)
+                        except asyncio.TimeoutError:
+                            continue
+                        yield {"type": "progress", "bot": bot_id,
+                               "id": c["id"], "text": msg}
+                    tools.media.set_progress(None)
+                    body, summary = await task
 
                 if body.startswith("data:image/"):
                     yield {
