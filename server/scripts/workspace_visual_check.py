@@ -100,6 +100,9 @@ with sync_playwright() as p:
             entry["title"] = page.title()
             entry["final_url"] = page.url
             entry["text"] = (page.inner_text("body") or "")[:4000]
+            # **可见的密码框**是最硬的信号: 关键词会误伤 (待办清单里的
+            # "Add LLM API key"、页脚的"登录"), 一个真在等你输密码的框不会。
+            entry["pw"] = page.locator("input[type=password]").count()
             shot = out / (prod["id"] + ".png")
             page.screenshot(path=str(shot), full_page=False)
             entry["shot"] = shot.name
@@ -202,7 +205,15 @@ def main() -> int:
             continue
         walls = [w for w in WALL_PHRASES if w in text]
         broken = [b for b in BROKEN_PHRASES if b in text]
-        if broken:
+        # 命中词**要带上下文打出来**。光报一个 ['api key'] 没法判断是墙还是待办,
+        # 每次都得去翻截图 —— 2026-09-01 一轮里三个红有两个是这么白翻的。
+        for w in walls:
+            i = text.find(w)
+            print(f"      「{w}」 …{text[max(0, i - 40) : i + len(w) + 40]}…".replace("\n", " "))
+        if e.get("pw"):
+            print(f"  ✗ {pid:14s} 页面上有 {e['pw']} 个密码框 —— 这是真墙  ({e.get('shot')})")
+            bad += 1
+        elif broken:
             print(f"  ✗ {pid:14s} 页面是坏的: {broken}  ({e.get('shot')})")
             bad += 1
         elif walls:
