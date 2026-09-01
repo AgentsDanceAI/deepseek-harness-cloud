@@ -82,3 +82,51 @@ def test_signed_token_matches_gpu_side_format(secret):
     assert tenant == "d-u_abc"
     want = hmac.new(secret.encode(), f"{ts}|{tenant}".encode(), hashlib.sha256).hexdigest()
     assert sig == want
+
+
+def test_back_to_back_calls_are_both_charged(secret, monkeypatch):
+    """背靠背两通短通话要**收两笔**, 别被幂等键当成重投吞掉。
+
+    幂等键防的是同一份回报被投递两次 (GPU 侧失败只记日志不重试, 所以窗口不必宽)。
+    先前的写法把 ts 末两位抹掉按 ~100 秒分桶, 结果是: 用户打 30 秒挂断、再打
+    30 秒, 两笔 (各计 1 分钟) 落进同一个桶, 第二笔静默不收。少收钱不报错, 是
+    最不容易发现的那种。
+    """
+    from app import credits
+
+    seen: list[str] = []
+    monkeypatch.setattr(credits, "spend", lambda *a, **kw: seen.append(kw["request_id"]))
+
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+
+    tenant = "d-u_back2back"
+    with TestClient(app) as c:
+        for ts in (str(int(time.time())), str(int(time.time()) + 3)):
+            r = c.post(
+                "/api/avatar/meter",
+                params={"ts": ts, "tenant": tenant, "minutes": "1", "sig": _sign(secret, ts, tenant, "1")},
+            )
+            assert r.status_code == 200, r.text
+    assert len(set(seen)) == 2, f"两通通话该有两个幂等键, 实得 {seen}"
+
+
+def test_a_redelivered_report_is_not_charged_twice(secret, monkeypatch):
+    """同一份回报重复投递 -> 幂等键相同, 由 credits.spend 去重。"""
+    from app import credits
+
+    seen: list[str] = []
+    monkeypatch.setattr(credits, "spend", lambda *a, **kw: seen.append(kw["request_id"]))
+
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+
+    ts, tenant = str(int(time.time())), "d-u_dup"
+    sig = _sign(secret, ts, tenant, "2")
+    with TestClient(app) as c:
+        for _ in range(2):
+            r = c.post("/api/avatar/meter", params={"ts": ts, "tenant": tenant, "minutes": "2", "sig": sig})
+            assert r.status_code == 200, r.text
+    assert len(set(seen)) == 1, f"重投该是同一个幂等键, 实得 {seen}"
