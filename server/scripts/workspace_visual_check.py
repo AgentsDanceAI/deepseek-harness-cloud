@@ -87,10 +87,22 @@ with sync_playwright() as p:
         page = ctx.new_page()
         entry = {"id": prod["id"], "url": prod["url"]}
         try:
-            page.goto(prod["url"], timeout=60000, wait_until="domcontentloaded")
-            # 冷启动: 我们自己的启动页会轮询, 等它跳走。最多等 3 分钟 ——
-            # Coze 那种十容器栈实测 90 秒才起得来。
-            for _ in range(90):
+            resp = page.goto(prod["url"], timeout=60000, wait_until="domcontentloaded")
+            entry["status"] = resp.status if resp else None
+            # 冷启动有**两种**长相, 都要等:
+            #  · 我们自己的启动页会轮询, 等它跳走;
+            #  · **网关 502/503** —— 实例还没听端口, Caddy 没人可转。这时是一张
+            #    错误页, 不会自己好, 得重新导航。
+            # 最多等 6 分钟 (Coze 那种十容器栈实测 90 秒; OpenHands 5.8GB 更久)。
+            for _ in range(180):
+                if entry.get("status") in (502, 503, 504):
+                    page.wait_for_timeout(4000)
+                    try:
+                        resp = page.goto(prod["url"], timeout=60000, wait_until="domcontentloaded")
+                        entry["status"] = resp.status if resp else None
+                    except Exception:
+                        pass
+                    continue
                 if "/work/starting" not in page.url and "启动中" not in page.title():
                     break
                 page.wait_for_timeout(2000)
@@ -191,6 +203,14 @@ def main() -> int:
         pid = e["id"]
         if e.get("error"):
             print(f"  ✗ {pid:14s} 打不开: {e['error']}")
+            bad += 1
+            continue
+        # **状态码先看**。2026-09-01 这个脚本给两个 502 页面判了绿: Cloudflare 的
+        # 错误页写的是"Bad gateway / Error code 502", 而词表里那条是
+        # "502 bad gateway" —— 词序对不上就漏了。词表永远追不全, 状态码是硬的。
+        # 假绿比假红严重: 假红我会去看图, 假绿谁也不会再看。
+        if (e.get("status") or 200) >= 400:
+            print(f"  ✗ {pid:14s} 打开就是 HTTP {e['status']}  ({e.get('shot')})")
             bad += 1
             continue
         text = (e.get("text") or "").lower()
