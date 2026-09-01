@@ -1,0 +1,28 @@
+/* 数字人通话页。舞台是"静止背景 + 视频层按 crop 叠上去" —— 两层必须严丝合缝,
+   错位一眼就看得出来 (那也是我们把 crop 交给服务端按形象算的原因)。 */
+.av-wrap { display: flex; gap: 24px; align-items: flex-start; flex-wrap: wrap; }
+.av-stage { position: relative; flex: 1 1 520px; min-width: 300px; border-radius: 14px;
+            overflow: hidden; background: #111; aspect-ratio: 16 / 9; }
+.av-bg { width: 100%; height: 100%; object-fit: cover; display: block; }
+.av-video { position: absolute; object-fit: cover; }
+.av-hint { position: absolute; inset: 0; display: grid; place-items: center;
+           color: #fff; background: rgba(0,0,0,.35); font-size: 15px; }
+
+.av-side { flex: 0 0 280px; display: flex; flex-direction: column; gap: 12px; }
+.av-meter { border: 1px solid var(--line, #e6e6e9); border-radius: 12px; padding: 12px 14px; }
+.av-row { display: flex; justify-content: space-between; align-items: baseline; font-size: 13px; }
+.av-row + .av-row { margin-top: 4px; }
+.av-row b { font-variant-numeric: tabular-nums; }
+.av-muted { color: #71717a; font-size: 12px; }
+
+.av-field { display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+.av-field select { padding: 7px 10px; border-radius: 8px; border: 1px solid var(--line, #e6e6e9); }
+.av-upload { display: inline-block; text-align: center; padding: 8px 12px; cursor: pointer;
+             border: 1px dashed var(--line, #c9c9cf); border-radius: 8px; font-size: 13px; }
+.av-call { padding: 11px 16px; border: 0; border-radius: 10px; cursor: pointer;
+           background: #2563eb; color: #fff; font: inherit; }
+.av-call:disabled { opacity: .5; cursor: default; }
+.av-status { font-size: 13px; min-height: 20px; color: #71717a; }
+.av-status.av-bad { color: #dc2626; }
+
+@media (max-width: 720px) { .av-side { flex: 1 1 100%; } }

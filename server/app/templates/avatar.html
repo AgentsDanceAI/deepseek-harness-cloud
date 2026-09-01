@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}{{ t('avatar.title') }} · DSH Cloud{% endblock %}
+{% block head %}
+<link rel="stylesheet" href="/static/avatar.css?v={{ asset_v }}">
+{% endblock %}
+{% block content %}
+<div class="av-wrap">
+  <div class="av-stage">
+    {# 静止背景与视频层是**同一个人**: /bg.png 吐的是模型自渲染的中性帧合成图,
+       视频起播时不会跳脸。两层按 crop 对齐 —— 那组坐标由服务端按形象给出。 #}
+    <img id="avBg" class="av-bg" alt="">
+    <video id="avVideo" class="av-video" playsinline muted></video>
+    <div id="avHint" class="av-hint">{{ t('avatar.tap_to_start') }}</div>
+  </div>
+
+  <div class="av-side">
+    <div class="av-meter">
+      <div class="av-row"><span>{{ t('avatar.balance') }}</span><b id="avBalance">—</b></div>
+      <div class="av-row"><span>{{ t('avatar.rate') }}</span><b id="avRate">—</b></div>
+      <div class="av-row av-muted"><span id="avTimer">00:00</span><span id="avCost"></span></div>
+    </div>
+
+    <label class="av-field">
+      <span>{{ t('avatar.look') }}</span>
+      <select id="avPerson"></select>
+    </label>
+    <label class="av-field">
+      <span>{{ t('avatar.voice') }}</span>
+      <select id="avVoice"></select>
+    </label>
+    <label class="av-upload" id="avUploadLabel">
+      <span id="avUploadText">{{ t('avatar.upload') }}</span>
+      <input type="file" id="avUpload" accept="image/*" hidden>
+    </label>
+
+    <button id="avCall" class="av-call">{{ t('avatar.start') }}</button>
+    <div id="avStatus" class="av-status"></div>
+  </div>
+</div>
+<script src="/static/avatar.js?v={{ asset_v }}" defer></script>
+{% endblock %}
