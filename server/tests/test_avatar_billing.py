@@ -84,49 +84,59 @@ def test_signed_token_matches_gpu_side_format(secret):
     assert sig == want
 
 
-def test_back_to_back_calls_are_both_charged(secret, monkeypatch):
-    """背靠背两通短通话要**收两笔**, 别被幂等键当成重投吞掉。
+def _charged(client, secret, tenant, ts, minutes):
+    r = client.post(
+        "/api/avatar/meter",
+        params={"ts": ts, "tenant": tenant, "minutes": minutes, "sig": _sign(secret, ts, tenant, minutes)},
+    )
+    assert r.status_code == 200, r.text
+    return r.json().get("charged", 0)
 
-    幂等键防的是同一份回报被投递两次 (GPU 侧失败只记日志不重试, 所以窗口不必宽)。
-    先前的写法把 ts 末两位抹掉按 ~100 秒分桶, 结果是: 用户打 30 秒挂断、再打
-    30 秒, 两笔 (各计 1 分钟) 落进同一个桶, 第二笔静默不收。少收钱不报错, 是
-    最不容易发现的那种。
+
+def test_back_to_back_calls_are_both_charged(secret):
+    """背靠背两通短通话要**收两笔**, 别被去重当成重投吞掉。
+
+    用户打 30 秒挂断、再打 30 秒 = 两笔各 1 分钟。早先把回报时间戳末两位抹掉
+    按 ~100 秒分桶, 这两笔落进同一个桶, 第二笔静默不收。少收钱不报错。
     """
-    from app import credits
-
-    seen: list[str] = []
-    monkeypatch.setattr(credits, "spend", lambda *a, **kw: seen.append(kw["request_id"]))
-
     from fastapi.testclient import TestClient
 
     from app.main import app
 
-    tenant = "d-u_back2back"
+    tenant, t0 = "d-u_back2back", int(time.time())
     with TestClient(app) as c:
-        for ts in (str(int(time.time())), str(int(time.time()) + 3)):
-            r = c.post(
-                "/api/avatar/meter",
-                params={"ts": ts, "tenant": tenant, "minutes": "1", "sig": _sign(secret, ts, tenant, "1")},
-            )
-            assert r.status_code == 200, r.text
-    assert len(set(seen)) == 2, f"两通通话该有两个幂等键, 实得 {seen}"
+        first = _charged(c, secret, tenant, str(t0), "1")
+        second = _charged(c, secret, tenant, str(t0 + 3), "1")
+    assert first > 0 and second > 0, f"两通都该收钱, 实得 {first} / {second}"
 
 
-def test_a_redelivered_report_is_not_charged_twice(secret, monkeypatch):
-    """同一份回报重复投递 -> 幂等键相同, 由 credits.spend 去重。"""
-    from app import credits
+def test_a_redelivered_report_is_not_charged_twice(secret):
+    """同一份回报投两次, **只扣一次钱**。
 
-    seen: list[str] = []
-    monkeypatch.setattr(credits, "spend", lambda *a, **kw: seen.append(kw["request_id"]))
-
+    这条测试直接数扣款, 不看幂等键长什么样 —— 先前那版比对的是 request_id 字符串,
+    而 usage_log.request_id 根本没有唯一约束: 键"对上了"钱照扣两次, 测试却是绿的。
+    断言要落在钱上。
+    """
     from fastapi.testclient import TestClient
 
+    from app import credits
     from app.main import app
 
-    ts, tenant = str(int(time.time())), "d-u_dup"
-    sig = _sign(secret, ts, tenant, "2")
-    with TestClient(app) as c:
-        for _ in range(2):
-            r = c.post("/api/avatar/meter", params={"ts": ts, "tenant": tenant, "minutes": "2", "sig": sig})
-            assert r.status_code == 200, r.text
-    assert len(set(seen)) == 1, f"重投该是同一个幂等键, 实得 {seen}"
+    tenant, ts = "d-u_dup", str(int(time.time()))
+    spent: list[int] = []
+    real_spend = credits.spend
+
+    def counting_spend(user_id, amount, **kw):
+        spent.append(amount)
+        return real_spend(user_id, amount, **kw)
+
+    credits.spend = counting_spend
+    try:
+        with TestClient(app) as c:
+            first = _charged(c, secret, tenant, ts, "2")
+            again = _charged(c, secret, tenant, ts, "2")
+    finally:
+        credits.spend = real_spend
+    assert first > 0, "第一次该收钱"
+    assert again == 0, f"重投不该再收, 实得 {again}"
+    assert len(spent) == 1, f"只该扣一次款, 实际扣了 {len(spent)} 次: {spent}"
