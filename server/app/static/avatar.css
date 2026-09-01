@@ -9,7 +9,12 @@
    服务端合成静止图时对同一块做了 24px 羽化 (448px 见方, 约 5.4%), 这里用遮罩
    给出同样的过渡, 两层才对得上。数值跟着服务端走, 改一处要改两处。 */
 .av-video { position: absolute; object-fit: cover; opacity: 0; transition: opacity .12s;
-            --feather: 6%;
+            /* 比服务端那 24px (约 5.4%) 再宽一些, 到 10%: 方块除了硬边, 还有
+               **框内色调**与照片对不上的成分 —— 模型的色彩校正强度是 0.4 (为了
+               保住转头时的光照变化, 见 avatar_server 的注释), 代价就是整体色调
+               会飘。边缘化得更开, 这点差也一起化掉。两层是同一个人同一个姿势,
+               多混一点没有副作用。 */
+            --feather: 10%;
             -webkit-mask-image:
               linear-gradient(to right, transparent 0, #000 var(--feather),
                               #000 calc(100% - var(--feather)), transparent 100%),
