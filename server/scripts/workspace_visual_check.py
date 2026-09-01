@@ -191,6 +191,15 @@ def main() -> int:
             bad += 1
             continue
         text = (e.get("text") or "").lower()
+        # **整页就是一段 JSON = 后端在答, 但答的是错误报文**, 不是应用。
+        # 2026-09-01 漏过一次: OpenHands 首页返回 {"detail":"Not Found"} (工作目录
+        # 不对, 静态文件没挂上), 而 "not found" 不在下面的词表里 —— 脚本报了 ✓,
+        # 截图上是一行 JSON。词表永远追不全, 但"整页是 JSON"这个形状是硬的。
+        stripped = text.strip()
+        if stripped.startswith("{") and stripped.endswith("}") and len(stripped) < 400:
+            print(f"  ✗ {pid:14s} 页面是一段 JSON, 不是应用: {stripped[:80]}")
+            bad += 1
+            continue
         walls = [w for w in WALL_PHRASES if w in text]
         broken = [b for b in BROKEN_PHRASES if b in text]
         if broken:

@@ -2466,6 +2466,11 @@ def _openhands_boot() -> str:
     return (
         "set -e\n"
         "mkdir -p /workspace\n"
+        # **必须 cd /app**: 前端那堆静态文件是按工作目录找的, 在别处起 uvicorn
+        # 的话首页直接 404 —— 而且是 `{"detail":"Not Found"}` 这种 API 式的 404,
+        # 看着像路由没配, 其实是 cwd 不对 (镜像的 WorkingDir 就是 /app, 我们绕过
+        # 它的 entrypoint 自己起, 就得自己把这条补上)。2026-09-01 线上撞到。
+        "cd /app\n"
         # 服务先起, 灌设置要等它应答 —— 后台起, 前台等
         "uvicorn openhands.server.listen:app --host 0.0.0.0 --port 3000 &\n"
         "srv=$!\n"
