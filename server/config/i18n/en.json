@@ -89,6 +89,7 @@
   "apps.d.lobe-chat": "A polished multi-model chat workspace with a plugin market.",
   "avatar.title": "Digital human",
   "avatar.balance": "Balance",
+  "avatar.play_failed": "Video cannot play",
   "avatar.rate": "Rate",
   "avatar.per_min": "credits/min",
   "avatar.listening": "Go ahead, she's listening",

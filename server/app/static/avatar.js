@@ -152,11 +152,14 @@
       // 她说话是不定长的续写流, 语义上本就没有 duration。
       try { st.ms.duration = Infinity; } catch { /* 老实现不认 */ }
       st.sb.addEventListener("updateend", pump);
+      st.sb.addEventListener("error", () => console.error("[avatar] SourceBuffer 出错"));
+      console.info("[avatar] sourceopen, SourceBuffer 已建");
       pump();
     }, { once: true });
     // 在**点击这一跳里**起播: 自动播放策略认的是用户手势, 等到第一帧再 play
     // 就晚了 (而失败是静默的)。
-    v.play().catch(() => { /* 数据还没来, 到货后 pump 里再试 */ });
+    v.play().catch((e) => console.info("[avatar] 首次 play 被拒 (到货后再试):", e.name));
+    v.addEventListener("error", () => console.error("[avatar] video 元素报错:", v.error?.code));
     return true;
   }
 
@@ -180,7 +183,16 @@
 
   function pump() {
     if (!st.sb || st.sb.updating || !st.queue.length) return;
-    try { st.sb.appendBuffer(st.queue.shift()); } catch { /* 缓冲满, 下一轮再来 */ }
+    try {
+      st.sb.appendBuffer(st.queue.shift());
+    } catch (e) {
+      // **不能静默**: QuotaExceeded 是"缓冲满了, 下一轮再来", 而其它错 (多半是
+      // 流与 codec 对不上, 或 SourceBuffer 已进错误态) 意味着这通电话再也不会
+      // 出画 —— 而两者从外面看一模一样, 都是"画面不动"。
+      if (e.name === "QuotaExceededError") return;
+      console.error("[avatar] appendBuffer 失败:", e.name, e.message);
+      status(t("avatar.play_failed", "画面播不出来"), true);
+    }
     // 缓冲无限长会吃内存; 播过 30s 就裁掉前面的。
     const v = $("#avVideo");
     if (v.currentTime > 40 && st.sb.buffered.length &&
