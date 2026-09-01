@@ -1841,6 +1841,11 @@ while [ "$n" -lt 120 ]; do
   V1=${C1%%;*}; V2=${C2%%;*}; V3=${C3%%;*}
   if [ -n "$C1" ] && [ -n "$C2" ] && [ -n "$C3" ]; then
     write_conf || { sleep 10; continue; }
+    # **就绪的标记落在这里, 不在 nginx 起来那一刻。** 探针探的必须是"用户能用",
+    # 而 nginx 一起来 / 就有 200 —— 那时代登录还在等控制台 (实测第 4 轮才成,
+    # 约 20 秒)。2026-09-01 视觉验收拍到的就是这一秒: 浏览器 20:49:59 到,
+    # 会话 20:50:00 下发, 于是截图上是一整页 SIGN IN, 而且不刷新不会自愈。
+    mkdir -p /run/dsh && : > /run/dsh/__dsh_ready
     log "会话已下发 (第 $n 轮)"
     # 会话有寿命, 而容器能连着跑很久 —— 定期重登刷新。
     sleep 1200
@@ -1927,6 +1932,7 @@ def _hermes_boot() -> str:
     """主容器是 nginx, 把流量送进同组的 Hermes 回环端口 (见 _hermes_stack)。"""
     return (
         "set -e\n"
+        "mkdir -p /run/dsh\n"
         # 免登录 (见 _HERMES_AUTOLOGIN)。先落空默认值 —— 会话要等 hermes 起来
         # 才拿得到, 而 nginx 现在就要能起; 引用未定义变量它会直接启动失败。
         "cat > /etc/nginx/conf.d/00-autologin.conf <<'AUTOCONF'\n"
@@ -1948,6 +1954,13 @@ def _hermes_boot() -> str:
         "  add_header Set-Cookie $hm_c1 always;\n"
         "  add_header Set-Cookie $hm_c2 always;\n"
         "  add_header Set-Cookie $hm_c3 always;\n"
+        # 就绪探针 (Product.ready_path)。文件在 = 200, 不在 = 503。
+        # 探针判的是 **< 500**, 所以"没登上"必须答 5xx —— 拿 /api/auth/me 那种
+        # 401 是不行的, 它照样算就绪。
+        "  location = /__dsh_ready {\n"
+        "    root /run/dsh;\n"
+        "    try_files /__dsh_ready =503;\n"
+        "  }\n"
         "  location / {\n"
         f"    proxy_pass http://127.0.0.1:{HERMES_PORT};\n"
         # Host 必须是它**绑定的**主机名。它有 Host 白名单, 只认绑定主机名或
@@ -2094,6 +2107,8 @@ def registry() -> dict[str, Product]:
             mem_mb=config.HERMES_MEM_LIMIT_MB,
             cpus=config.HERMES_CPUS,
             domain=config.HERMES_DOMAIN,
+            # 探"代登录已下发", 不探"nginx 活着" —— 见 _hermes_boot 里那条 location。
+            ready_path="/__dsh_ready",
             reports_presence=False,
             tab_grace_min=config.HERMES_TAB_GRACE_MIN,
             sidecars=_hermes_stack(),

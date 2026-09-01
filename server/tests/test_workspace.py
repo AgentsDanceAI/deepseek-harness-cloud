@@ -1847,6 +1847,33 @@ def test_hermes_keeps_its_auth_on_and_we_carry_the_credential(monkeypatch):
     assert "reload 失败" in sh
 
 
+def test_hermes_is_not_ready_until_the_autologin_landed(monkeypatch):
+    """就绪 = **代登录已下发**, 不是 "nginx 起来了"。
+
+    2026-09-01 视觉验收拍到过这一秒: 浏览器 20:49:59 打开, 会话 20:50:00 下发,
+    截图上是一整页 SIGN IN —— 而 Hermes 的登录墙正是我们花力气拆掉的东西
+    (老板铁律: 接入的应用一律不留登录墙)。当时 hermes 没设 ready_path, 探的是
+    默认的 "/", 而 nginx 一起来它就有 200; 代登录还在等控制台起 (实测第 4 轮
+    才成, 约 20 秒)。这段窗口里放进来的人看到的就是人家的登录框, 而且不刷新
+    不会自愈。
+
+    判据必须答 **5xx**: 就绪探针判的是 status_code < 500, 拿 /api/auth/me 那种
+    未登录 401 是不行的 —— 它照样算就绪。
+    """
+    monkeypatch.setattr(config, "HERMES_DOMAIN", "hermes.test.local")
+    prod = products.registry()["hermes"]
+    assert prod.ready_path == "/__dsh_ready", "探 / 等于只探到 nginx"
+
+    boot = products.boot_script("hermes")
+    assert "location = /__dsh_ready" in boot
+    assert "try_files /__dsh_ready =503" in boot, "文件不在时必须 5xx, 否则等于没探"
+    # 标记只能在**登录成功之后**落下。写在 nginx 起来那段里就等于没有这道闸。
+    marker = boot.index("/run/dsh/__dsh_ready")
+    ok = boot.index("会话已下发")
+    write_conf = boot.index("write_conf || ")
+    assert write_conf < marker < ok, "标记要落在 write_conf 成功之后"
+
+
 def test_hermes_keeps_its_entrypoint(monkeypatch):
     """只传 args, 不覆盖 entrypoint。
 
