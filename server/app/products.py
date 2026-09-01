@@ -2572,6 +2572,11 @@ def _openhands_boot() -> str:
         # 预热之后页缓存是热的, 真起沙箱快得多。放后台, 不挡用户开页面。
         '(/app/.venv/bin/python -c "import openhands.agent_server" >/dev/null 2>&1 '
         '&& echo "[dsh] agent server 已预热") &\n'
+        # 沙箱起不来时它会**把目录连同日志一起删掉**, 于是最该看的东西正好没了。
+        # 起个看门狗把日志抄出来 —— 排障时能省掉好几轮"再来一次抓现场"。
+        "(while :; do f=$(find /tmp /root /workspace -name '.openhands-agent-server.log' "
+        "2>/dev/null | head -1); [ -n \"$f\" ] && cat \"$f\" >> /tmp/dsh-sandbox.log; "
+        "sleep 1; done) >/dev/null 2>&1 &\n"'
         "wait $srv\n"
     )
 
