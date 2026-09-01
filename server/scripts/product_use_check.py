@@ -63,7 +63,9 @@ USE = {
         "kind": "openhands",
         "send": "只回我两个字",
         # 沙箱起不来时页面停在"等待沙盒", 那不算能用 —— 判据要落在它真回了话上。
-        "fail_extra": ["等待沙盒", "waiting for sandbox"],
+        # "正在连接…"同样不算能用 —— 它比"等待沙盒"晚一步, 但用户照样干不了事。
+        # 判据必须一路推到**她真回了话**。
+        "fail_extra": ["等待沙盒", "waiting for sandbox", "正在连接", "加载中"],
         "why": "点新对话就 500: Agent Server Failed to start properly / 一直等待沙盒",
     },
 }
@@ -140,7 +142,7 @@ with sync_playwright() as p:
                 for _ in range(80):
                     page.wait_for_timeout(3000)
                     body = page.inner_text("body")
-                    if "等待沙盒" not in body and "Waiting for sandbox" not in body:
+                    if all(w not in body for w in ("等待沙盒", "Waiting for sandbox", "正在连接")):
                         break
                 try:
                     box = page.get_by_placeholder("你想要构建什么?").first
