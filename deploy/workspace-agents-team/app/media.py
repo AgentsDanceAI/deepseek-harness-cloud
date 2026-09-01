@@ -150,8 +150,9 @@ async def generate_video(prompt: str, path: str, duration: int = 5, resolution: 
     }
     if not body["model"]:
         return "没有可用的视频模型 (DSH_VIDEO_MODEL 未配置)。", "出片无模型"
-    if ratio:
-        body["ratio"] = ratio
+    # ratio 必须显式传 —— 上游默认自适应, 提示词里写"横屏/竖屏"模型**不吃**
+    # (万相 3.0 官方协议)。短剧几乎总要锁画幅, 所以给默认值而不是留空。
+    body["ratio"] = ratio or "16:9"
     refs = [image] if isinstance(image, str) else list(image or [])
     refs = [r for r in refs if str(r).strip()][:MEDIA_MAX_ITEMS]
     if refs:
@@ -177,11 +178,14 @@ async def generate_video(prompt: str, path: str, duration: int = 5, resolution: 
         # video_jobs 表里, 界面上只有一句"出片失败" (2026-09-01 实测)。
         # 取值见 workspace-comfyui/api_shim.py: first_frame / reference_image。
         # 第一张当首帧 (它决定第一帧长什么样), 其余当参考图。
-        body["image_url"] = urls[0]                       # img_url 系吃这个
-        body["media"] = [
-            {"type": "first_frame" if i == 0 else "reference_image", "url": u}
-            for i, u in enumerate(urls)
-        ]
+        # 形态二选一, **不能混**: 万相 3.0 的 reference_* 与 first_frame/last_frame
+        # 互斥, 同传直接报错 (官方协议)。我原先写的"第一张当首帧, 其余当参考图"
+        # —— 传两张以上必炸, 而错误只落进作业表。
+        #   · 一张 → first_frame (首帧模式: prompt 只写运动+运镜+声音, 不复述外观)
+        #   · 多张 → 全部 reference_image (全能参考: prompt 用「@图片N」指代)
+        body["image_url"] = urls[0]                       # 单图系 (seedance) 吃这个
+        body["media"] = ([{"type": "first_frame", "url": urls[0]}] if len(urls) == 1
+                         else [{"type": "reference_image", "url": u} for u in urls])
     async with _client(120) as c:
         r = await c.post(f"{GATEWAY_BASE}/videos/generations", headers=_headers(), json=body)
     if r.status_code >= 400:
@@ -363,9 +367,11 @@ SCHEMAS = [
                     "resolution": {"type": "string", "description": "480p/720p/1080p (小写); 省略 720p"},
                     "ratio": {"type": "string", "description": "如 16:9 / 9:16"},
                     "image": {
-                        "description": ("参考图的工作区路径。可以给一张, 也可以给一个数组 "
-                                        "(最多 8 张) —— 一个镜头里的角色图+场景图+道具图"
-                                        "一起给, 人物与场景的一致性最好。"),
+                        "description": ("参考图的工作区路径。**给一张还是多张, 语义不同**: "
+                                        "一张 = 首帧模式 (那张就是第一帧, prompt 只写运动+"
+                                        "运镜+声音, 别复述画面里已有的外观); 多张 = 全能参考 "
+                                        "(最多 8 张, 角色图+场景图+道具图一起给, prompt 里用"
+                                        "「@图片1」指代, 同样不复述外观)。两种互斥, 不能混。"),
                         "anyOf": [
                             {"type": "string"},
                             {"type": "array", "items": {"type": "string"}},

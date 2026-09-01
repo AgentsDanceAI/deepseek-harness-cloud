@@ -311,6 +311,17 @@ async def submit_video(
         }
         if video_input_style(model) == "media":
             if media:
+                # ⚠️ `reference_*` 与 `first_frame`/`last_frame` **互斥, 同传报错**
+                # (万相 3.0 官方协议)。混着发必炸, 而错误只落进作业表。
+                # 两套都有时以**参考模式**为准: 它能带 ≤10 张, 首帧只能 1 张,
+                # 丢掉参考图的损失更大。
+                kinds = {str(m.get("type") or "") for m in media if isinstance(m, dict)}
+                if kinds & {"reference_image", "reference_video", "reference_audio"}:
+                    media = [m for m in media
+                             if str(m.get("type") or "") not in ("first_frame", "last_frame")]
+                elif "last_frame" in kinds and "first_frame" not in kinds:
+                    # last_frame 必须搭 first_frame, 单独发会被拒
+                    return "", {"error": {"message": "last_frame 必须与 first_frame 同时给"}}, 400
                 payload["input"]["media"] = media
         elif image_url:
             payload["input"]["img_url"] = image_url
@@ -324,9 +335,22 @@ async def submit_video(
             return "", {"error": {"message": "百炼没有返回 task_id"}}, 502
         return str(task), None, 0
 
+    # 千面走 OpenAI 风格的平铺参数, **参考素材字段是 `images` 数组** (供应商
+    # 2026-09-01 给的官方示例, 与 videos/audios/generate_audio 同级)。
+    # 实打对照 (坏图探测法: 字段被真读 -> 坏图当场 400; 被忽略 -> 照收 200):
+    #     images=[坏图]      -> 400 InvalidParameter.TaskTypeConstraint  ← 真读了
+    #     image_urls=[坏图]  -> 200 照收                                  ← 被静默忽略
+    #     image_url=坏图     -> 400 (seedance 认, 但只吃单张)
+    # 所以多图必须走 images; 早先只发 image_url 等于把多参考图全丢了。
     payload = {"model": model, "prompt": prompt, "resolution": resolution, "duration": duration}
-    if image_url:
-        payload["image_url"] = image_url
+    imgs = [str(m.get("url")) for m in (media or []) if isinstance(m, dict) and m.get("url")]
+    if not imgs and image_url:
+        imgs = [image_url]
+    if imgs:
+        payload["images"] = imgs
+    # ratio 必须显式传 —— 上游默认自适应, 提示词里写"横屏"是不吃的。
+    if ratio:
+        payload["ratio"] = ratio
     url = config.UPSTREAM_BASE_URL.rstrip("/") + "/video/generations"
     async with _client() as client:
         up = await client.post(url, headers=_auth_headers(), json=payload)
