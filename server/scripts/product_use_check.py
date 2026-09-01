@@ -131,7 +131,9 @@ with sync_playwright() as p:
                 page.get_by_role("button", name="新对话").first.click(timeout=15000)
                 # 沙箱起来要时间, 起来之后还要真发一句、等它回。**不能只等"页面
                 # 变了"就算过** —— "等待沙盒 / 加载中" 也是变了, 而那正是坏的样子。
-                for _ in range(50):
+                # 冷启动 + 起沙箱本来就慢 (实测三分钟以上都可能), 等不够久就会
+                # 把"还在起"报成"起不来" —— 那是假故障, 比漏报更耽误事。
+                for _ in range(80):
                     page.wait_for_timeout(3000)
                     body = page.inner_text("body")
                     if "等待沙盒" not in body and "Waiting for sandbox" not in body:
