@@ -2469,6 +2469,14 @@ def _opendesign_boot() -> str:
         + _opendesign_patch_yaml()
         + "DHCPATCH\n"
         f"node -e {_OD_APP_CONFIG_JS!r}\n"
+        # 沙箱那个子进程卡住时什么也不说 (它只在崩溃时才转储)。往它的 site 目录里
+        # 放一个 sitecustomize: 起来 100 秒后若还没退出, 自动把**全部线程的调用栈**
+        # 打到 stderr —— 而 stderr 走的正是我们那个看门狗。
+        # 这比"再猜一轮"省事: 卡在哪一行, 它自己会说。
+        'SITE=$(/app/.venv/bin/python -c "import site;print(site.getsitepackages()[0])") && '
+        "printf 'import faulthandler,sys\\n"
+        "faulthandler.dump_traceback_later(100, repeat=True, file=sys.stderr)\\n' "
+        '> "$SITE/sitecustomize.py"\n'
         "cd /app\n"
         "exec node apps/daemon/dist/cli.js --no-open\n"
     )
