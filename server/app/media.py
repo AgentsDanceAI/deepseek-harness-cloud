@@ -317,8 +317,9 @@ async def submit_video(
                 # 丢掉参考图的损失更大。
                 kinds = {str(m.get("type") or "") for m in media if isinstance(m, dict)}
                 if kinds & {"reference_image", "reference_video", "reference_audio"}:
-                    media = [m for m in media
-                             if str(m.get("type") or "") not in ("first_frame", "last_frame")]
+                    media = [
+                        m for m in media if str(m.get("type") or "") not in ("first_frame", "last_frame")
+                    ]
                 elif "last_frame" in kinds and "first_frame" not in kinds:
                     # last_frame 必须搭 first_frame, 单独发会被拒
                     return "", {"error": {"message": "last_frame 必须与 first_frame 同时给"}}, 400
