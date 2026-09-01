@@ -31,6 +31,12 @@ DEFAULT_MODEL = os.environ.get("DSH_DEFAULT_MODEL", "")
 #: 一轮里最多来回多少次。到顶不是报错, 是**把话语权还回去** —— 智能体绕进死循环
 #: 时报错只会让人重来一遍再绕一次, 而摊开说"我做到这里了"他能接手。
 MAX_STEPS = int(os.environ.get("AGENTS_TEAM_MAX_STEPS", "30"))
+#: 出片/出图的工位要按镜头逐条跑 —— 一部三分钟短剧就是三四十个镜头, 三十步的
+#: 通用上限**必然**把它掐在半路 (2026-08-31: 老板问"中间还会停顿吗", 查出来的
+#: 第二处非设计停顿)。给这几位单独放宽; 其余工位维持 30 步 —— 那个上限是防
+#: 跑飞的, 不该为一个特例整体放开。
+LONG_RUN_BOTS = {"videographer", "artist", "editor"}
+LONG_RUN_STEPS = int(os.environ.get("AGENTS_TEAM_LONG_STEPS", "120"))
 
 #: 群聊里额外压一层通用约束。人格由 rooms.render_for 拼在前面, 这里只放**与形态
 #: 有关**的部分 —— 人格是产品配置, 这段是机制。
@@ -96,6 +102,7 @@ async def run_turn(
     `messages` 是**这一轮的工作副本**, 会被就地追加 —— 调用方不该复用它。
     """
     mdl = model or DEFAULT_MODEL
+    max_steps = LONG_RUN_STEPS if bot_id in LONG_RUN_BOTS else MAX_STEPS
     if not GATEWAY_BASE or not GATEWAY_TOKEN:
         yield {
             "type": "error",
@@ -116,7 +123,7 @@ async def run_turn(
     usage: dict = {}
 
     async with httpx.AsyncClient() as client:
-        for _ in range(MAX_STEPS):
+        for _ in range(max_steps):
             parts: list[str] = []
             calls: dict[int, dict] = {}
             try:
@@ -221,5 +228,8 @@ async def run_turn(
         "text": "\n".join(said),
         "tools": ran,
         "usage": usage,
-        "note": f"连做了 {MAX_STEPS} 步还没收尾, 先停下来。",
+        # 说清楚"还没干完"而不只是"停了" —— 用户据此知道该说一句"继续",
+        # 而不是以为它已经交活了 (被掐时正文往往看起来像正常收尾)。
+        "note": f"连做了 {max_steps} 步还没收尾, 先停下来 — 回一句「继续」可以接着干。",
+        "capped": True,
     }
