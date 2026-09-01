@@ -7,23 +7,25 @@
       "id": "doubao-seedance-2-0-mini-260615",
       "name": "Seedance 2.0 Mini",
       "credits_per_second": {
-        "480p": null,
-        "720p": null,
-        "1080p": null
+        "480p": 5,
+        "720p": 10,
+        "1080p": 20
       },
-      "calibrated": false,
-      "provider": "qianmian"
+      "calibrated": true,
+      "provider": "qianmian",
+      "_derivation": "2026-09-01 老板拍板: 「都按照 wan3.0 的价格来, 720p 是 10 积分/秒 ≈ $0.10/秒, 其他按照比例折算」。所以直接套用 wan3.0-video 的档位表 (480p 5 / 720p 10 / 1080p 20, 即 0.5x / 1x / 2x)。**这不是按各自网关牌价推的** —— 上游单价只在供应商控制台里没有 API, 搜不到权威数字, 老板选择统一定价。上架前已实打确认可下单 (POST /video/generations 提交成功)。拿到各自真实牌价后应逐个重算并更新本字段。"
     },
     {
       "id": "doubao-seedance-2-0-fast-260128",
       "name": "Seedance 2.0 Fast",
       "credits_per_second": {
-        "480p": null,
-        "720p": null,
-        "1080p": null
+        "480p": 5,
+        "720p": 10,
+        "1080p": 20
       },
-      "calibrated": false,
-      "provider": "qianmian"
+      "calibrated": true,
+      "provider": "qianmian",
+      "_derivation": "2026-09-01 老板拍板: 「都按照 wan3.0 的价格来, 720p 是 10 积分/秒 ≈ $0.10/秒, 其他按照比例折算」。所以直接套用 wan3.0-video 的档位表 (480p 5 / 720p 10 / 1080p 20, 即 0.5x / 1x / 2x)。**这不是按各自网关牌价推的** —— 上游单价只在供应商控制台里没有 API, 搜不到权威数字, 老板选择统一定价。上架前已实打确认可下单 (POST /video/generations 提交成功)。拿到各自真实牌价后应逐个重算并更新本字段。"
     },
     {
       "id": "doubao-seedance-2-0-260128",
@@ -182,6 +184,39 @@
       },
       "video_input": "media",
       "auto_duration": true
+    },
+    {
+      "id": "MiniMax-H3",
+      "name": "MiniMax H3",
+      "credits_per_second": {
+        "480p": 5,
+        "720p": 10,
+        "1080p": 20
+      },
+      "calibrated": true,
+      "_derivation": "2026-09-01 老板拍板: 「都按照 wan3.0 的价格来, 720p 是 10 积分/秒 ≈ $0.10/秒, 其他按照比例折算」。所以直接套用 wan3.0-video 的档位表 (480p 5 / 720p 10 / 1080p 20, 即 0.5x / 1x / 2x)。**这不是按各自网关牌价推的** —— 上游单价只在供应商控制台里没有 API, 搜不到权威数字, 老板选择统一定价。上架前已实打确认可下单 (POST /video/generations 提交成功)。拿到各自真实牌价后应逐个重算并更新本字段。"
+    },
+    {
+      "id": "kling-v3.0-pro",
+      "name": "可灵 3.0 Pro",
+      "credits_per_second": {
+        "480p": 5,
+        "720p": 10,
+        "1080p": 20
+      },
+      "calibrated": true,
+      "_derivation": "2026-09-01 老板拍板: 「都按照 wan3.0 的价格来, 720p 是 10 积分/秒 ≈ $0.10/秒, 其他按照比例折算」。所以直接套用 wan3.0-video 的档位表 (480p 5 / 720p 10 / 1080p 20, 即 0.5x / 1x / 2x)。**这不是按各自网关牌价推的** —— 上游单价只在供应商控制台里没有 API, 搜不到权威数字, 老板选择统一定价。上架前已实打确认可下单 (POST /video/generations 提交成功)。拿到各自真实牌价后应逐个重算并更新本字段。"
+    },
+    {
+      "id": "kling-v3.0-std",
+      "name": "可灵 3.0 标准",
+      "credits_per_second": {
+        "480p": 5,
+        "720p": 10,
+        "1080p": 20
+      },
+      "calibrated": true,
+      "_derivation": "2026-09-01 老板拍板: 「都按照 wan3.0 的价格来, 720p 是 10 积分/秒 ≈ $0.10/秒, 其他按照比例折算」。所以直接套用 wan3.0-video 的档位表 (480p 5 / 720p 10 / 1080p 20, 即 0.5x / 1x / 2x)。**这不是按各自网关牌价推的** —— 上游单价只在供应商控制台里没有 API, 搜不到权威数字, 老板选择统一定价。上架前已实打确认可下单 (POST /video/generations 提交成功)。拿到各自真实牌价后应逐个重算并更新本字段。"
     }
   ],
   "image": [
