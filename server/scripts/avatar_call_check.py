@@ -64,7 +64,9 @@ with sync_playwright() as p:
             page.wait_for_timeout(1000)
             v = page.evaluate("() => { const v = document.querySelector('#avVideo');"
                               " return {t: v.currentTime, w: v.videoWidth, h: v.videoHeight,"
-                              " paused: v.paused, muted: v.muted, op: getComputedStyle(v).opacity}; }")
+                              " paused: v.paused, muted: v.muted, op: getComputedStyle(v).opacity,"
+                              " ready: v.readyState, net: v.networkState, err: v.error && v.error.code,"
+                              " buf: v.buffered.length, hasSrc: !!v.currentSrc}; }")
             if v["t"] > 0.3 and v["w"] > 0:
                 break
         res["video"] = v
@@ -122,8 +124,13 @@ def main() -> int:
     print(f"    状态栏: {res.get('status', '')!r}   计时: {res.get('timer')}")
     print(
         f"    video: currentTime={v.get('t')} {v.get('w')}x{v.get('h')} "
-        f"paused={v.get('paused')} muted={v.get('muted')} opacity={v.get('op')}"
+        f"paused={v.get('paused')} muted={v.get('muted')} opacity={v.get('op')}\n"
+        f"           readyState={v.get('ready')} networkState={v.get('net')} "
+        f"error={v.get('err')} buffered={v.get('buf')} src={v.get('hasSrc')}"
     )
+    for line in (res.get("console") or [])[-12:]:
+        if "cloudflareinsights" not in line:
+            print(f"    控制台 | {line}")
     bad = []
     if not (v.get("t") or 0) > 0.3:
         bad.append("画面没动 (currentTime 没往前走) —— 字节可能在收但没在播")

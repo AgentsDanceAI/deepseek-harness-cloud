@@ -89,6 +89,7 @@
   "apps.d.lobe-chat": "颜值在线的多模型聊天工作台，插件与助手市场。",
   "avatar.title": "数字人",
   "avatar.balance": "余额",
+  "avatar.play_failed": "画面播不出来",
   "avatar.rate": "单价",
   "avatar.per_min": "积分/分钟",
   "avatar.listening": "说话吧，她在听",
