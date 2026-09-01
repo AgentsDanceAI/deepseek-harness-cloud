@@ -371,7 +371,7 @@ def _apps_ctx() -> dict:
     """
     from . import apps_catalog, products
 
-    enabled = {p.id for p in products.enabled()}
+    enabled = {p.id for p in products.enabled()} | apps_catalog.site_apps()
     apps = apps_catalog.entries_with_status(enabled)
     if config.WORK_ENABLED:
         target = ""

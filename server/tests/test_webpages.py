@@ -85,6 +85,45 @@ def test_apps_page_shows_all_16_with_live_status(client, monkeypatch):
             assert f"/work?product_id={a.id}" not in body, f"{a.id} 未上线却挂了链接"
 
 
+def test_app_links_open_in_a_new_tab(client, monkeypatch):
+    """点云空间产品要开新标签, 别把用户从目录页顶掉。
+
+    这些工作界面是长驻的 (跑一个任务几十分钟很常见), 而用户常要在几个产品之间
+    来回; 在原标签里跳走等于每次都要退回来重新找。rel=noopener 是安全默认 ——
+    被打开的页面拿不到 window.opener。
+    老板 2026-08-30 点名要的。
+
+    **例外是住在主站上的产品** (数字人): 它就在本站, 顶层导航还在, 开新标签只是
+    给用户平添一个要自己关的窗口。所以这条断言按渲染结果分两种卡查 —— 早先是
+    逐行 grep 模板文本, 那种查法把"哪个链接"和"排版怎么折行"绑在了一起。
+    """
+    import re
+
+    from app import config
+
+    monkeypatch.setattr(config, "WORK_ENABLED", True)
+    monkeypatch.setattr(config, "COMFY_IMAGE", "comfy:test")
+    monkeypatch.setattr(config, "COMFY_DOMAIN", "comfy.test.local")
+    monkeypatch.setattr(config, "AVATAR_TOKEN_SECRET", "s" * 32)
+
+    for path in ("/apps", "/"):
+        body = client.get(path).text
+        # 只看产品卡 (16 格那些)。主页旗舰区另有一个"进入"按钮也指向工作台,
+        # 它一直是原地跳走的 —— 那是另一回事, 别混进这条断言里。
+        links = [
+            a for a in re.findall(r"<a\b[^>]*>", body) if "app-card is-live" in a or "hero-app is-live" in a
+        ]
+        work = [a for a in links if "/work?product_id=" in a]
+        assert work, f"{path}: 找不到工作台链接"
+        for a in work:
+            assert 'target="_blank"' in a, f"{path}: 工作台链接没开新标签 — {a}"
+            assert 'rel="noopener"' in a, f"{path}: 少了 noopener — {a}"
+        site = [a for a in links if 'href="/avatar"' in a]
+        assert site, f"{path}: 数字人卡没指向本站页面"
+        for a in site:
+            assert "target=" not in a, f"{path}: 本站页面不该开新标签 — {a}"
+
+
 def test_apps_page_without_workspace_has_no_dead_links(client, monkeypatch):
     """自部署 (云工作台关) 且没配托管地址: 只陈列, 不放会 404 的按钮。"""
     from app import config
