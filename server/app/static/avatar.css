@@ -9,6 +9,15 @@
 .av-hint { position: absolute; inset: 0; display: grid; place-items: center;
            color: #fff; background: rgba(0,0,0,.35); font-size: 15px; }
 
+/* 字幕: 压在画面下沿, 上缘用渐变化开 —— 直接铺一块半透明底会像贴了张纸。 */
+.av-log { position: absolute; left: 0; right: 0; bottom: 0; max-height: 42%;
+          overflow-y: auto; padding: 34px 18px 14px; display: flex;
+          flex-direction: column; gap: 6px; font-size: 14px; line-height: 1.5;
+          background: linear-gradient(to top, rgba(0,0,0,.62), rgba(0,0,0,0)); }
+.av-line { color: #fff; max-width: 84%; text-shadow: 0 1px 3px rgba(0,0,0,.6); }
+/* 我说的靠右、淡一点 —— 一眼分得出谁在说, 不用挂"我:"这种标签。 */
+.av-me { align-self: flex-end; text-align: right; color: #cfe0ff; }
+
 .av-side { flex: 0 0 280px; display: flex; flex-direction: column; gap: 12px; }
 .av-meter { border: 1px solid var(--line, #e6e6e9); border-radius: 12px; padding: 12px 14px; }
 .av-row { display: flex; justify-content: space-between; align-items: baseline; font-size: 13px; }
