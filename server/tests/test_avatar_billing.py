@@ -335,3 +335,25 @@ def test_the_call_page_may_load_blob_media_and_open_the_mic():
     # 别的页面不该跟着放开
     assert "blob:" not in home.headers.get("content-security-policy", "")
     assert "microphone=()" in home.headers.get("permissions-policy", "")
+
+
+def test_she_never_reads_the_models_scratchpad_aloud():
+    """推理块不能进她嘴里。
+
+    有些模型把思考过程裹在 <think>...</think> 里当正文吐出来。照原样发上去有两
+    个后果, 后一个更糟: 她会把"</think>"这个标记念出来 (2026-09-01 线上抓到一句
+    "你好</think>你好"), 而且会把**思考过程本身**念出来 —— 那是给模型自己看的草稿。
+
+    流式下还有个陷阱: 开头标记到了、闭合还没到时, 后面跟的正是不该出口的内容,
+    所以未闭合一律攒着, 不能先念。
+    """
+    from app.avatar import _speakable
+
+    assert _speakable("你好")[0] == "你好"
+    assert _speakable("你好</think>你好")[0] == "你好你好", "落单的闭合标记没摘掉"
+    assert _speakable("<think>我该说啥呢</think>你好")[0] == "你好", "思考过程漏出来了"
+    # 还没闭合: 已经出来的可以念, 从开头标记起全攒着
+    out, held = _speakable("你好<think>让我想想")
+    assert out == "你好" and held == "<think>让我想想", (out, held)
+    # 攒着的那半截接上闭合之后才放出来
+    assert _speakable(held + "</think>好的")[0] == "好的"
