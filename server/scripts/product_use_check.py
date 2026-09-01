@@ -138,8 +138,14 @@ with sync_playwright() as p:
                 e["text"] = page.inner_text("body")[-1500:]
 
             elif kind == "openhands":
-                # "新对话" 那个按钮 —— 点它才会去起沙箱, 而沙箱起不来正是那个 500。
-                page.get_by_role("button", name="新对话").first.click(timeout=15000)
+                # **有现成对话就点它**。沙箱是**按对话**建的, 点"新对话"要现建一个
+                # (实测四分钟以上); 而容器启动时已经预热了一个 (见
+                # products._openhands_boot), 侧栏里就有 —— 用户回到工作台看到的
+                # 也是它。这条才是常态路径。
+                try:
+                    page.get_by_text("Conversation", exact=False).first.click(timeout=8000)
+                except Exception:
+                    page.get_by_role("button", name="新对话").first.click(timeout=15000)
                 # 沙箱起来要时间, 起来之后还要真发一句、等它回。**不能只等"页面
                 # 变了"就算过** —— "等待沙盒 / 加载中" 也是变了, 而那正是坏的样子。
                 # 冷启动 + 起沙箱 + 前端连上, 实测要 **270 秒**。等不够久就会把
