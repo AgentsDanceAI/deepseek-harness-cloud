@@ -559,3 +559,26 @@ def test_hero_composer_never_leads_into_the_dead_end(client, monkeypatch):
     monkeypatch.setattr(config, "WORK_ENABLED", True)
     body = client.get("/").text
     assert 'data-target=""' in body and "hero-composer" in body
+
+
+def test_avatar_page_needs_an_account(client):
+    """未登录进 /avatar -> 先去登录, 别让人看着界面一路 401。
+
+    这页上**每一个**动作 (形象清单、背景图、上传、通话) 都挂着 resolve_user,
+    所以先渲染再失败没有任何好处 —— 用户看到的是"点什么都没反应", 而那与真坏了
+    分不出来。
+    """
+    r = client.get("/avatar", follow_redirects=False)
+    assert r.status_code == 303, r.status_code
+    assert r.headers["location"] == "/login?next=/avatar"
+
+
+def test_avatar_page_renders_for_a_signed_in_user(client, monkeypatch):
+    """登录后能开: 舞台、形象/音色选择、开始通话按钮都在。"""
+    from app import config
+
+    monkeypatch.setattr(config, "AVATAR_TOKEN_SECRET", "s" * 32)
+    signup(client, "avatar-page@example.com")
+    body = client.get("/avatar").text
+    for hook in ("avPerson", "avVoice", "avCall", "avBg", "avTimer", "/static/avatar.js"):
+        assert hook in body, f"通话页少了 {hook}"
