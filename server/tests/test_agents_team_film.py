@@ -450,3 +450,48 @@ def test_capped_turn_tells_the_user_it_is_unfinished():
     """被掐时正文往往看着像正常收尾 —— 必须说清楚"还没干完"。"""
     assert "回一句「继续」可以接着干" in AGENT
     assert '"capped": True' in AGENT
+
+
+# ── 网关瞬断重试 (2026-09-01 老板跑片时被打断两次) ──────────────────────
+# 一次 502 让阿摄整棒作废: 它读镜头表读到一半撞上 dhc-server 重建窗口 (容器换
+# IP, Caddy DNS 缓存约一秒不同步), 而后台其实什么都没坏, 重发一次就好。
+def test_gateway_retries_only_transient_failures():
+    """该重试的与不该重试的, 判据要写死在源码里 (行为测试见 image 内实测)。"""
+    assert "_RETRY_STATUS = (429, 500, 502, 503, 504)" in AGENT
+    assert "GATEWAY_TRIES" in AGENT
+    # 400/401/403 不在表里 —— 请求本身有问题, 重试一百次也一样
+    for code in ("400", "401", "403"):
+        i = AGENT.index("_RETRY_STATUS = (")
+        assert code not in AGENT[i : i + 60], f"{code} 不该进重试表"
+
+
+def test_retry_lives_below_the_step_loop():
+    """重试**不算一步**。
+
+    放在调用方那个 for 里 continue 会把网络抖动记成"干了一步活" —— 三次抖动
+    吃掉三格步数上限, 而三分钟短剧的出片工位本来就在跟上限赛跑。
+    """
+    assert "async def _stream_once(" in AGENT, "重试层没有独立出来"
+    i = AGENT.index("async def _stream(")
+    seg = AGENT[i : i + 1200]
+    assert "for attempt in range(GATEWAY_TRIES)" in seg
+    assert "_stream_once(" in seg
+
+
+def test_no_retry_after_content_already_streamed():
+    """已经吐出去的 token 用户看到了, 重来会让他看到重复的字。"""
+    i = AGENT.index("async def _stream(")
+    seg = AGENT[i : i + 1200]
+    assert "yielded" in seg
+    assert "if yielded or not transient" in seg, "吐过内容还重试 = 正文重复"
+
+
+def test_asyncio_is_imported_for_the_backoff():
+    """退避要 await asyncio.sleep —— 而 agent.py 原先根本没 import asyncio。
+
+    这条不是形式主义: 少了它, 重试**一触发就 NameError**, 比原来的 502 更糟,
+    而且只在真抖动时才炸 (平时全绿)。是镜像内跑行为测试当场撞出来的。
+    """
+    assert "import asyncio" in AGENT
+    i = AGENT.index("async def _stream(")
+    assert "asyncio.sleep" in AGENT[i : i + 1200]
