@@ -130,12 +130,22 @@ async def _run_relay(room: rooms.Room, model: str | None):
         分镜交完镜头表: 下一棒就要烧钱出片了)。用工具而不是文本标记来判定,
         是因为标记会漏会被改写, 而工具调用漏不了。
       · 有人炸了 —— 半截的产物传下去只会让后面的人基于错的东西接着做。
+
+    **停完从哪续**: 从被叫停的**下一棒**接着跑 (room.resume_at), 不从头重来。
+    从头重来的代价不只是慢 —— 美术会照着"再做一遍资产"的字面意思**再出一遍图**,
+    那是真花钱; 分镜也可能把用户刚确认过的表重写一遍。
     """
-    for bot_id in room.members:
+    members = list(room.members)
+    start = room.resume_at if 0 <= room.resume_at < len(members) else 0
+    if start:
+        yield {"type": "resume", "from": members[start], "skipped": start}
+    for idx in range(start, len(members)):
+        bot_id = members[idx]
         bot = store.bots.get(bot_id)
         if bot is None:
             continue
         halted = False
+        capped_here = False
         try:
             view = store.render_for(bot, room.id)
             async for ev in agent.run_turn(bot.id, view, bot.model or model):
@@ -147,13 +157,28 @@ async def _run_relay(room: rooms.Room, model: str | None):
                         store.add(room.id, ev["bot"], text, used)
                     if any(tools.HALT_TOOL in str(t) for t in used):
                         halted = True
+                    # 撞步数上限 = 这一棒**没干完**, 也要停 (别让下游拿半成品接着做),
+                    # 且续跑要重跑**这一棒** —— 它还有活没干完。
+                    if ev.get("capped"):
+                        halted = True
+                        capped_here = True
                 yield ev
         except Exception as e:  # noqa: BLE001 — 一棒炸了就停, 别让下游基于半成品接着做
+            # 停在**炸掉的这一棒**上 (不是下一棒): 它的活没干完, 重发时要重跑它
+            room.resume_at = idx
+            store.save()
             yield {"type": "error", "bot": bot_id, "message": f"{type(e).__name__}: {e}"}
-            break
+            return
         if halted:
-            yield {"type": "halted", "bot": bot_id}
-            break
+            # 下次从**下一棒**接着跑 (这一棒已经交活了, 它只是在等回话)
+            # 撞上限停在**本棒** (活没干完, 说"继续"要接着它干);
+            # 人审闸停在**下一棒** (这一棒交活了, 只是在等回话)。
+            nxt = idx if capped_here else idx + 1
+            room.resume_at = nxt if nxt < len(members) else -1
+            yield {"type": "halted", "bot": bot_id, "resume_at": room.resume_at}
+            store.save()
+            return
+    room.resume_at = -1   # 整条跑完 —— 下一轮是新需求, 从头开始
     store.save()
 
 
