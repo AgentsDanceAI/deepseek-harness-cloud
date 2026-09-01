@@ -179,3 +179,7 @@ def main() -> int:
     if not bad:
         print("  ✓ 招呼与回复都出了画、有声音、说完收回; 字幕在画面上")
     return 1 if bad else 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
