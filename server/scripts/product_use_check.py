@@ -85,8 +85,21 @@ results = []
 
 
 # 冷启动: 我们自己的启动页会轮询, 等它跳走。
-def wait_started(page):
-    for _ in range(90):
+def wait_started(page, url):
+    # 两种"还没起来"长得完全不一样, 都要等:
+    #  · 我们自己的启动页 (/work/starting) —— 会自己轮询然后跳走;
+    #  · **网关 502** —— 实例还没听端口, Caddy 没人可转。这时页面是一张错误页,
+    #    不会自己好, 得重新导航。开局撞上 502 就直接去找输入框, 只会等满超时
+    #    然后报"点不动", 把一次冷启动误判成产品坏了 (刚为此白跑一轮)。
+    # 5.8GB 的镜像就算命中缓存也要几分钟, 所以给到 6 分钟。
+    for i in range(180):
+        if "502" in (page.title() or "") or "Bad Gateway" in (page.content()[:2000] or ""):
+            page.wait_for_timeout(4000)
+            try:
+                page.goto(url, timeout=60000, wait_until="domcontentloaded")
+            except Exception:
+                pass
+            continue
         if "/work/starting" not in page.url and "启动中" not in page.title():
             return
         page.wait_for_timeout(2000)
@@ -111,7 +124,7 @@ with sync_playwright() as p:
         page.on("response", lambda r: r.status >= 400 and e.setdefault("bad", []).append(f"{r.status} {r.url}"[:150]))
         try:
             page.goto(prod["url"], timeout=60000, wait_until="domcontentloaded")
-            wait_started(page)
+            wait_started(page, prod["url"])
             page.wait_for_timeout(8000)
             kind = prod["kind"]
 
