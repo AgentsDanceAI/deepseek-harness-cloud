@@ -816,6 +816,26 @@ async def video_result(job_id: str, user: dict = Depends(resolve_user)):
     return _job_response(await _settle(dict(job)))
 
 
+@router.get("/v1/videos/jobs")
+async def video_jobs(limit: int = 20, user: dict = Depends(resolve_user)):
+    """列出调用方最近的出片作业 —— **给"下单响应丢了"这种情况兜底**。
+
+    下单是有副作用的调用: 连接在响应途中断掉时, 请求很可能**已经被上游收下**,
+    钱也已经扣了, 而客户端手里没有作业 id。没有这个端点的话, 那笔钱就是死账 ——
+    唯一的找回办法是有人去翻数据库 (2026-09-01 就是这么人工捞回一条的, 智能体
+    做不到)。于是客户端只剩"再下一单"这一条路, 那正是第二次扣费。
+
+    只返回调用方自己的作业, 且不做结算 (settle) —— 这是个查询, 不该有副作用。
+    """
+    n = max(1, min(int(limit or 20), 100))
+    rows = db.query(
+        "SELECT id, model, status, duration, resolution, credits, created "
+        "FROM video_jobs WHERE user_id = ? ORDER BY created DESC LIMIT ?",
+        (user["id"], n),
+    )
+    return JSONResponse({"data": [dict(r) for r in rows]})
+
+
 @router.post("/v1/images/generations")
 async def create_image(request: Request, user: dict = Depends(resolve_user)):
     """图生成是**同步**的 (实测 ~15 秒出图), 所以不进 video_jobs, 一个请求打完。

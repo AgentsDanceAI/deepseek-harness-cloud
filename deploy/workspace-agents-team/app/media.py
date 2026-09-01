@@ -199,8 +199,22 @@ async def generate_video(prompt: str, path: str, duration: int = 5, resolution: 
         body["image_url"] = urls[0]                       # 单图系 (seedance) 吃这个
         body["media"] = ([{"type": "first_frame", "url": urls[0]}] if len(urls) == 1
                          else [{"type": "reference_image", "url": u} for u in urls])
-    async with _client(120) as c:
-        r = await c.post(f"{GATEWAY_BASE}/videos/generations", headers=_headers(), json=body)
+    # ⚠️ 下单是**有副作用**的调用 —— 绝不自动重发 (重发就是第二次扣费), 而异常
+    # 也绝不许炸穿工具: 炸穿之后模型看到的是"工具出错", 它的本能是对同一个镜头
+    # 再调一次, 效果和自动重发一模一样。连接在响应途中断掉时请求很可能**已经被
+    # 上游收下**、钱已经扣了, 所以这里要明说"可能已经下单"并给出自查的路。
+    try:
+        async with _client(120) as c:
+            r = await c.post(f"{GATEWAY_BASE}/videos/generations", headers=_headers(), json=body)
+    except httpx.HTTPError as e:
+        why = (
+            f"出片提交时连接中断 ({type(e).__name__}: {e})。**这一单可能已经送到上游并计费, "
+            f"千万不要直接重下单** —— 先查一下最近的作业里有没有它:\n"
+            f'    curl -s -H "Authorization: Bearer $DSH_TOKEN" '
+            f'"$DSH_GATEWAY_BASE/videos/jobs?limit=5"\n'
+            f"里面有刚下的这一单就用 /videos/result/<id> 取, 确实没有再重下。"
+        )
+        return why, "出片提交中断 (可能已计费)"
     if r.status_code >= 400:
         return f"出片提交失败 HTTP {r.status_code}: {_err_text(r)}", "出片提交失败"
     job = (r.json() or {}).get("id") or ""

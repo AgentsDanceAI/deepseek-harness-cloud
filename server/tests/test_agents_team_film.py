@@ -1188,3 +1188,64 @@ def test_upload_retries_instead_of_killing_the_whole_shot():
         assert "ConnectError" in why and "重发" in why, f"失败原因不成话: {why!r}"
     finally:
         media._upload_once = _saved_once
+
+
+def test_a_submit_is_never_sent_twice():
+    """下单**绝不重发**, 异常也不许炸穿工具。
+
+    这是比幂等键更靠前的一道闸: 幂等键要求下游真的实现了幂等 (这个假设栽过),
+    "根本不重发"不依赖任何人。而异常炸穿工具等于变相重发 —— 模型看到"工具出错"
+    的本能就是对同一个镜头再调一次, 效果和自动重试一模一样。
+    """
+    import asyncio
+    import pathlib as _pl
+    import tempfile
+
+    import httpx as _httpx
+
+    filmdir = _crew("filmdir")
+    media = _crew("media")
+    saved = (filmdir.ROOT, media._client, media.VIDEO_POLL_INTERVAL_S)
+    filmdir.ROOT = _pl.Path(tempfile.mkdtemp(prefix="order-test-"))
+    media.GATEWAY_BASE = "http://gw/v1"
+    media.GATEWAY_TOKEN = "t"
+    media.VIDEO_MODEL = "wan3.0-video"
+    media.VIDEO_POLL_INTERVAL_S = 0
+
+    posts = {"n": 0}
+
+    class _C:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def post(self, url, **k):
+            posts["n"] += 1
+            # 下单途中连接断掉 —— 上游很可能**已经收下**
+            raise _httpx.ReadError("connection reset mid-flight")
+
+    media._client = lambda *a, **k: _C()
+
+    try:
+        body, summary = asyncio.run(media.generate_video("镜头", "片段/X.mp4", 10, "720p"))
+        assert posts["n"] == 1, f"下单发了 {posts['n']} 次 —— 每多一次就是多扣一次钱"
+        assert "不要直接重下单" in body, "没拦住重下单, 模型下一步就是再付一次"
+        assert "videos/jobs" in body, "没给自查的路 = 只剩重下单这一条路"
+        assert "可能已计费" in summary, f"摘要没提示可能已计费: {summary}"
+    finally:
+        filmdir.ROOT, media._client, media.VIDEO_POLL_INTERVAL_S = saved
+
+
+def test_lost_submits_are_recoverable_at_all():
+    """服务端必须能列出"我最近的作业" —— 否则丢了 id 的那笔钱是死账。
+
+    2026-09-01 那条被丢掉的成片, 是人去翻数据库捞回来的; 智能体没有任何途径。
+    只警告"别重下单"却不给取回的路, 等于把死胡同留给它。
+    """
+    src = (pathlib.Path(__file__).resolve().parents[1] / "app" / "media.py").read_text(encoding="utf-8")
+    i = src.index('@router.get("/v1/videos/jobs")')
+    seg = src[i : src.index("@router.", i + 10)]
+    assert "user_id = ?" in seg, "列表端点没按调用方过滤 —— 会泄漏别人的作业"
+    assert "_settle" not in seg, "查询端点不该有结算副作用"
