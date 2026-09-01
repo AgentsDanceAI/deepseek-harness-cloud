@@ -93,6 +93,15 @@
   .tool .dot { width:6px; height:6px; border-radius:50%; background:var(--accent); flex:none; }
   .tool.done .dot { background:#34a853; }
   /* 工具行折叠组: 默认只露一行摘要 (此刻在干嘛), 点开看全部 */
+  /* 等待状态条: 一直挂在最底下, 让"在干活"和"死了"长得不一样 */
+  .statusbar { display:flex; align-items:center; gap:8px; margin:8px 0 2px;
+               padding:7px 11px; border-radius:9px; background:var(--tool);
+               font-size:12.5px; color:var(--muted); }
+  .statusbar .dot { width:7px; height:7px; border-radius:50%; background:var(--accent);
+                    flex:none; animation:sbpulse 1.1s ease-in-out infinite; }
+  @keyframes sbpulse { 0%,100%{opacity:1} 50%{opacity:.25} }
+  .statusbar .who { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .statusbar .el { flex:none; font-variant-numeric:tabular-nums; opacity:.75; }
   .toolbox { margin:5px 0; }
   .toolbox .th { display:flex; align-items:center; gap:8px; width:100%; text-align:left;
                  font-size:12.5px; color:var(--muted); background:var(--tool);
@@ -288,6 +297,51 @@ function msgEl(sender, text) {
 // 一个工位随手就是十几步, 平铺开来能把整屏占满 —— 谁在干活反而看不出来了。
 // 收成一行: 「⚙ 第 N 步 · 正在做什么 ⌄」, 点开看全部。跑动中始终露出**最后一行**
 // (那才是"此刻在干嘛"), 收尾后自动收起。
+// 等待期的状态条 (2026-09-01 老板: "发消息半天不回, 有没有个计数器以及阶段说明")。
+// 一部三分钟短剧一棒能跑好几分钟, 而屏幕上此前只有一片静止 —— 用户分不出
+// "在干活"还是"死了"。这条一直挂在最底下: 谁在干活 · 干了多久 · 第几棒。
+let statusBar = null, statusTimer = null, statusFrom = 0, statusWho = '';
+const CREW_ORDER = ['director', 'artist', 'storyboard', 'videographer', 'editor'];
+
+function statusStart(label) {
+  statusStop();
+  statusFrom = Date.now();
+  statusWho = '';
+  statusBar = document.createElement('div');
+  statusBar.className = 'statusbar';
+  statusBar.innerHTML = '<span class="dot"></span><span class="who"></span>'
+                      + '<span class="el"></span>';
+  wrap.appendChild(statusBar);
+  statusSet(label);
+  statusTimer = setInterval(() => {
+    const s = Math.round((Date.now() - statusFrom) / 1000);
+    const t = s >= 60 ? `${Math.floor(s / 60)} 分 ${s % 60} 秒` : `${s} 秒`;
+    statusBar.querySelector('.el').textContent = t;
+  }, 1000);
+  scroll();
+}
+
+function statusSet(label, botId) {
+  if (!statusBar) return;
+  let txt = label;
+  if (botId) {
+    const i = CREW_ORDER.indexOf(botId);
+    // 第几棒只在剧组房间里有意义 (其它房间成员不是流水线)
+    const step = i >= 0 && cur && cur.mode === 'relay' ? ` · 第 ${i + 1}/${CREW_ORDER.length} 棒` : '';
+    txt = `${botOf(botId).emoji} ${botOf(botId).name} 正在${label}${step}`;
+    // **只在换人时**重新计时。一棒里要跑十几个工具, 每次工具调用都重置的话
+    // 秒数会被反复清零, 永远看不出"这一棒已经跑了多久" —— 而那正是用户要的。
+    if (botId !== statusWho) { statusFrom = Date.now(); statusWho = botId; }
+  }
+  statusBar.querySelector('.who').textContent = txt;
+}
+
+function statusStop() {
+  if (statusTimer) { clearInterval(statusTimer); statusTimer = null; }
+  if (statusBar && statusBar.parentNode) statusBar.parentNode.removeChild(statusBar);
+  statusBar = null;
+}
+
 function toolBox(container) {
   let box = container.querySelector(':scope > .toolbox');
   if (box) return box;
@@ -355,7 +409,10 @@ async function loadRooms(select) {
     el.innerHTML = '<div class="n"></div><div class="l"></div>';
     el.querySelector('.n').textContent =
       r.members.map(m => botOf(m).emoji).join('') + ' ' + r.name;
-    el.querySelector('.l').textContent = r.last || '还没说过话';
+    // 第二行带上消息数 —— 房间重名时这是唯一分得出"哪个是我刚才那个"的线索
+    const n = r.count || 0;
+    el.querySelector('.l').textContent =
+      (n ? `${n} 条 · ` : '') + (r.last || '还没说过话');
     el.onclick = () => open(r);
     $('rooms').appendChild(el);
   });
@@ -392,6 +449,7 @@ async function submit() {
   if (!text || busy || !cur) return;
   busy = true; send.disabled = true;
   msgEl('user', text);
+  statusStart('已发出, 等第一个工位开口…');
   input.value = ''; input.style.height = 'auto';
 
   // 几个机器人同时说话 —— 每个各自一个气泡, 按 bot id 归位。
@@ -430,11 +488,13 @@ async function submit() {
         const body = ev.bot ? bubbleFor(ev.bot).querySelector('.body') : null;
         if (ev.type === 'text') {
           {
+            statusSet('说话', ev.bot);
             const el = bubbleFor(ev.bot).querySelector('.txt');
             setText(el, (el.dataset.raw || '') + ev.text, false);
             scroll();
           }
         } else if (ev.type === 'tool') {
+          statusSet(ev.name, ev.bot);
           tools.set(ev.bot + ':' + ev.id, toolRow(body, '正在' + ev.name));
         } else if (ev.type === 'result') {
           const t = tools.get(ev.bot + ':' + ev.id);
@@ -475,6 +535,7 @@ async function submit() {
               '连接中断且重连未成功。云电脑可能已回收 — 刷新页面会重新开机, 文件和进度都在。', false);
     }
   } finally {
+    statusStop();
     busy = false; send.disabled = false; input.focus();
     loadRooms(cur.id);
   }
@@ -513,9 +574,15 @@ $('newRoom').onclick = async () => {
 
 // 开新片: 剧组五个工位按接力顺序自动入群 —— 用户提一个想法就该开工, 不该先手工
 // 拉五个人, 更不该自己记住谁先谁后。
+// 开新片不再弹 prompt 问名字 (2026-09-01 老板实测: 几个房间在侧栏里长得一模一样,
+// 切出去再回来以为"消息没了", 其实是切到了另一个同名房间)。名字改成自动生成 ——
+// 「新片 3 · 09-01 16:52」, 序号 + 时间, 一眼分得出哪个是哪个。
 $('newFilm').onclick = async () => {
-  const name = prompt('这部片叫什么？(可留空)', '') ?? null;
-  if (name === null) return;
+  const n = ROOMS.filter(r => (r.name || '').startsWith('新片')).length + 1;
+  const t = new Date();
+  const pad = x => String(x).padStart(2, '0');
+  const name = `新片 ${n} · ${pad(t.getMonth() + 1)}-${pad(t.getDate())} `
+             + `${pad(t.getHours())}:${pad(t.getMinutes())}`;
   const d = await api('/api/rooms/crew', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ name }),
