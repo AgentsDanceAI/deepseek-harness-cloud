@@ -40,6 +40,17 @@ VIDEO_POLL_TIMEOUT_S = float(os.environ.get("DSH_VIDEO_POLL_TIMEOUT", "900"))
 VIDEO_POLL_INTERVAL_S = 6.0
 
 
+#: 长工具的进度回调 —— 出片一条要几分钟, 而工具是"一次调用走完"的同步语义,
+#: 中间没有任何东西能告诉用户"还活着"。agent 在调用前把它指到当轮的事件流上,
+#: 调完置回 None。模块级而不是参数: 工具签名是给模型看的, 不该混进内部管道。
+_progress = None
+
+
+def set_progress(fn) -> None:
+    global _progress
+    _progress = fn
+
+
 def _headers() -> dict:
     return {"Authorization": f"Bearer {GATEWAY_TOKEN}"}
 
@@ -161,8 +172,16 @@ async def generate_video(prompt: str, path: str, duration: int = 5, resolution: 
                 return (f"参考图上传失败 ({r}): {why or '没有返回失败原因 — 这是个 bug, 请报告'}",
                         "参考图上传失败")
             urls.append(url)
+        # ⚠️ media 每项**必须带 type** —— 服务端只校验 url 所以放行, 但上游
+        # (百炼) 会退 `Field required: input.media.0.type`, 而这个错只出现在
+        # video_jobs 表里, 界面上只有一句"出片失败" (2026-09-01 实测)。
+        # 取值见 workspace-comfyui/api_shim.py: first_frame / reference_image。
+        # 第一张当首帧 (它决定第一帧长什么样), 其余当参考图。
         body["image_url"] = urls[0]                       # img_url 系吃这个
-        body["media"] = [{"url": u} for u in urls]        # media 系吃这个
+        body["media"] = [
+            {"type": "first_frame" if i == 0 else "reference_image", "url": u}
+            for i, u in enumerate(urls)
+        ]
     async with _client(120) as c:
         r = await c.post(f"{GATEWAY_BASE}/videos/generations", headers=_headers(), json=body)
     if r.status_code >= 400:
@@ -171,10 +190,16 @@ async def generate_video(prompt: str, path: str, duration: int = 5, resolution: 
     if not job:
         return "上游没有返回作业 id。", "出片无作业"
 
-    deadline = time.time() + VIDEO_POLL_TIMEOUT_S
+    # 出片是全流程最慢的一步 (一条几分钟), 轮询期间把进度喊出来 ——
+    # 干等最难受, 而工具是同步的, 只能靠 on_progress 把心跳递给上层。
+    started = time.time()
+    deadline = started + VIDEO_POLL_TIMEOUT_S
     url = ""
     while time.time() < deadline:
         await asyncio.sleep(VIDEO_POLL_INTERVAL_S)
+        waited = int(time.time() - started)
+        if _progress:
+            _progress(f"出片中 {waited} 秒 (通常 1-3 分钟)")
         async with _client(60) as c:
             g = await c.get(f"{GATEWAY_BASE}/videos/result/{job}", headers=_headers())
         if g.status_code >= 400:

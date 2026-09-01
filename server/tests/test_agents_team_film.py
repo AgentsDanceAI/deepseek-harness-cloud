@@ -563,7 +563,7 @@ def test_reference_images_reach_both_input_styles():
     assert 'payload["input"]["img_url"] = image_url' in SERVER_MEDIA
     # 容器侧两个都发
     assert 'body["image_url"] = urls[0]' in MEDIA
-    assert 'body["media"] = [{"url": u} for u in urls]' in MEDIA
+    assert 'body["media"] = [' in MEDIA and '"url": u' in MEDIA
 
 
 def test_media_item_shape_and_cap_match_the_server():
@@ -571,7 +571,7 @@ def test_media_item_shape_and_cap_match_the_server():
     assert "_MEDIA_MAX_ITEMS = 8" in SERVER_MEDIA
     assert "MEDIA_MAX_ITEMS = 8" in MEDIA, "上限没跟服务端对齐"
     assert "each media item needs a url" in SERVER_MEDIA
-    assert '{"url": u}' in MEDIA
+    assert '"url": u' in MEDIA
 
 
 def test_multiple_reference_images_are_supported():
@@ -639,3 +639,49 @@ def test_rooms_are_distinguishable():
     # 侧栏第二行带消息数 —— 重名时唯一分得出"哪个是我刚才那个"的线索
     assert "r.count" in WEB
     assert '"count": len(store.transcript(r.id))' in MAIN, "服务端没返回 count"
+
+
+# ── media 每项必须带 type + 长工具要报进度 (2026-09-01 老板: 出片一直失败;
+# "生成过程中能计数吗, 各个阶段都计数, 别让用户干等以为卡住了") ───────────
+AGENT_SRC = (TEAM / "app" / "agent.py").read_text(encoding="utf-8")
+
+
+def test_media_items_carry_a_type():
+    """服务端只校验 url 所以放行, 上游 (百炼) 退 `Field required: input.media.0.type`。
+
+    而那个错**只出现在 video_jobs 表里** —— 界面上只有一句"出片失败", 于是
+    阿导以为是"image 参数格式变了", 又开始瞎试。取值来自同仓的 ComfyUI 垫片
+    (workspace-comfyui/api_shim.py), 不是我猜的。
+    """
+    shim = (ROOT / "deploy" / "workspace-comfyui" / "api_shim.py").read_text(encoding="utf-8")
+    assert 'item["type"] == "first_frame"' in shim, "垫片改了取值, 这条的前提没了"
+    assert '"type": "first_frame"' in MEDIA
+    assert '"reference_image"' in MEDIA
+    # 第一张当首帧 —— 它决定第一帧长什么样; 其余当参考图
+    i = MEDIA.index('body["media"]')
+    seg = MEDIA[i : i + 300]
+    assert "if i == 0 else" in seg, "没有区分首帧与参考图"
+
+
+def test_long_tools_report_progress():
+    """出片一条几分钟, 而工具是"一次调用走完"的同步语义 —— 中间没有任何东西
+    告诉用户"还活着"。心跳必须真能泵出来 (镜像内实测过 3 条)。"""
+    assert "def set_progress" in MEDIA
+    i = MEDIA.index("deadline = started + VIDEO_POLL_TIMEOUT_S")
+    seg = MEDIA[i : i + 500]
+    assert "_progress(" in seg and "出片中" in seg
+    # agent 侧: 队列桥接 (异步生成器里 await 同步工具, 没法直接 yield)
+    assert "asyncio.Queue" in AGENT_SRC
+    assert 'yield {"type": "progress"' in AGENT_SRC
+    assert "call_soon_threadsafe" in AGENT_SRC
+    # 用完要置回, 否则下一轮的心跳会打到上一轮的队列上
+    assert "set_progress(None)" in AGENT_SRC
+
+
+def test_progress_updates_in_place_not_as_new_rows():
+    """每 6 秒一条, 新起一行会把工具组刷成一屏噪音。"""
+    i = WEB.index("ev.type === 'progress'")
+    seg = WEB[i : i + 600]
+    assert "tools.get(" in seg, "没有定位到原来那行"
+    assert "syncToolSummary" in seg, "摘要没跟着走"
+    assert "statusSet(" in seg, "状态条没跟着走"

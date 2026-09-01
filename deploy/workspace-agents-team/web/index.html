@@ -499,6 +499,16 @@ async function submit() {
         } else if (ev.type === 'result') {
           const t = tools.get(ev.bot + ':' + ev.id);
           if (t) { t.classList.add('done'); t.querySelector('.t').textContent = ev.summary; }
+        } else if (ev.type === 'progress') {
+          // 长工具的心跳 (出片一条几分钟): 工具行原地改写 + 状态条跟着走。
+          // 不新起一行 —— 每 6 秒一条会把工具组刷成一屏噪音。
+          const t = tools.get(ev.bot + ':' + ev.id);
+          if (t) {
+            t.querySelector('.t').textContent = ev.text;
+            const box = t.closest('.toolbox');
+            if (box) syncToolSummary(box);
+          }
+          statusSet(ev.text, ev.bot);
         } else if (ev.type === 'image') {
           const img = document.createElement('img');
           img.className = 'shot'; img.src = ev.data_uri; body.appendChild(img); scroll();
