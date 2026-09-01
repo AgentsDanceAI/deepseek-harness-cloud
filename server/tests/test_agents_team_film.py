@@ -544,7 +544,7 @@ def test_video_job_fields_match_the_server():
 
 def test_upload_failure_always_says_why():
     """空原因比报错更糟 —— 模型拿到"失败但没说为什么"只能瞎试。"""
-    i = MEDIA.index("async def _upload_blob")
+    i = MEDIA.index("async def _upload_once")  # 干活的那段在这里 (_upload_blob 是重试外壳)
     seg = MEDIA[i : i + 1600]
     # 每一条失败出口都要带上原因
     assert 'return "", f"文件不存在' in seg
@@ -608,7 +608,7 @@ def test_upload_sends_only_fields_the_server_reads():
     seg = SERVER_MEDIA[i : i + 1400]
     reads = {m for m in ("content_type", "file_name", "size") if f'body.get("{m}")' in seg}
     assert reads == {"content_type", "file_name"}, f"服务端读的字段变了: {reads}"
-    j = MEDIA.index("async def _upload_blob")
+    j = MEDIA.index("async def _upload_once")  # 干活的那段在这里 (_upload_blob 是重试外壳)
     body = MEDIA[j : j + 1200]
     assert '"content_type": ctype' in body and '"file_name": p.name' in body
     assert '"size"' not in body, "还在发服务端不读的 size"
@@ -1057,3 +1057,134 @@ def test_only_one_root_so_overrides_cannot_be_silently_ignored():
         )
     finally:
         filmdir.ROOT = old
+
+
+# ── 花钱的位置不许把瞬时故障当终局 (2026-09-01 验收跑读账读出来的) ─────────────
+
+
+def test_a_flaky_poll_does_not_abandon_a_paid_video():
+    """查询抖两下不许放弃 —— 片子在上游出着, 钱已经扣了。
+
+    验收跑实测: 作业 e92c5262 上游 succeeded、扣了 100 积分, 而剧组收到的是
+    "出片查询失败"。模型看到失败的本能是重试, 而出片提交就是**下单** —— 重试
+    等于同一个镜头付两次钱。工具返回里看不出这件事, 只有查 video_jobs 才知道。
+
+    这条**真跑 generate_video**, 不只验话术: 只验话术的话, 把轮询里的容错删掉
+    测试照样绿 (helper 还在)。
+    """
+    import asyncio
+    import pathlib as _pl
+    import tempfile
+
+    filmdir = _crew("filmdir")
+    media = _crew("media")
+    # ⚠️ filmdir.ROOT 是 import 期从 env 派生的 —— 这时候再设 AGENTS_TEAM_WORKDIR
+    # 已经晚了 (模块早被别的测试 import 过)。要像镜像自检那样直接改 ROOT。
+    _saved = (filmdir.ROOT, media._client, media.VIDEO_POLL_INTERVAL_S)
+    filmdir.ROOT = _pl.Path(tempfile.mkdtemp(prefix="poll-test-"))
+    media.GATEWAY_BASE = "http://gw/v1"
+    media.GATEWAY_TOKEN = "t"
+    media.VIDEO_MODEL = "wan3.0-video"
+    media.VIDEO_POLL_INTERVAL_S = 0
+
+    polls = {"n": 0}
+
+    class _R:
+        def __init__(self, code, payload=None):
+            self.status_code = code
+            self.text = "boom"
+            self._p = payload or {}
+
+        def json(self):
+            return self._p
+
+    class _Stream:
+        status_code = 200
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def aiter_bytes(self):
+            yield b"MP4DATA"
+
+    class _C:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def post(self, url, **k):
+            return _R(200, {"id": "job-abc"})  # 下单成功一次
+
+        async def get(self, url, **k):
+            polls["n"] += 1
+            if polls["n"] <= 2:
+                return _R(502)  # 抖两次
+            return _R(200, {"task_status": "SUCCESS", "video_result": [{"url": "http://x/v.mp4"}]})
+
+        def stream(self, *a, **k):
+            return _Stream()
+
+    media._client = lambda *a, **k: _C()
+
+    async def _go():
+        return await media.generate_video("一个镜头", "片段/T1.mp4", 10, "720p")
+
+    try:
+        body, _summary = asyncio.run(_go())
+        assert polls["n"] >= 3, f"抖了两次就不查了 (只查了 {polls['n']} 次) — 已付费的片被丢掉"
+        assert "已出片" in body, f"熬过抖动后该拿到片子, 实际: {body[:120]}"
+        assert (filmdir.ROOT / "片段/T1.mp4").exists(), "片子没落盘"
+    finally:
+        # 猴补丁必须还原 —— 模块是缓存在 sys.modules 里的, 漏了就污染同轮其它测试
+        filmdir.ROOT, media._client, media.VIDEO_POLL_INTERVAL_S = _saved
+
+
+def test_giving_up_on_polling_must_not_invite_a_second_order():
+    """真放弃时话术要拦住重新下单 —— 那是第二次扣费。"""
+    media = _crew("media")
+    body, summary = media._paid_but_unpolled("job-123", "HTTP 502")
+    assert "job-123" in body, "没说是哪个作业 — 模型没法自己去取"
+    assert "不要重新下单" in body, "没拦住重新下单 = 第二次扣费"
+    assert "已付费" in summary, f"摘要没标已付费: {summary}"
+    assert media.POLL_GIVEUP > 1, "一次失败就放弃 = 丢掉已付费的片"
+
+
+def test_upload_retries_instead_of_killing_the_whole_shot():
+    """上传没有副作用, 抖一下就放弃等于让整条镜头白跑; 异常也不许炸穿工具。"""
+    import asyncio
+
+    media = _crew("media")
+    calls = {"n": 0}
+
+    async def _flaky(p):
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise __import__("httpx").ConnectError("boom")
+        return "http://asset/x.png", ""
+
+    _saved_once = media._upload_once
+    media._upload_once = _flaky
+
+    async def _go():
+        return await media._upload_blob(__import__("pathlib").Path("/tmp/x.png"))
+
+    url, why = asyncio.run(_go())
+    assert url == "http://asset/x.png", f"重发之后该成功, 却是 {url!r} / {why!r}"
+    assert calls["n"] == 3, f"没重发够: {calls['n']} 次"
+
+    # 一直失败时: 要有原因, 不能是空串 (空原因让模型只能瞎试)
+    async def _always(p):
+        raise __import__("httpx").ConnectError("still boom")
+
+    media._upload_once = _always
+    try:
+        url, why = asyncio.run(_go())
+        assert url == ""
+        assert "ConnectError" in why and "重发" in why, f"失败原因不成话: {why!r}"
+    finally:
+        media._upload_once = _saved_once

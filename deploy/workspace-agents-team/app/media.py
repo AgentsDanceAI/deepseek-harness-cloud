@@ -113,7 +113,7 @@ async def generate_image(prompt: str, path: str, size: str = "", model: str = ""
         out.write_bytes(got.content)
     else:
         return "上游返回里既没有 url 也没有 b64_json。", "出图无结果"
-    rel = out.relative_to(filmdir.current())
+    rel = out.relative_to(_film_root())
     kb = out.stat().st_size // 1024
     return f"已出图并存到 {rel} ({kb} KB)。下游可以用这个路径当参考图。", f"出图 {rel.name}"
 
@@ -150,7 +150,7 @@ async def generate_video(prompt: str, path: str, duration: int = 5, resolution: 
     # 真要重做就先删掉那个文件 (人格里写了), 那是一个明确的动作。
     if out.exists() and out.stat().st_size > 0:
         mb = out.stat().st_size / 1024 / 1024
-        rel = out.relative_to(filmdir.current())
+        rel = out.relative_to(_film_root())
         msg = (f"{rel} 已经有成片了 ({mb:.1f} MB), **没有重新出片** —— 出片是要花钱的, "
                f"同一个镜头不重复跑。确实要重做请先删掉这个文件 (shell: rm '{rel}'), "
                f"或者换一个 path。")
@@ -212,15 +212,32 @@ async def generate_video(prompt: str, path: str, duration: int = 5, resolution: 
     started = time.time()
     deadline = started + VIDEO_POLL_TIMEOUT_S
     url = ""
+    fails = 0      # 连续查询失败次数; 查成功一次就归零
+    last = ""
     while time.time() < deadline:
         await asyncio.sleep(VIDEO_POLL_INTERVAL_S)
         waited = int(time.time() - started)
         if _progress:
             _progress(f"出片中 {waited} 秒 (通常 1-3 分钟)")
-        async with _client(60) as c:
-            g = await c.get(f"{GATEWAY_BASE}/videos/result/{job}", headers=_headers())
+        try:
+            async with _client(60) as c:
+                g = await c.get(f"{GATEWAY_BASE}/videos/result/{job}", headers=_headers())
+        except httpx.HTTPError as e:
+            fails += 1
+            last = f"{type(e).__name__}: {e}"
+            if fails >= POLL_GIVEUP:
+                return _paid_but_unpolled(job, last)
+            continue
         if g.status_code >= 400:
-            return f"查询作业失败 HTTP {g.status_code}: {_err_text(g)}", "出片查询失败"
+            last = f"HTTP {g.status_code}: {_err_text(g)}"
+            if g.status_code in _TRANSIENT:
+                # **别放弃**: 片子还在上游出, 钱已经扣了。继续等到 deadline。
+                fails += 1
+                if fails >= POLL_GIVEUP:
+                    return _paid_but_unpolled(job, last)
+                continue
+            return f"查询作业失败 {last} — 作业 {job} 已下单并计费, **不要重新下单**", "出片查询失败"
+        fails = 0
         d = g.json() or {}
         st = str(d.get("task_status") or "")
         if st == "SUCCESS":
@@ -239,7 +256,7 @@ async def generate_video(prompt: str, path: str, duration: int = 5, resolution: 
         with out.open("wb") as f:
             async for chunk in resp.aiter_bytes():
                 f.write(chunk)
-    rel = out.relative_to(filmdir.current())
+    rel = out.relative_to(_film_root())
     mb = out.stat().st_size / 1024 / 1024
     return (f"已出片并存到 {rel} ({mb:.1f} MB, {duration}秒 {_norm_resolution(resolution)})。",
             f"出片 {rel.name}")
@@ -251,7 +268,48 @@ _CTYPE = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
           ".webp": "image/webp", ".gif": "image/gif"}
 
 
+#: 值得重发的 HTTP 状态。**只用在没有副作用的调用上** (上传、查作业) ——
+#: 出片提交本身绝不重发: 那是下单, 重发就是重复扣费。
+_TRANSIENT = (408, 425, 429, 500, 502, 503, 504)
+
+#: 轮询期间允许连续失败多少次才放弃。一次抖动就放弃的代价是**丢掉一条已经付了钱、
+#: 上游正在出的片** —— 2026-09-01 验收跑实测: 作业 e92c5262 上游 succeeded、扣了
+#: 100 积分, 剧组却收到"出片查询失败", 于是它会重新下单, 等于同一个镜头付两次。
+POLL_GIVEUP = int(os.environ.get("AGENTS_TEAM_POLL_GIVEUP", "5"))
+
+UPLOAD_TRIES = int(os.environ.get("AGENTS_TEAM_UPLOAD_TRIES", "3"))
+
+
+def _film_root() -> Path:
+    """片目录的**解析后**路径。
+
+    _safe_rel 返回的是 .resolve() 过的路径, 拿没解析的根去 relative_to 会在路径
+    上有软链时炸 (ValueError: not in the subpath of) —— 而那一炸发生在片子**已经
+    下载完**之后, 等于钱花了、文件在盘上, 工具却报错。
+    """
+    return filmdir.current().resolve()
+
+
 async def _upload_blob(p: Path) -> tuple[str, str]:
+    """上传, 带退避重发。上传没有副作用, 抖一下就放弃纯属浪费 —— 而它的下一步是
+    出片, 放弃等于让整条镜头白跑。"""
+    why = ""
+    for attempt in range(UPLOAD_TRIES):
+        try:
+            url, why = await _upload_once(p)
+        except httpx.HTTPError as e:
+            why = f"{type(e).__name__}: {e}"   # 异常也要变成"原因", 不许炸穿工具
+        else:
+            if url:
+                return url, ""
+            if not any(str(c) in why for c in _TRANSIENT):
+                return "", why               # 不是瞬时的 (文件不存在、字段不对) 就别重试
+        if attempt + 1 < UPLOAD_TRIES:
+            await asyncio.sleep(min(1.5 * 2**attempt, 6.0))
+    return "", f"{why} (重发 {UPLOAD_TRIES} 次都没成)"
+
+
+async def _upload_once(p: Path) -> tuple[str, str]:
     """把本地文件放进 DSH 资产库, 换一个上游能取到的 url。
 
     ⚠️ 返回体的字段是 **download_url**, 不是 url (见 media.create_upload:
@@ -281,6 +339,23 @@ async def _upload_blob(p: Path) -> tuple[str, str]:
         if up.status_code >= 400:
             return "", f"上传 HTTP {up.status_code}: {_err_text(up)}"
     return get, ""
+
+
+def _paid_but_unpolled(job: str, why: str) -> tuple[str, str]:
+    """查不动了, 但**片子多半已经出好了, 钱也已经扣了**。
+
+    这条话术是防重复扣费的最后一道: 模型看到"失败"的本能是重试一次, 而出片提交
+    是下单 —— 重试就是第二次付钱。所以这里必须写明作业 id、写明已计费、并给出
+    自己去查的办法, 而不是笼统说一句失败。
+    """
+    body = (
+        f"查询作业状态连续失败 {POLL_GIVEUP} 次 ({why})。**作业 {job} 已经下单并计费, "
+        f"上游多半正常出片中 —— 千万不要重新下单**。稍后用 shell 查一次即可:\n"
+        f"    curl -s -H \"Authorization: Bearer $DSH_TOKEN\" "
+        f"\"$DSH_GATEWAY_BASE/videos/result/{job}\"\n"
+        f"拿到 video_result[0].url 后直接下载到目标路径。"
+    )
+    return body, "出片查询中断 (已付费)"
 
 
 _TIME_RE = re.compile(r"Duration:\s*(\d+):(\d+):(\d+\.\d+)")
@@ -322,7 +397,7 @@ async def concat_videos(clips: list[str], path: str, audio: str = "") -> tuple[s
     if proc.returncode != 0 or not outp.exists():
         tail = (err or b"").decode("utf-8", "replace")[-400:]
         return f"拼片失败: {tail}", "拼片失败"
-    rel = outp.relative_to(filmdir.current())
+    rel = outp.relative_to(_film_root())
     mb = outp.stat().st_size / 1024 / 1024
     return f"已拼成 {rel} ({len(paths)} 段, {mb:.1f} MB)。", f"拼片 {rel.name}"
 
