@@ -2536,7 +2536,23 @@ def _autogen_boot() -> str:
     状态落 /data (NAS 挂在这儿): 队伍、会话、图库都在 SQLite 里, 落容器里的话
     闲置回收一删就没了。
     """
-    return "set -e\nmkdir -p /data\nexec autogenstudio ui --host 0.0.0.0 --port 8081 --appdir /data\n"
+    return (
+        "set -e\n"
+        "mkdir -p /data\n"
+        "autogenstudio ui --host 0.0.0.0 --port 8081 --appdir /data &\n"
+        "srv=$!\n"
+        # 默认图库和那支示例队伍是**首次访问接口时才惰性生成**的 —— 不预热的话,
+        # 第一个打开页面的人正好撞在生成之前, 看到的是"Create a team to get
+        # started"的空侧栏, 刷新一次才有 (线上第一次视觉验收就是这样)。
+        "for i in $(seq 1 60); do\n"
+        "  curl -fsS -o /dev/null http://127.0.0.1:8081/api/health 2>/dev/null && break\n"
+        "  sleep 1\n"
+        "done\n"
+        'curl -fsS -o /dev/null "http://127.0.0.1:8081/api/gallery/?user_id=guestuser@gmail.com" || true\n'
+        'curl -fsS -o /dev/null "http://127.0.0.1:8081/api/teams/?user_id=guestuser@gmail.com" || true\n'
+        'echo "[dsh] autogen 默认队伍已预热"\n'
+        "wait $srv\n"
+    )
 
 
 def _langchain_boot() -> str:
