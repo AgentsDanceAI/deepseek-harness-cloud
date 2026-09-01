@@ -40,19 +40,23 @@ import pathlib
 #: 正是老板撞到的那个形状。
 USE = {
     "openmanus": {
-        "kind": "terminal",
-        # 敲一条能立刻见分晓的: 解释器指向哪、关键依赖在不在。
-        "type": "python -c 'import pydantic,sys;print(\"USE-OK\",sys.executable)'\n",
-        # 分成两段: xterm 会**折行**, inner_text 里两段之间可能夹着换行 ——
-        # 拿整串去匹配会把"产品其实好的"判成失败 (第一版就是这么误报的)。
-        "want": ["USE-OK", "/opt/venv-openmanus/bin/python"],
-        "why": "敲 python 报 ModuleNotFoundError —— 登录 shell 把 PATH 冲掉了",
+        # 2026-09-02 起这一格是**工作台**, 不再是裸终端 (老板: "包类似咱们为
+        # claude 和 codex 建的前端啊")。所以这里也从敲命令改成发消息 —— 验收
+        # 要走用户真正会走的那条路。
+        "kind": "chat",
+        "placeholder": "说点什么",
+        "send": "473 加 268 等于几? 只回数字, 不要解释",
+        "want": ["741"],
+        "why": "发一句话没反应 (它的日志走 stderr, 外壳只读 stdout)",
     },
     "crewai": {
-        "kind": "terminal",
-        "type": "crewai --version && echo USE-OK\n",
-        "want": ["USE-OK"],
-        "why": "敲 crewai 找不到命令 —— 登录 shell 把 PATH 冲掉了",
+        "kind": "chat",
+        "placeholder": "说点什么",
+        "send": "473 加 268 等于几? 只回数字, 不要解释",
+        "want": ["741"],
+        # 型号没钉的样子: litellm 拿它自己的默认 gpt-4o-mini 去问网关, 回 404。
+        "fail_extra2": ["gpt-4o-mini", "NotFoundError"],
+        "why": "发一句话回 404 (litellm 用了它自己的默认型号)",
     },
     "langchain": {
         "kind": "chat",
