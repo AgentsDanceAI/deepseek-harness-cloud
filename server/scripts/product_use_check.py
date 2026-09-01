@@ -61,7 +61,10 @@ USE = {
     },
     "openhands": {
         "kind": "openhands",
-        "why": "点新对话就 500: Agent Server Failed to start properly",
+        "send": "只回我两个字",
+        # 沙箱起不来时页面停在"等待沙盒", 那不算能用 —— 判据要落在它真回了话上。
+        "fail_extra": ["等待沙盒", "waiting for sandbox"],
+        "why": "点新对话就 500: Agent Server Failed to start properly / 一直等待沙盒",
     },
 }
 
@@ -126,8 +129,23 @@ with sync_playwright() as p:
             elif kind == "openhands":
                 # "新对话" 那个按钮 —— 点它才会去起沙箱, 而沙箱起不来正是那个 500。
                 page.get_by_role("button", name="新对话").first.click(timeout=15000)
-                page.wait_for_timeout(50000)
-                e["text"] = page.inner_text("body")[-1500:]
+                # 沙箱起来要时间, 起来之后还要真发一句、等它回。**不能只等"页面
+                # 变了"就算过** —— "等待沙盒 / 加载中" 也是变了, 而那正是坏的样子。
+                for _ in range(50):
+                    page.wait_for_timeout(3000)
+                    body = page.inner_text("body")
+                    if "等待沙盒" not in body and "Waiting for sandbox" not in body:
+                        break
+                try:
+                    box = page.get_by_placeholder("你想要构建什么?").first
+                    box.click(timeout=10000)
+                    box.fill(prod["send"])
+                    page.keyboard.press("Enter")
+                except Exception:
+                    # 输入框还没出来 —— 让判读去看 text 里的"等待沙盒"报错
+                    pass
+                page.wait_for_timeout(60000)
+                e["text"] = page.inner_text("body")[-2000:]
 
             page.screenshot(path=str(out / (prod["id"] + ".png")))
         except Exception as ex:
@@ -213,7 +231,7 @@ def main() -> int:
             bad += 1
             continue
         text = (e.get("text") or "").lower()
-        hits = [f for f in FAIL_PHRASES if f in text]
+        hits = [f for f in FAIL_PHRASES + (USE[pid].get("fail_extra") or []) if f in text]
         want = USE[pid].get("want")
         # 逐段查, 且**把空白全抹掉再比** —— 终端里的换行/折行不该算差异
         # (第一版拿整串比, 把 "USE-OK\n/opt/venv-..." 判成了失败, 而产品是好的)。
