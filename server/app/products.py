@@ -2578,19 +2578,13 @@ def _openhands_boot() -> str:
         "  curl -fsS -o /dev/null http://127.0.0.1:3000/ 2>/dev/null && break\n"
         "  sleep 1\n"
         "done\n"
-        # 灌设置。**必须成功** —— 失败就是用户开门见墙, 所以留痕并重试几次。
-        "for i in 1 2 3; do\n"
-        '  code=$(curl -s -o /tmp/oh_set.log -w "%{http_code}" -X POST '
-        "http://127.0.0.1:3000/api/v1/settings -H 'Content-Type: application/json' "
-        '-d "{\\"llm_model\\":\\"$DSH_LLM_MODEL\\",'
-        '\\"llm_base_url\\":\\"$DSH_LLM_BASE\\",'
-        '\\"llm_api_key\\":\\"$DSH_CLOUD_TOKEN\\",'
-        '\\"agent\\":\\"CodeActAgent\\",'
-        '\\"enable_default_condenser\\":true,'
-        '\\"user_consents_to_analytics\\":false}") || true\n'
-        '  [ "$code" = "200" ] && { echo "[dsh] openhands 设置已灌入"; break; }\n'
-        '  echo "[dsh] 灌设置失败 (HTTP $code), 重试"; cat /tmp/oh_set.log; sleep 3\n'
-        "done\n"
+        # 灌设置。**必须成功** —— 失败就是用户开门见墙。
+        # 用它自己的结构灌: 先 GET 拿回来、只改 llm 那几个字段再 POST 回去。
+        # 先前那版用老式扁平字段 (llm_model/llm_base_url/llm_api_key), 服务端
+        # **回 200 却什么也没存** —— 设置里 model 仍是 gpt-5.5、api_key 是 null,
+        # 而"200"让我一路以为这步是好的, 去查了半天沙箱。返回码不等于生效。
+        "echo IiIi5oyJKirlvZPliY3niYjmnKznmoTnnJ/lrp7nu5PmnoQqKueBjCBPcGVuSGFuZHMg55qE5qih5Z6L6K6+572u44CCCgrlhYjliY3pgqPmrKEgUE9TVCDnlKjnmoTmmK/ogIHniYjnmoTmiYHlubPlrZfmrrUgKGxsbV9tb2RlbCAvIGxsbV9iYXNlX3VybCAvIGxsbV9hcGlfa2V5KToK5pyN5Yqh56uv5ZueIDIwMCwg6ICM6K6+572u6YeMIG1vZGVsIOi/mOaYryBncHQtNS4144CBYXBpX2tleSDkuI4gYmFzZV91cmwg6YO95pivIG51bGwg4oCU4oCUCioq6L+U5ZueIDIwMCDkuI3nrYnkuo7lrZjov5vljrvkuoYqKiwg6L+Z5LiA5p2h5beu54K56K6p5oiR5LiA6Lev5p+l6ZSZ5pa55ZCRICjliY3pnaLlh6Dova7pg73lnKjmn6XmspnnrrEp44CCCgrlgZrms5U6IOWFiCBHRVQg5ou/5Yiw5a6D6Ieq5bex55qE57uT5p6ELCDlj6rmlLkgbGxtIOmCo+WHoOS4quWtl+auteWGjSBQT1NUIOWbnuWOuyDigJTigJQg5LiN6IeG6YCgIHNjaGVtYSwK5LiK5ri45pS554mI5Lmf5LiN5Lya6Z2Z6buY5aSx6YWN44CCCiIiIgppbXBvcnQganNvbgppbXBvcnQgb3MKaW1wb3J0IHVybGxpYi5yZXF1ZXN0CgpCQVNFID0gImh0dHA6Ly8xMjcuMC4wLjE6MzAwMCIKCgpkZWYgY2FsbChwYXRoLCBkYXRhPU5vbmUpOgogICAgcmVxID0gdXJsbGliLnJlcXVlc3QuUmVxdWVzdCgKICAgICAgICBCQVNFICsgcGF0aCwKICAgICAgICBkYXRhPWpzb24uZHVtcHMoZGF0YSkuZW5jb2RlKCkgaWYgZGF0YSBpcyBub3QgTm9uZSBlbHNlIE5vbmUsCiAgICAgICAgaGVhZGVycz17IkNvbnRlbnQtVHlwZSI6ICJhcHBsaWNhdGlvbi9qc29uIn0sCiAgICAgICAgbWV0aG9kPSJQT1NUIiBpZiBkYXRhIGlzIG5vdCBOb25lIGVsc2UgIkdFVCIsCiAgICApCiAgICB3aXRoIHVybGxpYi5yZXF1ZXN0LnVybG9wZW4ocmVxLCB0aW1lb3V0PTMwKSBhcyByOgogICAgICAgIGJvZHkgPSByLnJlYWQoKS5kZWNvZGUoKQogICAgICAgIHJldHVybiBqc29uLmxvYWRzKGJvZHkpIGlmIGJvZHkuc3RyaXAoKSBlbHNlIHt9CgoKY3VyID0gY2FsbCgiL2FwaS92MS9zZXR0aW5ncyIpCmxsbSA9IGN1ci5zZXRkZWZhdWx0KCJhZ2VudF9zZXR0aW5ncyIsIHt9KS5zZXRkZWZhdWx0KCJsbG0iLCB7fSkKbGxtWyJtb2RlbCJdID0gb3MuZW52aXJvblsiRFNIX0xMTV9NT0RFTCJdCmxsbVsiYmFzZV91cmwiXSA9IG9zLmVudmlyb25bIkRTSF9MTE1fQkFTRSJdCmxsbVsiYXBpX2tleSJdID0gb3MuZW52aXJvblsiRFNIX0NMT1VEX1RPS0VOIl0KY3VyLnNldGRlZmF1bHQoIm1pc2Nfc2V0dGluZ3MiLCB7fSlbInVzZXJfY29uc2VudHNfdG9fYW5hbHl0aWNzIl0gPSBGYWxzZQpjYWxsKCIvYXBpL3YxL3NldHRpbmdzIiwgY3VyKQoKYmFjayA9IGNhbGwoIi9hcGkvdjEvc2V0dGluZ3MiKVsiYWdlbnRfc2V0dGluZ3MiXVsibGxtIl0Kb2sgPSBiYWNrLmdldCgibW9kZWwiKSA9PSBsbG1bIm1vZGVsIl0gYW5kIGJvb2woYmFjay5nZXQoImJhc2VfdXJsIikpCnByaW50KGYiW2RzaF0g5qih5Z6L6K6+572uIHsn5bey55Sf5pWIJyBpZiBvayBlbHNlICfmsqHlhpnov5vljrsnfToge2JhY2suZ2V0KCdtb2RlbCcpfSBAIHtiYWNrLmdldCgnYmFzZV91cmwnKX0iKQo= | base64 -d > /tmp/dsh_oh_settings.py\n"
+        "for i in 1 2 3; do python3 /tmp/dsh_oh_settings.py && break; sleep 5; done\n"
         # **把 agent server 的 import 预热一遍**。用户点"新对话"时它会另起一个进程
         # 跑 `python -m openhands.agent_server`, 而应用只等 120 秒。2 核冷盘上那堆
         # import 走不完 —— 线上表现是页面一直"等待沙盒", 而本机 (缓存热、核多) 七秒
