@@ -366,6 +366,21 @@ CLOUDCLI_IMAGE_REF = _env("CLOUDCLI_IMAGE_REF", "ghcr.io/agentsdancepro/cloudcli
 # 自研的智能体工作台 (见 deploy/workspace-agentui)。老板 2026-08-31 拍板顶掉
 # CloudCLI —— 别人的界面里挂着别人的引流入口, 而积分这个核心机制在里面没有位置。
 AGENTUI_IMAGE_REF = _env("AGENTUI_IMAGE_REF", "ghcr.io/agentsdancepro/agentui:0.2.2")
+
+# --- 数字人 (实时口型视频通话) ----------------------------------------------
+# 与其它产品**不同**: 它不起每用户容器, 而是转发到我们自己的 GPU 节点 (那张 L20
+# 上跑着 SoulX-FlashHead), 三路并发满了排队。所以计费也不一样 —— 其它产品收的是
+# "容器存在时间"的机时额度, 这个收的是**真实通话分钟**的积分:
+#   · 没有容器, 收机时讲不通;
+#   · 排队等的那几分钟不该计费, 而排队恰恰是因为卡不够 —— 让用户为我们的容量
+#     不足付钱是说不过去的。
+AVATAR_DOMAIN = _env("AVATAR_DOMAIN", "")
+AVATAR_GPU_URL = _env("AVATAR_GPU_URL", "https://gpu.agentsdance.ai/avatar")
+# 与 GPU 节点共享的 HMAC 密钥 (两机的 .env 必须一致, 否则一律 bad token)。
+AVATAR_TOKEN_SECRET = _env("AVATAR_TOKEN_SECRET", "")
+# 一分钟通话多少积分。一路通话独占 1/3 张 L20, 成本远高于普通对话 —— 定价要
+# 反映这一点, 否则每一分钟都是我们在补贴。
+AVATAR_CREDITS_PER_MIN = _env_int("AVATAR_CREDITS_PER_MIN", 10)
 CLAUDE_CODE_DOMAIN = _env("CLAUDE_CODE_DOMAIN", "")
 CODEX_DOMAIN = _env("CODEX_DOMAIN", "")
 

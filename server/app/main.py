@@ -85,6 +85,7 @@ def create_app() -> FastAPI:
 
     from .accounts import router as accounts_router
     from .admin import router as admin_router
+    from .avatar import router as avatar_router
     from .desktop_updates import router as updates_router
     from .device_auth import router as device_router
     from .gateway import router as gateway_router
@@ -102,6 +103,7 @@ def create_app() -> FastAPI:
     app.include_router(oauth_router)
     app.include_router(device_router)
     app.include_router(gateway_router)
+    app.include_router(avatar_router)
     app.include_router(media_router)
     app.include_router(payments_router)
     app.include_router(admin_router)
