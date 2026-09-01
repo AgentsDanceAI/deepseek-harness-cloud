@@ -226,6 +226,18 @@ def test_capacity_cap(fake, monkeypatch):
     assert r.status_code == 302 and "state=busy" in r.headers["location"]
 
 
+def _reap_now(now):
+    """跑到**真的回收**为止。
+
+    2026-09-01 起 reaper 判定该收时**先挂牌问一句**, 等 WORK_RECLAIM_ASK_SEC
+    (120 秒) 没人表态才真收 —— 判据总有失灵的时候 (那次是 agent 活动信号传错了
+    键一直读 0), 而代价是用户正干着的活当场没了。
+    所以下面这些用例的承诺没变 ("闲了 N 分钟要回收"), 只是多走一个确认窗。
+    """
+    asyncio.run(workspace.reaper_tick(now))  # 第一遍: 挂牌
+    asyncio.run(workspace.reaper_tick(now + config.WORK_RECLAIM_ASK_SEC + 1))  # 窗口过后: 真收
+
+
 def _mark_agent_active(uid, ago_s=0.0):
     """Move the workspace device's last_seen — the 'agent worked' signal."""
     db.query(
@@ -282,7 +294,7 @@ def test_idle_workspaces_are_reclaimed_within_the_stated_window(fake, monkeypatc
     _mark_agent_active(uid, ago_s=11 * 60)
     workspace._started_at[uid] = now - 11 * 60
     workspace._user_active[uid] = now - 11 * 60
-    asyncio.run(workspace.reaper_tick(now))
+    _reap_now(now)
     assert fake.stops == stops + 1, "过了 10 分钟仍未回收 —— 闲置容器会一直计费"
 
 
@@ -328,7 +340,7 @@ def test_presence_is_not_inferred_from_browser_polling(fake, monkeypatch):
     stops = fake.stops
     for _ in range(3):  # 轮询照常进行
         workspace._last_seen[uid] = now
-        asyncio.run(workspace.reaper_tick(now))
+        _reap_now(now)
     assert fake.stops == stops + 1, "只靠轮询就续住了 —— 空标签页会整夜烧机时"
 
 
@@ -356,7 +368,7 @@ def test_closed_tab_is_reaped_quickly(fake, monkeypatch):
 
     workspace._last_seen[uid] = now - 4 * 60
     workspace._user_active[uid] = now - 4 * 60
-    asyncio.run(workspace.reaper_tick(now))
+    _reap_now(now)
     assert fake.stops == stops + 1, "页面早关了还留着 —— 白扣用户机时"
 
 
@@ -401,7 +413,7 @@ def test_abandoned_open_tab_is_reaped(fake, monkeypatch):
     workspace._started_at[uid] = time.time() - 31 * 60  # and running that long
     workspace._last_seen[uid] = time.time()  # …but the tab is still polling
     stops_before = fake.stops
-    asyncio.run(workspace.reaper_tick(time.time()))
+    _reap_now(time.time())
     assert fake.stops == stops_before + 1
 
 
@@ -421,7 +433,7 @@ def test_resumed_workspace_gets_a_grace_window(fake, monkeypatch):
     assert fake.stops == stops_before  # still alive
     # and the grace window is not infinite: once it lapses, the backstop fires
     workspace._started_at[uid] = time.time() - 31 * 60
-    asyncio.run(workspace.reaper_tick(time.time()))
+    _reap_now(time.time())
     assert fake.stops == stops_before + 1
 
 
@@ -448,7 +460,7 @@ def test_a_client_that_never_reports_presence_keeps_the_old_behaviour(fake, monk
 
     workspace._started_at[uid] = now - 11 * 60
     _mark_agent_active(uid, ago_s=11 * 60)
-    asyncio.run(workspace.reaper_tick(now))
+    _reap_now(now)
     assert fake.stops == stops + 1, "收不到心跳就永远不回收 —— 会一直计费"
 
 
@@ -1503,7 +1515,11 @@ def _reap(monkeypatch, key, *, last_ago, started_ago, product_id="dsh"):
 
     monkeypatch.setattr(workspace, "_running_workspaces", running)
     monkeypatch.setattr(workspace, "_stop", stop)
-    asyncio.get_event_loop_policy().new_event_loop().run_until_complete(workspace.reaper_tick(now))
+    workspace._reclaim_asked.pop(key, None)
+    loop = asyncio.get_event_loop_policy().new_event_loop()
+    # 两遍: 第一遍挂牌问"还用吗", 第二遍 (确认窗过后) 才真收。见 _reap_now。
+    loop.run_until_complete(workspace.reaper_tick(now))
+    loop.run_until_complete(workspace.reaper_tick(now + config.WORK_RECLAIM_ASK_SEC + 1))
     return bool(stopped)
 
 
@@ -2789,3 +2805,170 @@ def test_agents_team_gets_gateway_credentials_and_the_whole_catalog():
     listed = env["DSH_MODELS"].split()
     assert set(listed) == set(model_catalog.catalog()), "模型下拉没覆盖在售目录"
     assert env["DSH_DEFAULT_MODEL"] in listed
+
+
+# ── 回收前先问 + 键名 (2026-09-01 生产事故) ────────────────────────────────
+# 老板守着浏览器看剧组跑片, 容器被判 "tab closed" 回收, 屏幕上只留 "Load failed"。
+# 两个独立成因, 下面各钉各的。
+
+
+def test_agent_activity_is_looked_up_by_person_not_by_workspace_key(fake, monkeypatch):
+    """**这条是那次事故的根因。**
+
+    devices.user_id 存的是 u_xxx (人), 而 reaper 手里的 uid 是 u_xxx~agents-team
+    (工作台键)。传 uid 永远查到 0.0 —— 于是"智能体正在干活"这个信号**对所有
+    产品从来没生效过**。生产实测同一时刻: 传 uid 得 0.0, 传 owner 得 112 秒前。
+
+    这个 bug 能活到今天有两层原因:
+      · **默认产品 dsh 的工作台键就等于用户 id** (wskey 对 DEFAULT 不加后缀),
+        所以 dsh 上永远看不出来 —— 只有 ComfyUI/Dify/Coze/Agents Team 这些
+        非默认产品才会踩;
+      · 测试里的 uid 恰好也是用户 id, 两边同名不同物, 于是一直是绿的。
+    这条**必须用非默认产品**, 否则测不出任何东西。
+    """
+    monkeypatch.setattr(config, "WORK_IDLE_STOP_MIN", 10)
+    monkeypatch.setattr(config, "WORK_AGENT_IDLE_STOP_MIN", 10)
+    c, owner = _user("agentkey@test.local")
+    c.get("/api/work/route")
+    c.get("/api/work/route")
+
+    key = products.wskey(owner, "comfyui")
+    assert "~" in key, "非默认产品的键必须带后缀 —— 否则这条测试没有意义"
+
+    # ⚠️ 只在本用例内替身, 且用 monkeypatch (退出时自动还原) —— 直接赋值会
+    # 泄漏到后面的用例, 让它们遍历不到自己的工作台 (踩过一次: 欠费那条因此假红)。
+    async def running():
+        return [key]
+
+    monkeypatch.setattr(workspace, "_running_workspaces", running)
+    now = time.time()
+    # 人早就不动了, 但**智能体一分钟前刚调过网关** (正在跑长任务)
+    workspace._last_seen[key] = now - 30 * 60
+    workspace._started_at[key] = now - 60 * 60
+    workspace._user_active[key] = now - 30 * 60
+    _mark_agent_active(owner, ago_s=60)
+
+    assert workspace.agent_last_active(owner) > 0, "按人查该有活动"
+    assert workspace.agent_last_active(key) == 0.0, "按工作台键查必然是 0 —— 正是坑所在"
+
+    stops = fake.stops
+    asyncio.run(workspace.reaper_tick(now))
+    asyncio.run(workspace.reaper_tick(now + config.WORK_RECLAIM_ASK_SEC + 1))
+    assert fake.stops == stops, "智能体正在干活却被回收 —— 事故重演"
+
+
+def test_reclaim_asks_first_and_waits_the_full_window(fake, monkeypatch):
+    """判据总有失灵的时候, 而代价是用户正干着的活当场没了。
+
+    先挂牌问一句, 120 秒没人表态才真收 —— 把"判错"从事故降级成打扰。
+    """
+    monkeypatch.setattr(config, "WORK_IDLE_STOP_MIN", 10)
+    monkeypatch.setattr(config, "WORK_AGENT_IDLE_STOP_MIN", 10)
+    monkeypatch.setattr(config, "WORK_RECLAIM_ASK_SEC", 120)
+    c, uid = _user("askfirst@test.local")
+    c.get("/api/work/route")
+    c.get("/api/work/route")
+
+    now = time.time()
+    workspace._last_seen[uid] = now - 30 * 60
+    workspace._started_at[uid] = now - 60 * 60
+    workspace._user_active[uid] = now - 30 * 60
+    _mark_agent_active(uid, ago_s=60 * 60)
+
+    stops = fake.stops
+    asyncio.run(workspace.reaper_tick(now))
+    assert fake.stops == stops, "第一轮就杀了 —— 没有给用户表态的机会"
+    assert uid in workspace._reclaim_asked, "该收却没挂牌"
+
+    asyncio.run(workspace.reaper_tick(now + 119))
+    assert fake.stops == stops, "窗口没走完就杀 (119 < 120)"
+
+    asyncio.run(workspace.reaper_tick(now + 121))
+    assert fake.stops == stops + 1, "窗口过了还不收 —— 闲置容器会一直烧机时"
+
+
+def test_keeping_it_alive_clears_the_pending_reclaim(fake, monkeypatch):
+    """点「继续用」要真的留住, 而且不能下一轮又弹出来。"""
+    monkeypatch.setattr(config, "WORK_IDLE_STOP_MIN", 10)
+    monkeypatch.setattr(config, "WORK_AGENT_IDLE_STOP_MIN", 10)
+    c, uid = _user("keepalive@test.local")
+    c.get("/api/work/route")
+    c.get("/api/work/route")
+
+    now = time.time()
+    workspace._last_seen[uid] = now - 30 * 60
+    workspace._started_at[uid] = now - 60 * 60
+    workspace._user_active[uid] = now - 30 * 60
+    _mark_agent_active(uid, ago_s=60 * 60)
+    asyncio.run(workspace.reaper_tick(now))
+    assert uid in workspace._reclaim_asked
+
+    r = c.get("/api/work/reclaim")
+    assert r.status_code == 200 and r.json()["asking"] is True
+    assert 0 < r.json()["seconds_left"] <= 120
+
+    assert c.post("/api/work/keep").status_code == 200
+    assert uid not in workspace._reclaim_asked, "点了继续用还挂着牌"
+    # 关键: 刷了在场时间, 所以下一轮不会立刻又挂上 (否则弹窗反复跳)
+    stops = fake.stops
+    asyncio.run(workspace.reaper_tick(time.time()))
+    assert uid not in workspace._reclaim_asked, "点完继续用下一轮又弹 —— 骚扰"
+    assert fake.stops == stops
+
+
+def test_heartbeat_keeps_a_long_lived_connection_alive(fake, monkeypatch):
+    """流量信号治不了长连接: 一条挂几分钟的 SSE 期间页面一个新请求都不发。
+
+    心跳是主动的, 不受连接形态影响 —— 这是"守着浏览器却被回收"的直接解药。
+    """
+    monkeypatch.setattr(config, "WORK_IDLE_STOP_MIN", 10)
+    monkeypatch.setattr(config, "WORK_AGENT_IDLE_STOP_MIN", 10)
+    c, uid = _user("heartbeat@test.local")
+    c.get("/api/work/route")
+    c.get("/api/work/route")
+
+    now = time.time()
+    workspace._last_seen[uid] = now - 30 * 60  # 三十分钟没有新请求 (长连接挂着)
+    workspace._started_at[uid] = now - 60 * 60
+    _mark_agent_active(uid, ago_s=60 * 60)
+
+    assert c.post("/api/work/heartbeat").status_code == 200
+    stops = fake.stops
+    asyncio.run(workspace.reaper_tick(time.time()))
+    asyncio.run(workspace.reaper_tick(time.time() + config.WORK_RECLAIM_ASK_SEC + 1))
+    assert fake.stops == stops, "发着心跳还被回收 —— 长连接场景没治好"
+
+
+def test_overdraft_is_reclaimed_without_asking(fake, monkeypatch):
+    """欠费不问 —— 那不是"要不要收"的问题, 问了也留不住, 白等 120 秒机时。
+
+    不走 /api/work/route 建容器: 那条路在全套运行时受前面用例的状态影响
+    (实测 running 为空, 断言假红三次)。这里直接把 reaper 的输入摆好, 用替身
+    容器列表 —— 测的就是"欠费要不要走确认窗"这一条判据本身。
+    """
+    key = "u_broke_test~comfyui"
+    owner = "u_broke_test"
+    monkeypatch.setattr(config, "OVERDRAFT_LIMIT_CREDITS", 0)
+    monkeypatch.setattr(credits, "balance", lambda who: -50 if who == owner else 1000)
+    monkeypatch.setattr(credits, "spend", lambda *a, **k: None)
+
+    stopped = []
+
+    async def running():
+        return [key]
+
+    async def stop(k):
+        stopped.append(k)
+
+    monkeypatch.setattr(workspace, "_running_workspaces", running)
+    monkeypatch.setattr(workspace, "_stop", stop)
+    workspace._reclaim_asked.pop(key, None)
+
+    now = time.time()
+    workspace._last_seen[key] = now  # 人明明在用
+    workspace._started_at[key] = now
+    workspace._user_active[key] = now
+
+    asyncio.run(workspace.reaper_tick(now))
+    assert stopped == [key], "欠费还先问一句 —— 问了也留不住, 白等 120 秒机时"
+    assert key not in workspace._reclaim_asked, "欠费不该挂牌"
