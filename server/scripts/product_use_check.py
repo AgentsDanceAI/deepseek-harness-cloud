@@ -62,10 +62,12 @@ USE = {
     "openhands": {
         "kind": "openhands",
         "send": "只回我两个字",
+        # 判据落在"发出去的话进了对话" + 页面长出了新内容 (见 driver 里的 grew)。
+        "want": ["只回我两个字"],
         # 沙箱起不来时页面停在"等待沙盒", 那不算能用 —— 判据要落在它真回了话上。
         # "正在连接…"同样不算能用 —— 它比"等待沙盒"晚一步, 但用户照样干不了事。
-        # 判据必须一路推到**她真回了话**。
-        "fail_extra": ["等待沙盒", "waiting for sandbox", "正在连接", "加载中"],
+        # **"加载中"不能当失败词**: 右侧那块面板常驻这三个字, 拿它判等于永远红。
+        "fail_extra": ["等待沙盒", "waiting for sandbox", "正在连接"],
         "why": "点新对话就 500: Agent Server Failed to start properly / 一直等待沙盒",
     },
 }
@@ -156,8 +158,16 @@ with sync_playwright() as p:
                 except Exception:
                     # 输入框还没出来 —— 让判读去看 text 里的"等待沙盒"报错
                     pass
-                page.wait_for_timeout(60000)
+                # 发完之后**盯着页面长没长出新东西** —— 那才是"她回话了"。
+                # 光看"没有失败词"不够: 消息没发出去时页面也很干净。
+                before = len(page.inner_text("body"))
+                for _ in range(40):
+                    page.wait_for_timeout(5000)
+                    if len(page.inner_text("body")) > before + 20:
+                        break
+                page.wait_for_timeout(5000)
                 e["text"] = page.inner_text("body")[-2000:]
+                e["grew"] = len(page.inner_text("body")) - before
 
             page.screenshot(path=str(out / (prod["id"] + ".png")))
         except Exception as ex:
@@ -253,7 +263,11 @@ def main() -> int:
         # (第一版拿整串比, 把 "USE-OK\n/opt/venv-..." 判成了失败, 而产品是好的)。
         flat = "".join(text.split())
         missing = [w for w in (want or []) if "".join(w.lower().split()) not in flat]
-        if hits:
+        grew = e.get("grew")
+        if grew is not None and grew <= 20:
+            print(f"  ✗ {pid:12s} 发出去之后页面没长东西 (+{grew} 字) —— 她没回话")
+            bad += 1
+        elif hits:
             print(f"  ✗ {pid:12s} 动手之后报错: {hits}")
             bad += 1
         elif want and missing:
