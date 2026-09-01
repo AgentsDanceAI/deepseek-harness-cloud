@@ -563,7 +563,7 @@ def test_reference_images_reach_both_input_styles():
     assert 'payload["input"]["img_url"] = image_url' in SERVER_MEDIA
     # 容器侧两个都发
     assert 'body["image_url"] = urls[0]' in MEDIA
-    assert 'body["media"] = [' in MEDIA and '"url": u' in MEDIA
+    assert 'body["media"] = (' in MEDIA and '"url": u' in MEDIA
 
 
 def test_media_item_shape_and_cap_match_the_server():
@@ -583,7 +583,7 @@ def test_multiple_reference_images_are_supported():
     # 工具描述与人格都要说得出来, 否则模型不会用
     assert "最多 8 张" in MEDIA
     j = ROOMS.index('"videographer"')
-    assert "数组" in ROOMS[j : j + 1000], "阿摄的人格没提可以给多张"
+    assert "多张" in ROOMS[j : j + 1200], "阿摄的人格没提可以给多张"
 
 
 def test_upload_sends_only_fields_the_server_reads():
@@ -660,7 +660,7 @@ def test_media_items_carry_a_type():
     # 第一张当首帧 —— 它决定第一帧长什么样; 其余当参考图
     i = MEDIA.index('body["media"]')
     seg = MEDIA[i : i + 300]
-    assert "if i == 0 else" in seg, "没有区分首帧与参考图"
+    assert "if len(urls) == 1" in seg, "没有按张数分形态 (首帧 / 全能参考互斥)"
 
 
 def test_long_tools_report_progress():
@@ -685,3 +685,57 @@ def test_progress_updates_in_place_not_as_new_rows():
     assert "tools.get(" in seg, "没有定位到原来那行"
     assert "syncToolSummary" in seg, "摘要没跟着走"
     assert "statusSet(" in seg, "状态条没跟着走"
+
+
+# ── 上游真实传参 (2026-09-01 老板给了千面官方示例 + 百炼两个 skill 包) ──────
+# 我此前梳理的多图规则是**推**出来的, 全错。坏图探测法实打对照:
+#     images=[坏图]      -> 400 InvalidParameter.TaskTypeConstraint  ← 真读了
+#     image_urls=[坏图]  -> 200 照收                                  ← 被静默忽略
+#     image_url=坏图     -> 400 (seedance 认, 但只吃单张)
+SERVER_MEDIA2 = (ROOT / "server" / "app" / "media.py").read_text(encoding="utf-8")
+
+
+def test_qianmian_uses_the_images_array():
+    """千面的参考素材字段是 `images` 数组 (供应商官方示例 + 坏图探测双重确认)。"""
+    i = SERVER_MEDIA2.index('payload = {"model": model, "prompt": prompt, "resolution"')
+    seg = SERVER_MEDIA2[i : i + 900]
+    assert 'payload["images"] = imgs' in seg, "还在用单数 image_url 发多图"
+    assert '"image_urls"' not in seg, "image_urls 是被上游忽略的字段"
+    # media 摊平成 images —— 容器侧只发一套, 服务端负责翻译到各上游
+    assert "media or []" in seg
+
+
+def test_ratio_is_passed_explicitly():
+    """上游默认自适应, 提示词里写"横屏"**不吃** (万相 3.0 官方协议)。"""
+    i = SERVER_MEDIA2.index('payload = {"model": model, "prompt": prompt, "resolution"')
+    assert 'payload["ratio"] = ratio' in SERVER_MEDIA2[i : i + 900]
+    assert 'body["ratio"] = ratio or "16:9"' in MEDIA, "容器侧没给默认画幅"
+
+
+def test_reference_and_frame_modes_are_mutually_exclusive():
+    """`reference_*` 与 `first_frame`/`last_frame` 同传直接报错 (官方协议)。
+
+    我原先写的"第一张当首帧, 其余当参考图" —— 传两张以上必炸, 而错误只落进
+    作业表, 界面上还是那句"出片失败"。
+    """
+    # 服务端兜一道 (容器侧改坏了也不至于打到上游)
+    i = SERVER_MEDIA2.index('if video_input_style(model) == "media"')
+    seg = SERVER_MEDIA2[i : i + 1200]
+    assert "reference_image" in seg and "first_frame" in seg
+    assert "last_frame 必须与 first_frame 同时给" in seg
+    # 容器侧: 一张走首帧, 多张全走参考, 不混
+    j = MEDIA.index('body["media"] = (')
+    cseg = MEDIA[j : j + 400]
+    assert "if len(urls) == 1" in cseg, "还在混着发"
+    assert '"reference_image"' in cseg
+
+
+def test_wan3_skill_packs_are_shipped_and_referenced():
+    """整包进镜像而不是把要点抄进人格 —— 抄会失真, 也没法随上游更新。"""
+    skills = TEAM / "skills"
+    assert (skills / "wan3-drama-prompt" / "SKILL.md").is_file()
+    assert (skills / "wan3-ecommerce-prompt" / "SKILL.md").is_file()
+    assert "COPY skills/ /opt/agents-team/skills/" in DOCKERFILE
+    # 分镜师被明确要求动笔前先读 —— 不引用等于白带
+    i = ROOMS.index('"storyboard"')
+    assert "wan3-drama-prompt" in ROOMS[i : i + 1200]
