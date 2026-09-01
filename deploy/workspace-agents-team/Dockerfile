@@ -55,6 +55,9 @@ RUN playwright install --with-deps chromium \
 WORKDIR /opt/agents-team
 COPY app/ /opt/agents-team/app/
 COPY web/ /opt/agents-team/web/
+# 万相 3.0 提示词技能包 (百炼官方给的短剧/电商两套, 各十万字)。
+# 整包放进来而不是把要点抄进人格: 抄会失真, 也没法随上游更新。
+COPY skills/ /opt/agents-team/skills/
 
 # 工作目录挂 NAS (products.py 的 mounts)。先建出来, 免得首轮 shell 落在一个
 # 不存在的 cwd 上 —— 那会让第一条命令莫名其妙失败。
