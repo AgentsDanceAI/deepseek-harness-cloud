@@ -794,3 +794,56 @@ def test_regenerating_an_existing_clip_is_blocked():
     vseg = ROOMS[j : j + 1600]
     assert "不要反复跑" in vseg or "不要靠反复重跑" in vseg
     assert "duration" in vseg, "人格没提 duration 必填"
+
+
+# ── 轮次锁卡死 + 发送前探活 (2026-09-01 老板: "怎么回事, 没了呢") ──────────
+# 连发四条「继续」零回应。查下来是两件事叠在一起。
+MAIN2 = (TEAM / "app" / "main.py").read_text(encoding="utf-8")
+
+
+def test_turn_lock_recovers_from_a_dead_turn():
+    """**锁必须能自己恢复。**
+
+    `async with _turn_lock` 包着一个流式生成器 —— 浏览器一断 (关标签页/切走/
+    网络抖动/容器被换), 生成器不保证被正常关闭, 锁就永远不释放。之后**所有
+    房间**的每一条消息都被"上一轮还在跑"挡死。实测: 直接向工作台发一条, 回的
+    就是那句话, 事件总数 1。
+    """
+    assert "_turn_started" in MAIN2, "没有记录这一轮的开始时间, 无从判断锁死没死"
+    assert "TURN_STALE_S" in MAIN2
+    i = MAIN2.index("async def send")
+    seg = MAIN2[i : i + 2600]
+    assert "stale" in seg and "_turn_lock.release()" in seg, "陈旧锁不会被接管"
+    # finally 里无条件释放 —— 不依赖 async with 的正常退出路径
+    j = seg.index("finally:")
+    assert "_turn_lock.release()" in seg[j : j + 300]
+    # 陈旧阈值要大于最慢的一轮 (出片一条几分钟, 一棒十几镜可能半小时)
+    assert '"2400"' in MAIN2 or "2400" in MAIN2
+
+
+def test_lock_busy_message_says_how_long():
+    """ "上一轮还在跑"要带秒数 —— 不然用户分不清"真在跑"和"卡死了"。"""
+    i = MAIN2.index("async def send")
+    seg = MAIN2[i : i + 2600]
+    assert "上一轮还在跑" in seg and "秒" in seg
+
+
+def test_send_checks_the_backend_is_alive_first():
+    """容器被回收/换版后浏览器手里那条连接是死的, fetch 在 SSE 循环**之前**就
+    失败 —— 屏幕上只留一条自己的消息, 什么都不发生。探活一个 GET 很便宜,
+    换来的是"说得出为什么"。"""
+    i = WEB.index("async function submit")
+    seg = WEB[i : i + 1800]
+    assert "/api/rooms'" in seg or '/api/rooms"' in seg, "发送前没有探活"
+    assert "waitForBackend" in seg, "探活失败后没有重连"
+    assert "云电脑连接断了" in seg
+
+
+def test_time_is_imported_for_the_stale_check():
+    """陈旧判断要 time.time() —— 而 main.py 原先没 import time。
+
+    同款坑今晚栽过一次 (agent.py 加了 asyncio.sleep 却没 import asyncio,
+    重试一触发就 NameError, 平时全绿)。缺 import 不影响语法, 只在真触发时炸。
+    """
+    assert "\nimport time\n" in MAIN2
+    assert "time.time()" in MAIN2

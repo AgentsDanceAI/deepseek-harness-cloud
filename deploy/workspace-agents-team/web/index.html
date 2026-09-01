@@ -449,6 +449,24 @@ async function submit() {
   if (!text || busy || !cur) return;
   busy = true; send.disabled = true;
   msgEl('user', text);
+  // ⚠️ 发之前先确认后端还在。容器被回收/换版之后, 浏览器手里那条连接是死的,
+  // fetch 会直接失败 —— 而失败发生在 SSE 循环**之前**, 于是屏幕上只留一条
+  // 自己的消息, 什么都不发生 (2026-09-01 老板: "怎么回事, 没了呢")。
+  // 探活便宜 (一个 GET), 换来的是"说得出为什么"。
+  try {
+    const ping = await fetch('/api/rooms', { credentials: 'same-origin' });
+    if (!ping.ok) throw new Error('HTTP ' + ping.status);
+  } catch (e) {
+    const el = msgEl('system', '云电脑连接断了 — 正在重连…');
+    el.querySelector('.txt').classList.add('err');
+    const ok = await waitForBackend(6);
+    setText(el.querySelector('.txt'),
+            ok ? '连接已恢复, 请再发一次。' : '连接没能恢复 — 刷新页面会重新开机, 文件和进度都在。',
+            false);
+    if (ok) el.querySelector('.txt').classList.remove('err');
+    busy = false; send.disabled = false; input.focus();
+    return;
+  }
   statusStart('已发出, 等第一个工位开口…');
   input.value = ''; input.style.height = 'auto';
 

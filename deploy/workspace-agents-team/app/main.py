@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import os
 import pathlib
+import time
 from dataclasses import asdict
 
 from fastapi import FastAPI, Request
@@ -29,6 +30,12 @@ store = rooms.Store()
 #: 就是产品坏了。跨房间也串行: 它们共用同一个容器和 /workspace, 真并行起来
 #: 会互相踩文件。
 _turn_lock = asyncio.Lock()
+#: 这一轮是什么时候开始的 (0 = 空闲)。锁本身不带时间戳, 而"锁卡死了"只能靠
+#: 时间判断 —— 见 send() 里的说明。
+_turn_started: float = 0.0
+#: 超过这么久还占着锁, 认定上一轮已经死了, 新的一轮可以强行接管。
+#: 取值要大于最慢的一轮: 出片一条几分钟, 一棒十几个镜头可能跑半小时。
+TURN_STALE_S = float(os.environ.get("AGENTS_TEAM_TURN_STALE", "2400"))
 
 
 @app.get("/api/health")
@@ -241,15 +248,42 @@ async def send(room_id: str, request: Request) -> StreamingResponse:
         if not text:
             yield _sse({"type": "error", "message": "空消息"})
             return
-        if _turn_lock.locked():
-            yield _sse({"type": "error", "message": "上一轮还在跑, 等它结束再发。"})
+        # ⚠️ 锁必须**能自己恢复**。这里包的是一个流式生成器: 浏览器一断
+        # (关标签页/切走/网络抖动/容器被换), 生成器不保证被正常关闭, 锁就永远
+        # 不释放 —— 之后**所有房间**的每一条消息都被"上一轮还在跑"挡死, 而界面
+        # 上那句话还看不见, 表现成"消息发出去就没了"。
+        # 2026-09-01 老板实测: 连发四条「继续」零回应, 全卡在这把锁上。
+        #
+        # 两道保险:
+        #   · 陈旧锁自动放行 —— 超过 TURN_STALE_S 没有心跳就认定上一轮已经死了;
+        #   · finally 里无条件释放, 不依赖 async with 的正常退出路径。
+        global _turn_started
+        stale = _turn_started and (time.time() - _turn_started) > TURN_STALE_S
+        if _turn_lock.locked() and not stale:
+            waited = int(time.time() - (_turn_started or time.time()))
+            yield _sse({"type": "error",
+                        "message": f"上一轮还在跑 ({waited} 秒), 等它结束再发。"})
             return
-        async with _turn_lock:
+        if stale:
+            # 上一轮已经死了 (多半是浏览器断开时生成器没被关掉)。强行接管。
+            try:
+                _turn_lock.release()
+            except RuntimeError:
+                pass
+        await _turn_lock.acquire()
+        _turn_started = time.time()
+        try:
             store.add(room_id, "user", text)
             store.save()
             runner = _run_relay if room.mode == "relay" else _run_room
             async for ev in runner(room, model):
                 yield _sse(ev)
+        finally:
+            _turn_started = 0.0
+            try:
+                _turn_lock.release()
+            except RuntimeError:
+                pass
 
     return StreamingResponse(
         stream(),
