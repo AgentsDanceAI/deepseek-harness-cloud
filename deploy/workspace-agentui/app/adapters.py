@@ -41,6 +41,17 @@ class Adapter:
     def stdin_payload(self, prompt: str) -> str | None:
         return None
 
+    @property
+    def term_cmd(self) -> str:
+        """点开「终端」标签页时先替用户敲的那条命令。
+
+        默认就是这个 CLI 本身 (claude/codex/gemini 都是敲名字就进交互界面)。
+        但**有的接法 exe 是解释器** (OpenManus/CrewAI 是 Python 库, 我们跑的是
+        自己的 runner) —— 那时直接敲 exe 会掉进 Python REPL, 得由适配器自己说
+        终端里该敲什么。
+        """
+        return self.exe
+
     def feed(self, line: str) -> list[dict]:  # pragma: no cover - 被子类覆盖
         raise NotImplementedError
 
@@ -248,4 +259,73 @@ def _as_text(v) -> str:
     return ""
 
 
-ADAPTERS = {"claude": ClaudeAdapter, "codex": CodexAdapter, "gemini": GeminiAdapter}
+class JsonlRunnerAdapter(Adapter):
+    """跑我们自己写的 runner, 它**直接吐这套统一事件**, 一行一个 JSON。
+
+    与上面三个的区别只在事件从哪来: 那三个 CLI 自带 JSON 流 (--output-format
+    stream-json / --json), 而 OpenManus 与 CrewAI 是 Python 库, 没有这种流。
+    去刮它们的控制台文本等于把排版当协议 —— 所以改成在 runner 里挂它们自己的
+    钩子 (loguru sink / Crew 回调) 直接产出事件。runner 见
+    deploy/workspace-frameworks/runner/。
+
+    认不出的行照样走 raw: runner 的 stderr 里还有框架自己的输出, 而**丢掉一行
+    的症状是"偶尔少半句话"**, 查起来毫无线索。
+    """
+
+    def __init__(self, name: str, exe: str, runner: str, term: str) -> None:
+        super().__init__(name=name, exe=exe)
+        self._runner = runner
+        self._term = term
+
+    def argv(self, prompt: str, resume: str | None) -> list[str]:
+        # 没有 --resume: 这两个框架都是**一轮一个进程**, 上下文不由 CLI 端保存。
+        # 硬塞一个假的会话 id 只会让前端以为能续上。
+        return [self.exe, self._runner, prompt]
+
+    @property
+    def term_cmd(self) -> str:
+        return self._term
+
+    def feed(self, line: str) -> list[dict]:
+        try:
+            ev = json.loads(line)
+        except json.JSONDecodeError:
+            return [{"t": "raw", "line": line[:400]}]
+        if not isinstance(ev, dict) or "t" not in ev:
+            return [{"t": "raw", "line": line[:400]}]
+        if ev["t"] == "done":
+            self.usage = ev.get("usage") or {}
+        return [ev]
+
+
+class OpenManusAdapter(JsonlRunnerAdapter):
+    def __init__(self) -> None:
+        super().__init__(
+            name="OpenManus",
+            exe="/opt/venv-openmanus/bin/python",
+            runner="/opt/dsh/openmanus_run.py",
+            # 终端里给的是**它自己的交互入口**, 不是我们的 runner —— 用户在终端
+            # 里要的是原汁原味的 OpenManus。
+            term="cat /etc/motd 2>/dev/null; cd /opt/openmanus && /opt/venv-openmanus/bin/python main.py",
+        )
+
+
+class CrewAIAdapter(JsonlRunnerAdapter):
+    def __init__(self) -> None:
+        super().__init__(
+            name="CrewAI",
+            exe="/opt/venv-crewai/bin/python",
+            runner="/opt/dsh/crewai_run.py",
+            # 终端里落到工程目录: 用户在这儿 `crewai run` / 改 yaml, 跑的和左边
+            # 对话是同一份 crew。
+            term="cat /etc/motd 2>/dev/null; cd /workspace/crew",
+        )
+
+
+ADAPTERS = {
+    "claude": ClaudeAdapter,
+    "codex": CodexAdapter,
+    "gemini": GeminiAdapter,
+    "openmanus": OpenManusAdapter,
+    "crewai": CrewAIAdapter,
+}

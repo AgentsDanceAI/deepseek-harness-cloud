@@ -189,3 +189,93 @@ def test_session_injection_covers_the_upstream_direction(product_id):
     var = {"dify": "$dsh_up", "coze": "$dsh_cookie", "hermes": "$hm_up"}[product_id]
     boot = products.boot_script(product_id)
     assert f"proxy_set_header Cookie {var}" in boot, "少了上游方向的 cookie 注入"
+
+
+# ---- OpenManus / CrewAI: 同一套工作台外壳的另外两格 -------------------------
+#
+# 老板 2026-09-02: "CrewAI 和 OpenManus 包类似咱们为 claude 和 codex 建的前端啊"。
+# 原先这两格只有一个浏览器终端 —— 框架装好了、网关配好了, 但用户打开看到的是
+# 一个黑底提示符。下面钉的是"换成工作台"之后**不许退回去**的几条。
+
+FRAMEWORK_SLOTS = ("openmanus", "crewai")
+
+
+@pytest.mark.parametrize("product_id", FRAMEWORK_SLOTS)
+def test_framework_slots_serve_the_workbench_not_a_bare_terminal(product_id):
+    """端口/探针/启动命令三处要一起指向工作台, 少一处就是静默半坏。
+
+    只改端口不改启动命令 = 8080 上没人听, 冷启动一直 502;
+    只改启动命令不改探针 = 探 "/" 会在后端起来之前放人进来 (Dify/Coze 栽过)。
+    """
+    prod = products.registry()[product_id]
+    assert prod.port == 8080, "工作台在 8080; 7681 是 ttyd, 它已经退到反代后面了"
+    assert prod.ready_path == "/api/health", "探首页等于只探到静态文件"
+
+    boot = products.boot_script(product_id)
+    assert "uvicorn app.main:app" in boot, "起的不是工作台"
+    assert "exec ttyd" not in boot, "又退回成一个裸终端了"
+    # uvicorn 必须从 /srv 起 —— 上一行 cd 去了 /workspace, 不回来就是
+    # ModuleNotFoundError, 而表现是容器起不来。
+    assert boot.index("cd /srv") < boot.index("uvicorn app.main:app")
+
+
+@pytest.mark.parametrize("product_id", FRAMEWORK_SLOTS)
+def test_framework_slots_open_only_their_own_cli(product_id):
+    """这一格开放的必须只有它自己那个框架。
+
+    镜像里根本没有 claude/codex/gemini —— 露出来就是用户切过去发一句话、
+    进程起不来, 而前端只会显示"发了消息没反应"。
+    """
+    env = products.env_for(product_id, "tok")
+    assert env["DSH_DEFAULT_CLI"] == product_id
+    assert env["DSH_ENABLED_CLIS"] == product_id
+
+
+@pytest.mark.parametrize("product_id", FRAMEWORK_SLOTS)
+def test_framework_model_is_pinned_for_litellm_too(product_id):
+    """CrewAI 走 litellm, **不给型号就用它自己的默认** (gpt-4o-mini)。
+
+    网关只放行在售目录里的型号 —— 表现是发一句话回一条 404, 看起来像"配置没
+    生效", 其实是型号名不对。
+    """
+    env = products.env_for(product_id, "tok")
+    assert model_catalog.resolve(env["OPENAI_MODEL_NAME"]) is not None
+
+
+def test_openmanus_browser_mcp_is_off():
+    """不关掉的话它每次启动都去连 Browser Use 的 MCP, 而镜像里没有 uvx。
+
+    结果是用户第一眼看到一条红 ERROR, 而它其实无害。这是上游自带的开关,
+    不是我们打的补丁。
+    """
+    assert products.env_for("openmanus", "tok")["OPENMANUS_DISABLE_BROWSER_USE"] == "1"
+
+
+@pytest.mark.parametrize("product_id", FRAMEWORK_SLOTS)
+def test_framework_terminal_does_not_drop_into_a_python_repl(product_id):
+    """终端标签页起的命令由适配器给, 不能直接拿 exe。
+
+    这两格的 exe 是 **Python 解释器** (我们跑的是自己的 runner) —— 直接敲它,
+    用户点开终端看到的是 `>>>`, 而不是这个框架。
+    """
+    import importlib.util
+    import pathlib
+    import sys
+
+    root = pathlib.Path(__file__).resolve().parents[2]
+    spec = importlib.util.spec_from_file_location(
+        "dsh_adapters", root / "deploy" / "workspace-agentui" / "app" / "adapters.py"
+    )
+    mod = importlib.util.module_from_spec(spec)
+    # **先登记进 sys.modules 再执行**: 文件里有 from __future__ import annotations,
+    # 于是 @dataclass 解析注解时要回头找自己所在的模块 —— 找不到就是一句
+    # "'NoneType' object has no attribute '__dict__'", 跟被测代码毫无关系。
+    sys.modules[spec.name] = mod
+    spec.loader.exec_module(mod)
+
+    ad = mod.ADAPTERS[product_id]()
+    assert ad.term_cmd != ad.exe, "终端里敲解释器 = 掉进 Python REPL"
+    assert "/opt/venv-" in ad.exe, "runner 要用这一格自己的虚拟环境跑"
+    # runner 吐的就是统一事件, 认不出的行不许丢 —— 丢掉的症状是"偶尔少半句话"。
+    assert ad.feed('{"t":"text","text":"x"}') == [{"t": "text", "text": "x"}]
+    assert ad.feed("不是 json")[0]["t"] == "raw"

@@ -10,6 +10,20 @@
 # ChatCompletionMessageFunctionToolCall 就 import 失败)。装进同一个 site-packages
 # 时后装的那个把先装的顶掉, 而**症状出现在用户敲第一条命令的时候**, 不是构建时。
 # 合并镜像的收益 (共用一份 ECI 缓存、少一次冷启动拉取) 与隔离并不冲突。
+# ---- 前端要的两个 js 在构建期取, 运行时不碰网络 ----
+# 用 CDN 的话: 实例出网抖一下界面就白屏, 而且等于把用户的浏览器指向第三方。
+# (与 workspace-agentui 同一套, 版本也钉一样的。)
+FROM node:22-bookworm-slim AS vendor
+ARG XTERM_VERSION=5.5.0
+ARG MARKED_VERSION=15.0.7
+WORKDIR /v
+RUN npm i --no-fund --no-audit "@xterm/xterm@${XTERM_VERSION}" "marked@${MARKED_VERSION}" \
+ && mkdir -p /out \
+ && cp node_modules/@xterm/xterm/lib/xterm.js /out/xterm.js \
+ && cp node_modules/@xterm/xterm/css/xterm.css /out/xterm.css \
+ && cp node_modules/marked/marked.min.js /out/marked.js \
+ && test -s /out/xterm.js && test -s /out/marked.js
+
 FROM python:3.12-slim
 
 RUN apt-get update -qq && apt-get install -y -qq --no-install-recommends \
@@ -60,6 +74,45 @@ RUN curl -fsSL -o /usr/local/bin/ttyd \
  && chmod +x /usr/local/bin/ttyd \
  && ttyd --version
 
-WORKDIR /workspace
-EXPOSE 7681
+# ---- 工作台外壳 ----
+# 老板 2026-09-02: "CrewAI 和 OpenManus 包类似咱们为 claude 和 codex 建的前端啊"。
+# 用的就是**同一份** workspace-agentui/app + web (构建上下文取 deploy/), 不复制
+# 一份代码 —— 复制出来的第二份必然漂, 而漂的结果是两边界面不一样、修了一边。
+#
+# 这两个框架没有 JSON 流可吃 (它们是 Python 库, 不是带 --output-format 的 CLI),
+# 所以事件由 runner/ 里那两个脚本产出: 挂 OpenManus 的 loguru sink、CrewAI 的
+# Crew 回调, 直接吐统一事件。**不去刮控制台文本** —— 那等于把排版当协议。
+RUN python -m venv /opt/venv-ui \
+ && /opt/venv-ui/bin/pip install --no-cache-dir --upgrade pip \
+ && /opt/venv-ui/bin/pip install --no-cache-dir \
+      "fastapi==0.115.6" "uvicorn[standard]==0.34.0" "httpx==0.28.1" "websockets==14.1"
+
+COPY workspace-agentui/app /srv/app
+COPY workspace-agentui/web /srv/web
+COPY --from=vendor /out /srv/web/vendor
+COPY workspace-frameworks/runner /opt/dsh
+
+# CrewAI 的工程**在构建期生成好**, 开机只复制。
+# 现场跑 `crewai create` 要几十秒 (它还会 uv 装依赖), 那几十秒全落在用户第一次
+# 打开的等待里; 而且现场生成失败的话, 用户看到的是一个空工作台。
+# 换掉它自带的两份 yaml: 脚手架默认那套是"研究 AI LLMs 出长报告", 一句话的问题
+# 也要跑三分钟。**键名沿用它生成的** (crew.py 里 @agent/@task 按名字取配置) ——
+# 换键名就得去改它生成的代码, 那是自找的耦合。
+RUN cd /tmp \
+ && /opt/venv-crewai/bin/crewai create crew dsh_crew --skip-provider --classic \
+ && mv /tmp/dsh_crew /opt/dsh/crew-template \
+ && cp /opt/dsh/crew_agents.yaml /opt/dsh/crew-template/src/dsh_crew/config/agents.yaml \
+ && cp /opt/dsh/crew_tasks.yaml /opt/dsh/crew-template/src/dsh_crew/config/tasks.yaml \
+ && test -f /opt/dsh/crew-template/src/dsh_crew/crew.py \
+ && echo "[build] CrewAI 工程模板已就位"
+
+# runner 必须**当场证明能起来**, 不是等用户发第一句话才炸。
+# 只验到"导入并接上钩子"为止 —— 再往下就要真调模型了, 构建期不该花钱。
+RUN /opt/venv-openmanus/bin/python -c "import ast,sys; ast.parse(open('/opt/dsh/openmanus_run.py').read()); print('[build] openmanus runner 语法 OK')" \
+ && /opt/venv-crewai/bin/python -c "import ast; ast.parse(open('/opt/dsh/crewai_run.py').read()); print('[build] crewai runner 语法 OK')" \
+ && /opt/venv-ui/bin/python -c "import sys; sys.path.insert(0,'/srv'); from app import adapters; a=adapters.ADAPTERS['openmanus'](); b=adapters.ADAPTERS['crewai'](); print('[build] 适配器可用:', a.name, b.name)"
+
+# **回 /srv**: uvicorn 要从这里才 import 得到 app。
+WORKDIR /srv
+EXPOSE 8080
 ENTRYPOINT ["/usr/bin/tini","--"]

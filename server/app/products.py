@@ -2255,7 +2255,10 @@ def registry() -> dict[str, Product]:
             name="OpenManus",
             image=config.FRAMEWORKS_IMAGE_REF,
             image_ref=config.FRAMEWORKS_IMAGE_REF,
-            port=7681,
+            # 8080 是工作台外壳 (ttyd 退到它后面, 由 /terminal 反代出去)。
+            port=8080,
+            # 探后端, 别探首页 —— 首页是静态文件, 后端没起来照样 200。
+            ready_path="/api/health",
             mem_mb=config.FRAMEWORKS_MEM_LIMIT_MB,
             cpus=config.FRAMEWORKS_CPUS,
             domain=config.OPENMANUS_DOMAIN,
@@ -2267,7 +2270,10 @@ def registry() -> dict[str, Product]:
             name="CrewAI",
             image=config.FRAMEWORKS_IMAGE_REF,
             image_ref=config.FRAMEWORKS_IMAGE_REF,
-            port=7681,
+            # 8080 是工作台外壳 (ttyd 退到它后面, 由 /terminal 反代出去)。
+            port=8080,
+            # 探后端, 别探首页 —— 首页是静态文件, 后端没起来照样 200。
+            ready_path="/api/health",
             mem_mb=config.FRAMEWORKS_MEM_LIMIT_MB,
             cpus=config.FRAMEWORKS_CPUS,
             domain=config.CREWAI_DOMAIN,
@@ -2647,32 +2653,39 @@ def _langchain_boot() -> str:
 #: 黑终端 —— 不告诉他能敲什么, 这个产品跟"给了台空机器"没区别。
 _FRAMEWORK_HELLO = {
     "openmanus": (
-        "OpenManus —— 开源版 Manus, 一个通用智能体。模型和网关已经配好 "
-        "(config/config.toml), 直接开聊:\n"
-        "    cd /opt/openmanus && python main.py\n"
-        "换个跑法 (都要先 cd /opt/openmanus): python run_flow.py 多智能体编排 / "
-        "python run_mcp.py MCP 服务\n"
+        "OpenManus —— 开源版 Manus, 一个通用智能体。**左边直接说话就行**, "
+        "模型和网关都配好了。\n"
+        "这个终端是留给你手动跑的 (上面已经替你进了它的交互入口):\n"
+        "    cd /opt/openmanus && python main.py     # 就是上面这个\n"
+        "    python run_flow.py                      # 多智能体编排\n"
+        "    python run_mcp.py                       # MCP 服务\n"
     ),
     "crewai": (
-        "CrewAI —— 把智能体组成一支船员队, 各有角色和任务。模型和网关已配好 "
-        "(环境变量里)。三步开工:\n"
-        "    crewai create crew my_crew      # 生成脚手架\n"
-        "    cd my_crew                      # 改 config/agents.yaml 和 tasks.yaml\n"
-        "    crewai run                      # 跑起来\n"
+        "CrewAI —— 把智能体组成一支船员队, 各有角色和任务。**左边直接说话就行**: "
+        "你说的话会作为输入交给 /workspace/crew 那支队伍。\n"
+        "队伍是可以改的, 改完左边和这里跑的都是同一份:\n"
+        "    src/dsh_crew/config/agents.yaml   # 谁, 什么角色\n"
+        "    src/dsh_crew/config/tasks.yaml    # 干什么, 要什么产出\n"
+        "    crewai run                        # 在终端里手动跑一轮\n"
         "工具包按需装: pip install crewai-tools (没预装 —— 它拖一大串, 该由你按用途选)\n"
     ),
 }
 
 
 def _frameworks_boot(product_id: str) -> str:
-    """OpenManus / CrewAI: 一个浏览器终端, 框架和网关都配好了。
+    """OpenManus / CrewAI: 起**工作台外壳** (与 claude-code / codex 同一套)。
+
+    老板 2026-09-02: "CrewAI 和 OpenManus 包类似咱们为 claude 和 codex 建的
+    前端啊"。原先这一格只有一个浏览器终端 —— 框架装好了、网关配好了, 但用户
+    打开看到的是一个黑底提示符, 那不叫产品。现在左边是对话、右边是文件与版本,
+    终端退到一个标签页里 (由外壳的 /terminal 反代 ttyd)。
 
     **OpenManus 的配置必须在这里写**: 它 import 时就构造 Config(), 读的是
-    config/config.toml —— 镜像里烤的是占位值, 不换成这个用户的令牌, 他敲第一条
-    命令就是 401。
+    config/config.toml —— 镜像里烤的是占位值, 不换成这个用户的令牌, 他发第一句
+    话就是 401。
 
-    ttyd 的启动命令是**必填**的 (少了它自己会说 "missing start command" 然后
-    退出); 这里给的是 bash, 先打一段说明再交给用户。
+    CrewAI 的工程从**构建期就备好的模板**复制 (现场 `crewai create` 要几十秒,
+    那几十秒全落在用户第一次打开的等待里)。已经有了就不动 —— 那是他改过的。
     """
     hello = _FRAMEWORK_HELLO[product_id].replace("'", "'\\''")
     venv = "openmanus" if product_id == "openmanus" else "crewai"
@@ -2691,16 +2704,23 @@ def _frameworks_boot(product_id: str) -> str:
         '"$DSH_MODEL" "$OPENAI_BASE_URL" "$OPENAI_API_KEY" '
         "> /opt/openmanus/config/config.toml\n"
         f"printf '%s' '{hello}' > /etc/motd\n"
-        # ttyd: -W 允许写入 (只读终端没法用), 起始目录是 NAS 上的 /workspace
-        # **PATH 必须写进 /etc/profile.d, 不能只在这里 export**: ttyd 起的是
+        # CrewAI 的工程: 没有才复制, 有了就是用户自己的。
+        "[ -d /workspace/crew ] || cp -r /opt/dsh/crew-template /workspace/crew\n"
+        # **PATH 必须写进 /etc/profile.d, 不能只在这里 export**: 终端标签页起的是
         # `bash -l` (登录 shell), 它会重新加载 /etc/profile 把我们 export 的 PATH
         # 冲掉 —— 用户敲 python 用的是系统那个, 于是
         # "ModuleNotFoundError: No module named 'pydantic'" (2026-09-01 老板实测撞到)。
         # 写进 profile.d 之后, 他后面开的每一个 shell 也都对。
         f"printf 'export PATH=/opt/venv-{venv}/bin:$PATH\\n' > /etc/profile.d/dsh-venv.sh\n"
         f"export PATH=/opt/venv-{venv}/bin:$PATH\n"
-        "exec ttyd -W -p 7681 -t titleFixed='DSH Cloud' "
-        "bash -lc 'cat /etc/motd; cd /workspace; exec bash'\n"
+        # 空 git 仓库, 让「版本」标签页一开始就有东西可看 (用户改了 yaml 立刻
+        # 能看到 diff)。已经是仓库就不动。
+        "cd /workspace && (git rev-parse --git-dir >/dev/null 2>&1 || git init -q) || true\n"
+        # **回 /srv 再起**: 上一行把工作目录换到了 /workspace, 而 uvicorn 要从
+        # /srv 才 import 得到 app —— 不回来就是 ModuleNotFoundError, 容器起不来
+        # (agentui 那边同一处注释, 是踩过的)。
+        "cd /srv\n"
+        "exec /opt/venv-ui/bin/uvicorn app.main:app --host 0.0.0.0 --port 8080\n"
     )
 
 
@@ -2765,6 +2785,25 @@ def env_for(product_id: str, token: str, secret: str = "") -> dict[str, str]:
             "OPENAI_BASE_URL": f"{gateway}/llm/v1",
             "OPENAI_API_KEY": token,
             "OPENAI_API_BASE": f"{gateway}/llm/v1",  # litellm 认的是这个名字
+            # **CrewAI 不给型号就用它自己的默认** (litellm 的 gpt-4o-mini), 而网关
+            # 只放行目录里的型号 —— 表现是发一句话回一条 404, 不是"配置没生效"。
+            "OPENAI_MODEL_NAME": _codecli_model("codex"),
+            # 上游自带的开关。不给的话 Manus 每次启动都去连 Browser Use 的 MCP,
+            # 而镜像里没有 uvx —— 用户第一眼看到的就是一条红 ERROR, 而它其实
+            # 无害。装 uvx 会连一整套浏览器一起拖进来, 关掉才是对的。
+            "OPENMANUS_DISABLE_BROWSER_USE": "1",
+            # ---- 工作台外壳 (与 claude-code / codex 同一套) ----
+            "DSH_DEFAULT_CLI": product_id,
+            "DSH_ENABLED_CLIS": product_id,
+            # **不降权**: 这两个是 Python 库, 没有 Claude Code 那条"不许以 root
+            # 跑"的限制; 而 NAS 挂进来的目录属主是 root, 降权就得先 chown 一大片。
+            # 少一步就少一类"它只在日志里抱怨一句然后照常跑"的故障。
+            "DSH_AGENT_UID": "0",
+            "DSH_AGENT_HOME": "/root",
+            "DSH_PRODUCT_ID": product_id,
+            "DSH_CLOUD_TOKEN": token,
+            "DSH_GATEWAY_BASE": gateway,
+            "DSH_CREW_DIR": "/workspace/crew",
         }
     if product_id == "langchain":
         return {

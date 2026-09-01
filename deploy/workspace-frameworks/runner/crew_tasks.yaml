@@ -1,0 +1,15 @@
+research_task:
+  description: >
+    针对用户的问题做必要的梳理: {topic}
+    今年是 {current_year}。只列要点, 不要展开成文章。
+  expected_output: >
+    回答这个问题所需的要点, 最多 5 条。问题很简单时只给 1 条。
+  agent: researcher
+
+reporting_task:
+  description: >
+    根据上一步的要点, 直接回答用户的问题: {topic}
+  expected_output: >
+    对用户问题的直接回答。**长度随问题走** —— 一句话能答完的就只写一句话,
+    不要凑字数、不要加"总结"小标题。用 markdown, 不要包在 ``` 里。
+  agent: reporting_analyst

@@ -48,10 +48,14 @@ ENABLED_CLIS = [c for c in os.environ.get("DSH_ENABLED_CLIS", DEFAULT_CLI).split
 app = FastAPI(title="DSH Cloud Agent")
 
 
-def _agent_exe() -> str:
-    """这一格默认驱动的那个 CLI 的可执行文件。"""
+def _agent_term_cmd() -> str:
+    """终端标签页起来时先替用户敲的那条命令。
+
+    **不能直接用 exe**: 有的接法 exe 是 Python 解释器 (OpenManus/CrewAI 走的是
+    我们自己的 runner), 敲它只会掉进 Python REPL。由适配器自己说。
+    """
     ad = adapters.ADAPTERS.get(DEFAULT_CLI)
-    return ad().exe if ad else "/usr/local/bin/claude"
+    return ad().term_cmd if ad else "/usr/local/bin/claude"
 
 
 def _drop(argv: list[str]) -> list[str]:
@@ -341,7 +345,7 @@ async def _ensure_ttyd() -> None:
         # 卖的就是"点开就能用", 让人先认出提示符再想起来敲 claude 是多一道坎。
         # agent 退出后 `exec bash -l` 兜住 —— 否则退出即断线, 用户想在同一个终端
         # 里跑个 git 都得重开标签页。
-        "bash", "-lc", f"{_agent_exe()}; exec bash -l",
+        "bash", "-lc", f"{_agent_term_cmd()}; exec bash -l",
     ]
     if AGENT_UID:
         # 与 agent 子进程同一个身份: 用户在终端里手敲 claude 时会撞上同一堵
