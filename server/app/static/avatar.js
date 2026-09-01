@@ -62,8 +62,19 @@
     fill($("#avPerson"), c.d.persons || [], c.d.person_default);
     fill($("#avVoice"), (c.d.voices || []).map(v => v.id), c.d.voice_default,
          (c.d.voices || []).reduce((m, v) => (m[v.id] = v.name, m), {}));
-    $("#avBg").src = `/api/avatar/bg.png?v=${c.d.bg_ver || 0}`;
+    loadBg();
     layout();
+  }
+
+  /* 背景**跟着形象走**: 视频层是按这个形象的脸框贴上去的, 而上传形象的脸框是
+     它自己那张图的坐标 —— 背景取错就是一张脸浮在不属于它的身体上。
+     ver 记在每个形象名下: 同一个 id 重传一张新图时, 全局 bg_ver 不会变, 只靠
+     它打不穿浏览器缓存 (会看到上一张脸)。 */
+  const bgVer = {};
+  function loadBg() {
+    const p = $("#avPerson").value || "";
+    const v = bgVer[p] || st.cfg?.bg_ver || 0;
+    $("#avBg").src = `/api/avatar/bg.png?person=${encodeURIComponent(p)}&v=${v}`;
   }
 
   function fill(sel, ids, def, names) {
@@ -88,7 +99,8 @@
     v.style.width = crop.w * 100 + "%";
     v.style.height = crop.h * 100 + "%";
   }
-  $("#avPerson").addEventListener("change", layout);
+  // 换形象要**同时**换背景和重算视频层位置 —— 只换一个就是错位。
+  $("#avPerson").addEventListener("change", () => { loadBg(); layout(); });
 
   /* ---------- 上传形象 ---------- */
   $("#avUpload").addEventListener("change", async (e) => {
@@ -106,6 +118,8 @@
     (st.cfg.person_crops = st.cfg.person_crops || {})[d.id] = d.crop;
     fill($("#avPerson"), st.cfg.persons, st.cfg.person_default);
     $("#avPerson").value = d.id;
+    bgVer[d.id] = Date.now();            // 刚传的图, 别让缓存吐上一张
+    loadBg();
     layout();
     status(t("avatar.upload_ok", "形象已就绪"));
   });
