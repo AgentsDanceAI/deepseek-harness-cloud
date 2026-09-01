@@ -15,7 +15,7 @@
 
   const RT_CODEC = 'video/mp4; codecs="avc1.42E01E, mp4a.40.2"';
   const st = {
-    sess: null, cfg: null, ws: null, ear: null,
+    sess: null, cfg: null, ws: null, ear: null, history: [], sid: 0,
     ms: null, sb: null, queue: [], playing: false,
     t0: null, timer: null, rate: 0,
   };
@@ -189,10 +189,56 @@
         status(t("avatar.busy", "通道占线，稍后再试"), true); stopCall();
       } else if (m.type === "error") {
         status(m.message || t("avatar.error", "出错了"), true);
+      } else if (m.type === "ready") {
+        // 上游接通了才开始听 —— 早于这一刻识别出来的话没地方发。
+        status(t("avatar.listening", "说话吧，她在听"));
+        listen();
       }
     };
     ws.onclose = () => stopCall();
     ws.onerror = () => status(t("avatar.error", "连接失败"), true);
+  }
+
+  /* ---------- 听 ---------- */
+  /* 识别用浏览器自带的 SpeechRecognition: 它自带停顿断句, 而这正是电话里最难
+     做对的一件事 (自己按静音时长切, 要么把人话腰斩, 要么等到尴尬)。
+     代价是 Firefox 没有 —— 那种情况下明说, 别让人对着屏幕干等。 */
+  function listen() {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) { status(t("avatar.no_asr", "这个浏览器没有语音识别 — 请用 Chrome / Safari 打开"), true); return; }
+    const ear = new SR();
+    ear.lang = document.documentElement.lang === "en" ? "en-US" : "zh-CN";
+    ear.continuous = true;
+    ear.interimResults = false;
+    ear.onresult = (e) => {
+      const said = e.results[e.results.length - 1][0].transcript.trim();
+      if (said) reply(said);
+    };
+    // 识别器会自己停 (静默久了、或一次会话到点)。通话还在就重开 —— 不重开的
+    // 表现是"聊着聊着她突然不理人了", 而页面上什么都没变。
+    ear.onend = () => { if (st.ws && st.ear === ear) { try { ear.start(); } catch { /* 已在跑 */ } } };
+    ear.onerror = (e) => { if (e.error === "not-allowed") status(t("avatar.no_mic", "麦克风被拒绝了"), true); };
+    st.ear = ear;
+    try { ear.start(); } catch { /* 已在跑 */ }
+  }
+
+  /* 说出来的一句 -> 回一句。**先打断她**: 用户开口时她还在说的话, 两个人一起
+     出声, 而且她说的已经是上一轮的答案了。 */
+  async function reply(said) {
+    if (!st.ws) return;
+    try { st.ws.send(JSON.stringify({ type: "stop" })); } catch { /* 连接没了 */ }
+    st.history.push({ role: "user", content: said });
+    status(said);
+    const r = await api("/api/avatar/say", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text: said, history: st.history.slice(0, -1) }),
+    });
+    if (!r.ok || !r.d.text) { status(t("avatar.think_failed", "她没想出该说什么"), true); return; }
+    st.history.push({ role: "assistant", content: r.d.text });
+    if (st.history.length > 16) st.history.splice(0, st.history.length - 16);
+    if (!st.ws) return;                       // 等回复的这几秒里挂断了
+    st.ws.send(JSON.stringify({ type: "say", sid: ++st.sid, text: r.d.text }));
   }
 
   /* 计时与花费: 从**第一帧视频**起算 — 与服务端的计费口径一致, 排队不计。
@@ -211,7 +257,8 @@
 
   function stopCall() {
     if (st.ws) { try { st.ws.close(); } catch { /* 忽略 */ } st.ws = null; }
-    if (st.ear) { st.ear.stop(); st.ear = null; }
+    if (st.ear) { const e = st.ear; st.ear = null; e.onend = null; try { e.stop(); } catch { /* 已停 */ } }
+    st.history = [];
     if (st.timer) { clearInterval(st.timer); st.timer = null; }
     st.t0 = null; st.queue = [];
     $("#avCall").textContent = t("avatar.start", "开始通话");
