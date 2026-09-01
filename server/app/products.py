@@ -2184,6 +2184,16 @@ def registry() -> dict[str, Product]:
             domain=config.OPENHANDS_DOMAIN,
             reports_presence=False,
             tab_grace_min=config.OPENHANDS_TAB_GRACE_MIN,
+            # **host.docker.internal 必须解析到本机**。它起沙箱时按"我在容器里 ->
+            # 把 localhost 换成 host.docker.internal"探活 (app_server/utils/
+            # docker_utils.py) —— 那是给"OpenHands 在容器、沙箱在宿主"那种拓扑写
+            # 的。我们一人一容器、沙箱就在同一个容器内, 这个名字在容器里解析不了,
+            # 探活 30 秒必然超时。用户看到的是页面一直"等待沙盒", 而首页一切正常。
+            #
+            # 用 HostAliase 而不是启动脚本里改 /etc/hosts: 那个文件由 ECI 管,
+            # 运行时追加不保证生效 (实测线上就没生效, 而本机 docker 上是好的 ——
+            # 正是这类"本地能复现、线上不行"最费时间)。
+            host_aliases=("host.docker.internal",),
         ),
         # AutoGen Studio: 单进程 (FastAPI 同时出前端和 API)。
         "autogen": Product(
@@ -2529,7 +2539,6 @@ def _openhands_boot() -> str:
         # 我们是一人一容器、沙箱就在同一个容器内, 而这个名字在容器里**根本解析
         # 不了** —— 探活 30 秒必然超时, 用户看到的是
         # "500: Agent Server Failed to start properly", 而首页一切正常。
-        'grep -q host.docker.internal /etc/hosts || echo "127.0.0.1 host.docker.internal" >> /etc/hosts\n'
         # **必须 cd /app**: 前端那堆静态文件是按工作目录找的, 在别处起 uvicorn
         # 的话首页直接 404 —— 而且是 `{"detail":"Not Found"}` 这种 API 式的 404,
         # 看着像路由没配, 其实是 cwd 不对 (镜像的 WorkingDir 就是 /app, 我们绕过
