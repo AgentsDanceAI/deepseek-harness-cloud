@@ -342,7 +342,7 @@ OPENCLAW_TAB_GRACE_MIN = _env_int("OPENCLAW_TAB_GRACE_MIN", 10)
 # 8710 上同时是前端和 API; 就绪探针打 /api/health 而不是首页 —— 首页是静态文件,
 # 后端没起来它照样 200 (2026-08-30 Dify/Coze 都栽过这个)。
 AGENTS_TEAM_DOMAIN = _env("AGENTS_TEAM_DOMAIN", "")
-AGENTS_TEAM_IMAGE_REF = _env("AGENTS_TEAM_IMAGE_REF", "ghcr.io/agentsdancepro/agents-team:0.3.1")
+AGENTS_TEAM_IMAGE_REF = _env("AGENTS_TEAM_IMAGE_REF", "ghcr.io/agentsdancepro/agents-team:0.4.0")
 # 4G 是给 **Chromium** 留的 (浏览器工具, 见 app/browser.py): Python 侧空载才
 # 一百多兆, 而一个带页面的 headless Chromium 轻易吃掉 500MB+, 复杂页面更多。
 # 给少了的表现是容器被 OOM 杀掉重启 —— 用户看到的是"对话突然断了", 而日志里
@@ -384,6 +384,9 @@ HERMES_TAB_GRACE_MIN = _env_int("HERMES_TAB_GRACE_MIN", 10)
 # 智能体最后一次调网关之后再等这么久。长任务必须能在关掉标签页之后接着跑完,
 # 所以这一条单独顶着, 与"有没有人在"无关。
 WORK_AGENT_IDLE_STOP_MIN = _env_int("WORK_AGENT_IDLE_STOP_MIN", 30)
+# 回收前先问一句, 等这么久没人表态才真收 (2026-09-01 老板拍板 120 秒)。
+# 判据总有失灵的时候 —— 这个窗口把"判错"从"活儿当场没了"降级成"被打扰一下"。
+WORK_RECLAIM_ASK_SEC = _env_int("WORK_RECLAIM_ASK_SEC", 120)
 
 # --- cloud workspace paywall ------------------------------------------------
 # Everyone gets this many ACTIVE agent minutes on the house; when they run out,

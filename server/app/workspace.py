@@ -83,6 +83,13 @@ _started_at: dict[str, float] = {}
 # 没有条目 = 这个客户端还没上报过 (老缓存或脚本没跑起来), 那时回落到旧口径。
 _user_active: dict[str, float] = {}
 
+# 待回收 (2026-09-01 老板: "回收电脑时给用户一个弹窗询问, 120 秒没点击再回收")。
+# uid -> 提问时刻。判定该收时**先挂牌再等**, 而不是当场杀 —— 判据总有失灵的时候
+# (那次就是 agent 信号传错了键, 一直是 0), 而代价是用户正干着的活当场没了。
+# 一个 120 秒的确认窗把"判错"从事故降级成打扰。
+# 挂牌期间只要有任何在场信号 (流量/心跳/点了继续用), 立刻摘牌。
+_reclaim_asked: dict[str, float] = {}
+
 
 def _work_url(path: str = "/", product: products.Product | None = None) -> str:
     """Public URL of the workspace host. The scheme follows PUBLIC_BASE so a
@@ -1020,6 +1027,18 @@ _PWA_INJECT_TMPL = """
 """
 
 
+def _guard_inject() -> str:
+    """守护层脚本 —— **所有产品**的工作台文档都注入它 (心跳 + 回收前弹窗)。
+
+    与 _pwa_inject 分开: 那一份是 dsh 专有的手机壳 (manifest / service worker /
+    移动样式), 别的产品有自己的前端, 套上去只会打架。守护层则是平台侧的东西,
+    与产品界面无关, 谁都要。
+    """
+    from .webpages import ASSET_V
+
+    return f'<script defer src="/pwa/workspace-guard.js?v={ASSET_V}"></script>'
+
+
 def _pwa_inject() -> str:
     """The injected head block, stamped with the current asset version."""
     from .webpages import ASSET_V
@@ -1066,8 +1085,19 @@ async def work_shell(request: Request):
         return RedirectResponse(f"{site}/work/starting?product_id={product.id}", status_code=302)
     html = upstream.text
     if "</head>" in html:
-        html = html.replace("</head>", _pwa_inject() + "</head>", 1)
-    return HTMLResponse(html, headers={"cache-control": "no-store"})
+        # PWA 壳只给 dsh (它是手机壳: manifest/service worker/移动样式, 套到别的
+        # 产品自己的前端上只会打架); 守护层给所有产品 (心跳 + 回收前弹窗, 那是
+        # 平台侧的事, 与产品界面无关)。
+        head = (_pwa_inject() if product.id == products.DEFAULT else "") + _guard_inject()
+        html = html.replace("</head>", head + "</head>", 1)
+    # ⚠️ 透传上游的 Set-Cookie。Dify/Coze 会在**根文档**上种会话 cookie, 丢掉
+    # 就是"打开首页 → 转圈 → 退回登录页", 而错误里一个字都不会提 cookie。
+    # (dsh 那边一直没事只是因为它不在根文档上种 cookie —— 换个产品就踩。)
+    out = HTMLResponse(html, headers={"cache-control": "no-store"})
+    for k, v in upstream.headers.multi_items():
+        if k.lower() == "set-cookie":
+            out.raw_headers.append((b"set-cookie", v.encode()))
+    return out
 
 
 _PWA_DIR = None
@@ -1113,6 +1143,64 @@ async def pwa_asset(name: str):
 
 
 # --- user-facing endpoints ---------------------------------------------------
+
+
+@router.get("/api/work/reclaim")
+async def work_reclaim_state(request: Request):
+    """这台工作台是不是正在被问"要不要收"? 还剩多少秒。
+
+    所有产品共用 —— 注入到工作台页面的那段脚本轮询它, 挂牌了就弹窗。
+    """
+    user = try_resolve_user(request, cookie_only=True)
+    if user is None:
+        return JSONResponse({"asking": False})
+    product = _product_of(request)
+    uid = products.wskey(user["id"], product.id)
+    asked = _reclaim_asked.get(uid)
+    if asked is None:
+        return JSONResponse({"asking": False})
+    left = max(0, int(config.WORK_RECLAIM_ASK_SEC - (time.time() - asked)))
+    return JSONResponse({"asking": True, "seconds_left": left, "product": product.id})
+
+
+@router.post("/api/work/keep")
+async def work_keep(request: Request):
+    """「继续用」—— 摘牌并把在场时间刷新到此刻。
+
+    刷 _user_active 而不只是摘牌: 只摘牌的话, 下一轮 reaper 判据没变, 立刻又
+    挂上, 用户会看到弹窗反复跳出来。
+    """
+    user = try_resolve_user(request, cookie_only=True)
+    if user is None:
+        return JSONResponse(status_code=401, content={"detail": "unauthorized"})
+    product = _product_of(request)
+    uid = products.wskey(user["id"], product.id)
+    now = time.time()
+    _reclaim_asked.pop(uid, None)
+    _user_active[uid] = now
+    _last_seen[uid] = now
+    log.info("user kept workspace %s", uid)
+    return JSONResponse({"ok": True})
+
+
+@router.post("/api/work/heartbeat")
+async def work_heartbeat(request: Request):
+    """页面还开着 —— 与流量信号互补。
+
+    流量信号治不了**长连接**: 一条挂着几分钟的 SSE 期间页面一个新请求都不发,
+    看起来就像标签页关了 (2026-09-01 老板守着浏览器看剧组跑片, 容器被判
+    "tab closed" 收掉)。心跳是主动的, 不受连接形态影响。
+    """
+    user = try_resolve_user(request, cookie_only=True)
+    if user is None:
+        return JSONResponse(status_code=401, content={"detail": "unauthorized"})
+    product = _product_of(request)
+    uid = products.wskey(user["id"], product.id)
+    now = time.time()
+    _user_active[uid] = now
+    _last_seen[uid] = now
+    _reclaim_asked.pop(uid, None)
+    return JSONResponse({"ok": True})
 
 
 @router.get("/api/work/status")
@@ -1421,7 +1509,14 @@ async def reaper_tick(now: float) -> None:
         # 但那正是 tab_gone 那套机制在管的事: 标签页真关了流量就断, 3 分钟后收掉。
         reports_presence = product.reports_presence if product else True
         present = max(_user_active.get(uid, 0.0), started)
-        agent = agent_last_active(uid)
+        # ⚠️ 按**人**查, 不是按工作台键。devices.user_id 存的是 u_xxx, 而 uid 是
+        # u_xxx~agents-team —— 传 uid 永远得 0.0, 于是"智能体正在干活"这个信号
+        # **对所有产品从来没生效过**。2026-09-01 生产实测同一时刻:
+        #   agent_last_active(uid)   = 0.0        ("从来没有活动")
+        #   agent_last_active(owner) = 112 秒前   (真实情况)
+        # 后果: 老板守着浏览器看剧组跑片, 容器被判"tab closed"回收 —— 而它当时
+        # 正在调网关。与下面 credits.balance(owner) 是同一个坑, 那里注释都写了。
+        agent = agent_last_active(owner)
         if not reports_presence:
             present = max(present, last)
             agent = max(agent, last)
@@ -1430,13 +1525,28 @@ async def reaper_tick(now: float) -> None:
         # 余额要按**人**查。uid 是工作台键 (u_xxx~comfyui), 拿它查 credits 永远
         # 得 0 —— 于是欠费用户的 ComfyUI 工作台永远不会因欠费被回收。
         broke = credits.balance(owner) <= -config.OVERDRAFT_LIMIT_CREDITS
-        if (away and quiet) or broke:
+        should_stop = (away and quiet) or broke
+        if not should_stop:
+            # 恢复活跃 —— 摘牌 (哪怕之前已经问过)
+            _reclaim_asked.pop(uid, None)
+            continue
+        # 欠费不问 —— 那不是"要不要收"的问题, 问了也留不住
+        if not broke:
+            asked = _reclaim_asked.get(uid)
+            if asked is None:
+                _reclaim_asked[uid] = now
+                log.info("asking before reclaim %s (grace %ss)", uid, config.WORK_RECLAIM_ASK_SEC)
+                continue
+            if now - asked < config.WORK_RECLAIM_ASK_SEC:
+                continue  # 还在 120 秒窗口里, 等用户表态
+        if True:
             reason = "credits exhausted" if broke else ("tab closed" if tab_gone else "idle")
             log.info("stopping workspace %s (%s)", uid, reason)
             await _stop(uid)
             _last_seen.pop(uid, None)
             _started_at.pop(uid, None)
             _user_active.pop(uid, None)
+            _reclaim_asked.pop(uid, None)
 
 
 async def billing_reaper_loop() -> None:
