@@ -2216,6 +2216,32 @@ def registry() -> dict[str, Product]:
             # Next.js 起没起来 —— 而没有后端的聊天界面是个死壳。
             ready_path="/langgraph/info",
         ),
+        # OpenManus 与 CrewAI: 同一个镜像, 靠启动脚本区分 —— 两个产品共用一份
+        # ECI 镜像缓存。界面是浏览器终端 (ttyd), 因为这两个框架都没有界面。
+        "openmanus": Product(
+            id="openmanus",
+            name="OpenManus",
+            image=config.FRAMEWORKS_IMAGE_REF,
+            image_ref=config.FRAMEWORKS_IMAGE_REF,
+            port=7681,
+            mem_mb=config.FRAMEWORKS_MEM_LIMIT_MB,
+            cpus=config.FRAMEWORKS_CPUS,
+            domain=config.OPENMANUS_DOMAIN,
+            reports_presence=False,
+            tab_grace_min=config.FRAMEWORKS_TAB_GRACE_MIN,
+        ),
+        "crewai": Product(
+            id="crewai",
+            name="CrewAI",
+            image=config.FRAMEWORKS_IMAGE_REF,
+            image_ref=config.FRAMEWORKS_IMAGE_REF,
+            port=7681,
+            mem_mb=config.FRAMEWORKS_MEM_LIMIT_MB,
+            cpus=config.FRAMEWORKS_CPUS,
+            domain=config.CREWAI_DOMAIN,
+            reports_presence=False,
+            tab_grace_min=config.FRAMEWORKS_TAB_GRACE_MIN,
+        ),
     }
 # fmt: on
 
@@ -2574,6 +2600,63 @@ def _langchain_boot() -> str:
     )
 
 
+#: 这一格进去先看到什么。**不是装饰**: 这两个框架都没有界面, 用户开门就是一个
+#: 黑终端 —— 不告诉他能敲什么, 这个产品跟"给了台空机器"没区别。
+_FRAMEWORK_HELLO = {
+    "openmanus": (
+        "OpenManus —— 开源版 Manus, 一个通用智能体。模型和网关已经配好 "
+        "(config/config.toml), 直接开聊:\n"
+        "    cd /opt/openmanus && python main.py\n"
+        "换个跑法: python run_flow.py (多智能体编排) / python run_mcp.py (MCP 服务)\n"
+    ),
+    "crewai": (
+        "CrewAI —— 把智能体组成一支船员队, 各有角色和任务。模型和网关已配好 "
+        "(环境变量里)。三步开工:\n"
+        "    crewai create crew my_crew      # 生成脚手架\n"
+        "    cd my_crew                      # 改 config/agents.yaml 和 tasks.yaml\n"
+        "    crewai run                      # 跑起来\n"
+        "工具包按需装: pip install crewai-tools (没预装 —— 它拖一大串, 该由你按用途选)\n"
+    ),
+}
+
+
+def _frameworks_boot(product_id: str) -> str:
+    """OpenManus / CrewAI: 一个浏览器终端, 框架和网关都配好了。
+
+    **OpenManus 的配置必须在这里写**: 它 import 时就构造 Config(), 读的是
+    config/config.toml —— 镜像里烤的是占位值, 不换成这个用户的令牌, 他敲第一条
+    命令就是 401。
+
+    ttyd 的启动命令是**必填**的 (少了它自己会说 "missing start command" 然后
+    退出); 这里给的是 bash, 先打一段说明再交给用户。
+    """
+    hello = _FRAMEWORK_HELLO[product_id].replace("'", "'\\''")
+    venv = "openmanus" if product_id == "openmanus" else "crewai"
+    return (
+        "set -e\n"
+        "mkdir -p /workspace\n"
+        # 用户的令牌灌进 OpenManus 的配置。printf 而不是 cat<<EOF —— 这段脚本
+        # 本身是被 sh -c 传进来的, 少一层 here-doc 少一层转义。
+        'printf \'[llm]\\nmodel = "%s"\\nbase_url = "%s"\\napi_key = "%s"\\n'
+        # **[daytona] 那一段不能漏**: 上游的 DaytonaSettings.daytona_api_key 没有
+        # 默认值, 缺了它 Config() 在 **import 期**就抛 pydantic 校验错误。镜像里
+        # 烤的那份带着它, 这里覆盖时漏掉就等于把它撤销了 —— 渲染出来一看就发现,
+        # 光读代码看不出来。
+        "max_tokens = 8192\\ntemperature = 0.0\\n\\n[daytona]\\n"
+        'daytona_api_key = "unused"\\n\' '
+        '"$DSH_MODEL" "$OPENAI_BASE_URL" "$OPENAI_API_KEY" '
+        "> /opt/openmanus/config/config.toml\n"
+        f"printf '%s' '{hello}' > /etc/motd\n"
+        # ttyd: -W 允许写入 (只读终端没法用), 起始目录是 NAS 上的 /workspace
+        # **各自的虚拟环境放进 PATH**: 两个框架要的 openai 版本不兼容, 镜像里
+        # 是两个 venv (见 Dockerfile)。不设 PATH 的话用户敲 crewai 找不到命令,
+        # 敲 python 用的是系统那个 —— 两样都不对。
+        f"export PATH=/opt/venv-{venv}/bin:$PATH\n"
+        "exec ttyd -W -p 7681 -t titleFixed='DSH Cloud' "
+        "bash -lc 'cat /etc/motd; cd /workspace; exec bash'\n"
+    )
+
+
 _BOOTS = {
     DEFAULT: _dsh_boot,
     "comfyui": _comfyui_boot,
@@ -2588,6 +2671,8 @@ _BOOTS = {
     "openhands": _openhands_boot,
     "autogen": _autogen_boot,
     "langchain": _langchain_boot,
+    "openmanus": lambda: _frameworks_boot("openmanus"),
+    "crewai": lambda: _frameworks_boot("crewai"),
 }
 
 
@@ -2623,6 +2708,16 @@ def env_for(product_id: str, token: str, secret: str = "") -> dict[str, str]:
         return {
             "HERMES_USER": "owner",
             "HERMES_PASS": autologin_password(secret),
+        }
+    if product_id in ("openmanus", "crewai"):
+        return {
+            "HOME": "/root",
+            # OpenManus 的 config.toml 与 CrewAI 的 litellm 都认这几个。型号要钉在
+            # 在售目录里 —— 网关只放行目录内的。
+            "DSH_MODEL": _codecli_model("codex"),
+            "OPENAI_BASE_URL": f"{gateway}/llm/v1",
+            "OPENAI_API_KEY": token,
+            "OPENAI_API_BASE": f"{gateway}/llm/v1",  # litellm 认的是这个名字
         }
     if product_id == "langchain":
         return {

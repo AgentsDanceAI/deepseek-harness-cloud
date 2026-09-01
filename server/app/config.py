@@ -337,6 +337,17 @@ LANGCHAIN_MEM_LIMIT_MB = _env_int("LANGCHAIN_MEM_LIMIT_MB", 2048)
 LANGCHAIN_CPUS = _env_float("LANGCHAIN_CPUS", 1.0)
 LANGCHAIN_TAB_GRACE_MIN = _env_int("LANGCHAIN_TAB_GRACE_MIN", 10)
 
+# OpenManus 与 CrewAI —— 两个产品**共用一个镜像** (deploy/workspace-frameworks),
+# 因为它们的依赖高度重叠, 分开打两份等于让 ECI 多存一份、冷启动多拉一次。
+# 两个都没有自己的界面 (OpenManus 是命令行智能体, CrewAI 是 Python 库), 所以
+# 这一格的界面是浏览器里的终端 (ttyd)。
+FRAMEWORKS_IMAGE_REF = _env("FRAMEWORKS_IMAGE_REF", "")
+OPENMANUS_DOMAIN = _env("OPENMANUS_DOMAIN", "")
+CREWAI_DOMAIN = _env("CREWAI_DOMAIN", "")
+FRAMEWORKS_MEM_LIMIT_MB = _env_int("FRAMEWORKS_MEM_LIMIT_MB", 2048)
+FRAMEWORKS_CPUS = _env_float("FRAMEWORKS_CPUS", 1.0)
+FRAMEWORKS_TAB_GRACE_MIN = _env_int("FRAMEWORKS_TAB_GRACE_MIN", 10)
+
 # Dify —— 云空间的 LLM 应用搭建坑位 (多容器栈, 10 个容器)。
 DIFY_DOMAIN = _env("DIFY_DOMAIN", "")
 DIFY_VERSION = _env("DIFY_VERSION", "1.17.0")
