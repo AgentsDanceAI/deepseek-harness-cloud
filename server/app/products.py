@@ -2584,8 +2584,8 @@ def _openhands_boot() -> str:
         # 一发现就 tail 到**标准输出** —— 写文件没用: ECI 的容器进不去, 只有容器
         # 日志读得到 (这一条是排障时才想明白的, 白跑了一轮)。
         "(while :; do f=$(find /tmp /root /workspace -name '.openhands-agent-server.log' "
-        '2>/dev/null | head -1); if [ -n "$f" ]; then tail -n +1 -F "$f" | sed \'s/^/[sandbox] /\'; fi; '
-        "sleep 1; done) 2>/dev/null &\n"
+        '2>/dev/null | head -1); if [ -n "$f" ]; then timeout 25 tail -n +1 -F "$f" '
+        "| sed 's/^/[sandbox] /'; fi; sleep 2; done) 2>/dev/null &\n"
         "wait $srv\n"
     )
 
