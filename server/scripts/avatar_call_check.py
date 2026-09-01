@@ -51,6 +51,9 @@ with sync_playwright() as p:
     }])
     page = ctx.new_page()
     page.on("console", lambda m: res.setdefault("console", []).append(f"{m.type}: {m.text}"[:200]))
+    # 404/5xx 要**带着是哪个 URL** 记下来 —— 光看到"404"完全没法判断是我们的东西
+    # 坏了还是第三方探针。
+    page.on("response", lambda r: r.status >= 400 and res.setdefault("bad", []).append(f"{r.status} {r.url}"[:160]))
     try:
         page.goto(spec["url"], timeout=60000, wait_until="domcontentloaded")
         page.wait_for_timeout(4000)
@@ -128,6 +131,8 @@ def main() -> int:
         f"           readyState={v.get('ready')} networkState={v.get('net')} "
         f"error={v.get('err')} buffered={v.get('buf')} src={v.get('hasSrc')}"
     )
+    for line in (res.get("bad") or [])[-8:]:
+        print(f"    请求失败 | {line}")
     for line in (res.get("console") or [])[-12:]:
         if "cloudflareinsights" not in line:
             print(f"    控制台 | {line}")

@@ -16,7 +16,7 @@
   const RT_CODEC = 'video/mp4; codecs="avc1.42E01E, mp4a.40.2"';
   const st = {
     sess: null, cfg: null, ws: null, ear: null, history: [], sid: 0,
-    ms: null, sb: null, url: null, queue: [], speaking: false,
+    ms: null, sb: null, url: null, queue: [], speaking: false, hide: null,
     t0: null, timer: null, rate: 0,
   };
 
@@ -177,6 +177,7 @@
 
   /* 她不说话时露静止背景, 说话时才盖上视频层。不切的话最后一帧会僵在那儿。 */
   function showVideo(on) {
+    if (st.hide) { clearTimeout(st.hide); st.hide = null; }
     $("#avVideo").style.opacity = on ? "1" : "0";
     st.speaking = on;
   }
@@ -222,6 +223,7 @@
       if (typeof e.data !== "string") {
         st.queue.push(new Uint8Array(e.data));
         pump();
+        if (st.hide) { clearTimeout(st.hide); st.hide = null; }   // 又有话了
         if (!st.speaking) showVideo(true);
         const v = $("#avVideo");
         if (v.paused) v.play().catch(() => { /* 起播被拒, 下一块再试 */ });
@@ -239,8 +241,11 @@
         status(t("avatar.busy", "通道占线，稍后再试"), true); stopCall();
       } else if (m.type === "error") {
         status(m.message || t("avatar.error", "出错了"), true);
-      } else if (m.type === "end" || m.type === "idle") {
-        showVideo(false);                    // 说完了, 回静止背景
+      } else if (m.type === "idle") {
+        // **只认 idle, 不认 end**: end 是"这一句念完了", 而我们按句下发, 句与句
+        // 之间用它藏图层就是一路闪。idle 才是上游说的"没话说了"。
+        // 仍然延后一下: 下一句可能正在路上, 空档里藏了再露一样是闪。
+        st.hide = setTimeout(() => showVideo(false), 500);
       } else if (m.type === "ready") {
         // 上游接通了才开始听 —— 早于这一刻识别出来的话没地方发。
         status(t("avatar.listening", "说话吧，她在听"));
