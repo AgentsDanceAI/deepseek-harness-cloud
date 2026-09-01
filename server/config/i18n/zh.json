@@ -92,6 +92,7 @@
   "avatar.play_failed": "画面播不出来",
   "avatar.rate": "单价",
   "avatar.per_min": "积分/分钟",
+  "avatar.hello": "喂，我在呢，你说。",
   "avatar.listening": "说话吧，她在听",
   "avatar.no_asr": "这个浏览器没有语音识别 — 请用 Chrome / Safari 打开",
   "avatar.no_mic": "麦克风被拒绝了",

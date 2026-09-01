@@ -252,6 +252,9 @@
         // 上游接通了才开始听 —— 早于这一刻识别出来的话没地方发。
         status(t("avatar.listening", "说话吧，她在听"));
         listen();
+        // **她先开口**。固定一句, 不走模型: 立刻就能说 (模型要好几秒), 而接通后
+        // 双方干等的那几秒, 用户只会以为点了没反应。
+        ws.send(JSON.stringify({ type: "say", sid: ++st.sid, text: t("avatar.hello", "喂，我在呢，你说。") }));
       }
     };
     ws.onclose = () => stopCall();

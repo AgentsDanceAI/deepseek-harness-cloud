@@ -92,6 +92,7 @@
   "avatar.play_failed": "Video cannot play",
   "avatar.rate": "Rate",
   "avatar.per_min": "credits/min",
+  "avatar.hello": "Hey, I am here. Go ahead.",
   "avatar.listening": "Go ahead, she's listening",
   "avatar.no_asr": "This browser has no speech recognition — open in Chrome / Safari",
   "avatar.no_mic": "Microphone was blocked",
