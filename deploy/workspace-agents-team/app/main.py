@@ -197,6 +197,19 @@ async def _run_relay(room: rooms.Room, model: str | None):
                     if ev.get("capped"):
                         halted = True
                         capped_here = True
+                elif ev["type"] == "error":
+                    # **炸了就停, 别传棒。** 上面那句 except 只接得住**抛出来**的
+                    # 异常, 而网关失败是 run_turn **yield 一个 error 事件**再正常
+                    # 结束 —— 于是它被原样转发, 循环若无其事地跑下一位。接力"有人
+                    # 炸了就停"的本意, 对**最常见的那种失败**一直没生效。
+                    # 中断前说过的话要落进记录: 那些字已经流到浏览器了, 不落盘的话
+                    # 屏幕上有、记录里没有, 续跑时这一棒等于什么都没说过。
+                    if (ev.get("said") or "").strip():
+                        store.add(room.id, bot_id,
+                                  ev["said"] + "\n\n*(这一棒被网关中断, 以上是断线前说完的部分)*",
+                                  ev.get("tools") or [])
+                    halted = True
+                    capped_here = True   # 活没干完 —— 续跑重跑本棒
                 yield ev
         except Exception as e:  # noqa: BLE001 — 一棒炸了就停, 别让下游基于半成品接着做
             # 停在**炸掉的这一棒**上 (不是下一棒): 它的活没干完, 重发时要重跑它

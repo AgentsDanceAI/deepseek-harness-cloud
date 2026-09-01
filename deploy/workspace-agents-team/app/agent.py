@@ -204,7 +204,17 @@ async def run_turn(
                             if fn.get("arguments"):
                                 slot["args"] += fn["arguments"]
             except (GatewayError, httpx.HTTPError) as e:
-                yield {"type": "error", "bot": bot_id, "message": str(e)}
+                # **把已经说出口的话带上**。这些字已经流到浏览器了, 用户看见了,
+                # 但 store.add 只在 end 时发生 —— 不带出去的话, 屏幕上有、记录里
+                # 没有, 续跑时这一棒等于什么都没说过 (阿剪两次断在这里)。
+                partial = "\n".join([*said, "".join(parts)]).strip()
+                yield {
+                    "type": "error",
+                    "bot": bot_id,
+                    "message": str(e),
+                    "said": partial,
+                    "tools": ran,
+                }
                 return
 
             text = "".join(parts)

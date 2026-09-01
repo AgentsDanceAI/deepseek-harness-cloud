@@ -1249,3 +1249,62 @@ def test_lost_submits_are_recoverable_at_all():
     seg = src[i : src.index("@router.", i + 10)]
     assert "user_id = ?" in seg, "列表端点没按调用方过滤 —— 会泄漏别人的作业"
     assert "_settle" not in seg, "查询端点不该有结算副作用"
+
+
+def test_a_gateway_error_carries_what_was_already_said():
+    """断线前说过的话必须带出来 —— 那些字已经流到浏览器了。
+
+    `store.add` 只在 end 事件时发生。错误路径不把 said 带出去的话, 就是
+    **屏幕上有、记录里没有**: 用户看着阿剪说了一段, 续跑时这一棒等于什么都没说过。
+    同一族的教训见"端到端必须包含 UI" —— 发出去 ≠ 留下来。
+    """
+    import asyncio
+
+    import httpx as _httpx
+
+    agent = _crew("agent")
+    # run_turn 先查凭据再开跑, 不设的话根本走不到网关那一步
+    saved = (agent._stream, agent.GATEWAY_TOKEN, agent.GATEWAY_BASE, agent.DEFAULT_MODEL)
+    agent.GATEWAY_TOKEN = "t"
+    agent.GATEWAY_BASE = "http://gw/v1"
+    agent.DEFAULT_MODEL = "m"
+
+    async def _half_then_die(client, model, messages):
+        yield {"choices": [{"delta": {"content": "先说半句"}}]}
+        raise _httpx.ReadError("peer closed connection")
+
+    agent._stream = _half_then_die
+
+    async def _go():
+        out = []
+        async for ev in agent.run_turn("editor", [{"role": "user", "content": "剪"}]):
+            out.append(ev)
+        return out
+
+    try:
+        evs = asyncio.run(_go())
+    finally:
+        agent._stream, agent.GATEWAY_TOKEN, agent.GATEWAY_BASE, agent.DEFAULT_MODEL = saved
+
+    errs = [e for e in evs if e["type"] == "error"]
+    assert errs, "网关炸了却没发 error 事件"
+    assert "先说半句" in (errs[0].get("said") or ""), (
+        f"断线前说过的话没带出来: {errs[0]!r} —— 屏幕上有、记录里没有"
+    )
+
+
+def test_the_relay_stops_on_an_error_instead_of_passing_the_baton():
+    """炸了就停, 别传棒。
+
+    `except Exception` 只接得住**抛出来**的异常, 而网关失败是 run_turn
+    **yield 一个 error 事件**再正常结束 —— 于是它被原样转发, 循环若无其事地跑
+    下一位。接力"有人炸了就停"的本意, 对**最常见的那种失败**一直没生效, 而
+    下游会基于半截产物接着做, 全程不报错。
+    """
+    src = (TEAM / "app" / "main.py").read_text(encoding="utf-8")
+    body = src[src.index("async def _run_relay") : src.index("async def _run_room")]
+    i = body.index('elif ev["type"] == "error"')
+    seg = body[i : body.index("yield ev", i)]
+    assert "halted = True" in seg, "接力遇到 error 事件没停 —— 半截产物会传给下一位"
+    assert "capped_here = True" in seg, "续跑没停在本棒 (它的活没干完)"
+    assert "store.add" in seg, "断线前说过的话没落进记录"
