@@ -4,12 +4,14 @@
 <link rel="stylesheet" href="/static/avatar.css?v={{ asset_v }}">
 {% endblock %}
 {% block content %}
+<section class="section">
+  <div class="container">
 <div class="av-wrap">
   <div class="av-stage">
     {# 静止背景与视频层是**同一个人**: /bg.png 吐的是模型自渲染的中性帧合成图,
        视频起播时不会跳脸。两层按 crop 对齐 —— 那组坐标由服务端按形象给出。 #}
     <img id="avBg" class="av-bg" alt="">
-    <video id="avVideo" class="av-video" playsinline muted></video>
+    <video id="avVideo" class="av-video" playsinline></video>
     <div id="avHint" class="av-hint">{{ t('avatar.tap_to_start') }}</div>
   </div>
 
@@ -34,8 +36,13 @@
     </label>
 
     <button id="avCall" class="av-call">{{ t('avatar.start') }}</button>
+    {# 打字也能说。不只是给没有语音识别的浏览器 (Firefox) 兜底 —— 安静的场合
+       本来就不该逼人出声。 #}
+    <input id="avSay" class="av-say" type="text" placeholder="{{ t('avatar.type_here') }}" hidden>
     <div id="avStatus" class="av-status"></div>
   </div>
 </div>
+  </div>
+</section>
 <script src="/static/avatar.js?v={{ asset_v }}" defer></script>
 {% endblock %}
