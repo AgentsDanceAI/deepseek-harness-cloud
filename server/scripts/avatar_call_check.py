@@ -63,7 +63,8 @@ with sync_playwright() as p:
     # 浏览器不支持实时视频", 而那是**测试浏览器**的毛病, 不是产品的。
     browser = p.chromium.launch(channel="chrome",
                                 args=["--no-sandbox", "--autoplay-policy=no-user-gesture-required"])
-    ctx = browser.new_context(viewport={"width": 1440, "height": 900}, locale="zh-CN")
+    # 视口开大一点: 舞台特写是用来看**边缘化没化开**的, 小图看不出来。
+    ctx = browser.new_context(viewport={"width": 1920, "height": 1080}, locale="zh-CN")
     ctx.add_cookies([{
         "name": spec["cookie_name"], "value": spec["token"],
         "domain": "." + spec["base_domain"], "path": "/", "secure": True,
@@ -96,6 +97,12 @@ with sync_playwright() as p:
         res["reply"] = wait_for(page, lambda v: v["t"] > (res["greet_after"]["t"] + 0.3), 60)
         # 单独截舞台那一块: 整页截图里视频层只占一小格, 边缘化没化开根本看不出来。
         page.locator(".av-stage").screenshot(path=str(out / "stage.png"))
+        # 遮罩**要真的生效**: mask-composite 不被支持时两层会变成并集 (等于没羽化),
+        # 而那在截图上不一定看得出来 —— 直接问计算样式。
+        res["mask"] = page.evaluate(
+            "() => { const s = getComputedStyle(document.querySelector('#avVideo'));"
+            " return {img: (s.maskImage || s.webkitMaskImage || '').slice(0, 40),"
+            " comp: s.maskComposite || s.webkitMaskComposite || ''}; }")
         res["reply_after"] = wait_for(page, lambda v: v["op"] == "0", 30)
         res["log"] = page.inner_text("#avLog")[:400]
         res["log_grew"] = len(res["log"]) > len(before)
@@ -173,6 +180,12 @@ def main() -> int:
             bad.append(f"{label}: 说完了图层没藏 —— 最后一帧僵在背景上就是重影")
     print(f"    状态栏: {res.get('status', '')!r}")
     print(f"    字幕: {(res.get('log') or '')!r}")
+    mask = res.get("mask") or {}
+    print(f"    视频层遮罩: composite={mask.get('comp')!r} image={mask.get('img')!r}")
+    if "gradient" not in (mask.get("img") or ""):
+        bad.append("视频层没有羽化遮罩 —— 硬边压在照片上就是一个方块")
+    if mask.get("comp") not in ("intersect", "source-in"):
+        bad.append(f"遮罩合成方式是 {mask.get('comp')!r} —— 不是交集就等于没羽化")
     if not res.get("log_grew"):
         bad.append("我说完之后字幕没长 —— 她的回复没进字幕")
 
