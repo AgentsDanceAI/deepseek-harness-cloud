@@ -2589,6 +2589,15 @@ def _openhands_boot() -> str:
         "(while :; do f=$(find /tmp /root /workspace -name '.openhands-agent-server.log' "
         '2>/dev/null | head -1); if [ -n "$f" ]; then timeout 25 tail -n +1 -F "$f" '
         "| sed 's/^/[sandbox] /'; fi; sleep 2; done) 2>/dev/null &\n"
+        # 探活自检, **放在循环里反复打**: ECI 的日志接口最多给 2000 行, 而这个应用
+        # 的 SQL 日志几十秒就把 2000 行刷满 —— 只在启动时打一次的东西, 等你去看时
+        # 早被冲掉了 (为这个白跑了两轮)。
+        # 两个地址都测: 名字解析不了、与沙箱没在那个端口上应答, 是两回事。
+        '(while :; do echo "[dsh] 名字=$(curl -s -o /dev/null -w %{http_code} '
+        "--max-time 3 http://host.docker.internal:8000/alive 2>/dev/null || echo 打不通)"
+        " 回环=$(curl -s -o /dev/null -w %{http_code} --max-time 3 "
+        "http://127.0.0.1:8000/alive 2>/dev/null || echo 打不通)"
+        ' 解析=$(getent hosts host.docker.internal | head -1 || echo 无)"; sleep 20; done) &\n'
         "wait $srv\n"
     )
 
