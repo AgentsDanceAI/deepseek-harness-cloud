@@ -114,7 +114,7 @@ pathlib.Path("/work/results.json").write_text(json.dumps(results, ensure_ascii=F
 
 
 def _products(only: list[str]) -> list[dict]:
-    from app import config, products
+    from app import apps_catalog, config, products
 
     base = config.PUBLIC_BASE.rstrip("/").split("//")[-1]
     out = []
@@ -122,6 +122,12 @@ def _products(only: list[str]) -> list[dict]:
         if not p.domain or (only and p.id not in only):
             continue
         out.append({"id": p.id, "url": f"https://{p.domain}/"})
+    # 住在主站上的产品 (数字人) 没有自己的域名, 但一样要看渲染 —— 它的形象清单
+    # 和背景图都是拿会话去 GPU 节点换回来的, 任何一环断了页面照样 200, 只是空的。
+    site = apps_catalog.site_apps()
+    for a in apps_catalog.CATALOG:
+        if a.id in site and a.href and not (only and a.id not in only):
+            out.append({"id": a.id, "url": f"https://{base}{a.href}"})
     if not out:
         raise SystemExit("没有可检查的产品 (是不是都没配域名?)")
     return out, base
