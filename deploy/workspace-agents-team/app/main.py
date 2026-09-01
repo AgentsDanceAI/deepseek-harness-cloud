@@ -66,6 +66,9 @@ def list_rooms() -> dict:
                     ),
                     "",
                 ),
+                # 消息数 —— 房间重名时这是唯一分得出"哪个是我刚才那个"的线索
+                # (2026-09-01 老板: 切出去再回来"消息没了", 其实是切到了另一个同名房间)
+                "count": len(store.transcript(r.id)),
             }
             for r in sorted(store.rooms.values(), key=lambda x: x.created)
         ]
