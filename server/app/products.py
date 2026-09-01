@@ -2771,6 +2771,14 @@ def env_for(product_id: str, token: str, secret: str = "") -> dict[str, str]:
             # 一人一容器, 容器本身就是沙箱 —— 默认 runtime 要挂宿主 docker socket
             # 再起一个容器, ECI 上做不到。
             "RUNTIME": "local",
+            # **关掉沙箱里的 VSCode 与 VNC**。agent server 起来时这三个服务是
+            # 并发起的 (vscode / desktop / 工具预载), 而应用只等 120 秒 —— 冷盘上
+            # openvscode-server 那一坨拖过了线, 表现是页面一直"等待沙盒"。本机盘热
+            # 所以看不出来, 又是"本地好好的、线上不行"。
+            # 我们这一格卖的是对话界面, 沙箱里的编辑器和远程桌面本来也用不上。
+            # 它的配置认 OH_* 前缀的环境变量 (agent_server/config.py: load_config)。
+            "OH_ENABLE_VSCODE": "false",
+            "OH_ENABLE_VNC": "false",
             "SANDBOX_VOLUMES": "/workspace:/workspace:rw",
             # 灌设置那一步要用 (见 _openhands_boot)。型号必须钉在**在售目录**里 ——
             # 它内置的默认值是厂商自己的名字, 网关只放行目录内的, 不钉就是 404。
