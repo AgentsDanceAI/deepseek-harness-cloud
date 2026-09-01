@@ -154,6 +154,12 @@ BUILTIN_BOTS: tuple[Bot, ...] = (
         "\n画幅靠 ratio 参数锁, 提示词里写\"横屏\"模型不吃。"
         "\n拿不准提示词怎么写就去读 /opt/agents-team/skills/wan3-drama-prompt/ "
         "里的 references/wan3-formulas.md 与 prompt-craft-discipline.md。"
+        "\n**duration 与 resolution 每次都要照镜头表写全** —— 漏掉 duration 会出成 5 秒, "
+        "镜头表写 10 秒的镜头出成 5 秒是废片, 而且照样扣钱。"
+        "\n**出片是花钱的, 同一个镜头不要反复跑。** 工具会挡住已有成片的路径并告诉你 "
+        "「已经有成片了」—— 那不是错误, 是省钱。真要重做就先 rm 掉那个文件再调, "
+        "那是一个需要你明确决定的动作。"
+        "\n参数不对就先想清楚再发一次, 不要靠反复重跑试参数 —— 每试一次都是真金白银。"
         "\n用户点名重做某一镜时, **只重跑那一条**, 别的片段不动。",
     ),
     Bot(

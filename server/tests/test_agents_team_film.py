@@ -140,8 +140,7 @@ def test_storyboard_stops_for_human_review_before_expensive_generation():
 
 def test_video_tool_description_warns_about_cost_and_gate():
     """模型选工具几乎只看描述 —— 贵和要先审这两件事必须写在描述里。"""
-    i = MEDIA.index('"name": "generate_video"')
-    seg = MEDIA[i : i + 1200]
+    seg = _tool_schema("generate_video")
     assert "最慢最贵" in seg or "最贵" in seg
     assert "确认" in seg
 
@@ -170,7 +169,7 @@ def test_character_assets_anchor_shot_consistency():
 def test_single_shot_redo_does_not_touch_others():
     """成片不是终点: 退回某一镜 @对应 agent 单独重做, 别的片段不动。"""
     i = ROOMS.index('"videographer"')
-    assert "只重跑那一条" in ROOMS[i : i + 900]
+    assert "只重跑那一条" in ROOMS[i : i + 2200]
 
 
 def test_ffmpeg_is_in_the_image():
@@ -504,6 +503,19 @@ def test_asyncio_is_imported_for_the_backoff():
 #
 # 这条测试跨文件比对: 从服务端 media.py 里读出真实字段, 再断言容器侧在用它。
 # 光看容器侧的源码永远发现不了 —— 那边写什么都"看起来对"。
+
+
+def _tool_schema(name: str) -> str:
+    """取某个工具 schema 的完整片段。
+
+    固定字符窗口 (MEDIA[i:i+2000]) 每次往描述里加一句注释就会失效 —— 我为此
+    连修了三轮断言。按**下一个工具的 name** 切, 结构上永远是准的。
+    """
+    i = MEDIA.index(f'"name": "{name}"')
+    nxt = MEDIA.find('"name": "', i + 20)
+    return MEDIA[i : nxt if nxt > 0 else len(MEDIA)]
+
+
 SERVER_MEDIA = (ROOT / "server" / "app" / "media.py").read_text(encoding="utf-8")
 
 
@@ -577,7 +589,7 @@ def test_media_item_shape_and_cap_match_the_server():
 def test_multiple_reference_images_are_supported():
     """一个镜头里角色+场景+道具本该一起当参考 —— 只开一张是浪费。"""
     i = MEDIA.index("async def generate_video")
-    seg = MEDIA[i : i + 900]
+    seg = MEDIA[i : i + 2000]
     assert "image: str | list | None" in seg, "image 还是只收单张"
     assert "isinstance(image, str)" in seg, "得兼容单张写法"
     # 工具描述与人格都要说得出来, 否则模型不会用
@@ -739,3 +751,46 @@ def test_wan3_skill_packs_are_shipped_and_referenced():
     # 分镜师被明确要求动笔前先读 —— 不引用等于白带
     i = ROOMS.index('"storyboard"')
     assert "wan3-drama-prompt" in ROOMS[i : i + 1200]
+
+
+# ── 出片参数与重复出片 (2026-09-01 老板截图: 一小时二十多条同一镜头) ────────
+def test_duration_and_resolution_are_required():
+    """描述里写"省略 5"等于告诉模型可以不写, 它就真不写。
+
+    实测: 十几条镜头全出成 5 秒, 阿摄自己都发现"每次发的 JSON 里只有
+    prompt/path/ratio/model 四个键"。镜头表写 10 秒的镜头出成 5 秒是废片,
+    而且照样扣钱。
+    """
+    seg = _tool_schema("generate_video")
+    assert '"required": ["prompt", "path", "duration", "resolution"]' in seg
+    # ⚠️ 别用"省略 5"这种子串判 —— 新描述里那句"**省略**会变成 **5** 秒"是在
+    # 警告后果, 会被误判成"还在教模型省略"(我为此多修了一轮)。钉真语义:
+    # 描述必须说"必填", 且不能出现"省略 <默认值>"这种许可式写法。
+    dur = seg[seg.index('"duration"') : seg.index('"resolution"')]
+    assert "必填" in dur, "duration 描述没说必填"
+    assert "省略 5" not in dur.replace("省略会变成 5 秒", ""), "描述里还在教模型省略"
+    res = seg[seg.index('"resolution"') : seg.index('"ratio"')]
+    assert "必填" in res, "resolution 描述没说必填"
+
+
+def test_model_choice_is_not_exposed_to_the_agent():
+    """模型看不见账单。实测阿摄自己挑了 wan3.0-video-prime (15 积分/秒),
+    比默认的 wan3.0-video (10) 贵一半。型号由工作台注入, 换档是用户的决定。"""
+    seg = _tool_schema("generate_video")
+    assert '"model": {"type": "string"' not in seg, "又把型号开放给模型选了"
+
+
+def test_regenerating_an_existing_clip_is_blocked():
+    """**这条是省钱闸。** 阿摄在同一个镜头上反复调用二十多次, 一小时烧掉一千多
+    积分 —— 它以为在"修 duration 参数", 而每一次都真下单真扣钱。
+    模型看不见账单, 闸必须在工具里。"""
+    i = MEDIA.index("async def generate_video")
+    seg = MEDIA[i : i + 1400]
+    assert "out.exists()" in seg and "没有重新出片" in seg
+    # 要给出**可执行的**重做路径, 否则模型会卡住或绕路
+    assert "rm " in seg
+    # 人格里也要说清楚, 免得它把这个返回当成错误反复重试
+    j = ROOMS.index('"videographer"')
+    vseg = ROOMS[j : j + 1600]
+    assert "不要反复跑" in vseg or "不要靠反复重跑" in vseg
+    assert "duration" in vseg, "人格没提 duration 必填"
