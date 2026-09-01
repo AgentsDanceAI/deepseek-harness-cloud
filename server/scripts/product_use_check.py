@@ -104,7 +104,16 @@ with sync_playwright() as p:
                 page.wait_for_timeout(1000)
                 page.keyboard.type(prod["type"], delay=25)
                 page.wait_for_timeout(12000)
-                e["text"] = page.inner_text("body")[-1500:]
+                # **终端要读 xterm 的缓冲区, 不能用 inner_text**: ttyd 把字画在
+                # canvas 上, DOM 里一个字都没有 —— inner_text 返回空串, 而屏幕上
+                # 明明写着结果。第一版就是这么把好产品判成失败的 (截图里有字、
+                # 抓到的文本是 '')。
+                e["text"] = page.evaluate(
+                    "() => { const t = window.term; if (!t || !t.buffer) return '';"
+                    " const b = t.buffer.active; const out = [];"
+                    " for (let i = 0; i < b.length; i++) {"
+                    "   const ln = b.getLine(i); if (ln) out.push(ln.translateToString(true)); }"
+                    " return out.join('\\n'); }")[-1500:]
 
             elif kind == "chat":
                 box = page.get_by_placeholder("Type your message...")
