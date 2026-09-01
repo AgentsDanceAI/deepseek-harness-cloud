@@ -2477,6 +2477,9 @@ def _opendesign_boot() -> str:
         "printf 'import faulthandler,sys\\n"
         "faulthandler.dump_traceback_later(100, repeat=True, file=sys.stderr)\\n' "
         '> "$SITE/sitecustomize.py"\n'
+        # 一句自检: HostAliase 到底有没有落进 /etc/hosts。探活打的就是这个名字,
+        # 解析不了就是"一直等待沙盒", 而那时日志里什么都不会说。
+        'echo "[dsh] hosts: $(getent hosts host.docker.internal || echo 解析不了)"\n'
         "cd /app\n"
         "exec node apps/daemon/dist/cli.js --no-open\n"
     )
