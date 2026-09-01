@@ -21,13 +21,14 @@ import hashlib
 import hmac
 import logging
 import time
+import uuid
 from urllib.parse import urlencode
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket
 from fastapi.responses import JSONResponse, Response
 
-from . import config, credits, db
+from . import config, credits, db, model_catalog
 from .accounts import resolve_user, try_resolve_user
 
 router = APIRouter(tags=["avatar"])
@@ -178,6 +179,89 @@ async def avatar_config(user: dict = Depends(resolve_user)):
     except httpx.HTTPError as e:
         log.warning("[avatar] config 取不到: %s", type(e).__name__)
         raise HTTPException(502, "avatar_unreachable") from None
+
+
+#: 她是谁。**只在这里说一次** —— 通话里每一句都带着它, 写长了既费钱又让她啰嗦。
+_PERSONA = (
+    "你正在和用户视频通话。回答要口语、简短 —— 一到两句话, 像真的在讲电话。"
+    "不要用列表、标题、代码块或任何书面格式, 你说的每个字都会被读出来。"
+    "不知道就直说不知道。"
+)
+
+
+@router.post("/api/avatar/say")
+async def avatar_say(request: Request, user: dict = Depends(resolve_user)):
+    """用户说了一句话 -> 她该回什么。
+
+    **回复在服务端出, 不在浏览器**: 浏览器要调模型就得有网关密钥, 而那把密钥
+    能干的事远不止聊天。这里顺带也把这次调用照常计了费 (与 /llm 那条路同一个
+    算法), 否则通话里的模型消耗就是白送的。
+
+    只出文本, 不碰 WebSocket —— 让她说话的是前端把这段文字沿通话发上去 (上游的
+    say)。分开的好处是: 模型慢/超时只是这一句没回, 通话本身不受影响。
+    """
+    if not config.UPSTREAM_BASE_URL or not config.UPSTREAM_API_KEY:
+        raise HTTPException(503, "upstream_not_configured")
+    body = await request.json()
+    text = str(body.get("text", "")).strip()[:600]
+    if not text:
+        raise HTTPException(400, "empty_text")
+    # 客户端带上下文过来。**截断在这边做** —— 前端的边界不可信, 而这段会原样
+    # 变成给模型的账单。
+    history = [
+        {
+            "role": "assistant" if m.get("role") == "assistant" else "user",
+            "content": str(m.get("content", ""))[:600],
+        }
+        for m in (body.get("history") or [])[-8:]
+        if isinstance(m, dict) and m.get("content")
+    ]
+
+    model_id = model_catalog.default_model()
+    entry = model_catalog.resolve(model_id) or {}
+    payload = {
+        "model": entry.get("upstream_model", model_id),
+        "messages": [{"role": "system", "content": _PERSONA}, *history, {"role": "user", "content": text}],
+        # 电话里的一句话。放开了她会说成一段稿子, 而那要读上一分钟 (还按分钟计费)。
+        "max_tokens": 200,
+        "temperature": 0.7,
+    }
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as c:
+            r = await c.post(
+                config.UPSTREAM_BASE_URL.rstrip("/") + "/chat/completions",
+                json=payload,
+                headers={
+                    "authorization": f"Bearer {config.UPSTREAM_API_KEY}",
+                    "content-type": "application/json",
+                },
+            )
+    except httpx.HTTPError:
+        raise HTTPException(502, "upstream_unreachable") from None
+    if r.status_code != 200:
+        log.warning("[avatar] 上游 %s", r.status_code)
+        raise HTTPException(502, "upstream_error")
+    data = r.json()
+    reply = ((data.get("choices") or [{}])[0].get("message") or {}).get("content", "").strip()
+
+    u = data.get("usage") or {}
+    cache_read = int(
+        u.get("prompt_cache_hit_tokens") or (u.get("prompt_tokens_details") or {}).get("cached_tokens") or 0
+    )
+    uncached = max(0, int(u.get("prompt_tokens") or 0) - cache_read)
+    output = int(u.get("completion_tokens") or 0)
+    credits.spend(
+        user["id"],
+        model_catalog.charge_credits(model_id, uncached, cache_read, output),
+        kind="llm",
+        model=model_id,
+        device_id=user.get("device_id", ""),
+        uncached_input=uncached,
+        cache_read=cache_read,
+        output=output,
+        request_id=f"avatar-say-{uuid.uuid4().hex[:16]}",
+    )
+    return {"text": reply}
 
 
 @router.get("/api/avatar/bg.png")

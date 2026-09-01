@@ -24,6 +24,7 @@ os.environ.setdefault("DHC_DATA_DIR", _TMP)
 os.environ.setdefault("DB_PATH", os.path.join(_TMP, "test.db"))
 
 from app import avatar, config
+from tests._signup import signup
 
 
 @pytest.fixture()
@@ -171,3 +172,91 @@ def test_a_websocket_from_another_site_is_refused(secret, monkeypatch):
         cookies: dict = {}
 
     assert accounts._cookie_write_allowed(_EvilWS()) is False
+
+
+def _fake_upstream(monkeypatch, capture: dict):
+    """把上游 chat/completions 换成假的, 把请求体留下来看。"""
+    import httpx
+
+    class _R:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return {
+                "choices": [{"message": {"content": "我在呢。"}}],
+                "usage": {"prompt_tokens": 120, "completion_tokens": 8},
+            }
+
+    class _C:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def post(self, url, json=None, headers=None):
+            capture["url"] = url
+            capture["body"] = json
+            return _R()
+
+    monkeypatch.setattr(httpx, "AsyncClient", lambda *a, **kw: _C())
+
+
+def test_say_replies_and_bills(secret, monkeypatch):
+    """她说什么由服务端出, 并且**照常计费** —— 否则通话里的模型消耗是白送的。"""
+    from fastapi.testclient import TestClient
+
+    from app import config, credits
+    from app.main import app
+
+    monkeypatch.setattr(config, "UPSTREAM_BASE_URL", "https://upstream.test/v1")
+    monkeypatch.setattr(config, "UPSTREAM_API_KEY", "k")
+    cap: dict = {}
+    _fake_upstream(monkeypatch, cap)
+    spent: list[int] = []
+    monkeypatch.setattr(credits, "spend", lambda *a, **kw: spent.append(a[1] if len(a) > 1 else 0))
+
+    with TestClient(app) as c:
+        signup(c, "avatar-say@example.com")
+        r = c.post("/api/avatar/say", json={"text": "在吗"})
+    assert r.status_code == 200, r.text
+    assert r.json()["text"] == "我在呢。"
+    assert spent and spent[0] > 0, "出了回复却没计费"
+
+
+def test_say_caps_the_history_the_client_sends(secret, monkeypatch):
+    """历史**在服务端截断**: 前端的边界不可信, 而这段会原样变成账单。"""
+    from fastapi.testclient import TestClient
+
+    from app import config, credits
+    from app.main import app
+
+    monkeypatch.setattr(config, "UPSTREAM_BASE_URL", "https://upstream.test/v1")
+    monkeypatch.setattr(config, "UPSTREAM_API_KEY", "k")
+    cap: dict = {}
+    _fake_upstream(monkeypatch, cap)
+    monkeypatch.setattr(credits, "spend", lambda *a, **kw: None)
+
+    long_history = [{"role": "user", "content": "x" * 5000} for _ in range(50)]
+    with TestClient(app) as c:
+        signup(c, "avatar-hist@example.com")
+        r = c.post("/api/avatar/say", json={"text": "在吗", "history": long_history})
+    assert r.status_code == 200, r.text
+    msgs = cap["body"]["messages"]
+    assert len(msgs) == 10, f"system + 8 条历史 + 这句, 实得 {len(msgs)}"
+    assert all(len(m["content"]) <= 600 for m in msgs[1:]), "单条没截断"
+
+
+def test_say_needs_something_to_say(secret, monkeypatch):
+    """空话不发给模型 —— 识别器偶尔会吐空串, 那是白花钱。"""
+    from fastapi.testclient import TestClient
+
+    from app import config
+    from app.main import app
+
+    monkeypatch.setattr(config, "UPSTREAM_BASE_URL", "https://upstream.test/v1")
+    monkeypatch.setattr(config, "UPSTREAM_API_KEY", "k")
+    with TestClient(app) as c:
+        signup(c, "avatar-empty@example.com")
+        assert c.post("/api/avatar/say", json={"text": "   "}).status_code == 400
