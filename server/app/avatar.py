@@ -359,23 +359,14 @@ async def avatar_bg(person: str = "", user: dict = Depends(resolve_user)):
         raise HTTPException(502, "avatar_unreachable") from None
 
 
-@router.post("/api/avatar/persons")
-async def avatar_upload(request: Request, id: str = "", user: dict = Depends(resolve_user)):
-    """上传形象。同样代转 —— 令牌不出服务端。"""
-    if not config.AVATAR_TOKEN_SECRET:
-        raise HTTPException(503, "avatar_not_configured")
-    body = await request.body()
-    if not body or len(body) > 20 * 1024 * 1024:
-        return JSONResponse({"error": "图为空或超过 20MB"}, status_code=400)
-    tok = sign_token(user["id"])
-    try:
-        async with httpx.AsyncClient(timeout=120.0) as c:
-            r = await c.post(
-                f"{config.AVATAR_GPU_URL}/persons", params={"token": tok, "id": id}, content=body
-            )
-        return JSONResponse(r.json(), status_code=r.status_code)
-    except (httpx.HTTPError, ValueError):
-        raise HTTPException(502, "avatar_unreachable") from None
+# 用户上传形象这条路**撤掉了** (2026-09-01 老板拍板)。三个理由, 按分量排:
+#   1. 效果不对。上游取参考图用的是 center crop —— 脸不在正中的照片会被裁歪,
+#      而人随手拍的自拍恰恰都是脸占满画面。用户看到的是"我传的图怎么这样"。
+#   2. 我们做的形象是**三件套** (参考脸/场景图/脸框, 见 GPU 侧 _load_bundled_crops),
+#      三样同源才对得齐。一张上传图给不出场景, 只能拿它自己当背景, 构图无从谈起。
+#   3. 让任意人脸开口说话, 这条能力不该随便开着。
+# 改成从我们自己做好的形象里选 (前端 PERSON_NAMES)。GPU 侧的 /persons 端点保留 ——
+# 口袋专家那条产品线还在用, 且它是按租户隔离的。
 
 
 @router.websocket("/api/avatar/ws")

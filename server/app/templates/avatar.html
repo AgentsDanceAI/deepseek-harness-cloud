@@ -33,11 +33,6 @@
       <span>{{ t('avatar.voice') }}</span>
       <select id="avVoice"></select>
     </label>
-    <label class="av-upload" id="avUploadLabel">
-      <span id="avUploadText">{{ t('avatar.upload') }}</span>
-      <input type="file" id="avUpload" accept="image/*" hidden>
-    </label>
-
     <button id="avCall" class="av-call">{{ t('avatar.start') }}</button>
     {# 打字也能说。不只是给没有语音识别的浏览器 (Firefox) 兜底 —— 安静的场合
        本来就不该逼人出声。 #}
