@@ -113,26 +113,38 @@ CATALOG: tuple[AppEntry, ...] = (
     ),
     # Penpot 曾在这个坑位 (还真上线过一天), 老板 2026-08-29 拍板换成 Excalidraw:
     # 设计坑位归 open-design, 这里补一个白板类, 凑齐 16 格。
+    # 下面五格 2026-09-01 换成老板点名的五个智能体项目 (原先排的 excalidraw /
+    # open-webui / lobe-chat / ragflow / whisper 都没建, 换掉不影响线上)。
+    # 五个的许可证都查过, 全是 MIT —— 没有 n8n 那种"禁止作为服务转售"的条款。
     AppEntry(
-        "excalidraw", "Excalidraw", "sketch",
-        '<path d="M4 20l3.5-1 11-11a2.1 2.1 0 0 0-3-3l-11 11L4 20z"/><path d="M13 6.5 17.5 11"/>',
+        "openhands", "OpenHands", "coder",
+        '<path d="M7 11V6.5a1.5 1.5 0 0 1 3 0V11M10 11V5.5a1.5 1.5 0 0 1 3 0V11"/>'
+        '<path d="M13 11V7.5a1.5 1.5 0 0 1 3 0V13"/>'
+        '<path d="M7 11V9.5a1.5 1.5 0 0 0-3 0V14a7 7 0 0 0 7 7h1a7 7 0 0 0 7-7v-3"/>',
     ),
     AppEntry(
-        "open-webui", "Open WebUI", "chatui",
-        '<path d="M21 12a8 8 0 0 1-8 8H4l2-3a8 8 0 1 1 15-5z"/><path d="M9 11h.01M13 11h.01M17 11h.01"/>',
+        "autogen", "AutoGen Studio", "studio",
+        '<circle cx="6.5" cy="7" r="2.5"/><circle cx="17.5" cy="7" r="2.5"/>'
+        '<circle cx="12" cy="17.5" r="2.5"/>'
+        '<path d="M8.6 8.6 10.6 15.4M15.4 8.6 13.4 15.4M9 7h6"/>',
+    ),
+    # 卡片叫 LangChain 而不是 LangGraph: LangChain 是伞, 跑的东西 (LangGraph 运行时
+    # + 官方 agent-chat-ui + 我们写的智能体) 整套都在伞下 —— 名实相符, 而且以后
+    # 换成他们别的运行时这个名字还成立。老板 2026-09-01 定的。
+    AppEntry(
+        "langchain", "LangChain", "agentkit",
+        '<path d="M9.5 14.5 7 17a3.5 3.5 0 0 1-5-5l2.5-2.5"/>'
+        '<path d="M14.5 9.5 17 7a3.5 3.5 0 0 1 5 5l-2.5 2.5"/><path d="M9 15l6-6"/>',
     ),
     AppEntry(
-        "lobe-chat", "Lobe Chat", "chatui",
-        '<rect x="3" y="6" width="18" height="12" rx="4"/><path d="M8 11v2M16 11v2M12 2v4"/>',
+        "openmanus", "OpenManus", "agentcli",
+        '<path d="M12 3v4M12 17v4M3 12h4M17 12h4"/><circle cx="12" cy="12" r="4.5"/>'
+        '<path d="M6.3 6.3 8.8 8.8M15.2 15.2l2.5 2.5M17.7 6.3 15.2 8.8M8.8 15.2l-2.5 2.5"/>',
     ),
     AppEntry(
-        "ragflow", "RAGFlow", "docqa",
-        '<path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v18H6.5A2.5 2.5 0 0 1 4 18.5v-13z"/>'
-        '<path d="M4 18.5A2.5 2.5 0 0 1 6.5 16H20M9 8h7"/>',
-    ),
-    AppEntry(
-        "whisper", "Whisper WebUI", "stt",
-        '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3M8 21h8"/>',
+        "crewai", "CrewAI", "agentcli",
+        '<circle cx="9" cy="8" r="3"/><path d="M3.5 19a5.5 5.5 0 0 1 11 0"/>'
+        '<circle cx="17" cy="9.5" r="2.2"/><path d="M14.8 19a4.4 4.4 0 0 1 5.7-4.2"/>',
     ),
 )
 # fmt: on

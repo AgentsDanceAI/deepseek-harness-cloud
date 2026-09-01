@@ -307,6 +307,17 @@ OPEN_DESIGN_IMAGE_REF = _env("OPEN_DESIGN_IMAGE_REF", "")
 OPEN_DESIGN_MEM_LIMIT_MB = _env_int("OPEN_DESIGN_MEM_LIMIT_MB", 1024)
 OPEN_DESIGN_CPUS = _env_float("OPEN_DESIGN_CPUS", 1.0)
 OPEN_DESIGN_TAB_GRACE_MIN = _env_int("OPEN_DESIGN_TAB_GRACE_MIN", 10)
+# OpenHands —— 自主编码智能体 (2026-09-01)。
+# 用**官方小镜像** openhands/openhands (解开 1.78GB), 不是 agent-canvas 那个
+# all-in-one (5.81GB): 小的把设置存在服务端, POST 一次 /api/v1/settings 对所有
+# 用户都生效; agent-canvas 把首启向导记在浏览器 localStorage 里, 服务端预置不掉,
+# 每个用户都要撞一次墙。
+OPENHANDS_DOMAIN = _env("OPENHANDS_DOMAIN", "")
+OPENHANDS_IMAGE_REF = _env("OPENHANDS_IMAGE_REF", "ghcr.io/openhands/openhands:latest")
+OPENHANDS_MEM_LIMIT_MB = _env_int("OPENHANDS_MEM_LIMIT_MB", 4096)
+OPENHANDS_CPUS = _env_float("OPENHANDS_CPUS", 2.0)
+OPENHANDS_TAB_GRACE_MIN = _env_int("OPENHANDS_TAB_GRACE_MIN", 10)
+
 # Dify —— 云空间的 LLM 应用搭建坑位 (多容器栈, 10 个容器)。
 DIFY_DOMAIN = _env("DIFY_DOMAIN", "")
 DIFY_VERSION = _env("DIFY_VERSION", "1.17.0")
