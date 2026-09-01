@@ -27,7 +27,7 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket
 from fastapi.responses import JSONResponse, Response
 
-from . import config, credits
+from . import config, credits, db
 from .accounts import resolve_user, try_resolve_user
 
 router = APIRouter(tags=["avatar"])
@@ -86,8 +86,7 @@ async def avatar_meter(request: Request):
     **没有用户会话**: 调用方是 GPU 节点的服务进程, 凭的是共享密钥的签名。所以
     这个端点不能挂 resolve_user —— 它验的是机器身份, 不是人。
 
-    幂等靠 request_id (租户 + 分钟窗口): GPU 侧重试或我们这边超时重投时, 同一
-    分钟不会被扣两次。
+    重复投递不会重复扣: 见 _claim_report。
     """
     q = request.query_params
     ts, tenant, minutes, sig = (q.get("ts", ""), q.get("tenant", ""), q.get("minutes", ""), q.get("sig", ""))
@@ -104,19 +103,39 @@ async def avatar_meter(request: Request):
     if mins == 0:
         return {"ok": True, "charged": 0}
     amount = mins * config.AVATAR_CREDITS_PER_MIN
+    # 同一份回报被投两次就只收一次。**必须在这里挡**, 不能指望 usage_log 的
+    # request_id —— 那一列没有唯一约束, 只是记录字段 (实测: 投两次, 两行同一个
+    # request_id, 扣两次钱)。
+    if not _claim_report(f"avatar-meter:{tenant}:{ts}:{mins}"):
+        log.info("[avatar] 重复回报, 不重复扣 user=%s 分钟=%s", user_id, mins)
+        return {"ok": True, "charged": 0, "deduped": True}
     credits.spend(
         user_id,
         amount,
         kind="llm",
         model="avatar:live",
-        # 幂等键取**精确秒 + 分钟数**, 不做时间分桶: 同一份回报重投时 ts 与
-        # minutes 都不变 -> 认得出来; 而背靠背的两通短通话 ts 必然不同 ->
-        # 两笔都收得到。先前按 100 秒分桶, 后一种会被当成重投白吞掉。
-        # (GPU 侧失败不重试, 所以这里防的是重复投递, 不需要更宽的窗口。)
         request_id=f"avatar-{tenant}-{ts}-{mins}",
     )
     log.info("[avatar] 计费 user=%s 分钟=%s 积分=%s", user_id, mins, amount)
     return {"ok": True, "charged": amount}
+
+
+def _claim_report(key: str) -> bool:
+    """第一次见到这份回报 -> 占坑, 返回 True; 见过 -> False。
+
+    **不能拿 usage_log.request_id 当幂等键**: 那一列没有唯一约束, 只是给人看的
+    记录字段。先前就是这么写的, 实测同一份回报投两次 -> 两行同 request_id, 扣了
+    两次钱。多收钱不报错, 用户也不会知道该来问。
+
+    坑占在 kv 里 (主键即唯一), 插入冲突就说明来过了。**先占坑再扣款**: 反过来的
+    话两个并发的重投都会看到"还没扣过"。
+    """
+    with db.tx() as conn:
+        row = conn.execute(
+            "INSERT INTO kv (k, v) VALUES (?, ?) ON CONFLICT (k) DO NOTHING RETURNING k",
+            (key, str(int(time.time()))),
+        ).fetchone()
+    return row is not None
 
 
 def _verify_report(ts: str, tenant: str, minutes: str, sig: str) -> bool:
