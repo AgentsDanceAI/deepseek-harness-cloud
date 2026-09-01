@@ -2565,6 +2565,13 @@ def _openhands_boot() -> str:
         '  [ "$code" = "200" ] && { echo "[dsh] openhands 设置已灌入"; break; }\n'
         '  echo "[dsh] 灌设置失败 (HTTP $code), 重试"; cat /tmp/oh_set.log; sleep 3\n'
         "done\n"
+        # **把 agent server 的 import 预热一遍**。用户点"新对话"时它会另起一个进程
+        # 跑 `python -m openhands.agent_server`, 而应用只等 120 秒。2 核冷盘上那堆
+        # import 走不完 —— 线上表现是页面一直"等待沙盒", 而本机 (缓存热、核多) 七秒
+        # 就起来了, 于是"本地好好的、线上不行", 最费时间的那种。
+        # 预热之后页缓存是热的, 真起沙箱快得多。放后台, 不挡用户开页面。
+        '(/app/.venv/bin/python -c "import openhands.agent_server" >/dev/null 2>&1 '
+        '&& echo "[dsh] agent server 已预热") &\n'
         "wait $srv\n"
     )
 

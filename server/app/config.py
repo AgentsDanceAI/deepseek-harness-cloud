@@ -314,8 +314,10 @@ OPEN_DESIGN_TAB_GRACE_MIN = _env_int("OPEN_DESIGN_TAB_GRACE_MIN", 10)
 # 每个用户都要撞一次墙。
 OPENHANDS_DOMAIN = _env("OPENHANDS_DOMAIN", "")
 OPENHANDS_IMAGE_REF = _env("OPENHANDS_IMAGE_REF", "ghcr.io/openhands/openhands:latest")
-OPENHANDS_MEM_LIMIT_MB = _env_int("OPENHANDS_MEM_LIMIT_MB", 4096)
-OPENHANDS_CPUS = _env_float("OPENHANDS_CPUS", 2.0)
+# 4 核不是阔气: 起沙箱时它另跑一个 agent server 进程, 而应用只等 120 秒 ——
+# 2 核上那堆 import 走不完, 页面就一直"等待沙盒"。
+OPENHANDS_MEM_LIMIT_MB = _env_int("OPENHANDS_MEM_LIMIT_MB", 8192)
+OPENHANDS_CPUS = _env_float("OPENHANDS_CPUS", 4.0)
 OPENHANDS_TAB_GRACE_MIN = _env_int("OPENHANDS_TAB_GRACE_MIN", 10)
 
 # AutoGen Studio —— 微软的多智能体搭建台 (2026-09-01)。上游没有官方镜像, 这是
