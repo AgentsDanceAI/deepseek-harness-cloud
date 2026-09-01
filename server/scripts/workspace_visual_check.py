@@ -54,8 +54,22 @@ WALL_PHRASES = [
     "access token",
     "enter your",
     "git configuration",  # CloudCLI 的首次向导
-    "required",  # 向导里的"必填"
+    "必填",  # 向导里的必填项
 ]
+
+#: 某个产品里**已查明无害**的命中: 产品 id -> {命中词: (必须同时出现的锚点, 为什么)}。
+#:
+#: 只在锚点也在场时才豁免 —— 同一个词换个地方出现照样报。无锚点的白名单等于
+#: 把这个词从那个产品上永久删掉, 那才是真会漏掉墙的做法。
+IGNORE = {
+    "openhands": {
+        "api key": (
+            "getting started",
+            "左下角 Getting started 待办清单里的 'Add LLM API key' —— 它是清单项, "
+            "而且我们注入之后是**已划掉**的状态, 不是要用户填什么",
+        ),
+    },
+}
 
 #: 这些出现在屏幕上说明产品**确实起来了**但我们看到的是错误页。
 BROKEN_PHRASES = [
@@ -224,6 +238,10 @@ def main() -> int:
             bad += 1
             continue
         walls = [w for w in WALL_PHRASES if w in text]
+        for w, (anchor, why) in (IGNORE.get(pid) or {}).items():
+            if w in walls and anchor in text:
+                walls.remove(w)
+                print(f"      (放过「{w}」: {why})")
         broken = [b for b in BROKEN_PHRASES if b in text]
         # 命中词**要带上下文打出来**。光报一个 ['api key'] 没法判断是墙还是待办,
         # 每次都得去翻截图 —— 2026-09-01 一轮里三个红有两个是这么白翻的。
