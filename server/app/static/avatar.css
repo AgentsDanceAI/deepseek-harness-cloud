@@ -4,8 +4,24 @@
 .av-stage { position: relative; flex: 1 1 520px; min-width: 300px; border-radius: 14px;
             overflow: hidden; background: #111; aspect-ratio: 16 / 9; }
 .av-bg { width: 100%; height: 100%; object-fit: cover; display: block; }
-/* 起播前/她说完后是透明的, 露出底下的静止背景 (同源的中性帧, 不跳脸)。 */
-.av-video { position: absolute; object-fit: cover; opacity: 0; transition: opacity .12s; }
+/* 起播前/她说完后是透明的, 露出底下的静止背景 (同源的中性帧, 不跳脸)。
+   四边**羽化**: 视频层是个直角矩形, 硬边压在照片上一说话就看见一个方块 ——
+   服务端合成静止图时对同一块做了 24px 羽化 (448px 见方, 约 5.4%), 这里用遮罩
+   给出同样的过渡, 两层才对得上。数值跟着服务端走, 改一处要改两处。 */
+.av-video { position: absolute; object-fit: cover; opacity: 0; transition: opacity .12s;
+            --feather: 6%;
+            -webkit-mask-image:
+              linear-gradient(to right, transparent 0, #000 var(--feather),
+                              #000 calc(100% - var(--feather)), transparent 100%),
+              linear-gradient(to bottom, transparent 0, #000 var(--feather),
+                              #000 calc(100% - var(--feather)), transparent 100%);
+            -webkit-mask-composite: source-in;   /* Safari 的老语法 */
+            mask-image:
+              linear-gradient(to right, transparent 0, #000 var(--feather),
+                              #000 calc(100% - var(--feather)), transparent 100%),
+              linear-gradient(to bottom, transparent 0, #000 var(--feather),
+                              #000 calc(100% - var(--feather)), transparent 100%);
+            mask-composite: intersect; }
 .av-hint { position: absolute; inset: 0; display: grid; place-items: center;
            color: #fff; background: rgba(0,0,0,.35); font-size: 15px; }
 
