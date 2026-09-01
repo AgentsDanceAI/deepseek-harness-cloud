@@ -19,9 +19,9 @@ import pathlib
 
 from . import browser, filmdir, media
 
-#: 工作目录。与 products.py 里的 mounts 一致 —— 改一处必须改另一处,
-#: 不然用户的文件写进容器本地, 实例一回收就没了 (而且不报错)。
-WORKDIR = pathlib.Path(os.environ.get("AGENTS_TEAM_WORKDIR", "/workspace"))
+#: 工作区的根与"当前这部片的目录"都在 filmdir 里 —— **只留一个根**。
+#: 这里曾经另有一份 WORKDIR 常量, 于是镜像自检 `tools.WORKDIR = 临时目录` 的覆盖
+#: 被静默忽略: 工具全都"成功"了, 文件却写在别处 (2026-09-01 构建自检抓到)。
 
 #: 单次 shell 的墙钟上限。超时不是失败, 是**把已有输出还给模型**让它自己决定 ——
 #: 直接报错会让"跑一个长任务"这种正常用法变成死路。
@@ -120,7 +120,7 @@ async def screenshot(display: str | None = None) -> tuple[str, str]:
     env_display = display or os.environ.get("DISPLAY", "")
     if not env_display:
         return "这个工作台没有图形桌面, 截图不可用。", "截图 (无桌面)"
-    out = WORKDIR / ".agents-team-shot.png"
+    out = filmdir.ROOT / ".agents-team-shot.png"
     proc = await asyncio.create_subprocess_exec(
         "scrot",
         "-o",

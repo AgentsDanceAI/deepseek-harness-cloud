@@ -20,10 +20,10 @@ import tempfile
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
 import httpx
-from app import agent, tools
+from app import agent, filmdir
 
 _tmp = pathlib.Path(tempfile.mkdtemp(prefix="agents-team-verify-"))
-tools.WORKDIR = _tmp
+filmdir.ROOT = _tmp   # 唯一的根 (tools 不再自留一份)
 
 from app import rooms
 

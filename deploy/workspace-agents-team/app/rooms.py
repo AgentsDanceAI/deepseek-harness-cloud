@@ -20,9 +20,9 @@ import time
 import uuid
 from dataclasses import asdict, dataclass, field
 
-from . import filmdir, tools
+from . import filmdir
 
-STATE_PATH = tools.WORKDIR / ".agents-team" / "rooms.json"
+STATE_PATH = filmdir.ROOT / ".agents-team" / "rooms.json"
 
 
 @dataclass

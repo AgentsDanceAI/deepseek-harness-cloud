@@ -30,7 +30,12 @@ ROOT = pathlib.Path(os.environ.get("AGENTS_TEAM_WORKDIR", "/workspace"))
 #: 片子们放在根下这个目录里, 而不是直接摊在根上 —— 根上还有老片的散件。
 FILMS = "片"
 
-_CUR: contextvars.ContextVar[pathlib.Path] = contextvars.ContextVar("film_dir", default=ROOT)
+#: 默认存 None 而不是 ROOT: ContextVar 的 default 在创建时就定死了, 而 ROOT 是
+#: 会被改写的 (镜像自检把根指到临时目录再跑一遍工具)。存 None、取值时回落到当前
+#: 的 ROOT, 改写才生效 —— 否则自检的覆盖被静默忽略, 而工具"看起来"都成功了。
+_CUR: contextvars.ContextVar[pathlib.Path | None] = contextvars.ContextVar(
+    "film_dir", default=None
+)
 
 #: 文件名里留下汉字、字母数字和连字符; 其余一律折成 "-"。片名是用户随手起的,
 #: 里面有空格、引号、斜杠都很正常, 直接拿去当目录名会炸或者穿出去。
@@ -38,8 +43,8 @@ _UNSAFE = re.compile(r"[^\w一-鿿-]+")
 
 
 def current() -> pathlib.Path:
-    """当前这一棒的工作目录。没设过就是根 (老房间、单元测试)。"""
-    return _CUR.get()
+    """当前这一棒的工作目录。没设过就是根 (老房间、单元测试、镜像自检)。"""
+    return _CUR.get() or ROOT
 
 
 def use(path: pathlib.Path) -> contextvars.Token:

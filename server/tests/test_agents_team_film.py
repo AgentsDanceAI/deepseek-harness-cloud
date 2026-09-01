@@ -990,7 +990,7 @@ def test_tools_and_media_both_follow_the_current_film():
     media_m = _crew("media")
 
     rel = filmdir.slug_for("dd44", "验收片")
-    filmdir.use(filmdir.resolve(rel))
+    tok = filmdir.use(filmdir.resolve(rel))
     here = filmdir.ROOT / rel
 
     got = tools_m._resolve("讲戏本.md")
@@ -1005,6 +1005,8 @@ def test_tools_and_media_both_follow_the_current_film():
         pass
     else:
         raise AssertionError("路径穿越没挡住")
+    finally:
+        filmdir.reset(tok)  # 别把"当前是哪部片"泄漏给后面的测试
 
 
 def test_old_rooms_json_still_loads():
@@ -1021,3 +1023,37 @@ def test_old_rooms_json_still_loads():
         }
     )
     assert r.dir == "", "老房间该落在根上 (空 dir), 不该被搬进新目录"
+
+
+def test_only_one_root_so_overrides_cannot_be_silently_ignored():
+    """工作区的根只许有一个定义 —— 两个根 = 覆盖掉一个, 另一个照旧。
+
+    2026-09-01 构建自检抓到: tools 自留了一份 WORKDIR 常量, 于是 verify.py 里
+    `tools.WORKDIR = 临时目录` 的覆盖对路径解析**完全无效** —— 每个工具都报成功,
+    文件却写在 /workspace。这类 bug 在单测里看不见 (单测不覆盖根), 只有真去磁盘上
+    找文件才发现。
+    """
+    tools_src = (TEAM / "app" / "tools.py").read_text(encoding="utf-8")
+    rooms_src = (TEAM / "app" / "rooms.py").read_text(encoding="utf-8")
+    media_src = (TEAM / "app" / "media.py").read_text(encoding="utf-8")
+    for name, src in (("tools", tools_src), ("rooms", rooms_src), ("media", media_src)):
+        assert "AGENTS_TEAM_WORKDIR" not in src, (
+            f"{name}.py 又自己从 env 派生了一个根 —— 根只许 filmdir 定义一处"
+        )
+
+    # 而且 ROOT 必须是**可改写的**: ContextVar 的 default 在创建时定死, 存 ROOT
+    # 进去的话, 自检改 filmdir.ROOT 依然不生效 (同一个 bug 换个地方)。
+    filmdir = _crew("filmdir")
+    import contextvars
+    import pathlib
+
+    old = filmdir.ROOT
+    try:
+        filmdir.ROOT = pathlib.Path("/tmp/__root_override_probe__")
+        # 在**干净的 Context** 里探: 显式 use() 过的片目录本就该压过 ROOT, 而这里
+        # 要验的是"没设过片目录时回落到当前 ROOT"。直接调会读到上一条测试留下的值。
+        assert contextvars.Context().run(filmdir.current) == filmdir.ROOT, (
+            "改写 ROOT 后 current() 没跟上 —— ContextVar 的 default 又被定死了"
+        )
+    finally:
+        filmdir.ROOT = old
