@@ -184,7 +184,9 @@ def main() -> int:
     print(f"    视频层遮罩: composite={mask.get('comp')!r} image={mask.get('img')!r}")
     if "gradient" not in (mask.get("img") or ""):
         bad.append("视频层没有羽化遮罩 —— 硬边压在照片上就是一个方块")
-    if mask.get("comp") not in ("intersect", "source-in"):
+    # 计算样式**按遮罩层各给一个值**, 所以这里是 "intersect, intersect" 这种形状。
+    comps = [c.strip() for c in (mask.get("comp") or "").split(",") if c.strip()]
+    if not comps or any(c not in ("intersect", "source-in") for c in comps):
         bad.append(f"遮罩合成方式是 {mask.get('comp')!r} —— 不是交集就等于没羽化")
     if not res.get("log_grew"):
         bad.append("我说完之后字幕没长 —— 她的回复没进字幕")
