@@ -38,7 +38,12 @@ out = pathlib.Path("/work/out"); out.mkdir(parents=True, exist_ok=True)
 res = {}
 
 with sync_playwright() as p:
-    browser = p.chromium.launch(args=["--no-sandbox", "--autoplay-policy=no-user-gesture-required"])
+    # **必须是真 Chrome, 不能用 Playwright 自带的 Chromium**: 后者把专有编解码
+    # 编译掉了, H.264 (avc1) 一律 isTypeSupported=false —— 页面会正确地说"这个
+    # 浏览器不支持实时视频", 而那是**测试浏览器**的毛病, 不是产品的。
+    # 用 Chromium 跑这个脚本只会得到一个永远红的假故障。
+    browser = p.chromium.launch(channel="chrome",
+                                args=["--no-sandbox", "--autoplay-policy=no-user-gesture-required"])
     ctx = browser.new_context(viewport={"width": 1440, "height": 900}, locale="zh-CN")
     ctx.add_cookies([{
         "name": spec["cookie_name"], "value": spec["token"],
