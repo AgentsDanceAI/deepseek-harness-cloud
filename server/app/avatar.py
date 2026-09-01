@@ -16,16 +16,19 @@ GPU 侧用同一把密钥验; 回报计费时反向签一次, 我们验。租户
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import hmac
 import logging
 import time
+from urllib.parse import urlencode
 
-from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import JSONResponse
+import httpx
+from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket
+from fastapi.responses import JSONResponse, Response
 
 from . import config, credits
-from .accounts import resolve_user
+from .accounts import resolve_user, try_resolve_user
 
 router = APIRouter(tags=["avatar"])
 log = logging.getLogger("dhc.avatar")
@@ -132,3 +135,125 @@ def _verify_report(ts: str, tenant: str, minutes: str, sig: str) -> bool:
         hashlib.sha256,
     ).hexdigest()
     return hmac.compare_digest(want, sig)
+
+
+@router.get("/api/avatar/config")
+async def avatar_config(user: dict = Depends(resolve_user)):
+    """形象与音色清单。**代为转发**而不是让浏览器直连 GPU 节点。
+
+    为什么不直连: 那样得把令牌暴露在前端能拿到的地方并允许跨域, 而令牌是能建立
+    通话 (烧 GPU、扣积分) 的凭据。代转的话浏览器只跟我们说话, 令牌不出服务端。
+    """
+    if not config.AVATAR_TOKEN_SECRET:
+        raise HTTPException(503, "avatar_not_configured")
+    tok = sign_token(user["id"])
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as c:
+            r = await c.get(f"{config.AVATAR_GPU_URL}/config", params={"token": tok})
+        if r.status_code != 200:
+            raise HTTPException(502, "avatar_upstream_error")
+        return r.json()
+    except httpx.HTTPError as e:
+        log.warning("[avatar] config 取不到: %s", type(e).__name__)
+        raise HTTPException(502, "avatar_unreachable") from None
+
+
+@router.get("/api/avatar/bg.png")
+async def avatar_bg(user: dict = Depends(resolve_user)):
+    """静止背景。它是模型自渲染的中性帧合成图 —— 视频起播时不跳脸靠的就是它。"""
+    if not config.AVATAR_TOKEN_SECRET:
+        raise HTTPException(503, "avatar_not_configured")
+    tok = sign_token(user["id"])
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as c:
+            r = await c.get(f"{config.AVATAR_GPU_URL}/bg.png", params={"token": tok})
+        return Response(
+            content=r.content,
+            status_code=r.status_code,
+            media_type=r.headers.get("content-type", "image/png"),
+        )
+    except httpx.HTTPError:
+        raise HTTPException(502, "avatar_unreachable") from None
+
+
+@router.post("/api/avatar/persons")
+async def avatar_upload(request: Request, id: str = "", user: dict = Depends(resolve_user)):
+    """上传形象。同样代转 —— 令牌不出服务端。"""
+    if not config.AVATAR_TOKEN_SECRET:
+        raise HTTPException(503, "avatar_not_configured")
+    body = await request.body()
+    if not body or len(body) > 20 * 1024 * 1024:
+        return JSONResponse({"error": "图为空或超过 20MB"}, status_code=400)
+    tok = sign_token(user["id"])
+    try:
+        async with httpx.AsyncClient(timeout=120.0) as c:
+            r = await c.post(
+                f"{config.AVATAR_GPU_URL}/persons", params={"token": tok, "id": id}, content=body
+            )
+        return JSONResponse(r.json(), status_code=r.status_code)
+    except (httpx.HTTPError, ValueError):
+        raise HTTPException(502, "avatar_unreachable") from None
+
+
+@router.websocket("/api/avatar/ws")
+async def avatar_ws(ws: WebSocket):
+    """通话本身。双向转发到 GPU 节点。
+
+    **令牌在这里重签, 不用前端传来的那个**: 前端手里那份是 /api/avatar/session
+    给的, 它可能已经过期 (用户开着页面放了十分钟才点通话), 而过期的表现是
+    "点了没反应" —— 最难查的那类。重签一次是零成本的。
+
+    转发而不是让浏览器直连的另一个理由: 这样通话流量走我们的域, 前面压着
+    forward_auth, 未登录的人连不上 —— 而 GPU 那边只认 HMAC, 谁拿到令牌谁能用。
+    """
+    import websockets
+
+    await ws.accept()
+    user = try_resolve_user(ws)
+    if user is None:
+        await ws.send_json({"type": "error", "message": "not_authenticated"})
+        await ws.close()
+        return
+    if not config.AVATAR_TOKEN_SECRET:
+        await ws.send_json({"type": "error", "message": "avatar_not_configured"})
+        await ws.close()
+        return
+
+    q = dict(ws.query_params)
+    q["token"] = sign_token(user["id"])  # 重签, 见上面的说明
+    base = config.AVATAR_GPU_URL.replace("https://", "wss://").replace("http://", "ws://")
+    url = f"{base}/ws?" + urlencode(q)
+
+    try:
+        async with websockets.connect(url, max_size=None) as up:
+
+            async def c2s() -> None:
+                while True:
+                    m = await ws.receive()
+                    if m.get("type") == "websocket.disconnect":
+                        break
+                    if (b := m.get("bytes")) is not None:
+                        await up.send(b)
+                    elif (txt := m.get("text")) is not None:
+                        await up.send(txt)
+
+            async def s2c() -> None:
+                async for data in up:
+                    if isinstance(data, bytes):
+                        await ws.send_bytes(data)
+                    else:
+                        await ws.send_text(data)
+
+            done, pending = await asyncio.wait(
+                [asyncio.create_task(c2s()), asyncio.create_task(s2c())],
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            for task in pending:
+                task.cancel()
+    except Exception as e:  # noqa: BLE001
+        log.warning("[avatar] ws 转发中断: %s", type(e).__name__)
+    finally:
+        try:
+            await ws.close()
+        except RuntimeError:
+            pass

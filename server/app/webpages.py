@@ -421,6 +421,17 @@ def product_page(request: Request):
     return _render(request, "product.html", "product")
 
 
+@router.get("/avatar")
+def avatar_page(request: Request):
+    """数字人通话页。
+
+    与其它产品不同, 它**不是一个云工作台** —— 没有每用户容器可开, 页面就在主站
+    这里, 通话经 /api/avatar/* 转发到我们自己的 GPU 节点。所以它不走
+    /work/... 那条路, 也不出现在工作台的启动/回收逻辑里。
+    """
+    return _render(request, "avatar.html", "avatar")
+
+
 @router.get("/apps")
 def apps_page(request: Request):
     """云空间: 16 个开源 AI 产品的 4x4 卡片网格。
