@@ -495,3 +495,104 @@ def test_asyncio_is_imported_for_the_backoff():
     assert "import asyncio" in AGENT
     i = AGENT.index("async def _stream(")
     assert "asyncio.sleep" in AGENT[i : i + 1200]
+
+
+# ── 字段名必须与服务端实际返回一致 (2026-09-01: 我今晚第三次栽在"想当然") ──
+# 上传返回体的字段是 download_url, 我写成了 url —— 于是上传**全部成功**却取到
+# 空串, 报"参考图上传失败"且原因为空。阿摄被这个假错误折腾了十几步 (换绝对
+# 路径、换 jpg、验 PNG 魔数), 全是白费。
+#
+# 这条测试跨文件比对: 从服务端 media.py 里读出真实字段, 再断言容器侧在用它。
+# 光看容器侧的源码永远发现不了 —— 那边写什么都"看起来对"。
+SERVER_MEDIA = (ROOT / "server" / "app" / "media.py").read_text(encoding="utf-8")
+
+
+def test_upload_response_fields_match_the_server():
+    i = SERVER_MEDIA.index('"upload_url": f"{base}')
+    seg = SERVER_MEDIA[i - 200 : i + 400]
+    assert '"download_url"' in seg, "服务端改了字段名, 这条测试的前提没了"
+    # 容器侧必须用同一对字段
+    assert 'd.get("upload_url")' in MEDIA
+    assert 'd.get("download_url")' in MEDIA
+    assert 'd.get("url")' not in MEDIA, "又在用不存在的 url 字段"
+
+
+def test_video_job_fields_match_the_server():
+    assert '"id": job_id, "model": model, "task_status": "PROCESSING"' in SERVER_MEDIA
+    assert '"video_result": [{"url": job["url"]' in SERVER_MEDIA
+    # 容器侧: 提交读 id, 轮询读 task_status + video_result[0].url
+    assert '.get("id")' in MEDIA
+    assert 'd.get("task_status")' in MEDIA
+    assert '"video_result"' in MEDIA
+
+
+def test_upload_failure_always_says_why():
+    """空原因比报错更糟 —— 模型拿到"失败但没说为什么"只能瞎试。"""
+    i = MEDIA.index("async def _upload_blob")
+    seg = MEDIA[i : i + 1600]
+    # 每一条失败出口都要带上原因
+    assert 'return "", f"文件不存在' in seg
+    assert "申请上传位 HTTP" in seg
+    assert "实际字段" in seg, "字段对不上时要报出实际字段名, 而不是回空"
+    assert "上传 HTTP" in seg
+    # 调用方兜底: 万一还是空原因也要说人话
+    assert "没有返回失败原因" in MEDIA
+
+
+def test_upload_content_type_follows_the_suffix():
+    """一律报 image/png 会让 jpg 存成 png —— 没必要赌上游按魔数纠错。"""
+    assert "_CTYPE" in MEDIA
+    assert '".jpg": "image/jpeg"' in MEDIA
+
+
+def test_reference_images_reach_both_input_styles():
+    """**参考图必须两个字段都发。**
+
+    服务端按模型的 video_input 分流: img_url 系 (seedance) 只看 image_url;
+    media 系 (**万相 3.0 —— 我们的默认视频模型**) 只看 media 数组, image_url
+    被完全忽略。只发 image_url 的话默认模型下参考图被**静默丢弃** —— 十几个
+    镜头的人物一致性全没了, 而且不报任何错。
+
+    服务端注释原话: "把它压成一张首帧, 等于把用户的参考素材悄悄丢掉, 他付了钱
+    却拿到一条无视素材的视频, 比直接报错更糟"。我读过那段注释, 然后还是只发了
+    image_url —— 所以钉一条测试。
+    """
+    # 服务端确实按 input_style 分流 (前提成立才谈得上这条契约)
+    assert 'video_input_style(model) == "media"' in SERVER_MEDIA
+    assert 'payload["input"]["media"] = media' in SERVER_MEDIA
+    assert 'payload["input"]["img_url"] = image_url' in SERVER_MEDIA
+    # 容器侧两个都发
+    assert 'body["image_url"] = urls[0]' in MEDIA
+    assert 'body["media"] = [{"url": u} for u in urls]' in MEDIA
+
+
+def test_media_item_shape_and_cap_match_the_server():
+    """media 每项要 {"url": ...}, 且不超过服务端的上限 (超了整个请求 400)。"""
+    assert "_MEDIA_MAX_ITEMS = 8" in SERVER_MEDIA
+    assert "MEDIA_MAX_ITEMS = 8" in MEDIA, "上限没跟服务端对齐"
+    assert "each media item needs a url" in SERVER_MEDIA
+    assert '{"url": u}' in MEDIA
+
+
+def test_multiple_reference_images_are_supported():
+    """一个镜头里角色+场景+道具本该一起当参考 —— 只开一张是浪费。"""
+    i = MEDIA.index("async def generate_video")
+    seg = MEDIA[i : i + 900]
+    assert "image: str | list | None" in seg, "image 还是只收单张"
+    assert "isinstance(image, str)" in seg, "得兼容单张写法"
+    # 工具描述与人格都要说得出来, 否则模型不会用
+    assert "最多 8 张" in MEDIA
+    j = ROOMS.index('"videographer"')
+    assert "数组" in ROOMS[j : j + 1000], "阿摄的人格没提可以给多张"
+
+
+def test_upload_sends_only_fields_the_server_reads():
+    """服务端只读 content_type / file_name —— 发 size 是噪音。"""
+    i = SERVER_MEDIA.index('@router.post("/v1/media/uploads")')
+    seg = SERVER_MEDIA[i : i + 1400]
+    reads = {m for m in ("content_type", "file_name", "size") if f'body.get("{m}")' in seg}
+    assert reads == {"content_type", "file_name"}, f"服务端读的字段变了: {reads}"
+    j = MEDIA.index("async def _upload_blob")
+    body = MEDIA[j : j + 1200]
+    assert '"content_type": ctype' in body and '"file_name": p.name' in body
+    assert '"size"' not in body, "还在发服务端不读的 size"

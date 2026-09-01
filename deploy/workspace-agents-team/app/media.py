@@ -116,8 +116,12 @@ def _norm_resolution(r: str) -> str:
     return v if v in _RESOLUTIONS else "720p"
 
 
+MEDIA_MAX_ITEMS = 8   # 与服务端 media.py 的 _MEDIA_MAX_ITEMS 对齐
+
+
 async def generate_video(prompt: str, path: str, duration: int = 5, resolution: str = "720p",
-                         ratio: str = "", image: str = "", model: str = "") -> tuple[str, str]:
+                         ratio: str = "", image: str | list | None = None,
+                         model: str = "") -> tuple[str, str]:
     """出一段视频并存到工作区 (提交 → 轮询 → 下载, 一次调用走完)。
 
     做成同步是刻意的: 让模型"提交完自己去轮询"会让它在等待期间反复调工具、
@@ -137,12 +141,28 @@ async def generate_video(prompt: str, path: str, duration: int = 5, resolution: 
         return "没有可用的视频模型 (DSH_VIDEO_MODEL 未配置)。", "出片无模型"
     if ratio:
         body["ratio"] = ratio
-    if image:
-        # 首帧参考图: 上传进资产库换一个可被上游取到的 url
-        url, why = await _upload_blob(_safe_rel(image))
-        if not url:
-            return f"参考图上传失败: {why}", "参考图上传失败"
-        body["image_url"] = url
+    refs = [image] if isinstance(image, str) else list(image or [])
+    refs = [r for r in refs if str(r).strip()][:MEDIA_MAX_ITEMS]
+    if refs:
+        # 参考图上传进资产库, 换成上游能取到的 url。
+        #
+        # ⚠️ **两个字段都要发**。服务端按模型的 video_input 分流:
+        #   img_url 系 (seedance 等) 只看 image_url;
+        #   media   系 (**万相 3.0 —— 我们的默认视频模型**) 只看 media 数组,
+        #           image_url 被完全忽略。
+        # 只发 image_url 的话, 默认模型下参考图**被静默丢弃** —— 十几个镜头的
+        # 人物一致性全没了, 而且不报任何错。服务端注释原话: "把它压成一张首帧,
+        # 等于把用户的参考素材悄悄丢掉, 他付了钱却拿到一条无视素材的视频,
+        # 比直接报错更糟"。两个都发, 谁用得上谁取。
+        urls = []
+        for r in refs:
+            url, why = await _upload_blob(_safe_rel(str(r)))
+            if not url:
+                return (f"参考图上传失败 ({r}): {why or '没有返回失败原因 — 这是个 bug, 请报告'}",
+                        "参考图上传失败")
+            urls.append(url)
+        body["image_url"] = urls[0]                       # img_url 系吃这个
+        body["media"] = [{"url": u} for u in urls]        # media 系吃这个
     async with _client(120) as c:
         r = await c.post(f"{GATEWAY_BASE}/videos/generations", headers=_headers(), json=body)
     if r.status_code >= 400:
@@ -183,23 +203,41 @@ async def generate_video(prompt: str, path: str, duration: int = 5, resolution: 
             f"出片 {rel.name}")
 
 
+#: 按后缀给 content_type —— 资产库按它决定怎么存/怎么回, 一律报 image/png
+#: 会让 jpg 存成 png (上游取图时按魔数解码, 大多能过, 但没必要赌)。
+_CTYPE = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+          ".webp": "image/webp", ".gif": "image/gif"}
+
+
 async def _upload_blob(p: Path) -> tuple[str, str]:
-    """把本地文件放进 DSH 资产库, 换一个上游能取到的 url。"""
+    """把本地文件放进 DSH 资产库, 换一个上游能取到的 url。
+
+    ⚠️ 返回体的字段是 **download_url**, 不是 url (见 media.create_upload:
+    {"id", "upload_url", "download_url"})。2026-09-01 我照着想当然写了 url,
+    于是: 上传其实**全部成功**, 但取到空串 → 报"参考图上传失败"且原因为空 ——
+    阿摄被这个假错误折腾了十几步 (换绝对路径、换 jpg、验 PNG 魔数), 全是白费。
+    """
     if not p.exists():
         return "", f"文件不存在: {p}"
+    ctype = _CTYPE.get(p.suffix.lower(), "application/octet-stream")
     async with _client(60) as c:
         r = await c.post(f"{GATEWAY_BASE}/media/uploads", headers=_headers(),
-                         json={"content_type": "image/png", "size": p.stat().st_size})
+                         # 只发服务端真读的字段 (content_type / file_name)。
+                         # size 它不读 —— 发了是噪音, 还会让人以为有配额校验。
+                         json={"content_type": ctype, "file_name": p.name})
         if r.status_code >= 400:
-            return "", f"HTTP {r.status_code}: {_err_text(r)}"
+            return "", f"申请上传位 HTTP {r.status_code}: {_err_text(r)}"
         d = r.json() or {}
-        put, get = d.get("upload_url") or "", d.get("url") or ""
-        if not put:
-            return "", "资产库没有返回上传地址"
+        put = d.get("upload_url") or ""
+        get = d.get("download_url") or ""
+        if not put or not get:
+            # 字段名对不上要**说出来**, 不能回一个空原因 —— 那正是这次的坑:
+            # 模型拿到"失败但没说为什么", 只能瞎试。
+            return "", f"资产库返回里没有 upload_url/download_url, 实际字段: {sorted(d)}"
         up = await c.put(put, content=p.read_bytes(),
-                         headers={**_headers(), "Content-Type": "image/png"})
+                         headers={**_headers(), "Content-Type": ctype})
         if up.status_code >= 400:
-            return "", f"上传 HTTP {up.status_code}"
+            return "", f"上传 HTTP {up.status_code}: {_err_text(up)}"
     return get, ""
 
 
@@ -299,7 +337,15 @@ SCHEMAS = [
                     "duration": {"type": "number", "description": "秒; 省略 5"},
                     "resolution": {"type": "string", "description": "480p/720p/1080p (小写); 省略 720p"},
                     "ratio": {"type": "string", "description": "如 16:9 / 9:16"},
-                    "image": {"type": "string", "description": "首帧参考图的工作区路径"},
+                    "image": {
+                        "description": ("参考图的工作区路径。可以给一张, 也可以给一个数组 "
+                                        "(最多 8 张) —— 一个镜头里的角色图+场景图+道具图"
+                                        "一起给, 人物与场景的一致性最好。"),
+                        "anyOf": [
+                            {"type": "string"},
+                            {"type": "array", "items": {"type": "string"}},
+                        ],
+                    },
                     "model": {"type": "string", "description": "省略用工作台默认视频模型"},
                 },
                 "required": ["prompt", "path"],
@@ -341,7 +387,7 @@ HANDLERS = {
         a["prompt"], a["path"], a.get("size", ""), a.get("model", "")),
     "generate_video": lambda a: generate_video(
         a["prompt"], a["path"], int(a.get("duration") or 5), a.get("resolution") or "720p",
-        a.get("ratio", ""), a.get("image", ""), a.get("model", "")),
+        a.get("ratio", ""), a.get("image"), a.get("model", "")),
     "concat_videos": lambda a: concat_videos(
         list(a.get("clips") or []), a["path"], a.get("audio", "")),
     "media_models": lambda a: media_models(),
