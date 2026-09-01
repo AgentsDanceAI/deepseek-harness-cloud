@@ -37,11 +37,28 @@ spec = json.loads(pathlib.Path("/work/spec.json").read_text())
 out = pathlib.Path("/work/out"); out.mkdir(parents=True, exist_ok=True)
 res = {}
 
+PROBE = ("() => { const v = document.querySelector('#avVideo');"
+         " return {t: v.currentTime, w: v.videoWidth, h: v.videoHeight,"
+         " paused: v.paused, muted: v.muted, op: getComputedStyle(v).opacity,"
+         " ready: v.readyState, net: v.networkState, err: v.error && v.error.code,"
+         " buf: v.buffered.length, hasSrc: !!v.currentSrc}; }")
+
+
+def wait_for(page, want, secs=60):
+    """等到 want(探针) 为真; 返回最后一次探到的状态。"""
+    v = page.evaluate(PROBE)
+    for _ in range(secs):
+        if want(v):
+            return v
+        page.wait_for_timeout(1000)
+        v = page.evaluate(PROBE)
+    return v
+
+
 with sync_playwright() as p:
     # **必须是真 Chrome, 不能用 Playwright 自带的 Chromium**: 后者把专有编解码
     # 编译掉了, H.264 (avc1) 一律 isTypeSupported=false —— 页面会正确地说"这个
     # 浏览器不支持实时视频", 而那是**测试浏览器**的毛病, 不是产品的。
-    # 用 Chromium 跑这个脚本只会得到一个永远红的假故障。
     browser = p.chromium.launch(channel="chrome",
                                 args=["--no-sandbox", "--autoplay-policy=no-user-gesture-required"])
     ctx = browser.new_context(viewport={"width": 1440, "height": 900}, locale="zh-CN")
@@ -51,41 +68,34 @@ with sync_playwright() as p:
     }])
     page = ctx.new_page()
     page.on("console", lambda m: res.setdefault("console", []).append(f"{m.type}: {m.text}"[:200]))
-    # 404/5xx 要**带着是哪个 URL** 记下来 —— 光看到"404"完全没法判断是我们的东西
-    # 坏了还是第三方探针。
+    # 4xx/5xx 要**带着是哪个 URL** 记下来 —— 光看到"404"没法判断是我们的东西坏了
+    # 还是第三方探针。
     page.on("response", lambda r: r.status >= 400 and res.setdefault("bad", []).append(f"{r.status} {r.url}"[:160]))
     page.on("requestfailed", lambda r: res.setdefault("bad", []).append(f"failed {r.url}"[:160]))
     try:
         page.goto(spec["url"], timeout=60000, wait_until="domcontentloaded")
         page.wait_for_timeout(4000)
         page.click("#avCall")
-        # 接通后打字那一栏才出现 —— 它同时也是"上游 ready 已到"的证据。
+        # 打字那一栏出现 = 上游 ready 已到。接通后她会先说一句招呼。
         page.wait_for_selector("#avSay:not([hidden])", timeout=30000)
+
+        # 第一段: 招呼。验"露"。
+        res["greet"] = wait_for(page, lambda v: v["t"] > 0.3 and v["w"] > 0, 40)
+        page.screenshot(path=str(out / "call.png"))
+        # 验"藏" —— 她说完图层要收回去, 漏了就是最后一帧僵在背景上 (重影)。
+        res["greet_after"] = wait_for(page, lambda v: v["op"] == "0", 25)
+
+        # 第二段: 真问一句, 验模型那条路 (她的回复要出画、要进字幕)。
+        # 分两段是必要的: 只看第一段的话, 招呼是**固定文案**, 模型根本没参与 ——
+        # 而模型那条路恰恰是最容易慢/挂的一段。
+        before = page.inner_text("#avLog")
         page.fill("#avSay", spec["prompt"])
         page.press("#avSay", "Enter")
-        # 她要先想 (模型) 再合成 (GPU)。实测首帧 ~2s, 给足 60s。
-        for _ in range(60):
-            page.wait_for_timeout(1000)
-            v = page.evaluate("() => { const v = document.querySelector('#avVideo');"
-                              " return {t: v.currentTime, w: v.videoWidth, h: v.videoHeight,"
-                              " paused: v.paused, muted: v.muted, op: getComputedStyle(v).opacity,"
-                              " ready: v.readyState, net: v.networkState, err: v.error && v.error.code,"
-                              " buf: v.buffered.length, hasSrc: !!v.currentSrc}; }")
-            if v["t"] > 0.3 and v["w"] > 0:
-                break
-        res["video"] = v
-        # **说完之后还要再看一眼**: 露出来验过了, 藏没藏一直没验 —— 而漏藏的后果
-        # 是最后一帧僵在背景上变成重影。等她把缓冲播完 (说一句约几秒)。
-        for _ in range(20):
-            page.wait_for_timeout(1000)
-            after = page.evaluate("() => { const v = document.querySelector('#avVideo');"
-                                  " return {t: v.currentTime, op: getComputedStyle(v).opacity}; }")
-            if after["op"] == "0":
-                break
-        res["after"] = after
-        res["log"] = page.inner_text("#avLog")[:300]
+        res["reply"] = wait_for(page, lambda v: v["t"] > (res["greet_after"]["t"] + 0.3), 60)
+        res["reply_after"] = wait_for(page, lambda v: v["op"] == "0", 30)
+        res["log"] = page.inner_text("#avLog")[:400]
+        res["log_grew"] = len(res["log"]) > len(before)
         res["status"] = page.inner_text("#avStatus")[:200]
-        res["timer"] = page.inner_text("#avTimer")
         page.screenshot(path=str(out / "call.png"))
     except Exception as e:
         res["error"] = f"{type(e).__name__}: {e}"[:400]
@@ -131,44 +141,37 @@ def main() -> int:
         raise SystemExit("要么 --emit-spec 写规格, 要么 --read-results 判读 (见 avatar_call_check.sh)")
 
     res = json.loads((pathlib.Path(args.read_results) / "results.json").read_text())
+    for line in (res.get("bad") or [])[-8:]:
+        print(f"    请求失败 | {line}")
+    for line in (res.get("console") or [])[-10:]:
+        if "cloudflareinsights" not in line:
+            print(f"    控制台 | {line}")
     if res.get("error"):
         print(f"  ✗ 打不通: {res['error']}")
         return 1
-    v = res.get("video") or {}
-    print(f"    状态栏: {res.get('status', '')!r}   计时: {res.get('timer')}")
-    print(
-        f"    video: currentTime={v.get('t')} {v.get('w')}x{v.get('h')} "
-        f"paused={v.get('paused')} muted={v.get('muted')} opacity={v.get('op')}\n"
-        f"           readyState={v.get('ready')} networkState={v.get('net')} "
-        f"error={v.get('err')} buffered={v.get('buf')} src={v.get('hasSrc')}"
-    )
-    for line in (res.get("bad") or [])[-8:]:
-        print(f"    请求失败 | {line}")
-    for line in (res.get("console") or [])[-12:]:
-        if "cloudflareinsights" not in line:
-            print(f"    控制台 | {line}")
+
     bad = []
-    if not (v.get("t") or 0) > 0.3:
-        bad.append("画面没动 (currentTime 没往前走) —— 字节可能在收但没在播")
-    if not (v.get("w") or 0) > 0:
-        bad.append("没解出视频尺寸 (SourceBuffer 里的东西没被解码)")
-    if v.get("muted"):
-        bad.append("视频是静音的 —— 一通哑巴电话")
-    if (v.get("op") or "0") == "0":
-        bad.append("视频层是透明的 —— 用户看不到她")
-    after = res.get("after") or {}
-    print(f"    说完之后: currentTime={after.get('t')} opacity={after.get('op')}")
-    print(f"    字幕: {(res.get('log') or '')[:120]!r}")
-    if after.get("op") != "0":
-        bad.append("她说完了图层没藏 —— 最后一帧僵在背景上就是重影")
-    if not (res.get("log") or "").strip():
-        bad.append("画面上没有字幕")
+    for key, label in (("greet", "接通后的招呼"), ("reply", "她对我那句话的回复")):
+        v = res.get(key) or {}
+        after = res.get(key + "_after") or {}
+        print(f"    {label}: currentTime={v.get('t')} {v.get('w')}x{v.get('h')} "
+              f"opacity={v.get('op')} readyState={v.get('ready')} err={v.get('err')} "
+              f"-> 说完 opacity={after.get('op')}")
+        if not (v.get("t") or 0) > 0.3 or not (v.get("w") or 0) > 0:
+            bad.append(f"{label}: 画面没动 —— 字节可能在收但没在播")
+        if v.get("muted"):
+            bad.append(f"{label}: 视频是静音的 —— 一通哑巴电话")
+        if (v.get("op") or "0") == "0":
+            bad.append(f"{label}: 视频层是透明的 —— 用户看不到她")
+        if after.get("op") != "0":
+            bad.append(f"{label}: 说完了图层没藏 —— 最后一帧僵在背景上就是重影")
+    print(f"    状态栏: {res.get('status', '')!r}")
+    print(f"    字幕: {(res.get('log') or '')!r}")
+    if not res.get("log_grew"):
+        bad.append("我说完之后字幕没长 —— 她的回复没进字幕")
+
     for b in bad:
         print(f"  ✗ {b}")
     if not bad:
-        print("  ✓ 她说了话, 画面在动, 有声音")
+        print("  ✓ 招呼与回复都出了画、有声音、说完收回; 字幕在画面上")
     return 1 if bad else 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
