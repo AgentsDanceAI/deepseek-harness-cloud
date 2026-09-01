@@ -43,13 +43,15 @@ USE = {
         "kind": "terminal",
         # 敲一条能立刻见分晓的: 解释器指向哪、关键依赖在不在。
         "type": "python -c 'import pydantic,sys;print(\"USE-OK\",sys.executable)'\n",
-        "want": "USE-OK /opt/venv-openmanus",
+        # 分成两段: xterm 会**折行**, inner_text 里两段之间可能夹着换行 ——
+        # 拿整串去匹配会把"产品其实好的"判成失败 (第一版就是这么误报的)。
+        "want": ["USE-OK", "/opt/venv-openmanus/bin/python"],
         "why": "敲 python 报 ModuleNotFoundError —— 登录 shell 把 PATH 冲掉了",
     },
     "crewai": {
         "kind": "terminal",
         "type": "crewai --version && echo USE-OK\n",
-        "want": "USE-OK",
+        "want": ["USE-OK"],
         "why": "敲 crewai 找不到命令 —— 登录 shell 把 PATH 冲掉了",
     },
     "langchain": {
@@ -204,11 +206,15 @@ def main() -> int:
         text = (e.get("text") or "").lower()
         hits = [f for f in FAIL_PHRASES if f in text]
         want = USE[pid].get("want")
+        # 逐段查, 且**把空白全抹掉再比** —— 终端里的换行/折行不该算差异
+        # (第一版拿整串比, 把 "USE-OK\n/opt/venv-..." 判成了失败, 而产品是好的)。
+        flat = "".join(text.split())
+        missing = [w for w in (want or []) if "".join(w.lower().split()) not in flat]
         if hits:
             print(f"  ✗ {pid:12s} 动手之后报错: {hits}")
             bad += 1
-        elif want and want.lower() not in text:
-            print(f"  ✗ {pid:12s} 没看到预期回应 {want!r}")
+        elif want and missing:
+            print(f"  ✗ {pid:12s} 没看到预期回应 {missing!r}")
             bad += 1
         else:
             tail = " ".join((e.get("text") or "").split())[-90:]
