@@ -1658,3 +1658,25 @@ def test_first_read_retries_transient_os_errors(tmp_path, monkeypatch):
         assert calls["n"] == 2
     finally:
         _restore(saved)
+
+
+def test_deleting_every_room_is_a_legal_state_not_a_failed_load(tmp_path):
+    """用户把群删空再重启: 存档在、房间列表为空 —— 合法状态。
+
+    2026-09-02 第一版保险把"存档不在但工作区非空"和"存档在但房间为零"混在一起,
+    后者会被误判成读失败 → 拒绝保存 → 用户新建的群一重启就没了。老板当天正好把
+    房间全删了, 我却把播种出来的默认房当成部署事故去"恢复"。
+    """
+    rooms_m, saved = _fresh_store(tmp_path)
+    try:
+        (tmp_path / "片" / "老片-x").mkdir(parents=True)  # 工作区非空
+        rooms_m.STATE_PATH.parent.mkdir(parents=True)
+        rooms_m.STATE_PATH.write_text('{"bots": [], "rooms": [], "messages": []}', encoding="utf-8")
+        st = rooms_m.Store()
+        assert not st.load_failed, f"合法的空房间表被当成读失败: {st.load_failed}"
+        assert st.rooms, "删空后重启应照常播一个默认房"
+        r = st.create_room("新群", ["doer"])
+        st2 = rooms_m.Store()
+        assert r.id in st2.rooms, "删空后新建的群没落盘 —— 重启就没了"
+    finally:
+        _restore(saved)

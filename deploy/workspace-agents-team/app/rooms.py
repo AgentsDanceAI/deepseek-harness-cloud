@@ -228,8 +228,12 @@ class Store:
         if (
             not self.rooms
             and not self.load_failed
+            and not self._state_file_present()
             and not self._looks_like_first_boot()
         ):
+            # 注意条件是**存档文件不在**, 不是"房间为零": 用户把群删空再重启, 文件在、房间列表
+            # 为空, 那是合法状态, 该照常播默认房并允许保存 —— 第一版把两者混在一起, 会让删空
+            # 后的工作台拒绝保存任何新群 (2026-09-02 当天老板正好删空了房间)。
             # 存档不在, 工作区却有别的东西 (片/、角色/…): 真正的首次启动 /workspace 是空的。
             # 这更像"存档暂时读不到" (NFS 刚挂上、目录列表还没同步), 不许当首次启动播种。
             self.load_failed = "存档不在, 但工作区非空 —— 不当首次启动处理"
@@ -237,6 +241,10 @@ class Store:
             self._seed()
 
     # -- 持久化 -------------------------------------------------------------
+    @staticmethod
+    def _state_file_present() -> bool:
+        return STATE_PATH.exists() or STATE_PATH.with_suffix(".json.bak").exists()
+
     @staticmethod
     def _looks_like_first_boot() -> bool:
         root = STATE_PATH.parent.parent
