@@ -21,8 +21,9 @@ class AppEntry:
     name: str  # 产品名不翻译 —— 它们是专有名词
     # 卡片上那行小字的**文案键**, 文案在 i18n 的 apps.tag.<tag>。
     # 不是"类目": 页面是平铺的 4x4 网格, 没有分组也没有筛选, 这行字唯一的作用
-    # 是让人一眼认出这张卡是什么。所以它按产品走 —— 几个产品确实同类时才共用一个键
-    # (Codex 与 Claude Code、Open WebUI 与 Lobe Chat), 省得同一句话在 i18n 里写两遍。
+    # 是让人一眼认出这张卡**是干什么的、强在哪**。老板 2026-09-02: "OpenManus、CrewAI
+    # 不能叫智能体命令行, 应该有自己的特色, 别的也一样, 突出每个 AI 产品专长的地方"
+    # —— 所以一格一个键, 不再共用 (共用的结果就是两张卡写着同一句废话)。
     tag: str
     icon: str  # 24x24 viewBox 下的 SVG 内部标记 (stroke 图标)
     # 本站页面路径。非空 = 这个产品**不是云工作台**, 它就住在主站上, 卡片直接
@@ -58,7 +59,7 @@ CATALOG: tuple[AppEntry, ...] = (
     # Codex 顶掉了 OpenHands: 同为"自己读库改代码"的编码 agent, 而 Codex 与
     # Claude Code 共用一个镜像和一套接线, 多接一个几乎不要成本。
     AppEntry(
-        "codex", "Codex", "coding",
+        "codex", "Codex", "codex",
         '<path d="m8 8-4 4 4 4M16 8l4 4-4 4"/><path d="m13.5 6-3 12"/>',
     ),
     # OpenClaw 顶掉了 Aider: 命令行编码 agent 这一格我们自己的 dsh 已经覆盖,
@@ -72,7 +73,7 @@ CATALOG: tuple[AppEntry, ...] = (
     # (见 deploy/workspace-codecli), 但它只是外壳 —— 值钱的是里面那个 agent。
     # 单卖一个空编辑器, 用户拿它干不了我们这儿该干的事。
     AppEntry(
-        "claude-code", "Claude Code", "coding",
+        "claude-code", "Claude Code", "claude",
         '<path d="M12 3 4 7.5v9L12 21l8-4.5v-9L12 3z"/><path d="m8 10 4 2.2 4-2.2M12 12.2V17"/>',
     ),
     # Hermes 顶掉了 Bolt.diy: 搭应用这一格 Dify 和 Coze 已经占满, 而 Hermes 是
@@ -90,7 +91,7 @@ CATALOG: tuple[AppEntry, ...] = (
     # Coze Studio 顶替了 Langflow: 同为 LLM 流程编排, Coze 的覆盖面 (Agent/知识库/
     # 工作流/发布渠道) 是它的超集, 老板 2026-08-28 点名要接。
     AppEntry(
-        "coze", "Coze Studio", "studio",
+        "coze", "Coze Studio", "coze",
         '<circle cx="12" cy="11" r="7.5"/><path d="M9 10h.01M15 10h.01M9.5 13.5a3.5 3.5 0 0 0 5 0"/>'
         '<path d="M12 18.5V21M8 20l1-1.8M16 20l-1-1.8"/>',
     ),
@@ -123,7 +124,7 @@ CATALOG: tuple[AppEntry, ...] = (
         '<path d="M4 6h16"/><path d="M8 6v12M16 6v12"/><path d="M5 18h6M13 18h6"/>',
     ),
     AppEntry(
-        "autogen", "AutoGen Studio", "studio",
+        "autogen", "AutoGen Studio", "autogen",
         '<circle cx="6.5" cy="7" r="2.5"/><circle cx="17.5" cy="7" r="2.5"/>'
         '<circle cx="12" cy="17.5" r="2.5"/>'
         '<path d="M8.6 8.6 10.6 15.4M15.4 8.6 13.4 15.4M9 7h6"/>',
@@ -137,12 +138,12 @@ CATALOG: tuple[AppEntry, ...] = (
         '<path d="M14.5 9.5 17 7a3.5 3.5 0 0 1 5 5l-2.5 2.5"/><path d="M9 15l6-6"/>',
     ),
     AppEntry(
-        "openmanus", "OpenManus", "agentcli",
+        "openmanus", "OpenManus", "openmanus",
         '<path d="M12 3v4M12 17v4M3 12h4M17 12h4"/><circle cx="12" cy="12" r="4.5"/>'
         '<path d="M6.3 6.3 8.8 8.8M15.2 15.2l2.5 2.5M17.7 6.3 15.2 8.8M8.8 15.2l-2.5 2.5"/>',
     ),
     AppEntry(
-        "crewai", "CrewAI", "agentcli",
+        "crewai", "CrewAI", "crewai",
         '<circle cx="9" cy="8" r="3"/><path d="M3.5 19a5.5 5.5 0 0 1 11 0"/>'
         '<circle cx="17" cy="9.5" r="2.2"/><path d="M14.8 19a4.4 4.4 0 0 1 5.7-4.2"/>',
     ),
