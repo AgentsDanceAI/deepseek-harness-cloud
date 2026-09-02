@@ -343,7 +343,7 @@ def test_pi_slot_is_wired_to_the_gateway(monkeypatch):
     assert '"apiKey": "$OPENAI_API_KEY"' in boot, "令牌要从环境变量取, 不落盘"
     assert "/llm/v1" in boot
     # 型号必须在售 —— 网关只放行目录里的
-    import json, re
+    import re
 
     m = re.search(r'"defaultModel": "([^"]+)"', boot)
     assert m and model_catalog.resolve(m.group(1)) is not None
@@ -361,7 +361,8 @@ def test_pi_slot_is_wired_to_the_gateway(monkeypatch):
 
 def test_pi_took_over_the_openhands_slot():
     """目录里是 pi 不再是 OpenHands; 文案两种语言都要有, 少一种那张卡就是空的。"""
-    import json, pathlib
+    import json
+    import pathlib
 
     from app import apps_catalog
 
