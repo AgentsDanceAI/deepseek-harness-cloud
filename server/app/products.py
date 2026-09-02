@@ -2217,6 +2217,21 @@ def registry() -> dict[str, Product]:
             # 正是这类"本地能复现、线上不行"最费时间)。
             host_aliases=("host.docker.internal",),
         ),
+        "pi": Product(
+            id="pi",
+            name="pi",
+            image=config.PI_IMAGE_REF,
+            image_ref=config.PI_IMAGE_REF,
+            port=8787,
+            # 探 /api/health (真接口, 答 JSON)。**别探 /health 或 /healthz**: 那是
+            # SPA 兜底, 什么路径都 200, 后端没起来照样 200。
+            ready_path="/api/health",
+            mem_mb=config.PI_MEM_LIMIT_MB,
+            cpus=config.PI_CPUS,
+            domain=config.PI_DOMAIN,
+            reports_presence=False,
+            tab_grace_min=config.PI_TAB_GRACE_MIN,
+        ),
         # AutoGen Studio: 单进程 (FastAPI 同时出前端和 API)。
         "autogen": Product(
             id="autogen",
@@ -2597,6 +2612,70 @@ def _openhands_boot() -> str:
     )
 
 
+def _pi_boot() -> str:
+    """pi 那一格: 社区的 pi-web-ui 当前端, pi 作为 SDK 在它进程里跑。
+
+    开机三件事, 都是**每次**做 (镜像文件系统每次开机都是新的, 而配置里有该用户
+    的网关令牌, 每次建实例都会换):
+    · ~/.pi/agent/models.json —— 自定义提供方 `dsh` 指向我们的网关, 走
+      openai-completions; apiKey 写成 "$OPENAI_API_KEY" 让它从环境变量取
+      (它文档支持的写法, 令牌不落盘)。型号列表由我们钉 —— 网关只放行在售目录;
+    · ~/.pi/agent/settings.json —— 默认提供方/型号, 遥测与分析关掉;
+    · /workspace 建成 git 仓库 (它的 Git 面板要有仓库才有东西看)。
+    /root 与 /workspace 都在 NAS 上: pi 的会话 (~/.pi/agent/sessions) 和
+    pi-web-ui 的数据目录 (~/.pi-web) 跨实例留着。
+    """
+    import json as _json
+
+    gateway = config.PUBLIC_BASE.rstrip("/")
+    model = _codecli_model("codex")
+    models = _json.dumps(
+        {
+            "providers": {
+                "dsh": {
+                    "baseUrl": f"{gateway}/llm/v1",
+                    "api": "openai-completions",
+                    "apiKey": "$OPENAI_API_KEY",
+                    "models": [
+                        {
+                            "id": model,
+                            "name": model,
+                            "reasoning": False,
+                            "input": ["text", "image"],
+                            "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
+                            "contextWindow": 128000,
+                            "maxTokens": 8192,
+                        }
+                    ],
+                }
+            }
+        },
+        ensure_ascii=False,
+        indent=2,
+    )
+    settings = _json.dumps(
+        {
+            "defaultProvider": "dsh",
+            "defaultModel": model,
+            # 我们是托管方, 替用户默认关掉; 他想开自己去改。
+            "enableAnalytics": False,
+            "enableInstallTelemetry": False,
+        },
+        indent=2,
+    )
+    return (
+        "set -e\n"
+        "mkdir -p /root/.pi/agent /root/.pi-web /workspace\n"
+        "cat > /root/.pi/agent/models.json <<'DSHEOF'\n" + models + "\nDSHEOF\n"
+        "cat > /root/.pi/agent/settings.json <<'DSHEOF'\n" + settings + "\nDSHEOF\n"
+        "cd /workspace && (git rev-parse --git-dir >/dev/null 2>&1 || git init -q) || true\n"
+        # --no-browser: 它默认会去开本机浏览器, 容器里没有 xdg-open, 只会多两行
+        # 抱怨。数据目录钉到 /root 下 (NAS)。
+        "exec pi-web-ui --host 0.0.0.0 --port 8787 --cwd /workspace "
+        "--data-dir /root/.pi-web --no-browser\n"
+    )
+
+
 def _autogen_boot() -> str:
     """AutoGen Studio: 直接起。
 
@@ -2746,6 +2825,7 @@ _BOOTS = {
     "codex": lambda: _agentui_boot("codex"),
     "agents-team": _agents_team_boot,
     "openhands": _openhands_boot,
+    "pi": _pi_boot,
     "autogen": _autogen_boot,
     "langchain": _langchain_boot,
     "openmanus": lambda: _frameworks_boot("openmanus"),
@@ -2832,6 +2912,25 @@ def env_for(product_id: str, token: str, secret: str = "") -> dict[str, str]:
             "DSH_MODEL": _codecli_model("codex"),
             "OPENAI_BASE_URL": f"{gateway}/llm/v1",
             "OPENAI_API_KEY": token,
+        }
+    if product_id == "pi":
+        domain = config.PI_DOMAIN
+        return {
+            "HOME": "/root",
+            # models.json 里写的是 "$OPENAI_API_KEY", 它从这里取。
+            "OPENAI_API_KEY": token,
+            "DSH_CLOUD_TOKEN": token,
+            # 不联网自检/自更新: 它开机会去 npm 看新版本, 还会提示自更新 —— 托管
+            # 环境里升级是我们重建镜像的事, 不是用户点一下的事。
+            "PI_OFFLINE": "1",
+            "PI_SKIP_VERSION_CHECK": "1",
+            # WebSocket 同源校验的白名单。它比对 Origin 与 Host 的主机名**和端口**,
+            # 反代进来的形状是 Origin=https://<域>、Host=<域> —— 端口一边是 443 一边
+            # 缺省, 不放行的话页面能开, 对话/终端一直重连 (它 README 里明写的坑)。
+            "PI_WEB_ALLOW_ORIGINS": f"https://{domain}" if domain else "",
+            "PI_WEB_HOST": "0.0.0.0",
+            "PI_WEB_CWD": "/workspace",
+            "PI_WEB_DATA_DIR": "/root/.pi-web",
         }
     if product_id == "openhands":
         return {

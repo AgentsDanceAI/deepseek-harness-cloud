@@ -116,11 +116,11 @@ CATALOG: tuple[AppEntry, ...] = (
     # 下面五格 2026-09-01 换成老板点名的五个智能体项目 (原先排的 excalidraw /
     # open-webui / lobe-chat / ragflow / whisper 都没建, 换掉不影响线上)。
     # 五个的许可证都查过, 全是 MIT —— 没有 n8n 那种"禁止作为服务转售"的条款。
+    # pi 顶掉了 OpenHands (老板 2026-09-02): 盘点里它是最大的单镜像 (5.81GB)、
+    # 第四个写代码的 agent、也是最难部署的一个。pi 的前端用社区的 pi-web-ui。
     AppEntry(
-        "openhands", "OpenHands", "coder",
-        '<path d="M7 11V6.5a1.5 1.5 0 0 1 3 0V11M10 11V5.5a1.5 1.5 0 0 1 3 0V11"/>'
-        '<path d="M13 11V7.5a1.5 1.5 0 0 1 3 0V13"/>'
-        '<path d="M7 11V9.5a1.5 1.5 0 0 0-3 0V14a7 7 0 0 0 7 7h1a7 7 0 0 0 7-7v-3"/>',
+        "pi", "pi", "coder",
+        '<path d="M4 6h16"/><path d="M8 6v12M16 6v12"/><path d="M5 18h6M13 18h6"/>',
     ),
     AppEntry(
         "autogen", "AutoGen Studio", "studio",

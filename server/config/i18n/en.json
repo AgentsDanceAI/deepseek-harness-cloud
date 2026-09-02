@@ -106,6 +106,7 @@
   "apps.tag.agentkit": "Agent framework",
   "apps.tag.agentcli": "Agent CLI",
   "apps.d.openhands": "Tell it once — it reads the code, edits files, runs commands, and finishes the job. Browser and editor included; the container is its sandbox.",
+  "apps.d.pi": "The pi coding agent with the community pi-web-ui front end: chat, files, built-in terminal, Git panel. Open source, take it apart and rebuild.",
   "apps.d.autogen": "Microsoft's multi-agent studio. Assemble a team, watch them split the work and talk it through.",
   "apps.d.langchain": "A LangGraph agent behind LangChain's own chat UI. Streaming, tool calls, interruptible — on your credits.",
   "apps.d.openmanus": "Open-source Manus. A general agent that browses, codes and calls tools — you brief it from the terminal.",

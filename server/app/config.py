@@ -313,6 +313,12 @@ OPEN_DESIGN_TAB_GRACE_MIN = _env_int("OPEN_DESIGN_TAB_GRACE_MIN", 10)
 # 用户都生效; agent-canvas 把首启向导记在浏览器 localStorage 里, 服务端预置不掉,
 # 每个用户都要撞一次墙。
 OPENHANDS_DOMAIN = _env("OPENHANDS_DOMAIN", "")
+# pi 那一格 (老板 2026-09-02 拍板: 社区的 pi-web-ui 当前端, 顶掉 OpenHands)。
+PI_DOMAIN = _env("PI_DOMAIN", "")
+PI_IMAGE_REF = _env("PI_IMAGE_REF", "ghcr.io/agentsdancepro/pi-web-ui:0.59.1-r1")
+PI_MEM_LIMIT_MB = _env_int("PI_MEM_LIMIT_MB", 2048)
+PI_CPUS = _env_float("PI_CPUS", 1.0)
+PI_TAB_GRACE_MIN = _env_int("PI_TAB_GRACE_MIN", 10)
 OPENHANDS_IMAGE_REF = _env("OPENHANDS_IMAGE_REF", "ghcr.io/openhands/openhands:latest")
 # 4 核不是阔气: 起沙箱时它另跑一个 agent server 进程, 而应用只等 120 秒 ——
 # 2 核上那堆 import 走不完, 页面就一直"等待沙盒"。

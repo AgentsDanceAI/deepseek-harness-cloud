@@ -320,3 +320,55 @@ def test_terminal_turns_on_iutf8_before_the_agent():
     assert i < src.index("_agent_term_cmd()}; exec bash -l"), "要在进 agent 之前开"
     for pid in ("openmanus", "crewai"):
         assert products.env_for(pid, "tok")["PYTHONIOENCODING"].startswith("utf-8:replace")
+
+
+# ---- pi (pi-web-ui 前端) -----------------------------------------------------
+#
+# 老板 2026-09-02 拍板: pi 顶掉 OpenHands, 前端用社区的 pi-web-ui。下面钉的全是
+# 静默错法: 型号没钉是每次 404、探针打到 SPA 兜底是把人放进坏页面、白名单不设是
+# 页面能开但对话/终端一直重连。
+
+
+def test_pi_slot_is_wired_to_the_gateway(monkeypatch):
+    from app import config, model_catalog
+
+    monkeypatch.setattr(config, "PI_DOMAIN", "pi.test.local")
+    prod = products.registry()["pi"]
+    assert prod.port == 8787
+    # /health 与 /healthz 是 SPA 兜底 (什么路径都 200), 只有 /api/health 是真接口。
+    assert prod.ready_path == "/api/health"
+
+    boot = products.boot_script("pi")
+    assert '"api": "openai-completions"' in boot
+    assert '"apiKey": "$OPENAI_API_KEY"' in boot, "令牌要从环境变量取, 不落盘"
+    assert "/llm/v1" in boot
+    # 型号必须在售 —— 网关只放行目录里的
+    import json, re
+
+    m = re.search(r'"defaultModel": "([^"]+)"', boot)
+    assert m and model_catalog.resolve(m.group(1)) is not None
+    assert '"enableAnalytics": false' in boot and '"enableInstallTelemetry": false' in boot
+    assert "--no-browser" in boot, "容器里没有 xdg-open, 不关会多两行抱怨"
+    assert boot.index("models.json") < boot.index("exec pi-web-ui"), "配置要在起服务之前写好"
+
+    env = products.env_for("pi", "tok")
+    assert env["OPENAI_API_KEY"] == "tok"
+    assert env["PI_OFFLINE"] == "1"
+    # WS 同源校验白名单: 反代进来 Origin 是 https://<域>, 不放行就是"页面能开,
+    # 对话和终端一直重连"。
+    assert env["PI_WEB_ALLOW_ORIGINS"] == "https://pi.test.local"
+
+
+def test_pi_took_over_the_openhands_slot():
+    """目录里是 pi 不再是 OpenHands; 文案两种语言都要有, 少一种那张卡就是空的。"""
+    import json, pathlib
+
+    from app import apps_catalog
+
+    ids = [a.id for a in apps_catalog.CATALOG]
+    assert "pi" in ids and "openhands" not in ids
+    assert len(ids) == 16
+    root = pathlib.Path(__file__).resolve().parents[1] / "config" / "i18n"
+    for lang in ("zh", "en"):
+        d = json.loads((root / f"{lang}.json").read_text(encoding="utf-8"))
+        assert d.get("apps.d.pi"), f"{lang}.json 缺 apps.d.pi"
