@@ -376,3 +376,38 @@ def test_pi_took_over_the_openhands_slot():
     for lang in ("zh", "en"):
         d = json.loads((root / f"{lang}.json").read_text(encoding="utf-8"))
         assert d.get("apps.d.pi"), f"{lang}.json 缺 apps.d.pi"
+
+
+def test_pi_gets_the_whole_catalog_with_reasoning(monkeypatch):
+    """pi 的 models.json 要列**整个在售目录**, 并按能力元数据标 reasoning。
+
+    老板 2026-09-02 第一眼: "pi 这个为什么只有一个模型, 思考也开不了" —— 第一版
+    只写了一个型号还标了 reasoning=false。走网关实测 20/20 型号都吃
+    reasoning_effort, 所以默认 true; 能力表在 config/model_capabilities.json。
+    """
+    import json
+
+    from app import config, model_catalog
+
+    monkeypatch.setattr(config, "PI_DOMAIN", "pi.test.local")
+    boot = products.boot_script("pi")
+    i = boot.index("<<'DSHEOF'\n") + len("<<'DSHEOF'\n")
+    j = boot.index("\nDSHEOF", i)
+    d = json.loads(boot[i:j])
+    prov = d["providers"]["dsh"]
+    ids = [m["id"] for m in prov["models"]]
+    assert set(ids) == set(model_catalog.catalog()), "目录里有的型号 pi 里都得有, 多一个少一个都不对"
+    assert ids[0] == products._codecli_model("codex"), "默认型号排第一 (它的下拉按顺序列)"
+    assert all(m["reasoning"] is True for m in prov["models"]), "思考开关靠 reasoning=true, 实测全都吃"
+    assert prov["compat"]["supportsReasoningEffort"] is True
+    assert prov["compat"]["thinkingFormat"] == "reasoning_effort"
+    # cost 一律 0: 它会在状态栏按这个算美元, 而用户付的是积分, 那个数只会误导
+    assert all(m["cost"]["input"] == 0 and m["cost"]["output"] == 0 for m in prov["models"])
+
+
+def test_model_capabilities_fall_back_to_defaults():
+    """能力表缺条目时用 default, 缺文件时也不许炸 —— 它只是元数据, 不该拖垮启动。"""
+    from app import model_catalog
+
+    cap = model_catalog.capabilities("this-model-does-not-exist")
+    assert cap["reasoning"] is True and cap["vision"] is False and cap["context_window"] == 128000

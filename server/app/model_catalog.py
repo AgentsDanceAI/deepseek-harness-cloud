@@ -157,6 +157,33 @@ def charge_embedding_credits(model_id: str, input_tokens: int) -> int:
     return credits
 
 
+_CAPS_CACHE: dict | None = None
+_CAPS_MTIME: float = 0.0
+
+
+def capabilities(model_id: str) -> dict:
+    """型号的能力元数据: reasoning / vision / context_window。
+
+    价目表 (models.json) 是生成的, 不放这些; 能力是上游事实, 手工维护在
+    config/model_capabilities.json 里, 按 id 覆盖, 缺的用 default。给需要
+    "型号清单 + 能力"的产品用 (pi 的 models.json 就是照这个生成的) —— 之前这类
+    信息散在各产品的启动脚本里, 换个型号要改好几处。
+    """
+    global _CAPS_CACHE, _CAPS_MTIME
+    p = config.CONFIG_DIR / "model_capabilities.json"
+    with _lock:
+        try:
+            mtime = p.stat().st_mtime
+        except FileNotFoundError:
+            return {"reasoning": True, "vision": False, "context_window": 128000}
+        if _CAPS_CACHE is None or mtime != _CAPS_MTIME:
+            _CAPS_CACHE = json.loads(p.read_text())
+            _CAPS_MTIME = mtime
+        out = dict(_CAPS_CACHE.get("default") or {})
+        out.update((_CAPS_CACHE.get("models") or {}).get(model_id) or {})
+        return out
+
+
 def public_catalog() -> list[dict]:
     """Catalog for the pricing page: what a model costs, in credits."""
     out = []

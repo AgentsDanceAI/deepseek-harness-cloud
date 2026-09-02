@@ -1,0 +1,50 @@
+{
+  "_comment": "在售型号的能力元数据 (手工维护, 上游事实, 不是价目)。models.json 是价目表, 由 gen_models.py 生成, 不放这些; 这里按 id 覆盖, 缺的用 default。字段: reasoning=吃 reasoning_effort (2026-09-02 走网关实测 20/20 都吃, 所以默认 true), vision=接受 image_url 输入 (实测结果见各条), context_window=按保守值 128k, 宁可提前压缩也别让上游 400。",
+  "default": {
+    "reasoning": true,
+    "vision": false,
+    "context_window": 128000
+  },
+  "models": {
+    "gemini-3.6-flash": {
+      "vision": true
+    },
+    "MiniMax-M2.7": {
+      "vision": true
+    },
+    "kimi-k2.7-code": {
+      "vision": true
+    },
+    "glm-5.2": {
+      "vision": true
+    },
+    "kimi-k3": {
+      "vision": true
+    },
+    "gpt-5.6-luna": {
+      "vision": true
+    },
+    "gpt-5.6-terra": {
+      "vision": true
+    },
+    "gpt-5.6-sol": {
+      "vision": true
+    },
+    "grok-4.5": {
+      "vision": true
+    },
+    "claude-sonnet-5": {
+      "vision": true
+    },
+    "claude-opus-5": {
+      "vision": true
+    },
+    "claude-fable-5": {
+      "vision": true
+    },
+    "mimo-v2-omni": {
+      "reasoning": false
+    }
+  },
+  "_probe": "2026-09-02 走网关实测 (scripts 里没有, 手法: 1x1 PNG data URL 当 image_url 发, 200 即 vision; reasoning_effort=low 发, 200 即 reasoning)。Qwen3-VL / Qwen3-Omni 名字带 VL 但网关这条路回 400, 按实测记 false; mimo-v2-omni 什么请求都 400 (上游当时就是坏的), reasoning 记 false 免得用户一开思考就报错。"
+}

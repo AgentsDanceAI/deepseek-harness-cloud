@@ -2566,6 +2566,26 @@ def _pi_boot() -> str:
 
     gateway = config.PUBLIC_BASE.rstrip("/")
     model = _codecli_model("codex")
+    # **整个在售目录都给它**, 不只一个: 老板 2026-09-02 第一眼就问"为什么只有
+    # 一个模型, 思考也开不了" —— 第一版只写了一个型号还标了 reasoning=false。
+    # 能力按 config/model_capabilities.json (实测过的上游事实), 缺的用默认。
+    # cost 一律 0: pi 会在状态栏按它算美元, 而用户付的是积分, 那个数只会误导。
+    entries = []
+    for mid, e in model_catalog.catalog().items():
+        cap = model_catalog.capabilities(mid)
+        entries.append(
+            {
+                "id": mid,
+                "name": e.get("display_name") or mid,
+                "reasoning": bool(cap.get("reasoning", True)),
+                "input": ["text", "image"] if cap.get("vision") else ["text"],
+                "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
+                "contextWindow": int(cap.get("context_window") or 128000),
+                "maxTokens": 8192,
+            }
+        )
+    # 默认型号排第一 (它的下拉按顺序列)
+    entries.sort(key=lambda x: (x["id"] != model, x["name"].lower()))
     models = _json.dumps(
         {
             "providers": {
@@ -2577,17 +2597,15 @@ def _pi_boot() -> str:
                     # 拿我们的网关令牌去打 api.openai.com, 回 401 invalid_jwt。
                     # 令牌换个只有我们认的名字, 它就只剩 dsh 这一个提供方。
                     "apiKey": "$DSH_GATEWAY_KEY",
-                    "models": [
-                        {
-                            "id": model,
-                            "name": model,
-                            "reasoning": False,
-                            "input": ["text", "image"],
-                            "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
-                            "contextWindow": 128000,
-                            "maxTokens": 8192,
-                        }
-                    ],
+                    # 网关是 OpenAI 兼容面: reasoning_effort 原样透传 (20 个型号实测
+                    # 都吃), 流式带 usage 也实测通。
+                    "compat": {
+                        "supportsReasoningEffort": True,
+                        "thinkingFormat": "reasoning_effort",
+                        "supportsUsageInStreaming": True,
+                        "maxTokensField": "max_tokens",
+                    },
+                    "models": entries,
                 }
             }
         },
