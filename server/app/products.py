@@ -18,7 +18,6 @@ ComfyUI 的前端用绝对路径引资源, 塞不进子路径, 所以只能一�
 
 from __future__ import annotations
 
-import hashlib
 import logging
 from dataclasses import dataclass
 
@@ -2189,34 +2188,6 @@ def registry() -> dict[str, Product]:
         ),
         # OpenHands: 自主编码智能体。单容器 (uvicorn 同时出前端和 API), 沙箱走
         # local runtime —— 默认那个要挂 docker socket 起第二个容器, ECI 上给不了。
-        "openhands": Product(
-            id="openhands",
-            name="OpenHands",
-            image=config.OPENHANDS_IMAGE_REF,
-            image_ref=config.OPENHANDS_IMAGE_REF,
-            port=8000,
-            mem_mb=config.OPENHANDS_MEM_LIMIT_MB,
-            cpus=config.OPENHANDS_CPUS,
-            domain=config.OPENHANDS_DOMAIN,
-            reports_presence=False,
-            tab_grace_min=config.OPENHANDS_TAB_GRACE_MIN,
-            # 首页是 SPA, 后端没起来照样 200 —— 探它等于没探。
-            ready_path="/health",
-            # **必须以 root 起**: 开局要改 /opt 下的前端 (注入免向导的那段脚本),
-            # 而镜像里的 USER 是 openhands, 写不动 —— 容器会当场退出。
-            # 注入完由镜像自己的 entrypoint 降权, 应用照旧不是 root 在跑。
-            run_as_user=0,
-            # **host.docker.internal 必须解析到本机**。它起沙箱时按"我在容器里 ->
-            # 把 localhost 换成 host.docker.internal"探活 (app_server/utils/
-            # docker_utils.py) —— 那是给"OpenHands 在容器、沙箱在宿主"那种拓扑写
-            # 的。我们一人一容器、沙箱就在同一个容器内, 这个名字在容器里解析不了,
-            # 探活 30 秒必然超时。用户看到的是页面一直"等待沙盒", 而首页一切正常。
-            #
-            # 用 HostAliase 而不是启动脚本里改 /etc/hosts: 那个文件由 ECI 管,
-            # 运行时追加不保证生效 (实测线上就没生效, 而本机 docker 上是好的 ——
-            # 正是这类"本地能复现、线上不行"最费时间)。
-            host_aliases=("host.docker.internal",),
-        ),
         "pi": Product(
             id="pi",
             name="pi",
@@ -2578,40 +2549,6 @@ def _agents_team_boot() -> str:
     )
 
 
-def _openhands_boot() -> str:
-    """OpenHands: 用 **all-in-one 镜像**, 开局三件事都在 deploy/workspace-openhands-boot.py。
-
-    **为什么不是那个小镜像 (openhands/openhands)**: 它是"应用 + 子进程沙箱"的形态,
-    前端拿**应用给的 agent server 地址**去拼 WebSocket, 而那个地址是
-    `http://localhost:<port>` —— 在用户自己电脑上跑成立 (端口就在本机), 托管部署时
-    浏览器的 localhost 是用户自己的机器, 于是界面永远"正在连接…"。那是这个模式的
-    固有假设, 不是接线问题。为查清它我在小镜像上依次修掉了四层 (host.docker.internal
-    解析、沙箱里的 VSCode 与工具预载拖过 120 秒、上游把"就绪"判成了"此刻在占 CPU"、
-    灌设置用错了字段), 每层都是真 bug, 但最后一跳绕不过去。
-    all-in-one 把 agent server 放进同一个进程 (它的 openapi 里一个 /api/sandboxes
-    都没有), 前端与它同源 —— 这条路实测走通了。
-
-    代价是镜像大 (解开约 5.8GB), 换来的是少一整条会卡死的链路。
-
-    顺序不能乱: 先写密钥、注入前端, **再**起应用, 最后灌模型档案。密钥要在应用
-    启动前落盘 —— 它读一次就放内存里了, 之后再写文件它不认 (表现是我们调它的
-    接口一律 401)。
-    """
-    return (
-        "set -e\n"
-        "mkdir -p /workspace\n"
-        "echo IiIiYWdlbnQtY2FudmFzIOeahOW8gOWxgDog5a6a5q275Lya6K+d5a+G6ZKlIC0+IOeBjOaooeWei+iuvue9riAtPiDlhY3mjonpppblkK/lkJHlr7zjgIIKCuS4uuS7gOS5iOaNouaIkOi/meS4qiBhbGwtaW4tb25lIOmVnOWDjyAo5bCP6ZWc5YOP6YKj5p2h6Lev6LWw5LiN6YCaKToK5bCP6ZWc5YOP5pivIuW6lOeUqCArIOWtkOi/m+eoi+aymeeusSLnmoTlvaLmgIEsIOWJjeerr+aLvyoq5bqU55So57uZ55qEIGFnZW50IHNlcnZlciDlnLDlnYAqKuWOu+aLvApXZWJTb2NrZXQsIOiAjOmCo+S4quWcsOWdgOaYryBgaHR0cDovL2xvY2FsaG9zdDo8cG9ydD5gIOKAlOKAlCDlnKjnlKjmiLfoh6rlt7HnlLXohJHkuIrot5HmiJDnq4sKKOerr+WPo+WwseWcqOacrOacuiksIOaJmOeuoemDqOe9suaXtua1j+iniOWZqOeahCBsb2NhbGhvc3Qg5piv55So5oi36Ieq5bex55qE5py65Zmo44CC6L+Z5piv6YKj5Liq5qih5byP55qECuWbuuacieWBh+iuviwg5LiN5piv5o6l57q/6Zeu6aKY44CCYWxsLWluLW9uZSDmioogYWdlbnQgc2VydmVyIOaUvui/m+WQjOS4gOS4qui/m+eoiywg5rKh5pyJ5rKZ566xCuamguW/tSAo5a6D55qEIG9wZW5hcGkg6YeM5LiA5LiqIC9hcGkvc2FuZGJveGVzIOmDveayoeaciSksIOWJjeerr+S4juWug+WQjOa6kOOAggoK5LiJ5Lu25LqLOgoxLiAqKuWvhumSpeWFiOWGmeatuyoq44CC5a6D55qEIEFQSSDorqQgWC1TZXNzaW9uLUFQSS1LZXksIOWvhumSpeaYr+mmluasoeWQr+WKqOaXtumaj+acuueUn+aIkOiQveWcqAogICBhZ2VudC1jYW52YXMvYXBpLWtleS50eHQg6YeM55qE44CC5oiR5Lus5YWI5YaZ5aW9LCDmnI3liqHnq6/lkozms6jlhaXnu5nliY3nq6/nmoTlsLHmmK/lkIzkuIDmiorjgIIKMi4g55So6L+Z5oqK5a+G6ZKl54GM5qih5Z6L6K6+572uIOKAlOKAlCDngYzlrowqKuWbnuivu+agoemqjCoqLCDov5Tlm54gMjAwIOS4jeetieS6jueUn+aViCAo5bCP6ZWc5YOP6YKj6L65CiAgIOWwseaYr+i/meS5iOmql+i/h+aIkeS4gOi9rueahCnjgIIKMy4g6aaW5ZCv5ZCR5a+86K6w5ZyoKirmtY/op4jlmaggbG9jYWxTdG9yYWdlKiosIOacjeWKoeerr+mihOe9ruS4jeaOiSDigJTigJQg5b6A5a6D55qEIGluZGV4Lmh0bWwg6YeMCiAgIOazqOWFpeS4gOauteiEmuacrOaKiumUruenjeS4iuOAgumBpea1i+enjeaIkOaLkue7nSwg5LiN5piv5ZCM5oSP44CCCiIiIgppbXBvcnQganNvbgppbXBvcnQgb3MKaW1wb3J0IHBhdGhsaWIKaW1wb3J0IHRpbWUKaW1wb3J0IHVybGxpYi5lcnJvcgppbXBvcnQgdXJsbGliLnJlcXVlc3QKCkhPTUUgPSBwYXRobGliLlBhdGgoIi9ob21lL29wZW5oYW5kcy8ub3BlbmhhbmRzIikKS0VZID0gb3MuZW52aXJvbi5nZXQoIkRTSF9BQ19LRVkiKSBvciAiZHNoIiArIG9zLnVyYW5kb20oMTYpLmhleCgpCkJBU0UgPSAiaHR0cDovLzEyNy4wLjAuMTo4MDAwIgoKCmRlZiBzZWVkX2tleSgpIC0+IE5vbmU6CiAgICAiIiLlr4bpkqXkuI3nlKjmiJHku6zlhpnmlofku7Yg4oCU4oCUIOWug+eahCBlbnRyeXBvaW50IOiHquW4piBgTE9DQUxfQkFDS0VORF9BUElfS0VZYCDov5nkuKrlj6PlrZDjgIIKCiAgICDlhYjliY3miJHlvoAgYWdlbnQtY2FudmFzL2FwaS1rZXkudHh0IOmHjOWGmSwg5bqU55So54Wn5qC35ZueIDQwMTog6YKj5Liq5paH5Lu25Y+q5ZyoCiAgICAqKuS4pOS4queOr+Wig+WPmOmHj+mDveS4uuepuioq5pe25omN6KKr6K+7ICjop4EgZW50cnlwb2ludC5zaCDnmoQgaWYpLCDogIzkuJTml7bluo/kuIrkuZ/pmr7kv50KICAgIOWGmeWcqOW6lOeUqOivu+S5i+WJjeOAgueUqOeOr+Wig+WPmOmHj+aYr+WumOaWueaUr+aMgeeahOWBmuazlSwg5bCR5LiA5bGC54yc5rWL44CCCiAgICDov5nkuKrlh73mlbDnlZnnnYDlj6rkuLrmiornirbmgIHnm67lvZXlu7rlpb3lubbkuqTlm57lupTnlKjnlKjmiLcg4oCU4oCUIOi/meS4gOatpeS7pSByb290IOi3kSAo6KaB5pS5CiAgICAvb3B0IOS4i+eahOWJjeerryksIHJvb3Qg5bu65Ye65p2l55qE55uu5b2V5bqU55So55So5oi35YaZ5LiN5YqoLCDogIzlroPlj6rkvJrlnKjml6Xlv5fph4zmirHmgKjkuIDlj6UKICAgIOeEtuWQjueFp+W4uOi1t+adpSwg5LqO5piv55So5oi355qE5Lic6KW/5YWo5LiiICjlkIzkuIDkuKrlnZEgYWdlbnR1aSDpgqPovrnouKnov4cp44CCCiAgICAiIiIKICAgIGltcG9ydCBwd2QKCiAgICBkID0gSE9NRSAvICJhZ2VudC1jYW52YXMiCiAgICBkLm1rZGlyKHBhcmVudHM9VHJ1ZSwgZXhpc3Rfb2s9VHJ1ZSkKICAgIHRyeToKICAgICAgICB1ID0gcHdkLmdldHB3bmFtKCJvcGVuaGFuZHMiKQogICAgICAgIGZvciBwYXRoIGluIChIT01FLCBkKToKICAgICAgICAgICAgb3MuY2hvd24ocGF0aCwgdS5wd191aWQsIHUucHdfZ2lkKQogICAgZXhjZXB0IChLZXlFcnJvciwgUGVybWlzc2lvbkVycm9yKToKICAgICAgICBwYXNzCgoKZGVmIGNhbGwocGF0aCwgZGF0YT1Ob25lKToKICAgIHJlcSA9IHVybGxpYi5yZXF1ZXN0LlJlcXVlc3QoCiAgICAgICAgQkFTRSArIHBhdGgsCiAgICAgICAgZGF0YT1qc29uLmR1bXBzKGRhdGEpLmVuY29kZSgpIGlmIGRhdGEgaXMgbm90IE5vbmUgZWxzZSBOb25lLAogICAgICAgIGhlYWRlcnM9eyJDb250ZW50LVR5cGUiOiAiYXBwbGljYXRpb24vanNvbiIsICJYLVNlc3Npb24tQVBJLUtleSI6IEtFWX0sCiAgICAgICAgbWV0aG9kPSJQT1NUIiBpZiBkYXRhIGlzIG5vdCBOb25lIGVsc2UgIkdFVCIsCiAgICApCiAgICB3aXRoIHVybGxpYi5yZXF1ZXN0LnVybG9wZW4ocmVxLCB0aW1lb3V0PTMwKSBhcyByOgogICAgICAgIGJvZHkgPSByLnJlYWQoKS5kZWNvZGUoKQogICAgICAgIHJldHVybiBqc29uLmxvYWRzKGJvZHkpIGlmIGJvZHkuc3RyaXAoKSBlbHNlIHt9CgoKZGVmIGluamVjdF9mcm9udGVuZCgpIC0+IE5vbmU6CiAgICAiIiLmiorlhY3lkJHlr7znmoTplK7np43ov5sgaW5kZXguaHRtbCDigJTigJQg6YKj5piv5rWP6KeI5Zmo5L6n55qE54q25oCBLCDmnI3liqHnq6/ngYzkuI3ov5vljrvjgIIiIiIKICAgICMg6L+Z5Yeg5Liq6ZSu5pivKirlrp7mtYvmipPnmoQqKiwg5omL5rOV5YC85b6X6K6w5LiL5p2lOiDmi7/mtY/op4jlmajmiorlvLnnqpfnnJ/ngrnkuIDpgY0sIOeCueWJjeeCueWQjgogICAgIyDlkIQgZHVtcCDkuIDmrKEgbG9jYWxTdG9yYWdlLCDlt67pm4blsLHmmK/lroPjgILliKvljrsgSlMg5YyF6YeMIGdyZXAg54ycIOKAlOKAlCDpgqPljIXph4zloZ7nnYAKICAgICMg5LiA5pW05Lu95YWs5YWx5ZCO57yA6KGoLCDlhbPplK7or43lhajmmK/lmarlo7DjgIIKICAgICMKICAgICMgwrcgb3BlbmhhbmRzLW9uYm9hcmRlZD0xIOWFjeaOieS4ieatpeWQkeWvvDsKICAgICMgwrcgKipvcGVuaGFuZHMtdGVsZW1ldHJ5LWNvbnNlbnQtcGVuZGluZy1jbG91ZC1zeW5jIOaJjeaYr+mBpea1i+ahhueahOW8gOWFsyoq44CCCiAgICAjICAg5YWI5YmN56eN55qEIGFnZW50LWNhbnZhcy1jb25zZW50PTEg5piv55m956eNOiDlupTnlKjkuIDlkK/liqjlsLHmiorlroPph43nva7lm54gJzAnLAogICAgIyAgIOi/niBvcGVuaGFuZHMtdGVsZW1ldHJ5LWZpcnN0LXVzZSDkuZ/ooqvlroPlhpnlm54gJ3RydWUnIOKAlOKAlCDmiJHku6zmuIXkuobkuZ/msqHnlKjjgIIKICAgICMgICDlrp7mtYvngrnmjonlvLnnqpflkI4qKuWPquWkmuWHuui/meS4gOS4qumUrioqLCDpgqPlroPlsLHmmK/liKTmja7jgIIKICAgICMg6YGl5rWL5LiA5b6LIGRlbmllZCDogIzkuI3mmK8gZ3JhbnRlZDog6L+Z5qGG6buY6K6k5Yu+552AIuWPkemAgeWMv+WQjeS9v+eUqOaVsOaNriIsIOiAjOaIkeS7rOaYrwogICAgIyDmm7/nlKjmiLfmiZjnrqEsIOabv+S7luWBmueahOmAieaLqeWPquiDveaMkeacgOS/neWuiOeahOmCo+S4quOAggogICAgc2NyaXB0ID0gKAogICAgICAgICI8c2NyaXB0PnRyeXsiCiAgICAgICAgImxvY2FsU3RvcmFnZS5zZXRJdGVtKCdvcGVuaGFuZHMtb25ib2FyZGVkJywnMScpOyIKICAgICAgICAibG9jYWxTdG9yYWdlLnNldEl0ZW0oJ29wZW5oYW5kcy10ZWxlbWV0cnktY29uc2VudCcsJ2RlbmllZCcpOyIKICAgICAgICAibG9jYWxTdG9yYWdlLnNldEl0ZW0oJ29wZW5oYW5kcy10ZWxlbWV0cnktY29uc2VudC1wZW5kaW5nLWNsb3VkLXN5bmMnLCdkZW5pZWQnKTsiCiAgICAgICAgIn1jYXRjaChlKXt9PC9zY3JpcHQ+IgogICAgKQogICAgaGl0cyA9IDAKICAgIGZvciBwIGluIHBhdGhsaWIuUGF0aCgiL29wdC9hZ2VudC1jYW52YXMvZnJvbnRlbmQiKS5yZ2xvYigiaW5kZXguaHRtbCIpOgogICAgICAgIHMgPSBwLnJlYWRfdGV4dCgpCiAgICAgICAgaWYgIm9wZW5oYW5kcy1vbmJvYXJkZWQiIGluIHM6CiAgICAgICAgICAgIGhpdHMgKz0gMQogICAgICAgICAgICBjb250aW51ZQogICAgICAgIHAud3JpdGVfdGV4dChzLnJlcGxhY2UoIjwvaGVhZD4iLCBzY3JpcHQgKyAiPC9oZWFkPiIsIDEpCiAgICAgICAgICAgICAgICAgICAgIGlmICI8L2hlYWQ+IiBpbiBzIGVsc2Ugc2NyaXB0ICsgcykKICAgICAgICBoaXRzICs9IDEKICAgIHByaW50KGYiW2RzaF0g6aaW5ZCv5ZCR5a+85bey5YWN5o6JICh7aGl0c30g5LiqIGluZGV4Lmh0bWwpIikKCgpkZWYgbWFpbigpIC0+IE5vbmU6CiAgICAjICoq6L+Z6YeM5LiN5YaN56Kw5a+G6ZKl5ZKM5YmN56uvKiog4oCU4oCUIOmCo+S4pOS7tuS6i+WcqOW6lOeUqOWQr+WKqCoq5LmL5YmNKirnlLEgcHJlIOmYtuauteWBmuWujOS6hgogICAgIyAo5ZCv5Yqo6ISa5pys6YeM5Y2V54us6LCDIHNlZWRfa2V5L2luamVjdF9mcm9udGVuZCnjgILlnKjov5nlhL/ph43ot5HkuIDpgY3kvJrmiorlupTnlKjlt7Lnu48KICAgICMg6K+76L+b5YaF5a2Y55qE5a+G6ZKl6KaG55uW5o6JLCDkuo7mmK/lkI7pnaLosIPmjqXlj6PkuIDlvosgNDAxICjlrp7mtYvmkp7liLAp44CCCiAgICAjIOetieW6lOeUqOecn+ato+i1t+adpeOAgioqNDAxIOS4jeiDveW9k+aIkCLlr4bpkqXplJnkuoYi5bCx6YCA5Ye6Kiog4oCU4oCUIOW6lOeUqOWQr+WKqOaXqeacnwogICAgIyAo6L+Y5rKh6K+75Yiw5a+G6ZKl5paH5Lu25pe2KSDkuZ/kvJrlm54gNDAxLCDogIzpgqPml7bpgIDlh7rnrYnkuo7miooi6LW35b6X5oWiIuW9k+aIkCLphY3plJnkuoYiLAogICAgIyDkuo7mmK/mqKHlnovmoaPmoYjmsLjov5zngYzkuI3kuIosIOeVjOmdouS4gOebtOivtCBMTE0g5rKh6YWN5aW944CC5a6e5rWL5pKe5Yiw5Lik6L2u44CCCiAgICByZWFkeSA9IEZhbHNlCiAgICBmb3IgXyBpbiByYW5nZSgxODApOgogICAgICAgIHRyeToKICAgICAgICAgICAgY2FsbCgiL2FwaS9zZXR0aW5ncyIpCiAgICAgICAgICAgIHJlYWR5ID0gVHJ1ZQogICAgICAgICAgICBicmVhawogICAgICAgIGV4Y2VwdCB1cmxsaWIuZXJyb3IuSFRUUEVycm9yIGFzIGU6CiAgICAgICAgICAgIGlmIGUuY29kZSA9PSA0MDQ6ICAgICAgICAjIOi/mOayoeacieiuvue9ruiusOW9lSwg5L2G5pyN5Yqh5Zyo5bqU562UCiAgICAgICAgICAgICAgICByZWFkeSA9IFRydWUKICAgICAgICAgICAgICAgIGJyZWFrCiAgICAgICAgICAgIHRpbWUuc2xlZXAoMikgICAgICAgICAgICAjIDQwMS80MDM6IOWkmuWNiui/mOWcqOWQr+WKqCwg5YaN562JCiAgICAgICAgZXhjZXB0ICh1cmxsaWIuZXJyb3IuVVJMRXJyb3IsIE9TRXJyb3IpOgogICAgICAgICAgICB0aW1lLnNsZWVwKDIpCiAgICBpZiBub3QgcmVhZHk6CiAgICAgICAgcmFpc2UgU3lzdGVtRXhpdCgiW2RzaF0g562J5LiN5Yiw5bqU55So5bqU562UIOKAlOKAlCDmqKHlnovmoaPmoYjmsqHngYzkuIoiKQoKICAgIG1vZGVsLCBiYXNlID0gb3MuZW52aXJvblsiRFNIX0xMTV9NT0RFTCJdLCBvcy5lbnZpcm9uWyJEU0hfTExNX0JBU0UiXQoKICAgICMgKirmqKHlnovotbAgTExNIOaho+ahiCAoL2FwaS9wcm9maWxlcyksIOS4jeaYryBhZ2VudF9zZXR0aW5ncy5sbG0qKuOAggogICAgIyDngYzov5sgYWdlbnRfc2V0dGluZ3MubGxtIOS8muWbnuivu+aIkOWKn+OAgeeVjOmdouS5n+aKiiJBZGQgTExNIEFQSSBrZXki5omT5LiK5Yu+LCDkvYblu7oKICAgICMg5a+56K+d5pe25oqlIGBMTE0gcHJvZmlsZSAnZGVmYXVsdCcgbm90IGZvdW5kYCDigJTigJQg6ICM55WM6Z2i5LiK6YKj5Y+lCiAgICAjICJZb3VyIExMTSBpc24ndCBzZXQgdXAgeWV0IiDku47lpLTliLDlsL7pg73mmK/lr7nnmoQsIOaYr+aIkeeBjOmUmeS6huWcsOaWueOAggogICAgY2FsbCgiL2FwaS9wcm9maWxlcy9kZWZhdWx0IiwgewogICAgICAgICJsbG0iOiB7Im1vZGVsIjogbW9kZWwsICJiYXNlX3VybCI6IGJhc2UsICJhcGlfa2V5Ijogb3MuZW52aXJvblsiRFNIX0NMT1VEX1RPS0VOIl19CiAgICB9KQogICAgY2FsbCgiL2FwaS9wcm9maWxlcy9kZWZhdWx0L2FjdGl2YXRlIiwge30pCgogICAgZ290ID0gY2FsbCgiL2FwaS9wcm9maWxlcyIpCiAgICBwcm9mID0gbmV4dCgocCBmb3IgcCBpbiBnb3QuZ2V0KCJwcm9maWxlcyIsIFtdKSBpZiBwLmdldCgibmFtZSIpID09ICJkZWZhdWx0IiksIHt9KQogICAgb2sgPSAocHJvZi5nZXQoIm1vZGVsIikgPT0gbW9kZWwgYW5kIHByb2YuZ2V0KCJiYXNlX3VybCIpID09IGJhc2UKICAgICAgICAgIGFuZCBwcm9mLmdldCgiYXBpX2tleV9zZXQiKSBhbmQgZ290LmdldCgiYWN0aXZlX3Byb2ZpbGUiKSA9PSAiZGVmYXVsdCIpCiAgICBwcmludChmIltkc2hdIOaooeWei+aho+ahiHsn5bey55Sf5pWIJyBpZiBvayBlbHNlICcqKuayoeeUn+aViCoqJ306IHtwcm9mLmdldCgnbW9kZWwnKX0gQCB7cHJvZi5nZXQoJ2Jhc2VfdXJsJyl9IikKCiAgICAjIOmBpea1i+WFs+aOiSDigJTigJQg6ZqQ56eB5YGP5aW95LiA5b6L6YCJ5pyA5L+d5a6I55qE44CCCiAgICB0cnk6CiAgICAgICAgY2FsbCgiL2FwaS9zZXR0aW5ncyIsIHsibWlzY19zZXR0aW5nc19kaWZmIjogeyJ1c2VyX2NvbnNlbnRzX3RvX2FuYWx5dGljcyI6IEZhbHNlfX0pCiAgICBleGNlcHQgdXJsbGliLmVycm9yLkhUVFBFcnJvcjoKICAgICAgICBwYXNzCgoKbWFpbigpCg== | base64 -d > /tmp/dsh_ac_boot.py\n"
-        # 前两步要 root (改 /opt 下的前端), 脚本自己会把属主交回应用用户
-        'DSH_STAGE=pre python3 -c "import os,pathlib;'
-        "src=pathlib.Path('/tmp/dsh_ac_boot.py').read_text().split('def main()')[0];"
-        "ns={};exec(src,ns);ns['seed_key']();ns['inject_frontend']()\"\n"
-        "/opt/agent-canvas/entrypoint.sh &\n"
-        "srv=$!\n"
-        "(python3 /tmp/dsh_ac_boot.py) &\n"
-        "wait $srv\n"
-    )
-
-
 def _pi_boot() -> str:
     """pi 那一格: 社区的 pi-web-ui 当前端, pi 作为 SDK 在它进程里跑。
 
@@ -2828,7 +2765,6 @@ _BOOTS = {
     "claude-code": lambda: _agentui_boot("claude-code"),
     "codex": lambda: _agentui_boot("codex"),
     "agents-team": _agents_team_boot,
-    "openhands": _openhands_boot,
     "pi": _pi_boot,
     "autogen": _autogen_boot,
     "langchain": _langchain_boot,
@@ -2940,21 +2876,6 @@ def env_for(product_id: str, token: str, secret: str = "") -> dict[str, str]:
             "PI_WEB_HOST": "0.0.0.0",
             "PI_WEB_CWD": "/workspace",
             "PI_WEB_DATA_DIR": "/root/.pi-web",
-        }
-    if product_id == "openhands":
-        return {
-            # 会话密钥: 我们**先写死**再起应用, 这样调它的接口才认 (见
-            # deploy/workspace-openhands-boot.py 里 seed_key 的说明)。
-            # 按用户派生, 不同用户不共用一把。
-            # 它的 entrypoint 认这个 (LOCAL_BACKEND_API_KEY) —— 官方口子, 比我们
-            # 往 api-key.txt 里写可靠: 那个文件只在环境变量为空时才被读。
-            # 按用户令牌派生, 不同用户不共用一把。
-            "LOCAL_BACKEND_API_KEY": "dsh" + hashlib.sha256((token or "x").encode()).hexdigest()[:32],
-            "DSH_AC_KEY": "dsh" + hashlib.sha256((token or "x").encode()).hexdigest()[:32],
-            "DSH_CLOUD_TOKEN": token,
-            # 型号必须钉在**在售目录**里 —— 网关只放行目录内的。
-            "DSH_LLM_MODEL": f"openai/{_codecli_model('codex')}",
-            "DSH_LLM_BASE": f"{gateway}/llm/v1",
         }
     if product_id in _AGENTUI_SLOTS:
         cli, enabled = _AGENTUI_SLOTS[product_id]

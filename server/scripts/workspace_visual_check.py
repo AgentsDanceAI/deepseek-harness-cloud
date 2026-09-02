@@ -61,15 +61,7 @@ WALL_PHRASES = [
 #:
 #: 只在锚点也在场时才豁免 —— 同一个词换个地方出现照样报。无锚点的白名单等于
 #: 把这个词从那个产品上永久删掉, 那才是真会漏掉墙的做法。
-IGNORE = {
-    "openhands": {
-        "api key": (
-            "getting started",
-            "左下角 Getting started 待办清单里的 'Add LLM API key' —— 它是清单项, "
-            "而且我们注入之后是**已划掉**的状态, 不是要用户填什么",
-        ),
-    },
-}
+IGNORE = {}
 
 #: 这些出现在屏幕上说明产品**确实起来了**但我们看到的是错误页。
 BROKEN_PHRASES = [

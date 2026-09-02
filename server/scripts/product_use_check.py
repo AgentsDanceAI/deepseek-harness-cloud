@@ -78,7 +78,7 @@ USE = {
     "langchain": {
         "kind": "chat",
         "placeholder": "Type your message...",
-        # 同 openhands: 出一道答案不可能出现在题面里的题。先前只问"只回我两个字",
+        # 出一道答案不可能出现在题面里的题。先前只问"只回我两个字",
         # 判据就只剩"没出现失败词"——而消息压根没发出去时页面也很干净。
         "send": "{a} 加 {b} 等于几? 只回数字, 不要解释",
         "want": ["{sum}"],
@@ -94,26 +94,6 @@ USE = {
         # 队伍/会话没预热成的样子。两者都会让用户进来对着一个空壳。
         "fail_extra": ["No session selected", "Create a team to get started"],
         "why": "侧栏空的 / 首屏没有会话, 用户得自己走一遍新建弹窗",
-    },
-    "openhands": {
-        "kind": "openhands",
-        # 出一道**答案不可能出现在题面里**的题。先前问"只回我两个字", 她回了"好的"
-        # (完全正确), 可脚本没法证明那两个字是她写的 —— 于是判据只能退回去数页面
-        # 长度, 而从首页进对话页文字反而**少了两千多字** (推荐 agent、自动化那些块
-        # 没了), 一个能用的产品就这么被判成红的。
-        # 换成算术: 屏幕上出现 13, 就只可能是她算的。
-        # 数字挑大一点、别是常见数: "13" 那种在时间戳、侧栏、版本号里都可能撞上,
-        # 撞上就是**假绿** —— 比假红更坏。
-        "send": "{a} 加 {b} 等于几? 只回数字, 不要解释",
-        "want": ["{sum}"],
-        # 模型那一跳断了的样子: 它把上游异常原样贴在对话里。这几条**必须当失败**,
-        # 否则"页面长出新东西"会把一条报错当成回话。
-        "fail_extra2": ["LLMAuthenticationError", "AuthenticationError", "LLM profile"],
-        # 首启向导没免掉的样子 (那是我们注入前端要解决的事), 以及模型没配上时
-        # 它自己给的那句提示。
-        # **"加载中"不能当失败词**: 右侧那块面板常驻这三个字, 拿它判等于永远红。
-        "fail_extra": ["isn't set up yet", "Add LLM API key", "Accept the terms"],
-        "why": "首启向导挡着 / 建对话报 LLM profile not found",
     },
 }
 
@@ -209,41 +189,6 @@ with sync_playwright() as p:
                     if loc.count() and loc.first.is_hidden():
                         break
                 e["text"] = page.inner_text("body")[-1500:]
-
-            elif kind == "openhands":
-                # agent-canvas (all-in-one) 的首页就是一个输入框, 打字发出去即建
-                # 对话 —— 不再有"沙箱"这一层 (小镜像那套是应用 + 子进程沙箱, 前端
-                # 拿到的是 http://localhost:<端口>, 托管部署下浏览器连的是用户
-                # 自己的机器, 永远连不上)。所以这里不再等沙箱, 也没有侧栏预热对话。
-                #
-                # 两个**实测**出来的坑, 都会让能用的产品看起来是坏的:
-                #   1. 输入框不是 <textarea> 而是 contenteditable —— fill() 直接抛;
-                #   2. **回车不发送**。敲完 Enter 那句话原地不动躺在框里, 页面
-                #      一点没变, 看起来就像"发不出去"。要点右边那个圆形 ↑。
-                box = page.locator("[contenteditable='true']").first
-                box.click(timeout=60000)
-                page.keyboard.type(prod["send"])
-                page.wait_for_timeout(500)
-                before = len(page.inner_text("body"))  # 只为末尾那句参考打印
-                # 提交键没有可见文字, 按可及名字找; 找不到就回退到"输入框右边最近
-                # 的那个按钮", 别用坐标猜。
-                try:
-                    page.get_by_role("button", name=re.compile("send|submit|发送", re.I)).first.click(timeout=8000)
-                except Exception:
-                    box.press("Meta+Enter")
-                # 建对话 + 模型作答。冷启动时第一句慢, 给到 5 分钟。
-                # **等的是那个答案, 不是"页面变长"**: 从首页跳进对话页会把首页
-                # 那一大片 (推荐 agent、自动化) 卸掉, 文字净减少两千多字 —— 而那
-                # 恰恰说明对话开起来了。拿长度判就是把能用的产品判成红的 (踩过)。
-                want = ["".join(w.split()) for w in (prod.get("want") or [])]
-                for _ in range(60):
-                    page.wait_for_timeout(5000)
-                    flat = "".join(page.inner_text("body").split())
-                    if want and all(w in flat for w in want):
-                        break
-                page.wait_for_timeout(8000)
-                e["text"] = page.inner_text("body")[-2000:]
-                e["grew"] = len(page.inner_text("body")) - before
 
             page.screenshot(path=str(out / (prod["id"] + ".png")))
         except Exception as ex:

@@ -105,7 +105,6 @@
   "apps.tag.coder": "自主编码",
   "apps.tag.agentkit": "智能体框架",
   "apps.tag.agentcli": "智能体命令行",
-  "apps.d.openhands": "交代一句，它自己读代码、改文件、跑命令、把活干完。带浏览器和编辑器，容器就是它的沙箱。",
   "apps.d.pi": "pi 编码智能体 + 社区的 pi-web-ui 前端：对话、文件、内置终端、Git 面板，中英双语。开源、可拆可改。",
   "apps.d.autogen": "微软的多智能体搭建台。拖出一支队伍，让它们分工讨论着把事做完，全程可见。",
   "apps.d.langchain": "LangGraph 智能体，配官方对话前端。流式输出、工具调用、中途可打断，模型走你的额度。",
