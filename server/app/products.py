@@ -2802,6 +2802,10 @@ def env_for(product_id: str, token: str, secret: str = "") -> dict[str, str]:
             # 而镜像里没有 uvx —— 用户第一眼看到的就是一条红 ERROR, 而它其实
             # 无害。装 uvx 会连一整套浏览器一起拖进来, 关掉才是对的。
             "OPENMANUS_DISABLE_BROWSER_USE": "1",
+            # 兜底: 终端里万一还是混进了不合法的 UTF-8 (IUTF8 已开, 见 agentui
+            # main.py; 但粘贴进来的坏字节挡不住), 让 Python 的标准输入用 U+FFFD
+            # 顶替, 而不是兑成代理字符再在发网关时炸掉。
+            "PYTHONIOENCODING": "utf-8:replace",
             # ---- 工作台外壳 (与 claude-code / codex 同一套) ----
             "DSH_DEFAULT_CLI": product_id,
             "DSH_ENABLED_CLIS": product_id,

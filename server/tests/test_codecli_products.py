@@ -303,3 +303,20 @@ def test_openmanus_stops_when_the_model_answers_without_tools():
     assert "if self.tool_choices == ToolChoice.AUTO and not self.tool_calls:" in src, "锚点要钉上游原句"
     dockerfile = (root / "deploy" / "workspace-frameworks" / "Dockerfile").read_text(encoding="utf-8")
     assert "patch_openmanus.py" in dockerfile, "补丁没进镜像等于没打"
+
+
+def test_terminal_turns_on_iutf8_before_the_agent():
+    """终端起来前必须 `stty iutf8`, 否则退格会把汉字削掉一个字节。
+
+    ttyd 给的伪终端默认没开这一位; 规范模式下退格只删一个字节, 剩下的不是合法
+    UTF-8, Python 兑成代理字符, 发网关时 'surrogates not allowed'。老板 2026-09-02
+    在 CrewAI 终端里改了一个字就撞上; 真 PTY 里复现并验证过, 开了就好。
+    """
+    import pathlib
+
+    root = pathlib.Path(__file__).resolve().parents[2]
+    src = (root / "deploy" / "workspace-agentui" / "app" / "main.py").read_text(encoding="utf-8")
+    i = src.index("stty iutf8")
+    assert i < src.index("_agent_term_cmd()}; exec bash -l"), "要在进 agent 之前开"
+    for pid in ("openmanus", "crewai"):
+        assert products.env_for(pid, "tok")["PYTHONIOENCODING"].startswith("utf-8:replace")

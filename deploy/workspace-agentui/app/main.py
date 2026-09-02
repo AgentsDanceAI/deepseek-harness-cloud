@@ -345,7 +345,13 @@ async def _ensure_ttyd() -> None:
         # 卖的就是"点开就能用", 让人先认出提示符再想起来敲 claude 是多一道坎。
         # agent 退出后 `exec bash -l` 兜住 —— 否则退出即断线, 用户想在同一个终端
         # 里跑个 git 都得重开标签页。
-        "bash", "-lc", f"{_agent_term_cmd()}; exec bash -l",
+        # **先 `stty iutf8`**: ttyd 给的伪终端默认没开这一位, 于是退格在规范模式下
+        # 只删**一个字节** —— 一个三字节的汉字被削掉一截, 剩下的不是合法 UTF-8,
+        # Python 把它兑成代理字符, 发给网关时编不回去:
+        #   'utf-8' codec can't encode character '\udce8': surrogates not allowed
+        # 老板 2026-09-02 在 CrewAI 的终端里改了一个字就撞上了。整句中文没事,
+        # 按过退格才炸 —— 真 PTY 里复现并验证过, 开了 IUTF8 就好。
+        "bash", "-lc", f"stty iutf8 2>/dev/null; {_agent_term_cmd()}; exec bash -l",
     ]
     if AGENT_UID:
         # 与 agent 子进程同一个身份: 用户在终端里手敲 claude 时会撞上同一堵
