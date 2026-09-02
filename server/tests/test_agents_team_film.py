@@ -1557,3 +1557,64 @@ def test_every_team_ships_three_concrete_example_prompts():
     nxt = _re.search(r"\n(?:async )?function \w+\(", web[i + 10 :])
     seg = web[i : i + 10 + nxt.start()] if nxt else web[i:]
     assert "input.value = ex" in seg and "submit(" not in seg, "点示例直接发送了 — 用户没机会改"
+
+
+# ── 存档读失败不许播种覆盖 (2026-09-02 事故: 一次部署把老板全部房间和记录盖没了) ──
+
+
+def _fresh_store(tmp_path):
+    filmdir = _crew("filmdir")
+    rooms_m = _crew("rooms")
+    saved = (filmdir.ROOT, rooms_m.STATE_PATH)
+    filmdir.ROOT = tmp_path
+    rooms_m.STATE_PATH = tmp_path / ".agents-team" / "rooms.json"
+    return rooms_m, saved
+
+
+def _restore(saved):
+    filmdir = _crew("filmdir")
+    rooms_m = _crew("rooms")
+    filmdir.ROOT, rooms_m.STATE_PATH = saved
+
+
+def test_a_missing_state_file_is_the_only_case_that_seeds(tmp_path):
+    rooms_m, saved = _fresh_store(tmp_path)
+    try:
+        st = rooms_m.Store()
+        assert st.rooms and not st.load_failed, "真正的首次启动应播种默认房"
+        assert rooms_m.STATE_PATH.exists()
+    finally:
+        _restore(saved)
+
+
+def test_a_corrupt_state_file_never_gets_overwritten_by_a_seed(tmp_path):
+    """读失败 ≠ 不存在。半个 JSON / 挂载没就绪 / 字段对不上, 磁盘上很可能有好存档,
+    播种再保存等于把它盖掉 —— 而且全程不报错。"""
+    rooms_m, saved = _fresh_store(tmp_path)
+    try:
+        rooms_m.STATE_PATH.parent.mkdir(parents=True)
+        rooms_m.STATE_PATH.write_text('{"rooms": [{"id": "keep", "na', encoding="utf-8")  # 半个 JSON
+        before = rooms_m.STATE_PATH.read_bytes()
+        st = rooms_m.Store()
+        assert not st.rooms, "读失败还播种了"
+        assert st.load_failed, "没记下读失败的原因"
+        st.create_room("试图写", ["doer"])  # 会触发 save
+        assert rooms_m.STATE_PATH.read_bytes() == before, "读失败后 save 把磁盘上的存档盖掉了"
+    finally:
+        _restore(saved)
+
+
+def test_save_keeps_a_backup_and_load_falls_back_to_it(tmp_path):
+    rooms_m, saved = _fresh_store(tmp_path)
+    try:
+        st = rooms_m.Store()  # 播种 + 首次保存
+        first = rooms_m.STATE_PATH.read_bytes()
+        st.create_room("第二个", ["doer"])  # 第二次保存 -> .bak 应是第一版
+        bak = rooms_m.STATE_PATH.with_suffix(".json.bak")
+        assert bak.exists() and bak.read_bytes() == first, ".bak 没留住上一版"
+        # 主文件坏了 -> 从 .bak 起来, 房间不丢
+        rooms_m.STATE_PATH.write_text("{ 坏掉的", encoding="utf-8")
+        st2 = rooms_m.Store()
+        assert st2.rooms and not st2.load_failed, "主文件坏了没从 .bak 恢复"
+    finally:
+        _restore(saved)

@@ -16,6 +16,8 @@ messages —— 而不是各存一份对话。各存一份的话, 群里加一�
 from __future__ import annotations
 
 import json
+import shutil
+import sys
 import time
 import uuid
 from dataclasses import asdict, dataclass, field
@@ -196,24 +198,65 @@ class Store:
         self.bots: dict[str, Bot] = {b.id: b for b in BUILTIN_BOTS}
         self.rooms: dict[str, Room] = {}
         self.messages: list[Message] = []
+        #: 存档读失败的原因。非空时**拒绝保存** —— 否则内存里这份空表会把磁盘上真正的
+        #: 存档盖掉。2026-09-02 事故: 工作台重建时读不到 rooms.json (多半是 NAS 还没挂好),
+        #: 代码当成首次启动播了个默认房, 然后把只有一个房的存档写回 NAS, 老板所有房间
+        #: 和聊天记录当场没了 —— 全程没有一行报错。
+        self.load_failed: str = ""
         self._load()
-        if not self.rooms:
+        if not self.rooms and not self.load_failed:
             self._seed()
 
     # -- 持久化 -------------------------------------------------------------
     def _load(self) -> None:
-        try:
-            raw = json.loads(STATE_PATH.read_text())
-        except (OSError, json.JSONDecodeError):
+        """读存档。**只有"文件确实不存在"才算首次启动**; 其它任何失败都不许播种。
+
+        读不到和不存在是两回事: 权限、挂载没就绪、半个 JSON、字段对不上 —— 这些情况下
+        磁盘上很可能有一份好的存档, 播种再保存等于把它盖掉。主文件坏了先试 .bak。
+        """
+        for path in (STATE_PATH, STATE_PATH.with_suffix(".json.bak")):
+            try:
+                raw = json.loads(path.read_text())
+            except FileNotFoundError:
+                if path == STATE_PATH and not STATE_PATH.parent.exists():
+                    # 连目录都没有 = 真正的首次启动 (或挂载没就绪 —— 见下面 save 的兜底)
+                    continue
+                continue
+            except (OSError, json.JSONDecodeError, TypeError, ValueError) as e:
+                self.load_failed = f"{path.name}: {type(e).__name__}: {e}"
+                continue
+            try:
+                for b in raw.get("bots", []):
+                    self.bots[b["id"]] = Bot(**b)
+                for r in raw.get("rooms", []):
+                    self.rooms[r["id"]] = Room(**r)
+                self.messages = [Message(**m) for m in raw.get("messages", [])]
+            except (TypeError, KeyError, ValueError) as e:
+                self.rooms.clear()
+                self.messages.clear()
+                self.load_failed = f"{path.name}: 字段对不上: {type(e).__name__}: {e}"
+                continue
+            self.load_failed = ""
+            if path != STATE_PATH:
+                print(f"!! rooms.json 坏了, 已从 {path.name} 恢复", file=sys.stderr)
             return
-        for b in raw.get("bots", []):
-            self.bots[b["id"]] = Bot(**b)
-        for r in raw.get("rooms", []):
-            self.rooms[r["id"]] = Room(**r)
-        self.messages = [Message(**m) for m in raw.get("messages", [])]
+        # 走到这里: 主文件与 .bak 都没读成。若主文件存在却读不了, load_failed 已置;
+        # 若两个都不存在, 才是干净的首次启动 (load_failed 为空)。
 
     def save(self) -> None:
+        if self.load_failed:
+            # 内存里这份不可信 (读失败时是空的), 写回去就是把真存档盖掉。宁可这一轮不落盘。
+            print(
+                f"!! 存档读失败 ({self.load_failed}), 拒绝保存以免覆盖", file=sys.stderr
+            )
+            return
         STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        # 先留一份 .bak: 万一这次写出的东西有问题 (或者是错误地播种), 上一版还在。
+        if STATE_PATH.exists():
+            try:
+                shutil.copyfile(STATE_PATH, STATE_PATH.with_suffix(".json.bak"))
+            except OSError as e:
+                print(f"!! rooms.json.bak 没写成: {e}", file=sys.stderr)
         payload = {
             # 内置角色不落盘 —— 落了之后改代码里的人格就再也生效不了,
             # 而用户完全看不出为什么"更新了却没变"。
