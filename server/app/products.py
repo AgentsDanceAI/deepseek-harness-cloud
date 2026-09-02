@@ -2929,6 +2929,10 @@ def env_for(product_id: str, token: str, secret: str = "") -> dict[str, str]:
             # 环境里升级是我们重建镜像的事, 不是用户点一下的事。
             "PI_OFFLINE": "1",
             "PI_SKIP_VERSION_CHECK": "1",
+            # 它的文档: PI_TELEMETRY=0 同时关掉"安装/升级上报"和**给提供方带的归因
+            # 头** —— 后者是发给我们网关的请求里多出来的头, 少一个变量少一类怪事。
+            # (PI_OFFLINE 只管启动期联网, 不碰模型调用 —— 文档原话, 查过。)
+            "PI_TELEMETRY": "0",
             # WebSocket 同源校验的白名单。它比对 Origin 与 Host 的主机名**和端口**,
             # 反代进来的形状是 Origin=https://<域>、Host=<域> —— 端口一边是 443 一边
             # 缺省, 不放行的话页面能开, 对话/终端一直重连 (它 README 里明写的坑)。

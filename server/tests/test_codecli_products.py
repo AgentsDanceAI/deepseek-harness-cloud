@@ -356,7 +356,7 @@ def test_pi_slot_is_wired_to_the_gateway(monkeypatch):
     # 探针实测: 给了 OPENAI_API_KEY, pi 就把内置 OpenAI 提供方点亮并排在前面,
     # 界面选中 gpt-5.5, 拿网关令牌去打 api.openai.com, 回 401 invalid_jwt。
     assert "OPENAI_API_KEY" not in env, "会把内置 OpenAI 提供方点亮"
-    assert env["PI_OFFLINE"] == "1"
+    assert env["PI_OFFLINE"] == "1" and env["PI_TELEMETRY"] == "0"
     # WS 同源校验白名单: 反代进来 Origin 是 https://<域>, 不放行就是"页面能开,
     # 对话和终端一直重连"。
     assert env["PI_WEB_ALLOW_ORIGINS"] == "https://pi.test.local"
