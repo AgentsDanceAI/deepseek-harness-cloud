@@ -449,7 +449,7 @@ def test_openmanus_no_longer_seeds_a_crew_project(monkeypatch):
     """
     boot = products.boot_script("openmanus")
     assert "cp -r /opt/dsh/crew-template" not in boot
-    assert "diff -rq -x .git -x __pycache__ /workspace/crew /opt/dsh/crew-template" in boot, (
+    assert "diff -q $W/agents.yaml $T/agents.yaml" in boot, "没动过的要收回去 —— 只比我们写的两份 yaml"
         "没动过的要收回去 (跳过每次构建都变的 .git)"
     )
     assert "DSH_CREW_DIR" not in products.env_for("openmanus", "tok")
