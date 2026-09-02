@@ -110,6 +110,8 @@ async def create_crew(request: Request) -> dict:
 def list_teams() -> dict:
     """团队模板 —— 前端「组个团队」的选单从这里来, 顺序/提示也由它推导, 不再写死剧组。"""
     return {
+        # 手工拉的群没有模板, 空房间用这组开场
+        "generic_examples": list(teams.GENERIC_EXAMPLES),
         "teams": [
             {
                 "id": t.id,
@@ -118,6 +120,7 @@ def list_teams() -> dict:
                 "tagline": t.tagline,
                 "mode": t.mode,
                 "dir": t.dir,
+                "examples": list(t.examples),
                 "members": [
                     {"id": m, "name": store.bots[m].name, "emoji": store.bots[m].emoji}
                     for m in t.members
@@ -125,7 +128,7 @@ def list_teams() -> dict:
                 ],
             }
             for t in teams.TEAMS
-        ]
+        ],
     }
 
 

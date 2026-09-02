@@ -180,6 +180,19 @@
   dialog label { display:flex; align-items:center; gap:8px; padding:6px 0; cursor:pointer; font-size:14px; }
   dialog .row { display:flex; gap:8px; justify-content:flex-end; margin-top:14px; }
   dialog .row button:last-child { background:var(--accent); color:var(--accent-fg); border-color:transparent; font-weight:600; }
+  /* 空房间开场: 团队是谁 + 三条能直接发的示例 (2026-09-02 老板: "否则打开都不知道问什么") */
+  .empty { max-width:640px; margin:48px auto 0; }
+  .empty .eh { display:flex; align-items:center; gap:14px; margin-bottom:6px; }
+  .empty .em { width:48px; height:48px; border-radius:14px; background:var(--agent-bg); display:flex; align-items:center; justify-content:center; font-size:26px; flex:none; }
+  .empty .en { font-size:17px; font-weight:600; }
+  .empty .et { font-size:13px; color:var(--muted); margin-top:2px; }
+  .empty .el { font-size:12px; color:var(--faint); margin:18px 0 8px; }
+  .empty .ex { display:block; width:100%; text-align:left; height:auto; padding:11px 14px; margin-bottom:8px;
+               border-radius:12px; background:var(--card); border:1px solid var(--line); color:var(--fg);
+               font-size:13.5px; line-height:1.6; white-space:normal; cursor:pointer;
+               transition:border-color .15s, box-shadow .15s, transform .15s; }
+  .empty .ex:hover { border-color:#cfcbc4; box-shadow:0 5px 18px rgba(43,38,31,.065); transform:translateY(-1px); color:var(--fg); }
+  .empty .ex .arrow { color:var(--faint); margin-right:8px; }
   /* 团队选单: 卡片栅格, 每张 = emoji + 名字 + 一句话 + 成员头像串 */
   #teamDlg { width:min(880px,94vw); padding:16px 18px; }
   .teams { display:grid; grid-template-columns:repeat(auto-fill,minmax(250px,1fr)); gap:10px; max-height:min(560px,70vh); overflow:auto; padding:2px; }
@@ -412,6 +425,7 @@ function setText(el, text, isUser) {
 
 
 function msgEl(sender, text) {
+  const e0 = wrap.querySelector(':scope > .empty'); if (e0) e0.remove();   // 开场只在空房间显示
   const isUser = sender === 'user', b = botOf(sender);
   const d = document.createElement('div');
   d.className = 'msg ' + (isUser ? 'user' : 'bot');
@@ -433,6 +447,41 @@ function msgEl(sender, text) {
 // "在干活"还是"死了"。这条一直挂在最底下: 谁在干活 · 干了多久 · 第几棒。
 let statusBar = null, statusTimer = null, statusFrom = 0, statusWho = '';
 let TEAMS = [];   // /api/teams: 模板表, 选单和提示都从它来 (棒次从 cur.members 推, 不再写死剧组)
+let GENERIC_EXAMPLES = [];   // 手工拉的群没有模板, 空房间用这组开场
+
+// 空房间开场: 这个团队是谁、能干什么、三条能直接发的示例。点一条填进输入框
+// (不直接发 —— 示例里常有要改的地方: 产品名、路径、尺寸), 用户改完自己发。
+// 老房间没有 team 字段 (字段是 2026-09-02 才有的), 按成员集合反推是哪个模板 ——
+// 你那几部老片就是剧组五人, 开场该给剧组的示例而不是通用的。
+function teamOf(room) {
+  if (room.team) return TEAMS.find(x => x.id === room.team) || null;
+  const key = [...room.members].sort().join(',');
+  return TEAMS.find(x => [...x.members.map(m => m.id)].sort().join(',') === key) || null;
+}
+function renderEmpty(room) {
+  const t = teamOf(room);
+  const examples = t ? t.examples : GENERIC_EXAMPLES;
+  if (!examples || !examples.length) return;
+  const box = document.createElement('div'); box.className = 'empty';
+  const emoji = t ? t.emoji : (room.members.length === 1 ? botOf(room.members[0]).emoji : '💬');
+  const name = t ? t.name : room.name;
+  const tag = t ? t.tagline : room.members.map(m => botOf(m).name).join('、') + ' 在这个群里';
+  box.innerHTML = '<div class="eh"><div class="em"></div><div><div class="en"></div><div class="et"></div></div></div>'
+                + '<div class="el">试试这样开头：</div>';
+  box.querySelector('.em').textContent = emoji;
+  box.querySelector('.en').textContent = name;
+  box.querySelector('.et').textContent = tag;
+  examples.forEach(ex => {
+    const b = document.createElement('button'); b.type = 'button'; b.className = 'ex';
+    b.innerHTML = '<span class="arrow">↳</span>'; b.appendChild(document.createTextNode(ex));
+    b.onclick = () => {
+      input.value = ex; input.dispatchEvent(new Event('input')); input.focus();
+      input.setSelectionRange(input.value.length, input.value.length);
+    };
+    box.appendChild(b);
+  });
+  wrap.appendChild(box);
+}
 
 function statusStart(label) {
   statusStop();
@@ -601,6 +650,7 @@ async function open(room) {
   });
   wrap.innerHTML = '';
   const d = await api('/api/rooms/' + room.id + '/messages');
+  if (!d.messages.length) renderEmpty(room);
   d.messages.forEach(m => {
     const el = msgEl(m.sender, m.text);
     (m.tools || []).forEach(s => {
@@ -883,7 +933,7 @@ input.addEventListener('input', () => {
 (async function boot() {
   const b = await api('/api/bots');
   b.bots.forEach(x => BOTS[x.id] = x);
-  try { TEAMS = (await api('/api/teams')).teams || []; } catch (e) { TEAMS = []; }
+  try { const tj = await api('/api/teams'); TEAMS = tj.teams || []; GENERIC_EXAMPLES = tj.generic_examples || []; } catch (e) { TEAMS = []; }
   try {
     const m = await api('/api/models');
     m.models.forEach(id => {

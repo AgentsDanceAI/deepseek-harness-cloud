@@ -1527,3 +1527,33 @@ def test_group_management_endpoints_and_ui_hooks_exist():
     # 假网关要能给任何成员台词, 否则十个团队里九个在本地预览里一开口就炸
     dev = (TEAM / "dev_preview.py").read_text(encoding="utf-8")
     assert "SCRIPT.get(who)" in dev
+
+
+def test_every_team_ships_three_concrete_example_prompts():
+    """空房间要有开场 (2026-09-02 老板: "否则打开都不知道问什么")。
+
+    每个团队 3 条、互不相同、写得具体 —— 示例的作用是示范"问到什么程度算清楚",
+    第一棒拿到就能开工, 不用回头问。太短的一句 (< 20 字) 示范不了这个。
+    """
+    teams = _crew("teams")
+    for t in teams.TEAMS:
+        assert len(t.examples) == 3, f"{t.id} 示例数 {len(t.examples)} != 3"
+        assert len(set(t.examples)) == 3, f"{t.id} 示例有重复"
+        for ex in t.examples:
+            assert len(ex) >= 20, f"{t.id} 示例太短, 示范不了怎么问: {ex!r}"
+    assert len(teams.GENERIC_EXAMPLES) >= 3, "手工群没有开场示例"
+    # 接口要带出来, 前端要渲染出来
+    assert '"examples": list(t.examples)' in MAIN, "/api/teams 没带 examples"
+    assert '"generic_examples": list(teams.GENERIC_EXAMPLES)' in MAIN
+    web = (TEAM / "web" / "index.html").read_text(encoding="utf-8")
+    assert "function renderEmpty" in web and "renderEmpty(room)" in web, "空房间没有开场渲染"
+    assert "className = 'ex'" in web, "示例没有做成可点的按钮"
+    # 点示例是**填进输入框**而不是直接发 —— 示例里常有要改的地方 (产品名/路径/尺寸)
+    # 按结构切到下一个顶层函数 (不用固定字符窗口 —— 加一行注释就失效; 也别假设
+    # 文件里函数的先后顺序, msgEl 其实定义在它前面)
+    import re as _re
+
+    i = web.index("function renderEmpty")
+    nxt = _re.search(r"\n(?:async )?function \w+\(", web[i + 10 :])
+    seg = web[i : i + 10 + nxt.start()] if nxt else web[i:]
+    assert "input.value = ex" in seg and "submit(" not in seg, "点示例直接发送了 — 用户没机会改"
