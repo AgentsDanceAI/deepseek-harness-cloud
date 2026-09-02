@@ -436,5 +436,6 @@ def test_crewai_slot_runs_the_studio(monkeypatch):
     assert env["OPENAI_API_BASE"].endswith("/llm/v1")
     assert env["DB_URL"].startswith("sqlite:////root/"), "库要落 NAS, 不然回收就没了"
     assert env["DEFAULT_LANGUAGE"] == "zh"
+    assert env["CREWAI_TRACING_ENABLED"] == "false" and env["CREWAI_DISABLE_TELEMETRY"] == "true"
     models = env["OPENAI_PROXY_MODELS"].split(",")
     assert set(models) == set(model_catalog.catalog()) and models[0] == products._codecli_model("codex")

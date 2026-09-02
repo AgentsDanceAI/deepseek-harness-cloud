@@ -2859,6 +2859,11 @@ def env_for(product_id: str, token: str, secret: str = "") -> dict[str, str]:
             "DB_URL": "sqlite:////root/crewai-studio/crewai.db",
             "DEFAULT_LANGUAGE": "zh",
             "AGENTOPS_ENABLED": "False",
+            # CrewAI 第一次 kickoff 会弹一个"要不要开 tracing"的交互提问 (在线程里
+            # 拿 stdin, 卡一会儿才自动放弃), 之后还会上报遥测。全关。
+            "CREWAI_TRACING_ENABLED": "false",
+            "CREWAI_DISABLE_TELEMETRY": "true",
+            "OTEL_SDK_DISABLED": "true",
             # 它用 langchain 的抓取工具, 不设 UA 会每次启动抱怨一句
             "USER_AGENT": "dsh-cloud",
             "DSH_CLOUD_TOKEN": token,
