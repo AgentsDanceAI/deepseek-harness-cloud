@@ -9,6 +9,7 @@ DSH Cloud 的媒体端点与对话端点在**同一个网关、同一把 token**
 read_file 读到、被用户在文件树里看到、被单独重做而不牵动其它。塞回对话等于
 让下游只能拿到一段转述。
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -83,7 +84,9 @@ def _err_text(r: httpx.Response) -> str:
         return r.text[:300]
 
 
-async def generate_image(prompt: str, path: str, size: str = "", model: str = "") -> tuple[str, str]:
+async def generate_image(
+    prompt: str, path: str, size: str = "", model: str = ""
+) -> tuple[str, str]:
     """出一张图并存到工作区。角色四视图、场景参考、分镜草图都走它。"""
     bad = _unconfigured()
     if bad:
@@ -95,7 +98,9 @@ async def generate_image(prompt: str, path: str, size: str = "", model: str = ""
     if not body["model"]:
         return "没有可用的图像模型 (DSH_IMAGE_MODEL 未配置)。", "出图无模型"
     async with _client(300) as c:
-        r = await c.post(f"{GATEWAY_BASE}/images/generations", headers=_headers(), json=body)
+        r = await c.post(
+            f"{GATEWAY_BASE}/images/generations", headers=_headers(), json=body
+        )
     if r.status_code >= 400:
         return f"出图失败 HTTP {r.status_code}: {_err_text(r)}", "出图失败"
     data = (r.json() or {}).get("data") or []
@@ -115,7 +120,10 @@ async def generate_image(prompt: str, path: str, size: str = "", model: str = ""
         return "上游返回里既没有 url 也没有 b64_json。", "出图无结果"
     rel = out.relative_to(_film_root())
     kb = out.stat().st_size // 1024
-    return f"已出图并存到 {rel} ({kb} KB)。下游可以用这个路径当参考图。", f"出图 {rel.name}"
+    return (
+        f"已出图并存到 {rel} ({kb} KB)。下游可以用这个路径当参考图。",
+        f"出图 {rel.name}",
+    )
 
 
 #: 目录里的分辨率键是**小写** (credits_per_second: {"480p":..,"720p":..}), 而服务端
@@ -129,12 +137,18 @@ def _norm_resolution(r: str) -> str:
     return v if v in _RESOLUTIONS else "720p"
 
 
-MEDIA_MAX_ITEMS = 8   # 与服务端 media.py 的 _MEDIA_MAX_ITEMS 对齐
+MEDIA_MAX_ITEMS = 8  # 与服务端 media.py 的 _MEDIA_MAX_ITEMS 对齐
 
 
-async def generate_video(prompt: str, path: str, duration: int = 5, resolution: str = "720p",
-                         ratio: str = "", image: str | list | None = None,
-                         model: str = "") -> tuple[str, str]:
+async def generate_video(
+    prompt: str,
+    path: str,
+    duration: int = 5,
+    resolution: str = "720p",
+    ratio: str = "",
+    image: str | list | None = None,
+    model: str = "",
+) -> tuple[str, str]:
     """出一段视频并存到工作区 (提交 → 轮询 → 下载, 一次调用走完)。
 
     做成同步是刻意的: 让模型"提交完自己去轮询"会让它在等待期间反复调工具、
@@ -151,9 +165,11 @@ async def generate_video(prompt: str, path: str, duration: int = 5, resolution: 
     if out.exists() and out.stat().st_size > 0:
         mb = out.stat().st_size / 1024 / 1024
         rel = out.relative_to(_film_root())
-        msg = (f"{rel} 已经有成片了 ({mb:.1f} MB), **没有重新出片** —— 出片是要花钱的, "
-               f"同一个镜头不重复跑。确实要重做请先删掉这个文件 (shell: rm '{rel}'), "
-               f"或者换一个 path。")
+        msg = (
+            f"{rel} 已经有成片了 ({mb:.1f} MB), **没有重新出片** —— 出片是要花钱的, "
+            f"同一个镜头不重复跑。确实要重做请先删掉这个文件 (shell: rm '{rel}'), "
+            f"或者换一个 path。"
+        )
         return msg, f"跳过 {rel.name} (已存在)"
     body: dict = {
         "model": model or VIDEO_MODEL,
@@ -183,8 +199,10 @@ async def generate_video(prompt: str, path: str, duration: int = 5, resolution: 
         for r in refs:
             url, why = await _upload_blob(_safe_rel(str(r)))
             if not url:
-                return (f"参考图上传失败 ({r}): {why or '没有返回失败原因 — 这是个 bug, 请报告'}",
-                        "参考图上传失败")
+                return (
+                    f"参考图上传失败 ({r}): {why or '没有返回失败原因 — 这是个 bug, 请报告'}",
+                    "参考图上传失败",
+                )
             urls.append(url)
         # ⚠️ media 每项**必须带 type** —— 服务端只校验 url 所以放行, 但上游
         # (百炼) 会退 `Field required: input.media.0.type`, 而这个错只出现在
@@ -196,16 +214,21 @@ async def generate_video(prompt: str, path: str, duration: int = 5, resolution: 
         # —— 传两张以上必炸, 而错误只落进作业表。
         #   · 一张 → first_frame (首帧模式: prompt 只写运动+运镜+声音, 不复述外观)
         #   · 多张 → 全部 reference_image (全能参考: prompt 用「@图片N」指代)
-        body["image_url"] = urls[0]                       # 单图系 (seedance) 吃这个
-        body["media"] = ([{"type": "first_frame", "url": urls[0]}] if len(urls) == 1
-                         else [{"type": "reference_image", "url": u} for u in urls])
+        body["image_url"] = urls[0]  # 单图系 (seedance) 吃这个
+        body["media"] = (
+            [{"type": "first_frame", "url": urls[0]}]
+            if len(urls) == 1
+            else [{"type": "reference_image", "url": u} for u in urls]
+        )
     # ⚠️ 下单是**有副作用**的调用 —— 绝不自动重发 (重发就是第二次扣费), 而异常
     # 也绝不许炸穿工具: 炸穿之后模型看到的是"工具出错", 它的本能是对同一个镜头
     # 再调一次, 效果和自动重发一模一样。连接在响应途中断掉时请求很可能**已经被
     # 上游收下**、钱已经扣了, 所以这里要明说"可能已经下单"并给出自查的路。
     try:
         async with _client(120) as c:
-            r = await c.post(f"{GATEWAY_BASE}/videos/generations", headers=_headers(), json=body)
+            r = await c.post(
+                f"{GATEWAY_BASE}/videos/generations", headers=_headers(), json=body
+            )
     except httpx.HTTPError as e:
         why = (
             f"出片提交时连接中断 ({type(e).__name__}: {e})。**这一单可能已经送到上游并计费, "
@@ -226,7 +249,7 @@ async def generate_video(prompt: str, path: str, duration: int = 5, resolution: 
     started = time.time()
     deadline = started + VIDEO_POLL_TIMEOUT_S
     url = ""
-    fails = 0      # 连续查询失败次数; 查成功一次就归零
+    fails = 0  # 连续查询失败次数; 查成功一次就归零
     last = ""
     while time.time() < deadline:
         await asyncio.sleep(VIDEO_POLL_INTERVAL_S)
@@ -235,7 +258,9 @@ async def generate_video(prompt: str, path: str, duration: int = 5, resolution: 
             _progress(f"出片中 {waited} 秒 (通常 1-3 分钟)")
         try:
             async with _client(60) as c:
-                g = await c.get(f"{GATEWAY_BASE}/videos/result/{job}", headers=_headers())
+                g = await c.get(
+                    f"{GATEWAY_BASE}/videos/result/{job}", headers=_headers()
+                )
         except httpx.HTTPError as e:
             fails += 1
             last = f"{type(e).__name__}: {e}"
@@ -250,7 +275,10 @@ async def generate_video(prompt: str, path: str, duration: int = 5, resolution: 
                 if fails >= POLL_GIVEUP:
                     return _paid_but_unpolled(job, last)
                 continue
-            return f"查询作业失败 {last} — 作业 {job} 已下单并计费, **不要重新下单**", "出片查询失败"
+            return (
+                f"查询作业失败 {last} — 作业 {job} 已下单并计费, **不要重新下单**",
+                "出片查询失败",
+            )
         fails = 0
         d = g.json() or {}
         st = str(d.get("task_status") or "")
@@ -260,8 +288,10 @@ async def generate_video(prompt: str, path: str, duration: int = 5, resolution: 
         if st == "FAIL":
             return f"出片失败: {str(d.get('error') or '')[:300]}", "出片失败"
     if not url:
-        return (f"出片超时 (等了 {int(VIDEO_POLL_TIMEOUT_S)} 秒还没好), 作业 id {job} — "
-                f"可以稍后用 shell 手动查询, 不必重新下单。"), "出片超时"
+        return (
+            f"出片超时 (等了 {int(VIDEO_POLL_TIMEOUT_S)} 秒还没好), 作业 id {job} — "
+            f"可以稍后用 shell 手动查询, 不必重新下单。"
+        ), "出片超时"
 
     out.parent.mkdir(parents=True, exist_ok=True)
     async with _client(600) as c, c.stream("GET", url) as resp:
@@ -272,14 +302,21 @@ async def generate_video(prompt: str, path: str, duration: int = 5, resolution: 
                 f.write(chunk)
     rel = out.relative_to(_film_root())
     mb = out.stat().st_size / 1024 / 1024
-    return (f"已出片并存到 {rel} ({mb:.1f} MB, {duration}秒 {_norm_resolution(resolution)})。",
-            f"出片 {rel.name}")
+    return (
+        f"已出片并存到 {rel} ({mb:.1f} MB, {duration}秒 {_norm_resolution(resolution)})。",
+        f"出片 {rel.name}",
+    )
 
 
 #: 按后缀给 content_type —— 资产库按它决定怎么存/怎么回, 一律报 image/png
 #: 会让 jpg 存成 png (上游取图时按魔数解码, 大多能过, 但没必要赌)。
-_CTYPE = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
-          ".webp": "image/webp", ".gif": "image/gif"}
+_CTYPE = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".webp": "image/webp",
+    ".gif": "image/gif",
+}
 
 
 #: 值得重发的 HTTP 状态。**只用在没有副作用的调用上** (上传、查作业) ——
@@ -312,12 +349,12 @@ async def _upload_blob(p: Path) -> tuple[str, str]:
         try:
             url, why = await _upload_once(p)
         except httpx.HTTPError as e:
-            why = f"{type(e).__name__}: {e}"   # 异常也要变成"原因", 不许炸穿工具
+            why = f"{type(e).__name__}: {e}"  # 异常也要变成"原因", 不许炸穿工具
         else:
             if url:
                 return url, ""
             if not any(str(c) in why for c in _TRANSIENT):
-                return "", why               # 不是瞬时的 (文件不存在、字段不对) 就别重试
+                return "", why  # 不是瞬时的 (文件不存在、字段不对) 就别重试
         if attempt + 1 < UPLOAD_TRIES:
             await asyncio.sleep(min(1.5 * 2**attempt, 6.0))
     return "", f"{why} (重发 {UPLOAD_TRIES} 次都没成)"
@@ -335,10 +372,13 @@ async def _upload_once(p: Path) -> tuple[str, str]:
         return "", f"文件不存在: {p}"
     ctype = _CTYPE.get(p.suffix.lower(), "application/octet-stream")
     async with _client(60) as c:
-        r = await c.post(f"{GATEWAY_BASE}/media/uploads", headers=_headers(),
-                         # 只发服务端真读的字段 (content_type / file_name)。
-                         # size 它不读 —— 发了是噪音, 还会让人以为有配额校验。
-                         json={"content_type": ctype, "file_name": p.name})
+        r = await c.post(
+            f"{GATEWAY_BASE}/media/uploads",
+            headers=_headers(),
+            # 只发服务端真读的字段 (content_type / file_name)。
+            # size 它不读 —— 发了是噪音, 还会让人以为有配额校验。
+            json={"content_type": ctype, "file_name": p.name},
+        )
         if r.status_code >= 400:
             return "", f"申请上传位 HTTP {r.status_code}: {_err_text(r)}"
         d = r.json() or {}
@@ -347,9 +387,13 @@ async def _upload_once(p: Path) -> tuple[str, str]:
         if not put or not get:
             # 字段名对不上要**说出来**, 不能回一个空原因 —— 那正是这次的坑:
             # 模型拿到"失败但没说为什么", 只能瞎试。
-            return "", f"资产库返回里没有 upload_url/download_url, 实际字段: {sorted(d)}"
-        up = await c.put(put, content=p.read_bytes(),
-                         headers={**_headers(), "Content-Type": ctype})
+            return (
+                "",
+                f"资产库返回里没有 upload_url/download_url, 实际字段: {sorted(d)}",
+            )
+        up = await c.put(
+            put, content=p.read_bytes(), headers={**_headers(), "Content-Type": ctype}
+        )
         if up.status_code >= 400:
             return "", f"上传 HTTP {up.status_code}: {_err_text(up)}"
     return get, ""
@@ -365,8 +409,8 @@ def _paid_but_unpolled(job: str, why: str) -> tuple[str, str]:
     body = (
         f"查询作业状态连续失败 {POLL_GIVEUP} 次 ({why})。**作业 {job} 已经下单并计费, "
         f"上游多半正常出片中 —— 千万不要重新下单**。稍后用 shell 查一次即可:\n"
-        f"    curl -s -H \"Authorization: Bearer $DSH_TOKEN\" "
-        f"\"$DSH_GATEWAY_BASE/videos/result/{job}\"\n"
+        f'    curl -s -H "Authorization: Bearer $DSH_TOKEN" '
+        f'"$DSH_GATEWAY_BASE/videos/result/{job}"\n'
         f"拿到 video_result[0].url 后直接下载到目标路径。"
     )
     return body, "出片查询中断 (已付费)"
@@ -375,7 +419,9 @@ def _paid_but_unpolled(job: str, why: str) -> tuple[str, str]:
 _TIME_RE = re.compile(r"Duration:\s*(\d+):(\d+):(\d+\.\d+)")
 
 
-async def concat_videos(clips: list[str], path: str, audio: str = "") -> tuple[str, str]:
+async def concat_videos(
+    clips: list[str], path: str, audio: str = ""
+) -> tuple[str, str]:
     """把若干片段按顺序拼成一条成片 (剪辑师的活)。
 
     用 ffmpeg 的 concat demuxer 而不是 filter: 片段都出自同一个模型同一档参数,
@@ -400,12 +446,23 @@ async def concat_videos(clips: list[str], path: str, audio: str = "") -> tuple[s
         ap = _safe_rel(audio)
         if not ap.exists():
             return f"配乐文件不存在: {audio}", "拼片缺配乐"
-        cmd += ["-i", str(ap), "-map", "0:v", "-map", "1:a", "-shortest", "-c:v", "copy"]
+        cmd += [
+            "-i",
+            str(ap),
+            "-map",
+            "0:v",
+            "-map",
+            "1:a",
+            "-shortest",
+            "-c:v",
+            "copy",
+        ]
     else:
         cmd += ["-c", "copy"]
     cmd.append(str(outp))
     proc = await asyncio.create_subprocess_exec(
-        *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+        *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+    )
     _, err = await proc.communicate()
     listing.unlink(missing_ok=True)
     if proc.returncode != 0 or not outp.exists():
@@ -442,9 +499,18 @@ SCHEMAS = [
                 "type": "object",
                 "properties": {
                     "prompt": {"type": "string", "description": "画面描述, 越具体越好"},
-                    "path": {"type": "string", "description": "存到哪 (相对 /workspace), 如 项目/角色/华强.png"},
-                    "size": {"type": "string", "description": "如 1024x1024; 省略用默认"},
-                    "model": {"type": "string", "description": "省略用工作台默认图像模型"},
+                    "path": {
+                        "type": "string",
+                        "description": "存到哪 (相对 /workspace), 如 项目/角色/华强.png",
+                    },
+                    "size": {
+                        "type": "string",
+                        "description": "如 1024x1024; 省略用默认",
+                    },
+                    "model": {
+                        "type": "string",
+                        "description": "省略用工作台默认图像模型",
+                    },
                 },
                 "required": ["prompt", "path"],
             },
@@ -463,13 +529,21 @@ SCHEMAS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "prompt": {"type": "string", "description": "镜头描述: 画面内容 + 运镜 + 情绪"},
-                    "path": {"type": "string", "description": "存到哪, 如 项目/片段/01.mp4"},
+                    "prompt": {
+                        "type": "string",
+                        "description": "镜头描述: 画面内容 + 运镜 + 情绪",
+                    },
+                    "path": {
+                        "type": "string",
+                        "description": "存到哪, 如 项目/片段/01.mp4",
+                    },
                     "duration": {
                         "type": "number",
-                        "description": ("时长秒数, **必填**。照镜头表里那一镜的时长写 —— "
-                                        "省略会变成 5 秒, 而镜头表写 10 秒的镜头出成 5 秒"
-                                        "是废片, 还照样扣钱。2-30 秒。"),
+                        "description": (
+                            "时长秒数, **必填**。照镜头表里那一镜的时长写 —— "
+                            "省略会变成 5 秒, 而镜头表写 10 秒的镜头出成 5 秒"
+                            "是废片, 还照样扣钱。2-30 秒。"
+                        ),
                     },
                     "resolution": {
                         "type": "string",
@@ -477,11 +551,13 @@ SCHEMAS = [
                     },
                     "ratio": {"type": "string", "description": "如 16:9 / 9:16"},
                     "image": {
-                        "description": ("参考图的工作区路径。**给一张还是多张, 语义不同**: "
-                                        "一张 = 首帧模式 (那张就是第一帧, prompt 只写运动+"
-                                        "运镜+声音, 别复述画面里已有的外观); 多张 = 全能参考 "
-                                        "(最多 8 张, 角色图+场景图+道具图一起给, prompt 里用"
-                                        "「@图片1」指代, 同样不复述外观)。两种互斥, 不能混。"),
+                        "description": (
+                            "参考图的工作区路径。**给一张还是多张, 语义不同**: "
+                            "一张 = 首帧模式 (那张就是第一帧, prompt 只写运动+"
+                            "运镜+声音, 别复述画面里已有的外观); 多张 = 全能参考 "
+                            "(最多 8 张, 角色图+场景图+道具图一起给, prompt 里用"
+                            "「@图片1」指代, 同样不复述外观)。两种互斥, 不能混。"
+                        ),
                         "anyOf": [
                             {"type": "string"},
                             {"type": "array", "items": {"type": "string"}},
@@ -510,9 +586,15 @@ SCHEMAS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "clips": {"type": "array", "items": {"type": "string"},
-                              "description": "片段路径, 按成片顺序"},
-                    "path": {"type": "string", "description": "成片存到哪, 如 项目/成片.mp4"},
+                    "clips": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "片段路径, 按成片顺序",
+                    },
+                    "path": {
+                        "type": "string",
+                        "description": "成片存到哪, 如 项目/成片.mp4",
+                    },
                     "audio": {"type": "string", "description": "可选配乐/配音文件路径"},
                 },
                 "required": ["clips", "path"],
@@ -531,11 +613,19 @@ SCHEMAS = [
 
 HANDLERS = {
     "generate_image": lambda a: generate_image(
-        a["prompt"], a["path"], a.get("size", ""), a.get("model", "")),
+        a["prompt"], a["path"], a.get("size", ""), a.get("model", "")
+    ),
     "generate_video": lambda a: generate_video(
-        a["prompt"], a["path"], int(a.get("duration") or 5), a.get("resolution") or "720p",
-        a.get("ratio", ""), a.get("image"), a.get("model", "")),
+        a["prompt"],
+        a["path"],
+        int(a.get("duration") or 5),
+        a.get("resolution") or "720p",
+        a.get("ratio", ""),
+        a.get("image"),
+        a.get("model", ""),
+    ),
     "concat_videos": lambda a: concat_videos(
-        list(a.get("clips") or []), a["path"], a.get("audio", "")),
+        list(a.get("clips") or []), a["path"], a.get("audio", "")
+    ),
     "media_models": lambda a: media_models(),
 }

@@ -52,7 +52,10 @@ def listing(root: pathlib.Path, rel: str = "") -> dict:
                 "kind": _kind(p),
             }
         )
-    return {"dir": str(here.relative_to(root)) if here != root else "", "entries": entries}
+    return {
+        "dir": str(here.relative_to(root)) if here != root else "",
+        "entries": entries,
+    }
 
 
 def _kind(p: pathlib.Path) -> str:
@@ -64,6 +67,12 @@ def _kind(p: pathlib.Path) -> str:
         return "video"
     if mt.startswith("image/"):
         return "image"
-    if mt.startswith("text/") or p.suffix.lower() in {".md", ".json", ".txt", ".csv", ".srt"}:
+    if mt.startswith("text/") or p.suffix.lower() in {
+        ".md",
+        ".json",
+        ".txt",
+        ".csv",
+        ".srt",
+    }:
         return "text"
     return "other"

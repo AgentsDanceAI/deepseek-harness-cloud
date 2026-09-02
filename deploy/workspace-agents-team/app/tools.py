@@ -58,7 +58,7 @@ async def run_shell(command: str, timeout: float | None = None) -> tuple[str, st
     stderr 上的报错当成"没有输出"继续往下走。
     """
     limit = SHELL_TIMEOUT_S if timeout is None else timeout
-    here = filmdir.current()   # 每部片自己的目录 (老房间还是根)
+    here = filmdir.current()  # 每部片自己的目录 (老房间还是根)
     here.mkdir(parents=True, exist_ok=True)
     proc = await asyncio.create_subprocess_shell(
         command,
@@ -144,8 +144,10 @@ HALT_TOOL = "wait_for_user"
 async def wait_for_user(question: str) -> tuple[str, str]:
     """本身不做事 —— 唯一作用是让接力停在这一棒 (见 main._run_relay)。"""
     q = (question or "").strip() or "请确认后再继续。"
-    return (f"已把问题交给用户, 本轮到此为止, 后面的工位不会开工。你的问题: {q}",
-            "等用户回答")
+    return (
+        f"已把问题交给用户, 本轮到此为止, 后面的工位不会开工。你的问题: {q}",
+        "等用户回答",
+    )
 
 
 #: 给模型的工具定义 (OpenAI tools 格式)。描述里写**什么时候用**而不是"这是什么",
@@ -165,7 +167,10 @@ SCHEMAS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "question": {"type": "string", "description": "要问用户什么 / 请他确认什么"},
+                    "question": {
+                        "type": "string",
+                        "description": "要问用户什么 / 请他确认什么",
+                    },
                 },
                 "required": ["question"],
             },
