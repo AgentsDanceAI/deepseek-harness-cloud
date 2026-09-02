@@ -439,3 +439,15 @@ def test_crewai_slot_runs_the_studio(monkeypatch):
     assert env["CREWAI_TRACING_ENABLED"] == "false" and env["CREWAI_DISABLE_TELEMETRY"] == "true"
     models = env["OPENAI_PROXY_MODELS"].split(",")
     assert set(models) == set(model_catalog.catalog()) and models[0] == products._codecli_model("codex")
+
+
+def test_openmanus_no_longer_seeds_a_crew_project(monkeypatch):
+    """OpenManus 的工作区里不该长出 crew/ —— 老板 2026-09-02: "好诡异"。
+
+    CrewAI 换成 Studio 之前两格合用一份启动脚本, 开机会把 CrewAI 的工程模板复制进
+    /workspace/crew。现在不种了; 之前种下的、用户没动过的收回去 (逐字节比对), 改过的留着。
+    """
+    boot = products.boot_script("openmanus")
+    assert "cp -r /opt/dsh/crew-template" not in boot
+    assert "diff -rq /workspace/crew /opt/dsh/crew-template" in boot, "没动过的要收回去"
+    assert "DSH_CREW_DIR" not in products.env_for("openmanus", "tok")

@@ -2751,8 +2751,7 @@ def _frameworks_boot(product_id: str) -> str:
     config/config.toml —— 镜像里烤的是占位值, 不换成这个用户的令牌, 他发第一句
     话就是 401。
 
-    CrewAI 的工程从**构建期就备好的模板**复制 (现场 `crewai create` 要几十秒,
-    那几十秒全落在用户第一次打开的等待里)。已经有了就不动 —— 那是他改过的。
+    (CrewAI 2026-09-02 起换成 CrewAI-Studio, 见 _crewai_studio_boot; 这格只剩 OpenManus。)
     """
     hello = _FRAMEWORK_HELLO[product_id].replace("'", "'\\''")
     venv = "openmanus" if product_id == "openmanus" else "crewai"
@@ -2771,8 +2770,11 @@ def _frameworks_boot(product_id: str) -> str:
         '"$DSH_MODEL" "$OPENAI_BASE_URL" "$OPENAI_API_KEY" '
         "> /opt/openmanus/config/config.toml\n"
         f"printf '%s' '{hello}' > /etc/motd\n"
-        # CrewAI 的工程: 没有才复制, 有了就是用户自己的。
-        "[ -d /workspace/crew ] || cp -r /opt/dsh/crew-template /workspace/crew\n"
+        # 2026-09-02: CrewAI 换成 Studio 之后这格只剩 OpenManus, **不再种 crew 工程**。
+        # 之前种下去的那份, 用户没动过 (和模板逐字节一样) 就收回去 —— 老板在
+        # OpenManus 的文件面板里看到一个 crew/: "好诡异"。改过的留着, 那是他的东西。
+        "if [ -d /workspace/crew ] && [ -d /opt/dsh/crew-template ] "
+        "&& diff -rq /workspace/crew /opt/dsh/crew-template >/dev/null 2>&1; then rm -rf /workspace/crew; fi\n"
         # **PATH 必须写进 /etc/profile.d, 不能只在这里 export**: 终端标签页起的是
         # `bash -l` (登录 shell), 它会重新加载 /etc/profile 把我们 export 的 PATH
         # 冲掉 —— 用户敲 python 用的是系统那个, 于是
@@ -2899,7 +2901,6 @@ def env_for(product_id: str, token: str, secret: str = "") -> dict[str, str]:
             "DSH_PRODUCT_ID": product_id,
             "DSH_CLOUD_TOKEN": token,
             "DSH_GATEWAY_BASE": gateway,
-            "DSH_CREW_DIR": "/workspace/crew",
         }
     if product_id == "langchain":
         return {
