@@ -56,14 +56,14 @@ USE = {
         "why": "发一句话没反应 (它的日志走 stderr, 外壳只读 stdout)",
     },
     "crewai": {
-        "kind": "chat",
-        "placeholder": "说点什么",
+        # 2026-09-02 起这格是 CrewAI-Studio (Streamlit): 进「执行!」页, 给示例队伍的
+        # {question} 占位符填题, 点「运行团队!」, 答案出现在「最终输出」里。
+        "kind": "studio",
         "send": "{a} 加 {b} 等于几? 只回数字, 不要解释",
         "want": ["{sum}"],
-        "busy_hidden": "#stopBtn",
-        # 型号没钉的样子: litellm 拿它自己的默认 gpt-4o-mini 去问网关, 回 404。
-        "fail_extra2": ["gpt-4o-mini", "NotFoundError", "0↑ 0↓"],
-        "why": "发一句话回 404 (litellm 用了它自己的默认型号)",
+        # 提供方没钉住的样子 (下拉里混进别家型号) / 示例队伍没种上的样子
+        "fail_extra": ["还未定义任何团队", "No crews defined"],
+        "why": "首屏是空 Studio / 运行报 LLM 提供方错误",
     },
     "pi": {
         "kind": "chat",
@@ -166,6 +166,25 @@ with sync_playwright() as p:
                     " for (let i = 0; i < b.length; i++) {"
                     "   const ln = b.getLine(i); if (ln) out.push(ln.translateToString(true)); }"
                     " return out.join('\\n'); }")[-1500:]
+
+            elif kind == "studio":
+                # Streamlit: 侧栏是一组 radio, 点「执行!」进 kickoff 页; 示例队伍只有
+                # 一支, 选择框默认就是它; 占位符输入框的 label 就是占位符名 (question)。
+                page.get_by_text("执行!", exact=True).first.click(timeout=30000)
+                page.wait_for_timeout(3000)
+                box = page.get_by_label("question").first
+                box.click(timeout=30000)
+                box.fill(prod["send"])
+                page.wait_for_timeout(500)
+                page.get_by_role("button", name="运行团队!").first.click(timeout=15000)
+                # 两个 agent 依次跑, 冷启动第一次慢; 等答案出现在页面上, 最多 5 分钟
+                want = ["".join(w.split()) for w in (prod.get("want") or [])]
+                for _ in range(60):
+                    page.wait_for_timeout(5000)
+                    if want and all(w in "".join(page.inner_text("body").split()) for w in want):
+                        break
+                page.wait_for_timeout(3000)
+                e["text"] = page.inner_text("body")[-2500:]
 
             elif kind == "chat":
                 # 占位符按产品给 —— 两家的文案差两个词, 写死一个就永远找不到另一个。
