@@ -340,7 +340,7 @@ def test_pi_slot_is_wired_to_the_gateway(monkeypatch):
 
     boot = products.boot_script("pi")
     assert '"api": "openai-completions"' in boot
-    assert '"apiKey": "$OPENAI_API_KEY"' in boot, "令牌要从环境变量取, 不落盘"
+    assert '"apiKey": "$DSH_GATEWAY_KEY"' in boot, "令牌要从环境变量取, 不落盘"
     assert "/llm/v1" in boot
     # 型号必须在售 —— 网关只放行目录里的
     import re
@@ -352,7 +352,10 @@ def test_pi_slot_is_wired_to_the_gateway(monkeypatch):
     assert boot.index("models.json") < boot.index("exec pi-web-ui"), "配置要在起服务之前写好"
 
     env = products.env_for("pi", "tok")
-    assert env["OPENAI_API_KEY"] == "tok"
+    assert env["DSH_GATEWAY_KEY"] == "tok"
+    # 探针实测: 给了 OPENAI_API_KEY, pi 就把内置 OpenAI 提供方点亮并排在前面,
+    # 界面选中 gpt-5.5, 拿网关令牌去打 api.openai.com, 回 401 invalid_jwt。
+    assert "OPENAI_API_KEY" not in env, "会把内置 OpenAI 提供方点亮"
     assert env["PI_OFFLINE"] == "1"
     # WS 同源校验白名单: 反代进来 Origin 是 https://<域>, 不放行就是"页面能开,
     # 对话和终端一直重连"。

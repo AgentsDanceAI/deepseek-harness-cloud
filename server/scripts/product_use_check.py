@@ -65,6 +65,16 @@ USE = {
         "fail_extra2": ["gpt-4o-mini", "NotFoundError", "0↑ 0↓"],
         "why": "发一句话回 404 (litellm 用了它自己的默认型号)",
     },
+    "pi": {
+        "kind": "chat",
+        # pi-web-ui 的输入框 (中文界面): "给 pi 发送消息 — Enter 发送，/ 查看命令"。
+        "placeholder": "给 pi 发送消息",
+        "send": "{a} 加 {b} 等于几? 只回数字, 不要解释",
+        "want": ["{sum}"],
+        # 模型走错门的样子: 内置 OpenAI 提供方被点亮, 拿网关令牌去打 api.openai.com。
+        "fail_extra2": ["OpenAI API error", "invalid_jwt", "(401)"],
+        "why": "回 OpenAI API error (401) invalid_jwt —— 内置提供方被 OPENAI_API_KEY 点亮",
+    },
     "langchain": {
         "kind": "chat",
         "placeholder": "Type your message...",

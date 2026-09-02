@@ -2635,7 +2635,11 @@ def _pi_boot() -> str:
                 "dsh": {
                     "baseUrl": f"{gateway}/llm/v1",
                     "api": "openai-completions",
-                    "apiKey": "$OPENAI_API_KEY",
+                    # **不能叫 OPENAI_API_KEY**: pi 一看到这个变量就把内置的 OpenAI
+                    # 提供方也点亮, 还排在前面 —— 探针实测界面选中的是 gpt-5.5,
+                    # 拿我们的网关令牌去打 api.openai.com, 回 401 invalid_jwt。
+                    # 令牌换个只有我们认的名字, 它就只剩 dsh 这一个提供方。
+                    "apiKey": "$DSH_GATEWAY_KEY",
                     "models": [
                         {
                             "id": model,
@@ -2917,8 +2921,9 @@ def env_for(product_id: str, token: str, secret: str = "") -> dict[str, str]:
         domain = config.PI_DOMAIN
         return {
             "HOME": "/root",
-            # models.json 里写的是 "$OPENAI_API_KEY", 它从这里取。
-            "OPENAI_API_KEY": token,
+            # models.json 里写的是 "$DSH_GATEWAY_KEY", 它从这里取。**别给它
+            # OPENAI_API_KEY**: 那会把内置 OpenAI 提供方点亮 (见 _pi_boot)。
+            "DSH_GATEWAY_KEY": token,
             "DSH_CLOUD_TOKEN": token,
             # 不联网自检/自更新: 它开机会去 npm 看新版本, 还会提示自更新 —— 托管
             # 环境里升级是我们重建镜像的事, 不是用户点一下的事。
