@@ -175,7 +175,10 @@ with sync_playwright() as p:
                 box = page.get_by_label("question").first
                 box.click(timeout=30000)
                 box.fill(prod["send"])
-                page.wait_for_timeout(500)
+                # Streamlit 的 text_area 要 Ctrl+Enter 才把值交给服务端; 直接点按钮
+                # 的话按钮那次重绘拿到的可能还是空串。
+                box.press("Control+Enter")
+                page.wait_for_timeout(1500)
                 page.get_by_role("button", name="运行团队!").first.click(timeout=15000)
                 # 两个 agent 依次跑, 冷启动第一次慢; 等答案出现在页面上, 最多 5 分钟
                 want = ["".join(w.split()) for w in (prod.get("want") or [])]

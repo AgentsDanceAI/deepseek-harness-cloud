@@ -28,6 +28,7 @@ RUN git clone -q https://github.com/strnad/CrewAI-Studio /opt/cs \
 
 COPY patch_studio.py seed_demo.py /opt/dsh/
 RUN python /opt/dsh/patch_studio.py \
+ && ! grep -q 'ss.page = "Kickoff!"' /opt/cs/app/pg_crew_run.py \
  && cd /opt/cs && env -i PATH="$PATH" OPENAI_API_KEY=x OPENAI_API_BASE=http://x/v1 OPENAI_PROXY_MODELS=m1,m2 \
       python -c "import sys; sys.path.insert(0,'app'); import llms; ms=llms.llm_providers_and_models(); assert ms==['DSH: m1','DSH: m2'], ms; print('[build] 提供方只剩 DSH:', ms)"
 
