@@ -72,8 +72,14 @@ async def main():
     page = await browser._ensure()
     await page.set_content("<h1>chromium-alive</h1>")
     text = await page.inner_text("body")
-    await browser.shutdown()
+    # 先断言再关: 这一步验的是"浏览器能起来能渲染", 不是"能优雅关闭"。
+    # 2026-09-02 一次构建在 shutdown() 里抛了 "Event loop is closed" (Playwright
+    # 收尾的抖动), 同一镜像重跑就过 —— 把收尾噪音算成失败会让好镜像上不了线。
     assert "chromium-alive" in text, text
+    try:
+        await browser.shutdown()
+    except Exception as e:  # noqa: BLE001
+        print("(收尾抖动, 不影响结论:", type(e).__name__, ")")
 asyncio.run(main())
 ' || { echo "!! 镜像里 Chromium 起不来 —— 浏览器工具会全线失效"; exit 1; }
 echo "    Chromium OK"
