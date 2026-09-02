@@ -197,7 +197,7 @@ def test_session_injection_covers_the_upstream_direction(product_id):
 # 原先这两格只有一个浏览器终端 —— 框架装好了、网关配好了, 但用户打开看到的是
 # 一个黑底提示符。下面钉的是"换成工作台"之后**不许退回去**的几条。
 
-FRAMEWORK_SLOTS = ("openmanus", "crewai")
+FRAMEWORK_SLOTS = ("openmanus",)
 
 
 @pytest.mark.parametrize("product_id", FRAMEWORK_SLOTS)
@@ -277,7 +277,7 @@ def test_framework_terminal_does_not_drop_into_a_python_repl(product_id):
     assert ad.term_cmd != ad.exe, "终端里敲解释器 = 掉进 Python REPL"
     # 终端要**直接进框架自己的交互界面**, 不落一个裸 shell —— 老板 2026-09-02
     # 看到 CrewAI 那格停在提示符上: "怎么终端没有把 Agent 自动启动"。
-    assert {"openmanus": "python main.py", "crewai": "crewai chat"}[product_id] in ad.term_cmd
+    assert {"openmanus": "python main.py"}[product_id] in ad.term_cmd
     assert "/opt/venv-" in ad.exe, "runner 要用这一格自己的虚拟环境跑"
     # runner 吐的就是统一事件, 认不出的行不许丢 —— 丢掉的症状是"偶尔少半句话"。
     assert ad.feed('{"t":"text","text":"x"}') == [{"t": "text", "text": "x"}]
@@ -318,7 +318,8 @@ def test_terminal_turns_on_iutf8_before_the_agent():
     src = (root / "deploy" / "workspace-agentui" / "app" / "main.py").read_text(encoding="utf-8")
     i = src.index("stty iutf8")
     assert i < src.index("_agent_term_cmd()}; exec bash -l"), "要在进 agent 之前开"
-    for pid in ("openmanus", "crewai"):
+    # (crewai 那格 2026-09-02 换成了 CrewAI-Studio, 不再走这个终端)
+    for pid in ("openmanus",):
         assert products.env_for(pid, "tok")["PYTHONIOENCODING"].startswith("utf-8:replace")
 
 
@@ -414,3 +415,26 @@ def test_model_capabilities_fall_back_to_defaults():
 
     cap = model_catalog.capabilities("this-model-does-not-exist")
     assert cap["reasoning"] is True and cap["vision"] is False and cap["context_window"] == 128000
+
+
+# ---- CrewAI (CrewAI-Studio 前端) --------------------------------------------
+
+
+def test_crewai_slot_runs_the_studio(monkeypatch):
+    """CrewAI 那格换成社区的 CrewAI-Studio (老板 2026-09-02): 端口/探针/启动/示例队伍。"""
+    from app import config, model_catalog
+
+    monkeypatch.setattr(config, "CREWAI_DOMAIN", "crew.test.local")
+    prod = products.registry()["crewai"]
+    assert prod.port == 8501 and prod.ready_path == "/_stcore/health"
+    boot = products.boot_script("crewai")
+    assert "seed_demo.py" in boot, "空 Studio 不叫开箱即用 —— 开机要种示例队伍"
+    assert "--client.toolbarMode minimal" in boot, "右上角 Deploy 是它家的入口"
+    assert "--browser.gatherUsageStats false" in boot
+    assert boot.index("seed_demo.py") < boot.index("exec streamlit")
+    env = products.env_for("crewai", "tok")
+    assert env["OPENAI_API_BASE"].endswith("/llm/v1")
+    assert env["DB_URL"].startswith("sqlite:////root/"), "库要落 NAS, 不然回收就没了"
+    assert env["DEFAULT_LANGUAGE"] == "zh"
+    models = env["OPENAI_PROXY_MODELS"].split(",")
+    assert set(models) == set(model_catalog.catalog()) and models[0] == products._codecli_model("codex")

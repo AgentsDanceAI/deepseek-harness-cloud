@@ -315,6 +315,10 @@ PI_IMAGE_REF = _env("PI_IMAGE_REF", "ghcr.io/agentsdancepro/pi-web-ui:0.59.1-r1"
 PI_MEM_LIMIT_MB = _env_int("PI_MEM_LIMIT_MB", 2048)
 PI_CPUS = _env_float("PI_CPUS", 1.0)
 PI_TAB_GRACE_MIN = _env_int("PI_TAB_GRACE_MIN", 10)
+# CrewAI 那一格 (老板 2026-09-02 拍板: 社区的 CrewAI-Studio 当前端, 顶掉我们自己套的聊天框)。
+CREWAI_STUDIO_IMAGE_REF = _env("CREWAI_STUDIO_IMAGE_REF", "ghcr.io/agentsdancepro/crewai-studio:8b123b3-r1")
+CREWAI_STUDIO_MEM_LIMIT_MB = _env_int("CREWAI_STUDIO_MEM_LIMIT_MB", 4096)
+CREWAI_STUDIO_CPUS = _env_float("CREWAI_STUDIO_CPUS", 2.0)
 # 4 核不是阔气: 起沙箱时它另跑一个 agent server 进程, 而应用只等 120 秒 ——
 # 2 核上那堆 import 走不完, 页面就一直"等待沙盒"。
 

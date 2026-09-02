@@ -2254,14 +2254,13 @@ def registry() -> dict[str, Product]:
         "crewai": Product(
             id="crewai",
             name="CrewAI",
-            image=config.FRAMEWORKS_IMAGE_REF,
-            image_ref=config.FRAMEWORKS_IMAGE_REF,
-            # 8080 是工作台外壳 (ttyd 退到它后面, 由 /terminal 反代出去)。
-            port=8080,
-            # 探后端, 别探首页 —— 首页是静态文件, 后端没起来照样 200。
-            ready_path="/api/health",
-            mem_mb=config.FRAMEWORKS_MEM_LIMIT_MB,
-            cpus=config.FRAMEWORKS_CPUS,
+            image=config.CREWAI_STUDIO_IMAGE_REF,
+            image_ref=config.CREWAI_STUDIO_IMAGE_REF,
+            port=8501,
+            # Streamlit 的健康接口, 答 "ok"。首页是 SPA 外壳, 后端没起来也 200。
+            ready_path="/_stcore/health",
+            mem_mb=config.CREWAI_STUDIO_MEM_LIMIT_MB,
+            cpus=config.CREWAI_STUDIO_CPUS,
             domain=config.CREWAI_DOMAIN,
             reports_presence=False,
             tab_grace_min=config.FRAMEWORKS_TAB_GRACE_MIN,
@@ -2635,6 +2634,26 @@ def _pi_boot() -> str:
     )
 
 
+def _crewai_studio_boot() -> str:
+    """CrewAI 那一格: 社区的 CrewAI-Studio (Streamlit) 当前端。
+
+    老板 2026-09-02: "CrewAI 换 CrewAI-Studio" —— 它的形态正是 CrewAI 的特色: 用表单
+    搭队伍、定角色和任务、一键 kickoff 看结果, 有简体中文。
+    开机三件事: 库落 NAS (/root/crewai-studio/crewai.db, 跨实例留着); 一支队伍都
+    没有时种一支示例队伍 (空 Studio 首屏是 "No crews defined yet", 要先建两个
+    Agent、两个 Task 才能跑第一次 —— 那不叫开箱即用); 起 Streamlit, 工具栏收成
+    minimal (右上角那个 Deploy 是它家的入口), 不上报使用统计。
+    """
+    return (
+        "set -e\n"
+        "mkdir -p /root/crewai-studio /workspace\n"
+        "python /opt/dsh/seed_demo.py 2>/dev/null | tail -1\n"
+        "cd /opt/cs\n"
+        "exec streamlit run app/app.py --server.port 8501 --server.address 0.0.0.0 "
+        "--server.headless true --browser.gatherUsageStats false --client.toolbarMode minimal\n"
+    )
+
+
 def _autogen_boot() -> str:
     """AutoGen Studio: 直接起。
 
@@ -2787,7 +2806,7 @@ _BOOTS = {
     "autogen": _autogen_boot,
     "langchain": _langchain_boot,
     "openmanus": lambda: _frameworks_boot("openmanus"),
-    "crewai": lambda: _frameworks_boot("crewai"),
+    "crewai": _crewai_studio_boot,
 }
 
 
@@ -2824,7 +2843,27 @@ def env_for(product_id: str, token: str, secret: str = "") -> dict[str, str]:
             "HERMES_USER": "owner",
             "HERMES_PASS": autologin_password(secret),
         }
-    if product_id in ("openmanus", "crewai"):
+    if product_id == "crewai":
+        gateway_v1 = f"{gateway}/llm/v1"
+        return {
+            "HOME": "/root",
+            # CrewAI-Studio 的 "OpenAI" 那条路 (构建期已改名 DSH) 认这三个: 密钥、
+            # 端点、型号清单 (逗号分隔, 出现在下拉里)。型号按在售目录给全。
+            "OPENAI_API_KEY": token,
+            "OPENAI_API_BASE": gateway_v1,
+            "OPENAI_PROXY_MODELS": ",".join(
+                [_codecli_model("codex")]
+                + [m for m in model_catalog.catalog() if m != _codecli_model("codex")]
+            ),
+            "DSH_MODEL": _codecli_model("codex"),
+            "DB_URL": "sqlite:////root/crewai-studio/crewai.db",
+            "DEFAULT_LANGUAGE": "zh",
+            "AGENTOPS_ENABLED": "False",
+            # 它用 langchain 的抓取工具, 不设 UA 会每次启动抱怨一句
+            "USER_AGENT": "dsh-cloud",
+            "DSH_CLOUD_TOKEN": token,
+        }
+    if product_id == "openmanus":
         return {
             "HOME": "/root",
             # OpenManus 的 config.toml 与 CrewAI 的 litellm 都认这几个。型号要钉在
