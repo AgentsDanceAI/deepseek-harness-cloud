@@ -398,7 +398,10 @@ def test_pi_gets_the_whole_catalog_with_reasoning(monkeypatch):
     ids = [m["id"] for m in prov["models"]]
     assert set(ids) == set(model_catalog.catalog()), "目录里有的型号 pi 里都得有, 多一个少一个都不对"
     assert ids[0] == products._codecli_model("codex"), "默认型号排第一 (它的下拉按顺序列)"
-    assert all(m["reasoning"] is True for m in prov["models"]), "思考开关靠 reasoning=true, 实测全都吃"
+    # reasoning 跟能力表走: 实测 19/20 吃, mimo-v2-omni 记了 false (上游什么都 400)
+    for m in prov["models"]:
+        assert m["reasoning"] is bool(model_catalog.capabilities(m["id"])["reasoning"]), m["id"]
+    assert sum(m["reasoning"] for m in prov["models"]) >= len(prov["models"]) - 2, "思考开关几乎全开"
     assert prov["compat"]["supportsReasoningEffort"] is True
     assert prov["compat"]["thinkingFormat"] == "reasoning_effort"
     # cost 一律 0: 它会在状态栏按这个算美元, 而用户付的是积分, 那个数只会误导
