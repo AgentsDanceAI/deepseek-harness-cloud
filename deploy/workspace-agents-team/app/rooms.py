@@ -16,6 +16,8 @@ messages —— 而不是各存一份对话。各存一份的话, 群里加一�
 from __future__ import annotations
 
 import json
+import os
+import pathlib
 import shutil
 import sys
 import time
@@ -25,6 +27,8 @@ from dataclasses import asdict, dataclass, field
 from . import filmdir, teams
 
 STATE_PATH = filmdir.ROOT / ".agents-team" / "rooms.json"
+LOAD_RETRIES = int(os.environ.get("AGENTS_TEAM_LOAD_RETRIES", "5"))
+LOAD_RETRY_S = float(os.environ.get("AGENTS_TEAM_LOAD_RETRY_S", "1.0"))
 
 
 @dataclass
@@ -183,6 +187,23 @@ BUILTIN_BOTS: tuple[Bot, ...] = (
 )
 
 
+def _read_with_retry(path: pathlib.Path, tries: int = LOAD_RETRIES) -> str:
+    """NFS 刚挂上那几秒偶有 EIO/ESTALE; 重试几次比把它当成"没有存档"便宜得多。
+    FileNotFoundError 不重试 —— 那是另一条路 (首次启动判定) 的事。"""
+    last: OSError | None = None
+    for i in range(max(1, tries)):
+        try:
+            return path.read_text()
+        except FileNotFoundError:
+            raise
+        except OSError as e:
+            last = e
+            if i + 1 < tries:
+                time.sleep(LOAD_RETRY_S)
+    assert last is not None
+    raise last
+
+
 def _now() -> float:
     return time.time()
 
@@ -204,10 +225,28 @@ class Store:
         #: 和聊天记录当场没了 —— 全程没有一行报错。
         self.load_failed: str = ""
         self._load()
+        if (
+            not self.rooms
+            and not self.load_failed
+            and not self._looks_like_first_boot()
+        ):
+            # 存档不在, 工作区却有别的东西 (片/、角色/…): 真正的首次启动 /workspace 是空的。
+            # 这更像"存档暂时读不到" (NFS 刚挂上、目录列表还没同步), 不许当首次启动播种。
+            self.load_failed = "存档不在, 但工作区非空 —— 不当首次启动处理"
         if not self.rooms and not self.load_failed:
             self._seed()
 
     # -- 持久化 -------------------------------------------------------------
+    @staticmethod
+    def _looks_like_first_boot() -> bool:
+        root = STATE_PATH.parent.parent
+        try:
+            return not any(root.iterdir())
+        except FileNotFoundError:
+            return True
+        except OSError:
+            return False  # 连目录都读不了 —— 更不该播种
+
     def _load(self) -> None:
         """读存档。**只有"文件确实不存在"才算首次启动**; 其它任何失败都不许播种。
 
@@ -216,7 +255,7 @@ class Store:
         """
         for path in (STATE_PATH, STATE_PATH.with_suffix(".json.bak")):
             try:
-                raw = json.loads(path.read_text())
+                raw = json.loads(_read_with_retry(path))
             except FileNotFoundError:
                 if path == STATE_PATH and not STATE_PATH.parent.exists():
                     # 连目录都没有 = 真正的首次启动 (或挂载没就绪 —— 见下面 save 的兜底)

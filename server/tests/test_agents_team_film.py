@@ -1618,3 +1618,43 @@ def test_save_keeps_a_backup_and_load_falls_back_to_it(tmp_path):
         assert st2.rooms and not st2.load_failed, "主文件坏了没从 .bak 恢复"
     finally:
         _restore(saved)
+
+
+def test_a_nonempty_workspace_without_a_state_file_is_not_a_first_boot(tmp_path):
+    """工作区里有 片/ 却没有 rooms.json —— 这不是首次启动, 是存档暂时读不到。
+    真正的首次启动 /workspace 是空的。播种再保存会把随后出现的真存档盖掉。"""
+    rooms_m, saved = _fresh_store(tmp_path)
+    try:
+        (tmp_path / "片" / "验收片-x").mkdir(parents=True)
+        st = rooms_m.Store()
+        assert not st.rooms, "工作区非空却播种了"
+        assert st.load_failed, "没标记为可疑"
+        st.create_room("试图写", ["doer"])
+        assert not rooms_m.STATE_PATH.exists(), "可疑状态下还是写了存档"
+    finally:
+        _restore(saved)
+
+
+def test_first_read_retries_transient_os_errors(tmp_path, monkeypatch):
+    """NFS 刚挂上那几秒偶有 EIO/ESTALE —— 重试几次, 别把它当成"没有存档"。"""
+    import pathlib as _pl
+
+    rooms_m, saved = _fresh_store(tmp_path)
+    try:
+        rooms_m.Store()  # 播种, 写出一份合法存档
+        real = _pl.Path.read_text
+        calls = {"n": 0}
+
+        def flaky(self, *a, **k):
+            if self.name == "rooms.json" and calls["n"] < 2:
+                calls["n"] += 1
+                raise OSError(5, "EIO")
+            return real(self, *a, **k)
+
+        monkeypatch.setattr(_pl.Path, "read_text", flaky)
+        monkeypatch.setattr(rooms_m, "LOAD_RETRY_S", 0.0)
+        st = rooms_m.Store()
+        assert st.rooms and not st.load_failed, "两次 EIO 之后应读成, 却当成了失败"
+        assert calls["n"] == 2
+    finally:
+        _restore(saved)
