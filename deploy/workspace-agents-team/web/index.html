@@ -447,9 +447,14 @@ async function loadRooms(select) {
   else if (!cur && ROOMS.length) open(ROOMS[0]);
 }
 
+//: 接力房间的底栏提示。默认那句是并行模式的 ("同时对你说话, 彼此看不到") ——
+//: 挂在剧组房间下面正好说反了, 剧组是按棒接力、后一棒看得见前一棒刚交的活。
+const RELAY_HINT = '剧组按顺序接力：阿导 → 阿画 → 阿分 → 阿摄 → 阿剪，每一棒都看得见前一棒刚交的活。停在哪一棒，说「继续」就从那一棒接着跑。';
+
 async function open(room) {
   cur = room;
   $('title').textContent = room.name;
+  $('hint').textContent = room.mode === 'relay' ? RELAY_HINT : DEFAULT_HINT;
   $('members').innerHTML = '';
   room.members.forEach(m => {
     const c = document.createElement('span');
