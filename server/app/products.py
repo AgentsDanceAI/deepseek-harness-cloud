@@ -2773,8 +2773,10 @@ def _frameworks_boot(product_id: str) -> str:
         # 2026-09-02: CrewAI 换成 Studio 之后这格只剩 OpenManus, **不再种 crew 工程**。
         # 之前种下去的那份, 用户没动过 (和模板逐字节一样) 就收回去 —— 老板在
         # OpenManus 的文件面板里看到一个 crew/: "好诡异"。改过的留着, 那是他的东西。
+        # 比对时跳过 .git 和 __pycache__: 模板里的 .git 是每次构建 crewai create 重新生成
+        # 的, 逐字节比对永远对不上 (第一版就是这么把两份没人动过的判成"改过"的)。
         "if [ -d /workspace/crew ] && [ -d /opt/dsh/crew-template ] "
-        "&& diff -rq /workspace/crew /opt/dsh/crew-template >/dev/null 2>&1; then rm -rf /workspace/crew; fi\n"
+        "&& diff -rq -x .git -x __pycache__ /workspace/crew /opt/dsh/crew-template >/dev/null 2>&1; then rm -rf /workspace/crew; fi\n"
         # **PATH 必须写进 /etc/profile.d, 不能只在这里 export**: 终端标签页起的是
         # `bash -l` (登录 shell), 它会重新加载 /etc/profile 把我们 export 的 PATH
         # 冲掉 —— 用户敲 python 用的是系统那个, 于是
