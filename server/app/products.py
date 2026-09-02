@@ -2497,6 +2497,16 @@ def _opendesign_boot() -> str:
         + _opendesign_patch_yaml()
         + "DHCPATCH\n"
         f"node -e {_OD_APP_CONFIG_JS!r}\n"
+        # 藏掉它的登录入口 (老板 2026-09-02 拍板: 藏掉)。导航栏页脚挂着
+        # "登录即可享受云端协作" + 一个登录徽章 —— 那是它家自己的账号体系, 而
+        # 老板铁律是接入的应用一律不留登录墙。应用能用, 只是这块要收起来。
+        # 选择器是拿浏览器抓的 (section.entry-local-mode-tip 把文案和徽章一起
+        # 包着), 不是猜的。前端是 Next 静态导出, 镜像文件系统每次开机都是新的,
+        # 所以每次开机往 index.html 里补这一条; 补不上要喊出来, 别静默。
+        "grep -q dsh-hide-login /app/apps/web/out/index.html || "
+        "sed -i 's#</head>#<style id=\"dsh-hide-login\">section.entry-local-mode-tip{display:none!important}</style></head>#' "
+        "/app/apps/web/out/index.html\n"
+        'grep -q dsh-hide-login /app/apps/web/out/index.html || echo "[dsh] !! 登录入口没藏掉 (index.html 里没找到 </head>)"\n'
         # 沙箱那个子进程卡住时什么也不说 (它只在崩溃时才转储)。往它的 site 目录里
         # 放一个 sitecustomize: 起来 100 秒后若还没退出, 自动把**全部线程的调用栈**
         # 打到 stderr —— 而 stderr 走的正是我们那个看门狗。

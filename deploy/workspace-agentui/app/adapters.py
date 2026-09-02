@@ -329,9 +329,12 @@ class CrewAIAdapter(JsonlRunnerAdapter):
             name="CrewAI",
             exe="/opt/venv-crewai/bin/python",
             runner="/opt/dsh/crewai_run.py",
-            # 终端里落到工程目录: 用户在这儿 `crewai run` / 改 yaml, 跑的和左边
-            # 对话是同一份 crew。
-            term="cat /etc/motd 2>/dev/null; cd /workspace/crew",
+            # 终端里**直接进 `crewai chat`** —— 和 OpenManus 那格进 main.py 一样,
+            # 点开就是这个框架自己的交互界面, 不落一个要用户自己敲命令的 shell
+            # (老板 2026-09-02: "CrewAI 怎么终端没有把 Agent 自动启动")。
+            # 实测走真网关: 它先分析 crew 要什么输入, 然后就是一问一答。退出后
+            # 由外壳的 `exec bash -l` 兜住, 用户还能在同一个终端里改 yaml。
+            term="cat /etc/motd 2>/dev/null; cd /workspace/crew && crewai chat",
         )
 
 

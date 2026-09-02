@@ -275,6 +275,9 @@ def test_framework_terminal_does_not_drop_into_a_python_repl(product_id):
 
     ad = mod.ADAPTERS[product_id]()
     assert ad.term_cmd != ad.exe, "终端里敲解释器 = 掉进 Python REPL"
+    # 终端要**直接进框架自己的交互界面**, 不落一个裸 shell —— 老板 2026-09-02
+    # 看到 CrewAI 那格停在提示符上: "怎么终端没有把 Agent 自动启动"。
+    assert {"openmanus": "python main.py", "crewai": "crewai chat"}[product_id] in ad.term_cmd
     assert "/opt/venv-" in ad.exe, "runner 要用这一格自己的虚拟环境跑"
     # runner 吐的就是统一事件, 认不出的行不许丢 —— 丢掉的症状是"偶尔少半句话"。
     assert ad.feed('{"t":"text","text":"x"}') == [{"t": "text", "text": "x"}]
@@ -283,3 +286,20 @@ def test_framework_terminal_does_not_drop_into_a_python_repl(product_id):
     # 界面上"本轮消耗"永远 0↑0↓ —— 上线当天就是这么漏出去的。
     done = ad.feed('{"t":"done","usage":{"input_tokens":7,"output_tokens":3}}')[0]
     assert done["usage"]["input"] == 7 and done["usage"]["output"] == 3
+
+
+def test_openmanus_stops_when_the_model_answers_without_tools():
+    """直接作答就收口的补丁必须在, 而且钉的是上游的原句 —— 改了当场知道。
+
+    上游 ReAct 循环里, AUTO 模式下模型回了正文却没选工具时会**继续下一步**,
+    直到它主动调 terminate 或跑满 max_steps。对一句"你好啊"它永远不会去调
+    terminate, 于是一路自言自语 20 步 (老板 2026-09-02 在终端里撞到的)。
+    """
+    import pathlib
+
+    root = pathlib.Path(__file__).resolve().parents[2]
+    src = (root / "deploy" / "workspace-frameworks" / "patch_openmanus.py").read_text(encoding="utf-8")
+    assert "self.state = AgentState.FINISHED" in src
+    assert "if self.tool_choices == ToolChoice.AUTO and not self.tool_calls:" in src, "锚点要钉上游原句"
+    dockerfile = (root / "deploy" / "workspace-frameworks" / "Dockerfile").read_text(encoding="utf-8")
+    assert "patch_openmanus.py" in dockerfile, "补丁没进镜像等于没打"

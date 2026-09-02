@@ -1874,6 +1874,21 @@ def test_hermes_is_not_ready_until_the_autologin_landed(monkeypatch):
     assert write_conf < marker < ok, "标记要落在 write_conf 成功之后"
 
 
+def test_open_design_hides_its_own_login_entry(monkeypatch):
+    """open-design 导航栏页脚那块 "登录即可享受云端协作 + 登录" 必须藏掉。
+
+    老板 2026-09-02 拍板。那是它家自己的账号体系, 而铁律是接入的应用一律不留
+    登录墙。选择器 section.entry-local-mode-tip 是拿浏览器抓的 —— 上游改了
+    class 这条就静默失效, 所以视觉验收 (visual_check) 仍然会盯 '登录' 这个词。
+    """
+    monkeypatch.setattr(config, "OD_DOMAIN", "design.test.local", raising=False)
+    boot = products.boot_script("open-design")
+    assert "section.entry-local-mode-tip{display:none!important}" in boot
+    assert "dsh-hide-login" in boot
+    # 要在 daemon 起来之前注入 —— 静态文件是它一起来就会被浏览器拿走的。
+    assert boot.index("dsh-hide-login") < boot.index("exec node apps/daemon")
+
+
 def test_hermes_keeps_its_entrypoint(monkeypatch):
     """只传 args, 不覆盖 entrypoint。
 

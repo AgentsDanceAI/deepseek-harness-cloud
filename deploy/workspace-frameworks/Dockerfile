@@ -61,6 +61,13 @@ RUN git clone --depth 1 --branch ${OPENMANUS_REF} https://github.com/FoundationA
  && cd /opt/openmanus \
  && /opt/venv-openmanus/bin/python -c "import app.agent.manus, app.llm, app.tool; print('[build] OpenManus 主循环可导入')"
 
+# 模型直接作答就收口 (否则对一句问候能自言自语 20 步), 见 patch_openmanus.py。
+# 打不上 = 构建失败, 上游改了这段我们当场知道。
+COPY workspace-frameworks/patch_openmanus.py /opt/dsh-patch_openmanus.py
+RUN /opt/venv-openmanus/bin/python /opt/dsh-patch_openmanus.py \
+ && grep -q "self.state = AgentState.FINISHED" /opt/openmanus/app/agent/toolcall.py \
+ && cd /opt/openmanus && /opt/venv-openmanus/bin/python -c "import app.agent.toolcall; print('[build] 补丁后仍可导入')"
+
 # 这两个框架都没有界面, 所以这一格的界面就是一个浏览器里的终端。用 ttyd
 # (开源, libwebsockets + xterm.js) —— agentui 那个镜像用的是同一个, 自己写 PTY
 # 的坑这个会话里已经踩过一轮。
