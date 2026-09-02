@@ -132,6 +132,23 @@
   dialog h3 { margin:0 0 10px; font-size:15px; }
   dialog label { display:flex; align-items:center; gap:8px; padding:5px 0; cursor:pointer; }
   dialog .row { display:flex; gap:8px; justify-content:flex-end; margin-top:14px; }
+  /* 文件面板: 左列表右预览。产物落成文件是这个产品的立足点, 用户得看得见、点得开。 */
+  #filesDlg { width:min(960px,94vw); height:min(640px,88vh); padding:14px 16px; }
+  #filesDlg h3 { display:flex; align-items:baseline; gap:8px; }
+  #filesDlg .crumb { font-weight:400; color:var(--muted); font-size:13px; font-family:ui-monospace,monospace; }
+  #filesDlg .where { margin-left:auto; font-weight:400; color:var(--muted); font-size:12px; }
+  .fbody { display:flex; gap:12px; height:calc(100% - 78px); }
+  #fileList { width:300px; flex:none; overflow:auto; border-right:1px solid var(--line); padding-right:8px; }
+  #filePreview { flex:1; min-width:0; overflow:auto; display:flex; flex-direction:column;
+                 align-items:center; justify-content:center; gap:10px; }
+  #filePreview video, #filePreview img { max-width:100%; max-height:calc(100% - 30px); border-radius:8px; }
+  #filePreview pre { align-self:stretch; white-space:pre-wrap; font-size:12px; margin:0; overflow:auto; }
+  #filePreview .dl { font-size:13px; color:var(--accent); }   /* 深色下默认链接蓝几乎看不见 */
+  .frow { display:flex; gap:8px; align-items:center; padding:6px 8px; border-radius:8px; cursor:pointer; font-size:13px; }
+  .frow:hover { background:var(--tool); }
+  .frow .sz { margin-left:auto; color:var(--muted); font-size:12px; flex:none; }
+  .frow.muted { color:var(--muted); cursor:default; }
+  .muted { color:var(--muted); font-size:13px; }
   @media (max-width:720px) { aside { display:none; } }
 </style>
 </head>
@@ -149,6 +166,7 @@
     <span id="members"></span>
     <span class="sp"></span>
     <select id="model" title="模型"></select>
+    <button id="filesBtn" title="这部片的产物">文件</button>
     <button id="edit">成员</button>
   </header>
   <div id="log"><div class="wrap" id="wrap"></div></div>
@@ -160,6 +178,15 @@
     <div class="hint" id="hint">同一轮里成员是同时对你说话，彼此看不到对方这一轮说了什么；再发一轮它们就能接上话。</div>
   </footer>
 </main>
+
+<dialog id="filesDlg">
+  <h3>文件 <span class="crumb" id="fileCrumb">/</span><span class="where" id="fileWhere"></span></h3>
+  <div class="fbody">
+    <div id="fileList"></div>
+    <div id="filePreview"><div class="muted">点左边的文件预览；视频直接播</div></div>
+  </div>
+  <div class="row"><button id="filesRefresh">刷新</button><button id="filesClose">关闭</button></div>
+</dialog>
 
 <dialog id="picker">
   <h3 id="pickTitle">选成员</h3>
@@ -566,8 +593,62 @@ async function submit() {
     statusStop();
     busy = false; send.disabled = false; input.focus();
     loadRooms(cur.id);
+    if ($('filesDlg').open) loadFiles(fdir);   // 刚出的产物立刻出现在面板里
   }
 }
+
+// --- 文件面板 -------------------------------------------------------------
+// 群里说"成片在 片/xxx/成片.mp4"是真的, 但以前页面上没有任何地方能看到它 ——
+// 2026-09-02 老板验收第一句: "生成的内容在哪呢"。
+let fdir = '';
+const fmtSize = n => n > 1048576 ? (n / 1048576).toFixed(1) + ' MB' : n > 1024 ? (n / 1024 | 0) + ' KB' : n + ' B';
+const fileIcon = k => ({ video: '🎬 ', image: '🖼 ', text: '📄 ' }[k] || '📎 ');
+const rawUrl = e => '/api/rooms/' + cur.id + '/files/raw?path=' + encodeURIComponent(e.path);
+function frow(label, right) {
+  const el = document.createElement('div'); el.className = 'frow';
+  const a = document.createElement('span'); a.textContent = label; el.appendChild(a);
+  if (right) { const b = document.createElement('span'); b.className = 'sz'; b.textContent = right; el.appendChild(b); }
+  return el;
+}
+async function loadFiles(rel) {
+  if (!cur) return;
+  fdir = rel || '';
+  $('fileWhere').textContent = cur.dir ? '这部片的目录: ' + cur.dir : '工作区根目录 (老房间)';
+  let d;
+  try { d = await api('/api/rooms/' + cur.id + '/files?path=' + encodeURIComponent(fdir)); }
+  catch (e) { $('fileList').textContent = '读不到目录: ' + e; return; }
+  $('fileCrumb').textContent = '/' + (d.dir || '');
+  const list = $('fileList'); list.innerHTML = '';
+  if (d.dir) {
+    const up = frow('⬆︎ 上一级', ''); up.onclick = () => loadFiles(d.dir.split('/').slice(0, -1).join('/'));
+    list.appendChild(up);
+  }
+  if (!d.entries.length) {
+    const e = frow('这里还是空的 — 剧组开工后产物会出现在这里', ''); e.classList.add('muted'); list.appendChild(e);
+  }
+  d.entries.forEach(e => {
+    const el = frow((e.dir ? '📁 ' : fileIcon(e.kind)) + e.name, e.dir ? '' : fmtSize(e.size));
+    el.onclick = () => e.dir ? loadFiles(e.path) : preview(e);
+    list.appendChild(el);
+  });
+}
+async function preview(e) {
+  const pv = $('filePreview'); pv.innerHTML = '';
+  if (e.kind === 'video') {
+    const v = document.createElement('video'); v.controls = true; v.autoplay = true; v.src = rawUrl(e); pv.appendChild(v);
+  } else if (e.kind === 'image') {
+    const i = document.createElement('img'); i.src = rawUrl(e); i.alt = e.name; pv.appendChild(i);
+  } else if (e.kind === 'text' && e.size < 400000) {
+    const r = await fetch(rawUrl(e)); const pre = document.createElement('pre'); pre.textContent = await r.text(); pv.appendChild(pre);
+  } else {
+    const m = document.createElement('div'); m.className = 'muted'; m.textContent = e.name + ' (' + fmtSize(e.size) + ')'; pv.appendChild(m);
+  }
+  const dl = document.createElement('a'); dl.href = rawUrl(e); dl.download = e.name; dl.className = 'dl'; dl.textContent = '⬇ 下载 ' + e.name;
+  pv.appendChild(dl);
+}
+$('filesBtn').onclick = () => { $('filesDlg').showModal(); loadFiles(''); };
+$('filesClose').onclick = () => { $('filePreview').innerHTML = ''; $('filesDlg').close(); };
+$('filesRefresh').onclick = () => loadFiles(fdir);
 
 // --- 成员选择 (拉群 / 改成员共用) -------------------------------------------
 function pick(title, checked) {

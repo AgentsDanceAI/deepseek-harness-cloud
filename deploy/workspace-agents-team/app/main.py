@@ -14,11 +14,11 @@ import pathlib
 import time
 from dataclasses import asdict
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import agent, filmdir, rooms, tools
+from . import agent, files, filmdir, rooms, tools
 
 WEB_DIR = pathlib.Path(__file__).resolve().parent.parent / "web"
 
@@ -335,6 +335,35 @@ def _sse(payload: dict) -> str:
     import json as _json
 
     return f"data: {_json.dumps(payload, ensure_ascii=False)}\n\n"
+
+
+@app.get("/api/rooms/{room_id}/files")
+def room_files(room_id: str, path: str = "") -> dict:
+    """列这个房间那部片的目录。见 files.py 开头 —— 没有它, 产物只在盘上不在眼前。"""
+    room = store.rooms.get(room_id)
+    if room is None:
+        raise HTTPException(404, "没有这个房间")
+    try:
+        return files.listing(files.root_for(room), path)
+    except ValueError:
+        raise HTTPException(400, "路径越界") from None
+    except FileNotFoundError:
+        raise HTTPException(404, "没有这个目录") from None
+
+
+@app.get("/api/rooms/{room_id}/files/raw")
+def room_file_raw(room_id: str, path: str) -> FileResponse:
+    """取一个文件。FileResponse 自带 Range —— 视频拖进度条靠它, 没有的话只能从头放。"""
+    room = store.rooms.get(room_id)
+    if room is None:
+        raise HTTPException(404, "没有这个房间")
+    try:
+        p = files.safe(files.root_for(room), path)
+    except ValueError:
+        raise HTTPException(400, "路径越界") from None
+    if not p.is_file():
+        raise HTTPException(404, "没有这个文件")
+    return FileResponse(p, filename=p.name)
 
 
 @app.get("/")

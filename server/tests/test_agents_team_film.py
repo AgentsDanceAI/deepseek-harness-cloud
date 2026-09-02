@@ -1308,3 +1308,66 @@ def test_the_relay_stops_on_an_error_instead_of_passing_the_baton():
     assert "halted = True" in seg, "接力遇到 error 事件没停 —— 半截产物会传给下一位"
     assert "capped_here = True" in seg, "续跑没停在本棒 (它的活没干完)"
     assert "store.add" in seg, "断线前说过的话没落进记录"
+
+
+# ── 文件面板 (2026-09-02 老板验收第一句: "生成的内容在哪呢") ────────────────────
+
+
+def test_file_panel_is_confined_to_the_room_and_hides_internals(tmp_path):
+    """一个房间只能看自己那部片; 老房间看根但看不见房间存档; 越界必须挡。
+
+    "产物落成文件"是这个产品的立足点, 而页面上以前没有任何地方能看到文件 ——
+    文件在盘上, 不在用户眼前。补面板的同时边界只有一条: 路径由用户/模型给,
+    resolve 之后必须仍在房间根之下, 否则一个房间能读到别部片, 甚至读到根之外。
+    """
+    import pytest
+
+    files = _crew("files")
+    rooms_m = _crew("rooms")
+    filmdir = _crew("filmdir")
+    saved = filmdir.ROOT
+    try:
+        filmdir.ROOT = tmp_path
+        (tmp_path / ".agents-team").mkdir()
+        (tmp_path / ".agents-team" / "rooms.json").write_text("{}")
+        (tmp_path / "片" / "验收片-x" / "片段").mkdir(parents=True)
+        (tmp_path / "片" / "验收片-x" / "成片.mp4").write_bytes(b"x" * 10)
+        (tmp_path / "片" / "验收片-x" / "片段" / "01.mp4").write_bytes(b"y")
+        (tmp_path / "片" / "别的片-y").mkdir()
+        (tmp_path / "片" / "别的片-y" / "秘密.txt").write_text("不该被看到")
+
+        new = rooms_m.Room("x", "验收片", ["director"], 1.0, "relay", "片/验收片-x")
+        old = rooms_m.Room("o", "旧", ["director"], 1.0, "relay", "")
+
+        # 新房间只看自己的目录, 且视频被认出来 (前端靠 kind 决定用 <video> 放)
+        d = files.listing(files.root_for(new))
+        assert {e["name"] for e in d["entries"]} == {"片段", "成片.mp4"}
+        assert next(e for e in d["entries"] if e["name"] == "成片.mp4")["kind"] == "video"
+        sub = files.listing(files.root_for(new), "片段")
+        assert sub["dir"] == "片段" and [e["name"] for e in sub["entries"]] == ["01.mp4"]
+
+        # 老房间看根, 但 .agents-team (房间存档) 不许露出来
+        d = files.listing(files.root_for(old))
+        names = {e["name"] for e in d["entries"]}
+        assert ".agents-team" not in names and "片" in names
+
+        # 越界: 别部片、根之外、绝对路径, 一个都不许
+        root = files.root_for(new)
+        for bad in ("../别的片-y/秘密.txt", "../../.agents-team/rooms.json", "/etc/passwd"):
+            with pytest.raises(ValueError):
+                files.safe(root, bad)
+    finally:
+        filmdir.ROOT = saved
+
+
+def test_file_routes_are_registered_and_use_range_capable_responses():
+    """两条路由都得在, 且取文件走 FileResponse —— 视频拖进度条靠它的 Range 支持。"""
+    src = (TEAM / "app" / "main.py").read_text(encoding="utf-8")
+    assert '@app.get("/api/rooms/{room_id}/files")' in src, "没有列目录的路由"
+    assert '@app.get("/api/rooms/{room_id}/files/raw")' in src, "没有取文件的路由"
+    i = src.index('@app.get("/api/rooms/{room_id}/files/raw")')
+    seg = src[i : src.index("@app.", i + 10)]
+    assert "FileResponse(" in seg, "取文件没走 FileResponse — 视频只能从头放, 拖不动"
+    assert "files.safe(" in seg, "取文件没过越界检查"
+    web = (TEAM / "web" / "index.html").read_text(encoding="utf-8")
+    assert 'id="filesBtn"' in web and "files/raw" in web, "前端没有文件面板"
