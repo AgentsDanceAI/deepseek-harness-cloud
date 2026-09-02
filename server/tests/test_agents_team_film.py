@@ -266,7 +266,9 @@ def test_crew_room_is_relay_not_parallel():
     assert 'CREW = ("director", "artist", "storyboard", "videographer", "editor")' in ROOMS
     assert "def create_crew_room" in ROOMS
     i = ROOMS.index("def create_crew_room")
-    assert 'mode="relay"' in ROOMS[i : i + 500]
+    # relay 现在来自剧组模板 (teams.py), create_crew_room 只是 create_team_room("film")
+    assert 'create_team_room("film"' in ROOMS[i : i + 500]
+    assert _crew("teams").BY_ID["film"].mode == "relay", "剧组模板不是接力 —— 流水线就散了"
 
 
 def test_relay_writes_each_turn_before_passing_the_baton():
@@ -320,10 +322,15 @@ def test_gate_users_are_wired_to_the_tool():
 
 
 def test_ui_has_a_one_click_new_film_entry():
-    """一句话出片 = 不用手工拉五个人, 也不用自己记谁先谁后。"""
+    """一句话组队 = 不用手工拉五个人, 也不用自己记谁先谁后。
+
+    2026-09-02 起剧组只是十个模板之一: 入口从「开新片」变成「组个团队」选模板,
+    建群走 /api/rooms/team; /api/rooms/crew 保留给老调用方。
+    """
     web = (TEAM / "web" / "index.html").read_text(encoding="utf-8")
-    assert 'id="newFilm"' in web
-    assert "/api/rooms/crew" in web
+    assert 'id="newTeam"' in web and 'id="teamDlg"' in web, "没有组队入口/选单"
+    assert "/api/rooms/team" in web and "/api/teams" in web
+    assert '@app.post("/api/rooms/crew")' in MAIN, "老入口 /api/rooms/crew 不能拆"
 
 
 # ── 流式 Markdown 渲染 (2026-08-31 老板截图: 阿导整段发言是原始 markdown,
@@ -443,7 +450,9 @@ def test_failed_stage_resumes_itself():
 def test_shot_by_shot_roles_get_a_higher_step_cap():
     """三分钟片 ≈ 三四十个镜头, 三十步必然掐在半路。"""
     assert "LONG_RUN_BOTS" in AGENT
-    assert "videographer" in AGENT and "artist" in AGENT
+    # 长跑名单由团队模板推 (teams.Team.long_run), 出片/出图的工位必须在里面
+    lr = _crew("agent").LONG_RUN_BOTS
+    assert "videographer" in lr and "artist" in lr, f"出片/出图工位不在长跑名单: {sorted(lr)}"
     assert "max_steps = LONG_RUN_STEPS if bot_id in LONG_RUN_BOTS else MAX_STEPS" in AGENT
     # 通用上限不许为了一个特例整体放开 —— 它是防跑飞的
     assert 'os.environ.get("AGENTS_TEAM_MAX_STEPS", "30")' in AGENT
@@ -637,21 +646,27 @@ def test_elapsed_resets_only_when_the_baton_changes():
 
 
 def test_relay_step_number_is_shown():
-    """第几棒只在剧组房间有意义 —— 别的房间成员不是流水线。"""
+    """第几棒只在接力房间有意义 —— 并行房间成员不是流水线。
+
+    棒次从**房间成员表**推 (cur.members), 不再写死剧组那五个 id: 有十个团队之后,
+    写死等于只有剧组能显示棒次, 而且移出一个成员后棒次就错位。
+    """
     i = WEB.index("function statusSet")
-    seg = WEB[i : i + 700]
-    assert "CREW_ORDER" in seg
+    seg = WEB[i : i + 800]
+    assert "cur.members" in seg, "棒次没从房间成员表推"
     assert "cur.mode === 'relay'" in seg, "非流水线房间也标棒次会误导"
-    # 顺序必须与服务端 Store.CREW 一致, 否则棒次是错的
-    assert "['director', 'artist', 'storyboard', 'videographer', 'editor']" in WEB
+    assert "CREW_ORDER" not in WEB, "还在写死剧组顺序"
+    # 服务端: 剧组模板的顺序与老的 Store.CREW 一致 (老调用方还认它)
     assert 'CREW = ("director", "artist", "storyboard", "videographer", "editor")' in ROOMS
+    teams = _crew("teams")
+    assert teams.BY_ID["film"].members == ("director", "artist", "storyboard", "videographer", "editor")
 
 
 def test_rooms_are_distinguishable():
     """开新片不再弹 prompt 问名字 —— 几个房间在侧栏长得一模一样, 切出去再回来
     会以为"消息没了", 其实是切到了另一个同名房间。"""
     assert "prompt('这部片叫什么" not in WEB, "还在弹 prompt"
-    assert "新片 ${n}" in WEB, "名字没有序号"
+    assert "新${t.name} ${n}" in WEB, "名字没有序号 (按团队计数)"
     # 侧栏第二行带消息数 —— 重名时唯一分得出"哪个是我刚才那个"的线索
     assert "r.count" in WEB
     assert '"count": len(store.transcript(r.id))' in MAIN, "服务端没返回 count"
@@ -688,7 +703,9 @@ def test_long_tools_report_progress():
     assert "_progress(" in seg and "出片中" in seg
     # agent 侧: 队列桥接 (异步生成器里 await 同步工具, 没法直接 yield)
     assert "asyncio.Queue" in AGENT_SRC
-    assert 'yield {"type": "progress"' in AGENT_SRC
+    import re as _re
+
+    assert _re.search(r'yield \{\s*"type": "progress"', AGENT_SRC), "没有 progress 事件"
     assert "call_soon_threadsafe" in AGENT_SRC
     # 用完要置回, 否则下一轮的心跳会打到上一轮的队列上
     assert "set_progress(None)" in AGENT_SRC
@@ -1371,3 +1388,142 @@ def test_file_routes_are_registered_and_use_range_capable_responses():
     assert "files.safe(" in seg, "取文件没过越界检查"
     web = (TEAM / "web" / "index.html").read_text(encoding="utf-8")
     assert 'id="filesBtn"' in web and "files/raw" in web, "前端没有文件面板"
+
+
+# ── 十个团队模板 (2026-09-02 老板: "不仅仅只是剧组, 咱们是多 Agent 群聊引擎") ──
+
+
+def test_ten_team_templates_are_well_formed():
+    """模板表必须自洽: 10 个、id/名字唯一、每个成员都在花名册、模式合法、目录互不相同。
+
+    成员名字也不许撞 —— 「拉个群」的花名册是全体平铺的, 两个"阿图"用户分不清谁是谁。
+    """
+    teams = _crew("teams")
+    rooms_m = _crew("rooms")
+    assert len(teams.TEAMS) == 10, f"应有 10 个团队, 实际 {len(teams.TEAMS)}"
+    ids = [t.id for t in teams.TEAMS]
+    assert len(set(ids)) == 10
+    roster = {b.id: b for b in rooms_m.BUILTIN_BOTS}
+    names = [b.name for b in rooms_m.BUILTIN_BOTS]
+    assert len(set(names)) == len(names), [n for n in names if names.count(n) > 1]
+    for t in teams.TEAMS:
+        assert t.mode in ("relay", "parallel"), t.id
+        assert len(t.members) >= 3, f"{t.id} 成员太少, 不成群"
+        for m in t.members:
+            assert m in roster, f"{t.id} 引用了花名册里没有的成员 {m}"
+        for m in t.long_run:
+            assert m in t.members, f"{t.id}.long_run 里的 {m} 不是本团队成员"
+        assert t.tagline and t.dir
+    dirs = [t.dir for t in teams.TEAMS]
+    assert len(set(dirs)) == len(dirs), "两个团队共用一个产物目录前缀"
+    # 剧组还是第一个, 老入口 create_crew_room 要落到它
+    assert teams.TEAMS[0].id == "film"
+
+
+def test_team_rooms_carry_their_template_and_directory():
+    """按模板建的群要记住出自哪个模板, 产物目录前缀跟着团队走。"""
+    import tempfile
+
+    filmdir = _crew("filmdir")
+    rooms_m = _crew("rooms")
+    saved = (filmdir.ROOT, rooms_m.STATE_PATH)
+    try:
+        filmdir.ROOT = pathlib.Path(tempfile.mkdtemp(prefix="team-room-"))
+        rooms_m.STATE_PATH = filmdir.ROOT / ".agents-team" / "rooms.json"
+        st = rooms_m.Store()
+        r = st.create_team_room("research")
+        assert r.team == "research" and r.mode == "relay"
+        assert r.dir.startswith("报告/"), r.dir
+        assert r.members == ["topic", "searcher", "verifier", "writer", "editor_doc"]
+        f = st.create_crew_room("验收片")
+        assert f.team == "film" and f.dir.startswith("片/")
+        c = st.create_team_room("code_review")
+        assert c.mode == "parallel" and c.dir.startswith("评审/")
+        # 手工拉的群: 没有模板, 目录落在默认前缀下
+        h = st.create_room("随手群", ["doer", "checker"])
+        assert h.team == "" and h.dir.startswith(filmdir.FILMS + "/")
+    finally:
+        filmdir.ROOT, rooms_m.STATE_PATH = saved
+
+
+def test_delete_room_drops_its_messages_but_keeps_files():
+    """删群 = 房间 + 记录一起删; 产物文件留在磁盘 (那是用户花钱出的东西)。"""
+    import tempfile
+
+    filmdir = _crew("filmdir")
+    rooms_m = _crew("rooms")
+    saved = (filmdir.ROOT, rooms_m.STATE_PATH)
+    try:
+        filmdir.ROOT = pathlib.Path(tempfile.mkdtemp(prefix="del-room-"))
+        rooms_m.STATE_PATH = filmdir.ROOT / ".agents-team" / "rooms.json"
+        st = rooms_m.Store()
+        r = st.create_team_room("film", "要删的片")
+        keep = st.create_team_room("film", "留着的片")
+        st.add(r.id, "user", "开工", [])
+        st.add(keep.id, "user", "别动我", [])
+        d = filmdir.ROOT / r.dir
+        (d / "片段").mkdir(parents=True)
+        (d / "片段" / "01.mp4").write_bytes(b"paid")
+        assert st.delete_room(r.id) is True
+        assert r.id not in st.rooms
+        assert not any(m.room == r.id for m in st.messages), "记录没跟着删"
+        assert any(m.room == keep.id for m in st.messages), "误删了别的群的记录"
+        assert (d / "片段" / "01.mp4").exists(), "删群把用户花钱出的文件也删了"
+        assert st.delete_room(r.id) is False, "删不存在的群应返回 False"
+        # 落盘了: 重新加载不该复活
+        st2 = rooms_m.Store()
+        assert r.id not in st2.rooms and keep.id in st2.rooms
+    finally:
+        filmdir.ROOT, rooms_m.STATE_PATH = saved
+
+
+def test_remove_member_keeps_relay_resume_pointer_right_and_refuses_empty_room():
+    """移出成员: 接力下标要跟着修; 群里至少留一个人。
+
+    停在第 3 棒时移出第 1 棒, 不修下标续跑就会跳过一位 —— 而且不报错。
+    """
+    import tempfile
+
+    import pytest
+
+    filmdir = _crew("filmdir")
+    rooms_m = _crew("rooms")
+    saved = (filmdir.ROOT, rooms_m.STATE_PATH)
+    try:
+        filmdir.ROOT = pathlib.Path(tempfile.mkdtemp(prefix="rm-member-"))
+        rooms_m.STATE_PATH = filmdir.ROOT / ".agents-team" / "rooms.json"
+        st = rooms_m.Store()
+        r = st.create_team_room("research")  # topic searcher verifier writer editor_doc
+        r.resume_at = 3  # 停在 writer
+        st.remove_member(r.id, "searcher")  # 移出前面的一位
+        assert r.members == ["topic", "verifier", "writer", "editor_doc"]
+        assert r.resume_at == 2 and r.members[r.resume_at] == "writer", "续跑指针错位"
+        r.resume_at = 3  # 停在最后一位 editor_doc
+        st.remove_member(r.id, "editor_doc")  # 把停着的那位移出 -> 没有待续的棒
+        assert r.resume_at == -1
+        one = st.create_room("独角戏", ["doer"])
+        with pytest.raises(ValueError):
+            st.remove_member(one.id, "doer")
+        # 移出不存在的人: 无事发生, 不炸
+        st.remove_member(r.id, "nobody")
+    finally:
+        filmdir.ROOT, rooms_m.STATE_PATH = saved
+
+
+def test_group_management_endpoints_and_ui_hooks_exist():
+    """接口与入口都得在: 列模板 / 按模板建群 / 删群 / 移出成员; 前端有选单、删除键、chip 上的 ×。"""
+    for route in (
+        '@app.get("/api/teams")',
+        '@app.post("/api/rooms/team")',
+        '@app.delete("/api/rooms/{room_id}")',
+        '@app.delete("/api/rooms/{room_id}/members/{bot_id}")',
+    ):
+        assert route in MAIN, f"缺端点 {route}"
+    web = (TEAM / "web" / "index.html").read_text(encoding="utf-8")
+    assert "method: 'DELETE'" in web, "前端没有任何删除调用"
+    assert 'class="del"' in web and "删除这个群" in web, "房间项没有删除键"
+    assert "x.className = 'x'" in web and "移出" in web, "成员 chip 没有移出入口"
+    assert "function hintFor" in web, "底栏提示没按房间生成"
+    # 假网关要能给任何成员台词, 否则十个团队里九个在本地预览里一开口就炸
+    dev = (TEAM / "dev_preview.py").read_text(encoding="utf-8")
+    assert "SCRIPT.get(who)" in dev

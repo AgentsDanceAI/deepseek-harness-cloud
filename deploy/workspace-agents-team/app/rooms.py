@@ -20,7 +20,7 @@ import time
 import uuid
 from dataclasses import asdict, dataclass, field
 
-from . import filmdir
+from . import filmdir, teams
 
 STATE_PATH = filmdir.ROOT / ".agents-team" / "rooms.json"
 
@@ -67,6 +67,9 @@ class Room:
     #: 从头重来的代价不只是慢: 美术会照着"再做一遍资产"的字面意思**再出一遍图**,
     #: 那是真花钱。-1 = 没有待续的棒 (下一轮从头开始, 即一部新片/新需求)。
     resume_at: int = -1
+    #: 出自哪个团队模板 (teams.TEAMS 的 id)。空 = 手工拉的群。模板不进 rooms.json,
+    #: 房间只记 id —— 模板里的顺序/提示改了, 老房间也跟着变 (与内置人格同理)。
+    team: str = ""
 
 
 #: 开箱自带的几个角色。**不是花活**: 群聊的价值要靠"成员各有所长"才立得住,
@@ -156,7 +159,7 @@ BUILTIN_BOTS: tuple[Bot, ...] = (
         "那是保人物一致性的主要手段。**给一张还是多张语义不同**: 一张 = 首帧模式 "
         "(那张就是第一帧, prompt 只写运动+运镜+声音, **不要复述画面里已有的外观**); "
         "多张 = 全能参考 (最多 8 张, prompt 里用「@图片1」指代)。两种互斥。"
-        "\n画幅靠 ratio 参数锁, 提示词里写\"横屏\"模型不吃。"
+        '\n画幅靠 ratio 参数锁, 提示词里写"横屏"模型不吃。'
         "\n拿不准提示词怎么写就去读 /opt/agents-team/skills/wan3-drama-prompt/ "
         "里的 references/wan3-formulas.md 与 prompt-craft-discipline.md。"
         "\n**duration 与 resolution 每次都要照镜头表写全** —— 漏掉 duration 会出成 5 秒, "
@@ -230,20 +233,75 @@ class Store:
         self.create_room("和 阿做 的对话", ["doer"])
 
     def create_crew_room(self, name: str = "") -> Room:
-        """开一部新片: 剧组五个工位按接力顺序入群。
+        """开一部新片 —— 就是 create_team_room("film")。保留这个名字给老调用方。"""
+        return self.create_team_room("film", name)
+
+    def create_team_room(self, team_id: str, name: str = "") -> Room:
+        """按模板组一个团队: 成员、顺序、模式、产物目录都从模板来。
 
         对应千问那个"自动组队" —— 用户提一个想法就该开工, 不该先手工拉五个人,
         更不该自己记住谁先谁后。
         """
-        return self.create_room(name or "新片", list(self.CREW), mode="relay")
+        team = teams.BY_ID[team_id]
+        return self.create_room(
+            name or f"新{team.name}",
+            list(team.members),
+            mode=team.mode,
+            team=team.id,
+            dir_prefix=team.dir,
+        )
 
     # -- 房间 ---------------------------------------------------------------
-    def create_room(self, name: str, members: list[str], mode: str = "parallel") -> Room:
+    def create_room(
+        self,
+        name: str,
+        members: list[str],
+        mode: str = "parallel",
+        team: str = "",
+        dir_prefix: str | None = None,
+    ) -> Room:
         rid = uuid.uuid4().hex[:8]
-        room = Room(rid, name, [m for m in members if m in self.bots], _now(),
-                    mode if mode in ("parallel", "relay") else "parallel",
-                    filmdir.slug_for(rid, name))
+        room = Room(
+            rid,
+            name,
+            [m for m in members if m in self.bots],
+            _now(),
+            mode if mode in ("parallel", "relay") else "parallel",
+            filmdir.slug_for(rid, name, dir_prefix or filmdir.FILMS),
+            team=team,
+        )
         self.rooms[rid] = room
+        self.save()
+        return room
+
+    def delete_room(self, room_id: str) -> bool:
+        """删群: 房间和它的聊天记录一起删; **产物目录里的文件留在磁盘上**。
+
+        照口袋专家"解散群, 专家本身还在"的口径: 成员是花名册里的人, 不属于某个群。
+        文件不删是因为那是用户花钱出的东西 (成片、图), 删群不该顺手把它们抹掉 ——
+        要清理让用户在「文件」面板里自己看着删。
+        """
+        if room_id not in self.rooms:
+            return False
+        del self.rooms[room_id]
+        self.messages = [m for m in self.messages if m.room != room_id]
+        self.save()
+        return True
+
+    def remove_member(self, room_id: str, bot_id: str) -> Room | None:
+        """请一位出群。群里至少留一个人 —— 空群没有任何用, 而且 relay 的下标会越界。"""
+        room = self.rooms.get(room_id)
+        if room is None or bot_id not in room.members:
+            return room
+        if len(room.members) <= 1:
+            raise ValueError("群里至少要留一个成员")
+        idx = room.members.index(bot_id)
+        room.members.remove(bot_id)
+        # 接力停在被移出的人之后的话, 下标要跟着前移, 否则续跑会跳过一位
+        if room.resume_at > idx:
+            room.resume_at -= 1
+        elif room.resume_at == idx and room.resume_at >= len(room.members):
+            room.resume_at = -1
         self.save()
         return room
 
@@ -296,4 +354,7 @@ class Store:
         return out
 
 
+#: 其余九个团队的成员定义在 teams.py (人格是产品配置, 集中一处好改)。这里合并进
+#: 花名册, 「拉个群」的选人列表和 /api/bots 都从这一份来。
+BUILTIN_BOTS = BUILTIN_BOTS + tuple(Bot(*spec) for spec in teams.BOT_SPECS)
 _BUILTIN_IDS = {b.id for b in BUILTIN_BOTS}

@@ -60,7 +60,9 @@ async def stub(request: Request) -> StreamingResponse:
 
     # 工具跑完那一轮**只说工具之后的话**。剧本从头重放的话, 工具前那句会再说一遍 ——
     # 而主循环本来就该把一轮里前后说的话都收进去, 于是界面上看着像它复读了。
-    script = SCRIPT[who]
+    script = SCRIPT.get(who) or next(
+        iter(SCRIPT.values())
+    )  # 新团队的成员没有专属台词, 借第一段
     if used_tool:
         cut = next((i for i, (p, _) in enumerate(script) if p == "__TOOL__"), -1)
         script = script[cut + 1 :]

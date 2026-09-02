@@ -55,14 +55,16 @@ def reset(token: contextvars.Token) -> None:
     _CUR.reset(token)
 
 
-def slug_for(room_id: str, name: str) -> str:
+def slug_for(room_id: str, name: str, prefix: str = FILMS) -> str:
     """给新房间算一个目录名, 存进 Room.dir。
 
     带上 room_id 是因为片名可以重复 —— 两部都叫"新片"的话, 不带 id 就又共用一个
-    目录了, 那正是本模块要治的病。
+    目录了, 那正是本模块要治的病。prefix 是团队模板的产物目录 (片/报告/店铺…),
+    不同团队的产物分开放, 文件面板里一眼分得出这是哪类东西。
     """
     s = _UNSAFE.sub("-", (name or "").strip()).strip("-")[:24].strip("-")
-    return f"{FILMS}/{s}-{room_id}" if s else f"{FILMS}/{room_id}"
+    top = _UNSAFE.sub("-", (prefix or FILMS).strip()).strip("-") or FILMS
+    return f"{top}/{s}-{room_id}" if s else f"{top}/{room_id}"
 
 
 def resolve(rel: str) -> pathlib.Path:

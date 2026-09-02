@@ -18,7 +18,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import agent, files, filmdir, rooms, tools
+from . import agent, files, filmdir, rooms, teams, tools
 
 WEB_DIR = pathlib.Path(__file__).resolve().parent.parent / "web"
 
@@ -104,6 +104,60 @@ async def create_crew(request: Request) -> dict:
     body = await request.json() if await request.body() else {}
     name = (body.get("name") or "").strip()
     return {"room": asdict(store.create_crew_room(name))}
+
+
+@app.get("/api/teams")
+def list_teams() -> dict:
+    """团队模板 —— 前端「组个团队」的选单从这里来, 顺序/提示也由它推导, 不再写死剧组。"""
+    return {
+        "teams": [
+            {
+                "id": t.id,
+                "name": t.name,
+                "emoji": t.emoji,
+                "tagline": t.tagline,
+                "mode": t.mode,
+                "dir": t.dir,
+                "members": [
+                    {"id": m, "name": store.bots[m].name, "emoji": store.bots[m].emoji}
+                    for m in t.members
+                    if m in store.bots
+                ],
+            }
+            for t in teams.TEAMS
+        ]
+    }
+
+
+@app.post("/api/rooms/team")
+async def create_team_room(request: Request) -> dict:
+    """按模板组一个团队 (剧组/调研组/评审组…)。/api/rooms/crew 是它的剧组特例。"""
+    body = await request.json() if await request.body() else {}
+    team_id = str(body.get("team") or "")
+    if team_id not in teams.BY_ID:
+        raise HTTPException(400, f"没有这个团队模板: {team_id}")
+    name = (body.get("name") or "").strip()
+    return {"room": asdict(store.create_team_room(team_id, name))}
+
+
+@app.delete("/api/rooms/{room_id}")
+def delete_room(room_id: str) -> dict:
+    """删群。记录一起删, 产物目录里的文件留着 (见 Store.delete_room)。"""
+    if not store.delete_room(room_id):
+        raise HTTPException(404, "没有这个房间")
+    return {"ok": True, "deleted": room_id}
+
+
+@app.delete("/api/rooms/{room_id}/members/{bot_id}")
+def remove_member(room_id: str, bot_id: str) -> dict:
+    """请一位出群 (口袋专家的口径: 专家本身还在花名册里, 只是不在这个群)。"""
+    if room_id not in store.rooms:
+        raise HTTPException(404, "没有这个房间")
+    try:
+        room = store.remove_member(room_id, bot_id)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from None
+    return {"room": asdict(room)}
 
 
 @app.post("/api/rooms/{room_id}/members")
@@ -205,17 +259,25 @@ async def _run_relay(room: rooms.Room, model: str | None):
                     # 中断前说过的话要落进记录: 那些字已经流到浏览器了, 不落盘的话
                     # 屏幕上有、记录里没有, 续跑时这一棒等于什么都没说过。
                     if (ev.get("said") or "").strip():
-                        store.add(room.id, bot_id,
-                                  ev["said"] + "\n\n*(这一棒被网关中断, 以上是断线前说完的部分)*",
-                                  ev.get("tools") or [])
+                        store.add(
+                            room.id,
+                            bot_id,
+                            ev["said"]
+                            + "\n\n*(这一棒被网关中断, 以上是断线前说完的部分)*",
+                            ev.get("tools") or [],
+                        )
                     halted = True
-                    capped_here = True   # 活没干完 —— 续跑重跑本棒
+                    capped_here = True  # 活没干完 —— 续跑重跑本棒
                 yield ev
         except Exception as e:  # noqa: BLE001 — 一棒炸了就停, 别让下游基于半成品接着做
             # 停在**炸掉的这一棒**上 (不是下一棒): 它的活没干完, 重发时要重跑它
             room.resume_at = idx
             store.save()
-            yield {"type": "error", "bot": bot_id, "message": f"{type(e).__name__}: {e}"}
+            yield {
+                "type": "error",
+                "bot": bot_id,
+                "message": f"{type(e).__name__}: {e}",
+            }
             return
         if halted:
             # 下次从**下一棒**接着跑 (这一棒已经交活了, 它只是在等回话)
@@ -226,7 +288,7 @@ async def _run_relay(room: rooms.Room, model: str | None):
             yield {"type": "halted", "bot": bot_id, "resume_at": room.resume_at}
             store.save()
             return
-    room.resume_at = -1   # 整条跑完 —— 下一轮是新需求, 从头开始
+    room.resume_at = -1  # 整条跑完 —— 下一轮是新需求, 从头开始
     store.save()
 
 
@@ -300,8 +362,12 @@ async def send(room_id: str, request: Request) -> StreamingResponse:
         stale = _turn_started and (time.time() - _turn_started) > TURN_STALE_S
         if _turn_lock.locked() and not stale:
             waited = int(time.time() - (_turn_started or time.time()))
-            yield _sse({"type": "error",
-                        "message": f"上一轮还在跑 ({waited} 秒), 等它结束再发。"})
+            yield _sse(
+                {
+                    "type": "error",
+                    "message": f"上一轮还在跑 ({waited} 秒), 等它结束再发。",
+                }
+            )
             return
         if stale:
             # 上一轮已经死了 (多半是浏览器断开时生成器没被关掉)。强行接管。

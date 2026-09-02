@@ -23,7 +23,7 @@ from collections.abc import AsyncIterator
 
 import httpx
 
-from . import tools
+from . import teams, tools
 
 GATEWAY_BASE = os.environ.get("DSH_GATEWAY_BASE", "").rstrip("/")
 GATEWAY_TOKEN = os.environ.get("DSH_CLOUD_TOKEN", "")
@@ -36,7 +36,9 @@ MAX_STEPS = int(os.environ.get("AGENTS_TEAM_MAX_STEPS", "30"))
 #: 通用上限**必然**把它掐在半路 (2026-08-31: 老板问"中间还会停顿吗", 查出来的
 #: 第二处非设计停顿)。给这几位单独放宽; 其余工位维持 30 步 —— 那个上限是防
 #: 跑飞的, 不该为一个特例整体放开。
-LONG_RUN_BOTS = {"videographer", "artist", "editor"}
+#: 哪些工位算"长跑"由团队模板说 (teams.Team.long_run): 剧组的出片/出图/剪辑,
+#: 电商组的主图/带货视频, 小说组的写手… 这里只取并集, 不再写死剧组那三位。
+LONG_RUN_BOTS = set(teams.long_run_bots())
 LONG_RUN_STEPS = int(os.environ.get("AGENTS_TEAM_LONG_STEPS", "120"))
 
 #: 群聊里额外压一层通用约束。人格由 rooms.render_for 拼在前面, 这里只放**与形态
@@ -276,15 +278,22 @@ async def run_turn(
                     # 默认参数显式绑定 —— 循环里的 lambda 直接引用 pq/loop 的话,
                     # 几个工具调用会全都指向**最后一次**的队列 (ruff B023)。
                     tools.media.set_progress(
-                        lambda msg, _q=pq, _l=loop: _l.call_soon_threadsafe(_q.put_nowait, msg))
+                        lambda msg, _q=pq, _l=loop: _l.call_soon_threadsafe(
+                            _q.put_nowait, msg
+                        )
+                    )
                     task = asyncio.create_task(tools.dispatch(c["name"], args))
                     while not task.done():
                         try:
                             msg = await asyncio.wait_for(pq.get(), timeout=1.0)
                         except asyncio.TimeoutError:
                             continue
-                        yield {"type": "progress", "bot": bot_id,
-                               "id": c["id"], "text": msg}
+                        yield {
+                            "type": "progress",
+                            "bot": bot_id,
+                            "id": c["id"],
+                            "text": msg,
+                        }
                     tools.media.set_progress(None)
                     body, summary = await task
 

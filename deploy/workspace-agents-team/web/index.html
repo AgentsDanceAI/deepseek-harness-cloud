@@ -69,8 +69,8 @@
                  border:1px solid var(--side-line); border-radius:10px; padding:8px 12px;
                  font-size:13px; text-align:left; }
   aside button:hover { background:var(--side-hover); border-color:rgba(255,255,255,.18); }
-  aside #newFilm { background:var(--side-fg); color:var(--side); border-color:transparent; font-weight:600; }
-  aside #newFilm:hover { background:#fff; }
+  aside #newTeam { background:var(--side-fg); color:var(--side); border-color:transparent; font-weight:600; }
+  aside #newTeam:hover { background:#fff; }
 
   /* ── 主区 ───────────────────────────────────────────────────────────── */
   main { flex:1; display:flex; flex-direction:column; min-width:0; }
@@ -180,6 +180,27 @@
   dialog label { display:flex; align-items:center; gap:8px; padding:6px 0; cursor:pointer; font-size:14px; }
   dialog .row { display:flex; gap:8px; justify-content:flex-end; margin-top:14px; }
   dialog .row button:last-child { background:var(--accent); color:var(--accent-fg); border-color:transparent; font-weight:600; }
+  /* 团队选单: 卡片栅格, 每张 = emoji + 名字 + 一句话 + 成员头像串 */
+  #teamDlg { width:min(880px,94vw); padding:16px 18px; }
+  .teams { display:grid; grid-template-columns:repeat(auto-fill,minmax(250px,1fr)); gap:10px; max-height:min(560px,70vh); overflow:auto; padding:2px; }
+  .tcard { text-align:left; height:auto; padding:12px 14px; border:1px solid var(--line); border-radius:12px; background:var(--card);
+           display:flex; flex-direction:column; gap:6px; cursor:pointer; box-shadow:var(--shadow); transition:border-color .15s, box-shadow .15s, transform .15s; }
+  .tcard:hover { border-color:#cfcbc4; box-shadow:0 5px 18px rgba(43,38,31,.065); transform:translateY(-1px); }
+  .tcard .tn { display:flex; align-items:center; gap:8px; font-size:14px; font-weight:600; color:var(--fg); }
+  .tcard .tn .em { font-size:18px; }
+  .tcard .tn .mode { margin-left:auto; font-size:11px; font-weight:500; color:var(--faint); border:1px solid var(--line); border-radius:999px; padding:1px 7px; }
+  .tcard .tg { font-size:12.5px; color:var(--muted); line-height:1.5; }
+  .tcard .tm { font-size:12px; color:var(--faint); }
+  /* 房间项右侧的删除键: 悬停才出现, 别在列表里摆一排 × */
+  .room .del { position:absolute; right:6px; top:50%; transform:translateY(-50%); width:22px; height:22px; padding:0;
+               border:0; border-radius:6px; background:transparent; color:var(--side-muted); font-size:14px; line-height:22px;
+               opacity:0; box-shadow:none; }
+  .room:hover .del, .room.on .del { opacity:1; }
+  .room .del:hover { background:rgba(255,255,255,.12); color:#fff; }
+  @media (hover:none) { .room .del { opacity:1; } }
+  /* 成员 chip 的 ×: 移出成员 (口袋专家口径: 专家本身还在, 只是不在这个群) */
+  .chip .x { margin-left:6px; opacity:.45; cursor:pointer; font-size:13px; line-height:1; }
+  .chip .x:hover { opacity:1; color:var(--err); }
   /* 文件面板: 左列表右预览。产物落成文件是这个产品的立足点, 用户得看得见、点得开。 */
   #filesDlg { width:min(960px,94vw); height:min(640px,88vh); padding:16px 18px; }
   #filesDlg h3 { display:flex; align-items:baseline; gap:8px; }
@@ -226,11 +247,11 @@
 </head>
 <body>
 <aside>
-  <div class="brand"><div class="logo">🎬</div><div><div class="name">Agents Team</div><div class="sub">剧组 · 群聊</div></div></div>
+  <div class="brand"><div class="logo">🎬</div><div><div class="name">Agents Team</div><div class="sub">多 Agent 群聊</div></div></div>
   <h2>房间</h2>
   <div class="rooms" id="rooms"></div>
   <div class="actions">
-    <button id="newFilm">🎬 开新片</button>
+    <button id="newTeam">✨ 组个团队</button>
     <button id="newRoom">＋ 拉个群</button>
   </div>
 </aside>
@@ -263,6 +284,12 @@
     <div id="filePreview"><div class="muted">点左边的文件预览；视频直接播</div></div>
   </div>
   <div class="row"><button id="filesRefresh">刷新</button><button id="filesClose">关闭</button></div>
+</dialog>
+
+<dialog id="teamDlg">
+  <h3>组个团队 <span class="where">选一个模板，成员和顺序自动就位</span></h3>
+  <div class="teams" id="teamList"></div>
+  <div class="row"><button id="teamCancel">取消</button></div>
 </dialog>
 
 <dialog id="picker">
@@ -405,7 +432,7 @@ function msgEl(sender, text) {
 // 一部三分钟短剧一棒能跑好几分钟, 而屏幕上此前只有一片静止 —— 用户分不出
 // "在干活"还是"死了"。这条一直挂在最底下: 谁在干活 · 干了多久 · 第几棒。
 let statusBar = null, statusTimer = null, statusFrom = 0, statusWho = '';
-const CREW_ORDER = ['director', 'artist', 'storyboard', 'videographer', 'editor'];
+let TEAMS = [];   // /api/teams: 模板表, 选单和提示都从它来 (棒次从 cur.members 推, 不再写死剧组)
 
 function statusStart(label) {
   statusStop();
@@ -429,9 +456,10 @@ function statusSet(label, botId) {
   if (!statusBar) return;
   let txt = label;
   if (botId) {
-    const i = CREW_ORDER.indexOf(botId);
-    // 第几棒只在剧组房间里有意义 (其它房间成员不是流水线)
-    const step = i >= 0 && cur && cur.mode === 'relay' ? ` · 第 ${i + 1}/${CREW_ORDER.length} 棒` : '';
+    // 第几棒 = 在这个房间成员表里的位置; 只在接力房间里有意义 (并行房间不是流水线)
+    const order = cur && cur.mode === 'relay' ? cur.members : [];
+    const i = order.indexOf(botId);
+    const step = i >= 0 ? ` · 第 ${i + 1}/${order.length} 棒` : '';
     txt = `${botOf(botId).emoji} ${botOf(botId).name} 正在${label}${step}`;
     // **只在换人时**重新计时。一棒里要跑十几个工具, 每次工具调用都重置的话
     // 秒数会被反复清零, 永远看不出"这一棒已经跑了多久" —— 而那正是用户要的。
@@ -510,9 +538,16 @@ async function loadRooms(select) {
   ROOMS.forEach(r => {
     const el = document.createElement('div');
     el.className = 'room' + (r.id === (cur && cur.id) ? ' on' : '');
-    el.innerHTML = '<div class="n"></div><div class="l"></div>';
+    el.innerHTML = '<div class="n"></div><div class="l"></div><button class="del" type="button" title="删除这个群">×</button>';
     el.querySelector('.n').textContent =
       r.members.map(m => botOf(m).emoji).join('') + ' ' + r.name;
+    el.querySelector('.del').onclick = async e => {
+      e.stopPropagation();
+      if (!confirm(`删除「${r.name}」？聊天记录一起删；文件面板里的产物留在磁盘上。`)) return;
+      const d = await api('/api/rooms/' + r.id, { method: 'DELETE' });
+      if (d.ok) { if (cur && cur.id === r.id) cur = null; await loadRooms(); }
+      else alert(d.detail || d.error || '删除失败');
+    };
     // 第二行带上消息数 —— 房间重名时这是唯一分得出"哪个是我刚才那个"的线索
     const n = r.count || 0;
     el.querySelector('.l').textContent =
@@ -522,27 +557,46 @@ async function loadRooms(select) {
   });
   if (select && ROOMS.length) open(ROOMS.find(r => r.id === select) || ROOMS[0]);
   else if (!cur && ROOMS.length) open(ROOMS[0]);
+  else if (!ROOMS.length) { cur = null; $('title').textContent = '—'; $('members').innerHTML = ''; wrap.innerHTML = ''; }
 }
 
-//: 接力房间的底栏提示。默认那句是并行模式的 ("同时对你说话, 彼此看不到") ——
-//: 挂在剧组房间下面正好说反了, 剧组是按棒接力、后一棒看得见前一棒刚交的活。
-const RELAY_HINT = '剧组按顺序接力：阿导 → 阿画 → 阿分 → 阿摄 → 阿剪，每一棒都看得见前一棒刚交的活。停在哪一棒，说「继续」就从那一棒接着跑。';
+//: 底栏提示按房间模式生成。默认那句是并行模式的 ("同时对你说话, 彼此看不到") ——
+//: 挂在接力房间下面正好说反了, 接力是后一棒看得见前一棒刚交的活。顺序从成员表来。
+function hintFor(room) {
+  if (room.mode === 'relay' && room.members.length) {
+    return '按顺序接力：' + room.members.map(m => botOf(m).name).join(' → ')
+         + '，每一棒都看得见前一棒刚交的活。停在哪一棒，说「继续」就从那一棒接着跑。';
+  }
+  return DEFAULT_HINT;
+}
 
 $('navBtn').onclick = () => document.body.classList.toggle('nav-open');
 // 窄屏上那句长占位文案会被裁成两行半, 换短的 (placeholder 改不了样式, 只能改字)
-if (matchMedia('(max-width:720px)').matches) input.placeholder = '说一件事，剧组开工';
+if (matchMedia('(max-width:720px)').matches) input.placeholder = '说一件事，团队开工';
 $('backdrop').onclick = () => document.body.classList.remove('nav-open');
 
 async function open(room) {
   cur = room;
   document.body.classList.remove('nav-open');   // 手机上选完房间收起抽屉
   $('title').textContent = room.name;
-  $('hint').textContent = room.mode === 'relay' ? RELAY_HINT : DEFAULT_HINT;
+  $('hint').textContent = hintFor(room);
   $('members').innerHTML = '';
   room.members.forEach(m => {
     const c = document.createElement('span');
     c.className = 'chip';
     c.textContent = botOf(m).emoji + ' ' + botOf(m).name;
+    if (room.members.length > 1) {
+      const x = document.createElement('span');
+      x.className = 'x'; x.textContent = '×'; x.title = '移出 ' + botOf(m).name;
+      x.onclick = async e => {
+        e.stopPropagation();
+        if (!confirm(`把 ${botOf(m).name} 移出「${room.name}」？他本人还在花名册里，只是不在这个群。`)) return;
+        const d = await api('/api/rooms/' + room.id + '/members/' + m, { method: 'DELETE' });
+        if (d.room) { cur = d.room; await loadRooms(d.room.id); }
+        else alert(d.detail || d.error || '移出失败');
+      };
+      c.appendChild(x);
+    }
     $('members').appendChild(c);
   });
   wrap.innerHTML = '';
@@ -712,7 +766,7 @@ async function loadFiles(rel) {
     list.appendChild(up);
   }
   if (!d.entries.length) {
-    const e = frow('这里还是空的 — 剧组开工后产物会出现在这里', ''); e.classList.add('muted'); list.appendChild(e);
+    const e = frow('这里还是空的 — 团队开工后产物会出现在这里', ''); e.classList.add('muted'); list.appendChild(e);
   }
   d.entries.forEach(e => {
     const el = frow((e.dir ? '📁 ' : fileIcon(e.kind)) + e.name, e.dir ? '' : fmtSize(e.size));
@@ -769,22 +823,41 @@ $('newRoom').onclick = async () => {
   if (d.room) { cur = d.room; await loadRooms(d.room.id); }
 };
 
-// 开新片: 剧组五个工位按接力顺序自动入群 —— 用户提一个想法就该开工, 不该先手工
-// 拉五个人, 更不该自己记住谁先谁后。
-// 开新片不再弹 prompt 问名字 (2026-09-01 老板实测: 几个房间在侧栏里长得一模一样,
-// 切出去再回来以为"消息没了", 其实是切到了另一个同名房间)。名字改成自动生成 ——
-// 「新片 3 · 09-01 16:52」, 序号 + 时间, 一眼分得出哪个是哪个。
-$('newFilm').onclick = async () => {
-  const n = ROOMS.filter(r => (r.name || '').startsWith('新片')).length + 1;
-  const t = new Date();
-  const pad = x => String(x).padStart(2, '0');
-  const name = `新片 ${n} · ${pad(t.getMonth() + 1)}-${pad(t.getDate())} `
-             + `${pad(t.getHours())}:${pad(t.getMinutes())}`;
-  const d = await api('/api/rooms/crew', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name }),
+// 组个团队: 选一个模板, 成员和接力顺序自动就位 —— 用户提一个想法就该开工, 不该先
+// 手工拉五个人, 更不该自己记住谁先谁后。剧组只是十个模板中的一个。
+// 名字自动生成「新<团队> N · 09-01 16:52」: 几个房间在侧栏里长得一模一样时, 序号 +
+// 时间是唯一分得出"哪个是我刚才那个"的线索 (2026-09-01 老板实测)。
+function pickTeam() {
+  return new Promise(resolve => {
+    const list = $('teamList'); list.innerHTML = '';
+    TEAMS.forEach(t => {
+      const b = document.createElement('button'); b.type = 'button'; b.className = 'tcard';
+      b.innerHTML = '<div class="tn"><span class="em"></span><span class="nm"></span><span class="mode"></span></div>'
+                  + '<div class="tg"></div><div class="tm"></div>';
+      b.querySelector('.em').textContent = t.emoji;
+      b.querySelector('.nm').textContent = t.name;
+      b.querySelector('.mode').textContent = t.mode === 'relay' ? '接力' : '并行';
+      b.querySelector('.tg').textContent = t.tagline;
+      b.querySelector('.tm').textContent = t.members.map(m => m.emoji + ' ' + m.name).join(' · ');
+      b.onclick = () => { $('teamDlg').close(); resolve(t); };
+      list.appendChild(b);
+    });
+    $('teamCancel').onclick = () => { $('teamDlg').close(); resolve(null); };
+    $('teamDlg').showModal();
   });
-  if (d.room) { cur = d.room; await loadRooms(d.room.id); }
+}
+$('newTeam').onclick = async () => {
+  const t = await pickTeam();
+  if (!t) return;
+  const n = ROOMS.filter(r => r.team === t.id).length + 1;
+  const d = new Date(), pad = x => String(x).padStart(2, '0');
+  const name = `新${t.name} ${n} · ${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  const r = await api('/api/rooms/team', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ team: t.id, name }),
+  });
+  if (r.room) { cur = r.room; await loadRooms(r.room.id); }
+  else alert(r.detail || r.error || '建群失败');
 };
 
 $('edit').onclick = async () => {
@@ -810,6 +883,7 @@ input.addEventListener('input', () => {
 (async function boot() {
   const b = await api('/api/bots');
   b.bots.forEach(x => BOTS[x.id] = x);
+  try { TEAMS = (await api('/api/teams')).teams || []; } catch (e) { TEAMS = []; }
   try {
     const m = await api('/api/models');
     m.models.forEach(id => {
