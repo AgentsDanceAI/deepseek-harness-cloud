@@ -47,7 +47,9 @@ docker run --rm -u 0 --entrypoint bash "$REF" -c '
 
   # 反代下的 WebSocket 同源校验: Origin 是公网 https 域、Host 也是它 —— 这正是
   # Caddy 转进来的形状。白名单 (PI_WEB_ALLOW_ORIGINS) 由启动脚本按域名设。
-  code=$(curl -s -o /dev/null -w "%{http_code}" -H "Host: x.example" -H "Origin: https://x.example" -H "Connection: Upgrade" -H "Upgrade: websocket" -H "Sec-WebSocket-Version: 13" -H "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==" http://127.0.0.1:18787/ws)
+  # **--max-time 必须有**: 握手成功是 101 之后连接就挂着不断, curl 会一直等 ——
+  # 第一版自检就是这么卡死在这一行的 (日志停在"无登录墙"之后, 什么都不说)。
+  code=$(curl -s --max-time 5 -o /dev/null -w "%{http_code}" -H "Host: x.example" -H "Origin: https://x.example" -H "Connection: Upgrade" -H "Upgrade: websocket" -H "Sec-WebSocket-Version: 13" -H "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==" http://127.0.0.1:18787/ws || true)
   echo "  · 未设白名单时反代形状的 WS 握手 -> $code (启动脚本会设 PI_WEB_ALLOW_ORIGINS)"
 '
 if [ "${SKIP_PUSH:-0}" = "1" ]; then echo "==> SKIP_PUSH=1, 不推"; else docker push -q "$REF" >/dev/null && echo "==> 已推 $REF"; fi
