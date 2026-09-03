@@ -463,7 +463,8 @@ _DIFY_AUTOLOGIN = r"""#!/bin/sh
 # Coze 那样只在上游注入 —— 前端还要自己从 csrf_token 里读值拼请求头。
 EM="$DSH_AUTOLOGIN_EMAIL"
 PW="$DSH_AUTOLOGIN_PASSWORD"
-[ -n "$EM" ] && [ -n "$PW" ] || exit 0
+# 没配代登录凭据就直接放行 (会看到 Dify 自己的登录页, 但至少不会永远"启动中")。
+[ -n "$EM" ] && [ -n "$PW" ] || { mkdir -p /run/dsh && : > /run/dsh/__dsh_ready; exit 0; }
 API=http://127.0.0.1:5001/console/api
 # 登录接口收 base64 的密码 (前端就是这么发的); setup 收明文。
 B64=$(printf '%s' "$PW" | base64 | tr -d '\n')
@@ -676,6 +677,13 @@ while :; do
   CT=$(grep -i '^set-cookie: csrf_token=' /tmp/.dify-hdr 2>/dev/null | head -1 | sed 's/.*csrf_token=//; s/;.*//' | tr -d '\r')
   if [ -n "$AT" ] && [ -n "$RT" ] && [ -n "$CT" ]; then
     write_conf
+    # **就绪的标记落在这里**, 不在 api 应答那一刻 (与 Hermes 同款)。探针原先探
+    # /console/api/system-features: api 一起来它就 200, 而会话注入还差一次
+    # reload —— 2026-09-03 切到 k8s 后 Pod 起得快而整齐, 视觉验收正好落进这几秒,
+    # 拍到一整页"登录 Dify"。标记在模型预置**之前**: 那一步要装插件、写 26 份
+    # 凭据, 首次要一两分钟, 用户不必等它。
+    mkdir -p /run/dsh && : > /run/dsh/__dsh_ready
+    log "会话已下发"
     provision || true
     tries=0
     # access_token 只活 1 小时, 而容器能连着跑很久 —— 定期重登刷新, 否则新开的
@@ -724,12 +732,19 @@ def _dify_boot() -> str:
         "AUTOCONF\n"
         "cat > /usr/local/bin/dsh-dify-autologin <<'AUTOLOGIN'\n" + _DIFY_AUTOLOGIN + "AUTOLOGIN\n"
         "chmod +x /usr/local/bin/dsh-dify-autologin\n"
+        "mkdir -p /run/dsh\n"
         "/usr/local/bin/dsh-dify-autologin >/dev/null 2>&1 &\n"
         "cat > /etc/nginx/conf.d/default.conf <<'NGINXCONF'\n"
         "server {\n"
         "  listen 80;\n"
         "  server_name _;\n"
         "  client_max_body_size 100m;\n"
+        # 就绪探针 (Product.ready_path)。文件在 = 200, 不在 = 503; 文件由
+        # dsh-dify-autologin 在会话注入之后落下。
+        "  location = /__dsh_ready {\n"
+        "    root /run/dsh;\n"
+        "    try_files /__dsh_ready =503;\n"
+        "  }\n"
         # 放在 server 层: 这份配置里没有别的 add_header, 所以各 location 都继承
         # 得到 (nginx 的 add_header 一旦在子层出现就会丢掉父层的, 这里没有子层的)。
         "  add_header Set-Cookie $dsh_at always;\n"
@@ -1146,7 +1161,8 @@ while [ "$i" -lt 150 ]; do
        -d "$BODY" "$API/register/v2/" || true
   sleep 3
 done
-[ -n "$SK" ] || exit 0
+# 150 轮 (约 7 分钟) 还登不上就放行: 用户会看到 Coze 自己的登录页, 但不会永远"启动中"。
+[ -n "$SK" ] || { mkdir -p /run/dsh && : > /run/dsh/__dsh_ready; exit 0; }
 cat > /etc/nginx/conf.d/00-autologin.conf <<EOF
 # 浏览器没带 session_key 时注入工作台自己的那个; 带了就原样透传 (想切账号也切得了)。
 map \$cookie_session_key \$dsh_cookie {
@@ -1155,6 +1171,10 @@ map \$cookie_session_key \$dsh_cookie {
 }
 EOF
 nginx -s reload
+# 就绪标记 (Product.ready_path): 会话注入并 reload 之后才算能用。原先探 /api/,
+# coze-server 一应答就放人, 而这里的注册/登录还要几秒 —— 2026-09-03 全切 k8s
+# 的首轮视觉验收拍到一整页"欢迎使用扣子"登录框。
+mkdir -p /run/dsh && : > /run/dsh/__dsh_ready
 """
 
 
@@ -1245,6 +1265,11 @@ def _coze_boot() -> str:
         "map $cookie_session_key $dsh_cookie { default $http_cookie; }\n"
         "AUTOCONF\n"
         f"sed -i '/{_COZE_APIHOST_ANCHOR}/a\\        proxy_set_header Cookie $dsh_cookie;'"
+        " /etc/nginx/conf.d/default.conf\n"
+        # 就绪探针的 location 塞进上游的 server 块 (文件在 = 200, 不在 = 503),
+        # 标记由 dsh-coze-autologin 在会话注入之后落下。
+        "mkdir -p /run/dsh\n"
+        "sed -i '/server {/a\\    location = /__dsh_ready { root /run/dsh; try_files /__dsh_ready =503; }'"
         " /etc/nginx/conf.d/default.conf\n"
         "cat > /usr/local/bin/dsh-coze-autologin <<'AUTOLOGIN'\n" + _COZE_AUTOLOGIN + "AUTOLOGIN\n"
         "chmod +x /usr/local/bin/dsh-coze-autologin\n"
@@ -2029,7 +2054,10 @@ def registry() -> dict[str, Product]:
             # 首页 (/) 答的是 Next.js, 它比 api 早起来一分多钟, 而且 api 没起来时
             # 它把错误边界渲染出来照样回 200 —— 拿它探活等于没探。这条路径
             # proxy_pass 去 api:5001 (见 _dify_boot), api 没起来时 nginx 给 502。
-            ready_path="/console/api/system-features",
+            # 2026-09-03 再改一次: 探 api 也还不够 —— api 起来到代登录把会话注入
+            # nginx 之间有几秒窗口, 落进去的人看到"登录 Dify"。改探代登录落下的
+            # 标记 (见 _DIFY_AUTOLOGIN / _dify_boot), 与 Hermes 同款。
+            ready_path="/__dsh_ready",
             sidecars=_dify_stack(),
             # 栈内互相用回环, 这里只兜住万一漏改的服务名引用。
             host_aliases=("api", "api_websocket", "web", "db_postgres", "redis",
@@ -2062,7 +2090,9 @@ def registry() -> dict[str, Product]:
             #
             # 用未注册路由而不是某个真接口: 它**不会有副作用**, 也不随接口增删
             # 而失效 (那几个 GET 里 /logout/ 会登出、/password/reset/ 会触发重置)。
-            ready_path="/api/",
+            # 2026-09-03: 探 /api/ 也还早 —— coze-server 一应答代登录还没注入会话,
+            # 那几秒放进来的人看到扣子的登录框。改探代登录落下的标记 (与 Hermes 同款)。
+            ready_path="/__dsh_ready",
             sidecars=_coze_stack(),
             # 组内一律用上游的服务名 (见 _coze_server_env 的说明), 全部指回环。
             host_aliases=("mysql", "redis", "elasticsearch", "minio", "milvus",

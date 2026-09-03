@@ -1847,6 +1847,35 @@ def test_hermes_keeps_its_auth_on_and_we_carry_the_credential(monkeypatch):
     assert "reload 失败" in sh
 
 
+def test_dify_is_not_ready_until_the_session_is_injected(monkeypatch):
+    """同 Hermes: 就绪 = 代登录已下发。探 api 早了几秒, 2026-09-03 切 k8s 后的
+    首轮视觉验收正好落进那个窗口, 拍到一整页"登录 Dify"。"""
+    monkeypatch.setattr(config, "DIFY_DOMAIN", "dify.test.local")
+    prod = products.registry()["dify"]
+    assert prod.ready_path == "/__dsh_ready"
+    boot = products.boot_script("dify")
+    assert "location = /__dsh_ready" in boot
+    assert "try_files /__dsh_ready =503" in boot, "文件不在时必须 5xx, 否则等于没探"
+    # 标记落在 write_conf (会话注入 + reload) 之后、模型预置之前
+    body = boot[boot.index("tries=0\nwhile :; do") :]
+    assert body.index("write_conf\n") < body.index("/run/dsh/__dsh_ready") < body.index("provision || true")
+    # 没配凭据也要放行, 否则永远"启动中"
+    head = boot[: boot.index("API=http://127.0.0.1:5001")]
+    assert "/run/dsh/__dsh_ready; exit 0" in head
+
+
+def test_coze_is_not_ready_until_the_session_is_injected(monkeypatch):
+    monkeypatch.setattr(config, "COZE_DOMAIN", "coze.test.local")
+    monkeypatch.setattr(config, "COZE_ASSETS_IMAGE_REF", "ghcr.io/x/coze-assets:1")
+    prod = products.registry()["coze"]
+    assert prod.ready_path == "/__dsh_ready"
+    boot = products.boot_script("coze")
+    assert "location = /__dsh_ready { root /run/dsh; try_files /__dsh_ready =503; }" in boot
+    # 标记在 reload 之后; 放弃时也要放行
+    assert boot.index("nginx -s reload\n") < boot.rindex("/run/dsh/__dsh_ready")
+    assert "/run/dsh/__dsh_ready; exit 0" in boot
+
+
 def test_hermes_is_not_ready_until_the_autologin_landed(monkeypatch):
     """就绪 = **代登录已下发**, 不是 "nginx 起来了"。
 
@@ -2687,22 +2716,22 @@ def test_readiness_probes_the_product_ready_path(monkeypatch):
 
 
 def test_dify_ready_path_lands_on_the_api_upstream():
-    """Dify 的 ready_path 必须落在**转发去 api** 的那条 location 上。
+    """Dify 的就绪判据必须**经过 api**, 不许探回 Next.js。
 
-    这是一对跨文件的改动: 探活路径写在 registry(), 而它转发去哪个上游写在
-    _dify_boot() 生成的 nginx 配置里。两处不一致不报错, 只是探针又探回了
-    Next.js —— 事故原样复现, 而且照样一路绿灯。按 nginx 的最长前缀匹配钉住。
+    历史: 2026-08-30 探首页放人进坏页面 -> 改探 /console/api/system-features (转发去
+    api:5001) -> 2026-09-03 发现 api 应答到会话注入之间还有几秒窗口 -> 改探代登录
+    落下的标记。标记只在 **登录 api:5001 成功** (拿到三个 cookie) 之后才落, 所以
+    "经过 api" 这条仍然成立, 而且更严: api 起来 + 会话已注入。
+    这里钉住三件事: 探的是标记; 标记路径在 nginx 里答 503 而不是 404 (404 < 500
+    会被当作就绪); 标记落在登录成功分支里。
     """
-    import re
-
     prod = products.registry()["dify"]
     conf = products.boot_script("dify")
-    locs = re.findall(r"location\s+(/\S*)\s*\{\s*proxy_pass\s+http://127\.0\.0\.1:(\d+);", conf)
-    assert locs, "没解析出 location —— nginx 配置的写法变了, 这个测试要跟着改"
-    matched = [loc for loc in locs if prod.ready_path.startswith(loc[0])]
-    assert matched, f"ready_path {prod.ready_path} 不落在任何 location 上"
-    path, port = max(matched, key=lambda loc: len(loc[0]))
-    assert port == "5001", f"ready_path 命中的是 location {path} -> {port}, 不是 api(5001)"
+    assert prod.ready_path == "/__dsh_ready"
+    assert "location = /__dsh_ready" in conf and "try_files /__dsh_ready =503" in conf
+    login_ok = conf.index('if [ -n "$AT" ] && [ -n "$RT" ] && [ -n "$CT" ]; then')
+    marker = conf.index("/run/dsh/__dsh_ready", login_ok)
+    assert marker < conf.index("provision || true"), "标记要在登录成功分支里、模型预置之前"
 
 
 def test_coze_turns_off_the_env_model_path_explicitly():
@@ -2728,24 +2757,21 @@ def test_coze_turns_off_the_env_model_path_explicitly():
 
 
 def test_coze_ready_path_is_proxied_to_the_backend():
-    """Coze 的 ready_path 必须落在上游那条转发去 coze-server 的 location 上。
+    """Coze 的就绪判据必须经过 coze-server, 不许落回静态首页。
 
-    它的首页是 `root /usr/share/nginx/html` 的**静态文件** —— coze-server 没起来
-    也照样回 200, 与 Dify 同一个洞。2026-08-30 起真实例实测: 第 23 秒 nginx 就绪
-    (`/`=200 而 `/api/`=502), 第 119 秒 coze-server 才应答 (`/api/`=404) —— 旧探针
-    会在第 23 秒就放人进来, 96 秒的坏窗口, 比 Dify 那 44 秒还长。
-
-    上游那份 conf 在资产镜像里、不在仓库中, 所以这里只能钉住**前缀**; 配置本身
-    改没改由 deploy/workspace-coze/build.sh 的守卫在构建期拦 —— 两处要一起改。
+    历史: 首页是 `root /usr/share/nginx/html` 的静态文件, coze-server 没起来也 200
+    (2026-08-30 实测第 23 秒 nginx 就绪、第 119 秒 coze-server 才应答, 96 秒坏窗口)
+    -> 改探 /api/ -> 2026-09-03 发现 coze-server 应答到代登录注入会话之间还有几秒,
+    全切 k8s 的首轮视觉验收拍到扣子的登录框 -> 改探代登录落下的标记。标记只在
+    向 coze-server 登录拿到 session_key 之后才落, "经过后端"仍然成立且更严。
+    上游那份 conf 在资产镜像里, 标记的 location 由 _coze_boot 用 sed 塞进 server 块。
     """
-    import re
-
     prod = products.registry()["coze"]
-    assert prod.ready_path != "/", "首页是静态文件, 永远回 200, 拿它探活等于没探"
-    # 与上游的 `location ~ ^/(api|v[1-3]|admin)(/|$)` 对齐
-    assert re.match(r"^/(api|v[1-3]|admin)(/|$)", prod.ready_path), (
-        f"ready_path {prod.ready_path} 不会被转发去 coze-server, 会落回静态首页"
-    )
+    conf = products.boot_script("coze")
+    assert prod.ready_path == "/__dsh_ready"
+    assert "location = /__dsh_ready { root /run/dsh; try_files /__dsh_ready =503; }" in conf
+    got_session = conf.index('[ -n "$SK" ] ||')
+    assert conf.index("nginx -s reload\n", got_session) < conf.rindex("/run/dsh/__dsh_ready")
 
 
 def test_coze_preconfigures_the_whole_catalog_as_yaml():
