@@ -401,6 +401,51 @@ async def test_stack_product_becomes_one_pod_with_sidecar_containers(k8s):
 
 
 @pytest.mark.asyncio
+async def test_host_aliases_with_underscores_are_dropped_not_fatal(k8s, caplog):
+    """k8s 的 hostAliases 只收 RFC 1123 名; 带下划线的整个 Pod 会被 422 拒掉 (Dify 2026-09-03)。"""
+    b, fake = k8s
+    with caplog.at_level("WARNING"):
+        await _create(b, "u_abc~dify", host_aliases=("api", "api_websocket", "db_postgres", "web"))
+    assert fake.created()[0]["spec"]["hostAliases"] == [{"ip": "127.0.0.1", "hostnames": ["api", "web"]}]
+    assert any("api_websocket" in r.message and "db_postgres" in r.message for r in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_all_underscore_aliases_means_no_host_aliases_block(k8s):
+    b, fake = k8s
+    await _create(b, host_aliases=("db_postgres",))
+    assert "hostAliases" not in fake.created()[0]["spec"]
+
+
+def test_every_product_manifest_carries_only_valid_hostnames(monkeypatch):
+    """每个产品的栈定义都过一遍: 别名要么合法要么被过滤, 不许有漏网的进 manifest。"""
+    monkeypatch.setattr(config, "K8S_DATA_PVC", "dshwork-data")
+    b = K8sBackend()
+    for prod in products.registry().values():
+        m = b._manifest(
+            f"u_x~{prod.id}",
+            boot="true",
+            env={},
+            boot_fp="fp",
+            image=prod.image or "img",
+            image_ref=prod.image_ref,
+            mem_mb=prod.mem_mb,
+            cpus=prod.cpus,
+            sidecars=prod.sidecars,
+            host_aliases=prod.host_aliases,
+            init_containers=prod.init_containers,
+            seeds=prod.seeds,
+            run_as_user=prod.run_as_user,
+        )
+        for ha in m["spec"].get("hostAliases", []):
+            for h in ha["hostnames"]:
+                assert workbackend._RFC1123.fullmatch(h), (prod.id, h)
+        # 容器名也是 DNS label
+        for c in m["spec"]["containers"] + m["spec"].get("initContainers", []):
+            assert workbackend._RFC1123.fullmatch(c["name"]), (prod.id, c["name"])
+
+
+@pytest.mark.asyncio
 async def test_init_container_seeds_a_shared_volume_for_the_whole_pod(k8s):
     b, fake = k8s
     ic = (

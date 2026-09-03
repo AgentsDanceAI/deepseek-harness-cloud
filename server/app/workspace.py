@@ -368,6 +368,26 @@ def _ensure_lock(uid: str) -> asyncio.Lock:
     return lock
 
 
+def _log_ensure_failure(product: products.Product, user: dict, e: Exception) -> None:
+    """起工作台失败时把原因写进日志。
+
+    三个入口都把 RuntimeError 翻成一张"启动失败"页, 原先**不记日志** —— 用户看到
+    的是一句客气话, 日志里连一行都没有, 只能靠猜。2026-09-03 Dify 在 k8s 上起不来
+    就是这么查了半天: API 明明回了校验错误, 却没有任何地方留下它。
+    "capacity" 是预期内的 (名额满), 记 info; 别的都是故障, 记 warning 带原因。
+    """
+    if str(e) == "capacity":
+        log.info("[work] %s 名额已满, 拒起 %s", product.id, user["id"])
+    else:
+        log.warning(
+            "[work] 起 %s 工作台失败 (user=%s): %s: %s",
+            product.id,
+            user["id"],
+            type(e).__name__,
+            str(e)[:600],
+        )
+
+
 async def ensure_workspace(user: dict, product: products.Product) -> str:
     key = products.wskey(user["id"], product.id)
     async with _ensure_lock(key):
@@ -1000,6 +1020,7 @@ async def work_route(request: Request):
         state = await ensure_workspace(user, product)
     except RuntimeError as e:
         reason = "busy" if str(e) == "capacity" else "error"
+        _log_ensure_failure(product, user, e)
         return RedirectResponse(
             f"{site}/work/starting?state={reason}&product_id={product.id}", status_code=302
         )
@@ -1074,6 +1095,7 @@ async def work_shell(request: Request):
         state = await ensure_workspace(user, product)
     except RuntimeError as e:
         kind = "busy" if str(e) == "capacity" else "error"
+        _log_ensure_failure(product, user, e)
         return RedirectResponse(f"{site}/work/starting?state={kind}&product_id={product.id}", status_code=302)
     if state != "running":
         return RedirectResponse(f"{site}/work/starting?product_id={product.id}", status_code=302)
@@ -1315,6 +1337,7 @@ async def work_entry(request: Request, product_id: str = products.DEFAULT):
         state = await ensure_workspace(user, product)
     except RuntimeError as e:
         kind = "busy" if str(e) == "capacity" else "error"
+        _log_ensure_failure(product, user, e)
         return RedirectResponse(f"{site}/work/starting?state={kind}&product_id={product.id}", status_code=302)
     if state == "running":
         return RedirectResponse(_work_url("/" + suffix, product), status_code=302)

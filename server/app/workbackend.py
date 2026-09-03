@@ -733,6 +733,12 @@ _K8S_STUCK_REASONS = {
 }
 
 
+#: k8s 的 hostAliases 只收 RFC 1123 主机名 (小写字母数字、-、.)。compose 栈里常见的
+#: api_websocket / db_postgres 这种带下划线的服务名, ECI 照单全收, k8s 直接拒掉
+#: 整个 Pod (422) —— 2026-09-03 Dify 全切时就栽在这三个名字上。
+_RFC1123 = re.compile(r"[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*")
+
+
 def pod_name(user_id: str) -> str:
     """Pod 名: cname 的小写形式。k8s 的对象名是 DNS-1123 (只许小写), 而 cname 为
     docker DNS 与 ECI 保留了大小写。用户 id 本身全小写 (u_ + 十六进制), 不会撞。"""
@@ -965,7 +971,14 @@ class K8sBackend(Backend):
         if inits:
             spec["initContainers"] = inits
         if host_aliases:
-            spec["hostAliases"] = [{"ip": "127.0.0.1", "hostnames": list(host_aliases)}]
+            ok = [h for h in host_aliases if _RFC1123.fullmatch(h)]
+            bad = [h for h in host_aliases if h not in ok]
+            if bad:
+                # 栈内互相走回环, 别名只兜"漏改的服务名引用"; 少几个不致命, 而带上
+                # 它们整个 Pod 都建不出来。记一笔, 好知道哪些名字没兜住。
+                log.warning("[work] %s: 主机别名 %s 不是合法 DNS 名, k8s 不收, 已跳过", user_id, bad)
+            if ok:
+                spec["hostAliases"] = [{"ip": "127.0.0.1", "hostnames": ok}]
         secret = (config.K8S_IMAGE_PULL_SECRET or "").strip()
         if secret:
             spec["imagePullSecrets"] = [{"name": secret}]
