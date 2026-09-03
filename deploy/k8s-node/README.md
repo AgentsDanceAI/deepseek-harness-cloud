@@ -60,8 +60,16 @@ Pod 侧的 API server 只监听节点自己 (6443 不在安全组放行范围), 
 
 ## 3. dhc-server 这边
 
-把 token 与 CA 放到应用机 `/root/dsh-k8s/{token,ca.crt}` (0600), compose 已把该
-目录只读挂到 `/run/dsh-k8s`。`.env`:
+把 token 与 CA 放到应用机 `/root/dsh-k8s/{token,ca.crt}`, compose 已把该目录
+只读挂到 `/run/dsh-k8s`。**属主必须是容器里跑服务的那个用户** (Dockerfile 里的
+`dsh-cloud`, uid 10001), 目录 0755、文件 0600:
+
+```sh
+chmod 0755 /root/dsh-k8s; chown 10001:10001 /root/dsh-k8s/token /root/dsh-k8s/ca.crt
+```
+
+留成 root 0600 的症状 (2026-09-03 首次上线): 产品域名 500, 而且回收循环每分钟
+抛一次 PermissionError —— 那一版里它会把**所有后端**的计量回收一起拖停。`.env`:
 
 ```
 K8S_API_URL=https://<TUNNEL_NODE_IP>:6443

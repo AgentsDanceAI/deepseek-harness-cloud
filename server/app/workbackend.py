@@ -1187,9 +1187,20 @@ class RoutedBackend(Backend):
             await b.destroy(user_id)
 
     async def running_users(self) -> list[str]:
+        """各后端的并集。一个后端挂了 (k8s 节点掉线、凭据读不了) **不能拖着别的
+        后端一起不计量不回收** —— 那边的实例还在按秒烧钱。所以按后端隔开: 坏的
+        那个大声记一条错然后跳过, 好的照常。漏掉的那批等它恢复就回来。
+        2026-09-03 首次上线就撞上: CA 文件容器里读不了, 回收循环整轮抛异常,
+        ECI 上所有工作台跟着停止计量与回收。"""
         users: list[str] = []
         for b in self._all():
-            users.extend(await b.running_users())
+            try:
+                users.extend(await b.running_users())
+            except Exception:  # noqa: BLE001
+                log.exception(
+                    "[work] %s.running_users 失败 —— 这个后端上的工作台这一轮不计量不回收",
+                    type(b).__name__,
+                )
         return list(dict.fromkeys(users))
 
     def capacity_reason(self) -> str:

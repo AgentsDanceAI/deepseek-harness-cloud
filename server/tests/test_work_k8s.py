@@ -731,3 +731,18 @@ def test_make_backend_rejects_a_malformed_map(monkeypatch):
     monkeypatch.setattr(config, "WORK_BACKEND_PRODUCTS", "pi=nomad")
     with pytest.raises(ValueError, match="未知"):
         workbackend.make_backend()
+
+
+@pytest.mark.asyncio
+async def test_a_broken_backend_does_not_stop_the_others_from_being_metered(caplog):
+    """k8s 节点掉线时 ECI 上的实例还在烧钱 —— 那边的计量与回收必须照常。"""
+
+    class _Broken(_Stub):
+        async def running_users(self):
+            raise RuntimeError("PermissionError: ca.crt")
+
+    eci, k8s_ = _Stub("eci", ["u_a", "u_b~comfyui"]), _Broken("k8s")
+    r = RoutedBackend(eci, {"pi": k8s_})
+    with caplog.at_level("ERROR"):
+        assert await r.running_users() == ["u_a", "u_b~comfyui"]
+    assert any("_Broken.running_users 失败" in rec.message for rec in caplog.records)
