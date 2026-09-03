@@ -95,6 +95,44 @@ curl --cacert /root/dsh-k8s/ca.crt -H "Authorization: Bearer $(cat /root/dsh-k8s
 docker exec dhc-server curl -s http://<某个 Pod IP>:<端口>/  # 容器里直连 Pod
 ```
 
+## 4. 用户数据: 正本在 OSS (K8S_SYNC_OSS_*)
+
+节点是公司机器, 挂不到老板账号的 NAS (跨账号跨 VPC); OSS 内网端点整个地域可达,
+不分账号不分 VPC。于是每个 Pod 多两个容器 (`workbackend.K8sBackend._sync_containers`):
+
+- `dsh-restore` 初始化容器: 起动前 `rclone sync oss:<bucket>/<prefix>/<hexid> /data`。
+  OSS 是正本 —— 本地多出来的会被删。OSS 上没这个用户就保留本地 (新用户/迁移前)。
+  拉失败不落 `/data/.dsh-restored` 标记, 同步器见不到标记不推 (半份数据不能上去)。
+- `dsh-syncer` 原生 sidecar (initContainer + restartPolicy Always): 每 `K8S_SYNC_INTERVAL_S`
+  推一次 home/workspace; 收到 TERM 时全量推 (含数据库目录)。原生 sidecar **在应用容器
+  退出之后**才收 TERM (实测: app TERM → app 退出 → syncer TERM), 所以推上去的
+  MySQL/Postgres 目录是停机后的一致状态。`terminationGracePeriodSeconds` 随之改为
+  `K8S_SYNC_GRACE_S` (180)。
+- rclone 参数: `--metadata` 保 mode/uid/gid/mtime, `--links` 保符号链接,
+  `--s3-directory-markers --create-empty-src-dirs` 保空目录 (Postgres 数据目录里有一堆)。
+- 凭据: dhc-server 把 `K8S_SYNC_OSS_ACCESS_KEY_ID/SECRET` 写成 Secret `dshwork-oss`,
+  两个同步容器 `envFrom` 取; **应用容器拿不到** (用户的智能体跑在里面)。
+  **密钥必须只对这一个 bucket 有权限**: 它落在公司机器上, 有 root 的人都读得到。
+  RAM 策略 (把 bucket 名换掉):
+
+  ```json
+  {"Version": "1", "Statement": [{"Effect": "Allow", "Action": ["oss:*"],
+    "Resource": ["acs:oss:*:*:dshcloud-work", "acs:oss:*:*:dshcloud-work/*"]}]}
+  ```
+
+已知取舍: Pod 异常死亡会丢最后一次推送之后的改动 (间隔默认 5 分钟); 起动多一步
+下载, 单容器产品秒级, Coze 那种几百 MB 要十几秒。
+
+迁移 (一次性, 在应用机上, `.env` 里已有 K8S_SYNC_OSS_* 时):
+
+```sh
+bash deploy/k8s-node/migrate_to_oss.sh          # NAS 上每个 <hexid>/ -> oss:<bucket>/<prefix>/<hexid>/
+```
+
+节点本地盘上已经有的目录 (切 OSS 之前那几天的) 用 `migrate-node-to-oss.yaml` 这个
+Job 在节点上推 (凭据取集群里的 Secret, 不经人手); 先推节点 (新)、再推 NAS (旧),
+两边都是 `--update`, 新的不被旧的盖掉。
+
 ## 退场
 
 ```sh
@@ -107,9 +145,8 @@ systemctl disable --now dsh-tunnel; rm -f /etc/systemd/system/dsh-tunnel.service
 
 ## 还没做的
 
-- 用户数据在节点本地盘 (PVC 是 local-path), 与 ECI 那边的 NAS 不是同一份:
-  同一个人在 k8s 产品和 ECI 产品里看到的是两个家目录。「個人成品」页对 k8s
-  产品是空的 (`offline_workspace_dir` 返回 None)。
+- 「個人成品」页对 k8s 产品是空的 (`offline_workspace_dir` 返回 None): 正本在 OSS,
+  应用机上还没挂 (可以 ossfs 只读挂 bucket 再指 K8S 的本地路径)。
 - 隔离是容器级 (共享内核), ECI 是每实例一台微 VM。要补的话在节点上给
   k3s 配 gVisor (`runtimeClassName`), 后端加一个字段即可。
 - 单节点, 节点挂了这些产品整体不可用 —— 回落到 ECI 只要改 `WORK_BACKEND_PRODUCTS`。

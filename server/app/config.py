@@ -262,6 +262,24 @@ K8S_DATA_PVC = _env("K8S_DATA_PVC", "dshwork-data")
 # 时 dhc-server 会自己把它写进命名空间 (与 ECI 同一份凭据); 没配就假定它是别人建
 # 好的。留空 = Pod 不带拉取凭据 (只适用于公开镜像)。
 K8S_IMAGE_PULL_SECRET = _env("K8S_IMAGE_PULL_SECRET", "dshwork-registry")
+# --- k8s: 用户数据的正本放 OSS, 节点本地盘只是工作盘 ------------------------------
+# 节点 (公司机器) 挂不到老板账号的 NAS (跨账号跨 VPC), 而 OSS 内网端点整个地域可达,
+# 不分账号不分 VPC。于是: Pod 起动前从 OSS 把 <hexid>/ 拉到本地卷 (初始化容器
+# dsh-restore), 运行中每隔一会儿把 home/workspace 推回去, 回收时全量推一次 (原生
+# sidecar dsh-syncer, 它在应用容器**退出之后**才收到 TERM, 所以数据库目录推上去的
+# 是停机后的一致状态)。配了 BUCKET + 密钥即启用; 密钥只给同步容器, 不给用户的智能体。
+# 密钥必须是**只对这一个 bucket** 有权限的 RAM 密钥: 它要落到公司机器的集群 Secret 里。
+K8S_SYNC_OSS_BUCKET = _env("K8S_SYNC_OSS_BUCKET", "")
+K8S_SYNC_OSS_PREFIX = _env("K8S_SYNC_OSS_PREFIX", "dshwork")
+K8S_SYNC_OSS_ENDPOINT = _env("K8S_SYNC_OSS_ENDPOINT", "oss-ap-southeast-1-internal.aliyuncs.com")
+K8S_SYNC_OSS_ACCESS_KEY_ID = _env("K8S_SYNC_OSS_ACCESS_KEY_ID", "")
+K8S_SYNC_OSS_ACCESS_KEY_SECRET = _env("K8S_SYNC_OSS_ACCESS_KEY_SECRET", "")
+K8S_SYNC_SECRET = _env("K8S_SYNC_SECRET", "dshwork-oss")
+K8S_SYNC_IMAGE = _env("K8S_SYNC_IMAGE", "rclone/rclone:1.75")
+K8S_SYNC_INTERVAL_S = _env_int("K8S_SYNC_INTERVAL_S", 300)
+# 回收时留给"应用退出 + 全量推送"的宽限 (秒)。Coze 一个 MySQL+ES+Milvus 停机加推送
+# 要一两分钟; 超时 kubelet 直接杀, 推了一半的目录下次起动会不一致。
+K8S_SYNC_GRACE_S = _env_int("K8S_SYNC_GRACE_S", 180)
 
 # --- ComfyUI 工作台 -----------------------------------------------------------
 # 与 dsh 工作台同构的第二种产品: 每用户一个容器, 同一套回收与计费。

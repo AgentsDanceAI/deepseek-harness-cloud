@@ -739,6 +739,67 @@ _K8S_STUCK_REASONS = {
 _RFC1123 = re.compile(r"[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*")
 
 
+#: 同步容器统一的 rclone 参数。--metadata 把 mode/uid/gid/mtime 存进对象元数据
+#: (uid 1000 的产品、可执行文件都靠它); --links 把符号链接存成 .rclonelink 再还原;
+#: 目录标记 + 建空目录: S3 语义里没有目录, 而 Postgres 数据目录里有一堆必须存在的
+#: 空目录, 少一个就起不来。/.dsh-* 是我们自己的标记文件, 不进 OSS。
+_K8S_RCLONE_FLAGS = (
+    "--metadata --links --fast-list --transfers 16 --checkers 32 "
+    "--s3-directory-markers --create-empty-src-dirs --exclude '/.dsh-*' "
+    "--stats-one-line --stats 60s"
+)
+
+#: 初始化容器: 起动前把用户目录从 OSS 拉回本地卷。OSS 是正本 —— 本地有而 OSS 没有
+#: 的东西会被删掉 (上次没推上去的改动就是这么丢的, 见 README "还没做的")。
+#: 拉失败**不落标记**, 同步器见不到标记就不推: 半份数据推上去会把正本也弄坏。
+#: OSS 上没有这个用户 (新用户, 或迁移前) 时保留本地、落标记 —— 本地就是正本。
+_K8S_RESTORE_SH = r"""set -u
+R="$DSH_SYNC_REMOTE/$DSH_HEXID"
+mkdir -p /data/home /data/workspace
+rm -f /data/.dsh-restored
+if rclone lsf "$R" --max-depth 1 2>/dev/null | grep -q .; then
+  echo "restore: $R -> /data"
+  if rclone sync "$R" /data %(flags)s; then
+    : > /data/.dsh-restored
+    echo "restore: done"
+  else
+    echo "restore: FAILED, syncer will not push until a clean restore" >&2
+  fi
+else
+  echo "restore: nothing under $R, local is authoritative"
+  : > /data/.dsh-restored
+fi
+exit 0
+"""
+
+#: 原生 sidecar: 运行中每隔 DSH_SYNC_INTERVAL 秒推 home/workspace; 收到 TERM (应用
+#: 容器已经退出) 后全量推一次再退出 —— 数据库目录只在这一刻推, 推的是停机后的
+#: 一致状态。周期推送在前台跑, TERM 来了 trap 会等它跑完再执行 (sh 在命令之间处理
+#: 信号), 所以两次推送不会重叠。
+_K8S_SYNCER_SH = r"""set -u
+R="$DSH_SYNC_REMOTE/$DSH_HEXID"
+final() {
+  if [ -e /data/.dsh-restored ]; then
+    echo "final push: /data -> $R"
+    rclone sync /data "$R" %(flags)s && echo "final push: done" || echo "final push: FAILED" >&2
+  else
+    echo "final push: skipped (no clean restore)" >&2
+  fi
+  exit 0
+}
+trap final TERM INT
+echo "syncer: up, interval ${DSH_SYNC_INTERVAL}s"
+while :; do
+  sleep "$DSH_SYNC_INTERVAL" & wait $!
+  [ -e /data/.dsh-restored ] || continue
+  for d in home workspace; do
+    [ -d "/data/$d" ] || continue
+    rclone sync "/data/$d" "$R/$d" %(flags)s || echo "push $d: FAILED" >&2
+  done
+done
+"""
+
+
 def pod_name(user_id: str) -> str:
     """Pod 名: cname 的小写形式。k8s 的对象名是 DNS-1123 (只许小写), 而 cname 为
     docker DNS 与 ECI 保留了大小写。用户 id 本身全小写 (u_ + 十六进制), 不会撞。"""
@@ -778,6 +839,7 @@ class K8sBackend(Backend):
         self._ssl: ssl.SSLContext | bool | None = None
         self._warned_no_pvc = False
         self._pull_secret_ready = False
+        self._sync_secret_ready = False
         self._stuck_reported: set[str] = set()
 
     # -- transport ----------------------------------------------------------
@@ -861,6 +923,74 @@ class K8sBackend(Backend):
             log.info("[work] 拉取凭据 Secret %s/%s 已就位 (%s)", self._ns, name, server)
         else:
             log.warning("[work] 写拉取凭据 Secret %s 失败: %s %s", name, r.status_code, r.text[:200])
+
+    @staticmethod
+    def _sync_enabled() -> bool:
+        return bool(
+            (config.K8S_SYNC_OSS_BUCKET or "").strip()
+            and config.K8S_SYNC_OSS_ACCESS_KEY_ID
+            and config.K8S_SYNC_OSS_ACCESS_KEY_SECRET
+        )
+
+    async def _ensure_sync_secret(self) -> None:
+        """OSS 凭据写成命名空间里的 Secret, 同步容器用 envFrom 取; 每个进程写一次。
+        密钥不进 Pod 清单 (清单里只有 Secret 名), 也不进应用容器的 env。"""
+        name = (config.K8S_SYNC_SECRET or "").strip()
+        if self._sync_secret_ready or not name or not self._sync_enabled():
+            return
+        remote = (
+            f"oss:{config.K8S_SYNC_OSS_BUCKET.strip()}/{(config.K8S_SYNC_OSS_PREFIX or 'dshwork').strip('/')}"
+        )
+        kv = {
+            "RCLONE_CONFIG_OSS_TYPE": "s3",
+            "RCLONE_CONFIG_OSS_PROVIDER": "Alibaba",
+            "RCLONE_CONFIG_OSS_ENDPOINT": config.K8S_SYNC_OSS_ENDPOINT,
+            "RCLONE_CONFIG_OSS_ACCESS_KEY_ID": config.K8S_SYNC_OSS_ACCESS_KEY_ID,
+            "RCLONE_CONFIG_OSS_SECRET_ACCESS_KEY": config.K8S_SYNC_OSS_ACCESS_KEY_SECRET,
+            "DSH_SYNC_REMOTE": remote,
+        }
+        body = {
+            "apiVersion": "v1",
+            "kind": "Secret",
+            "metadata": {"name": name, "namespace": self._ns},
+            "type": "Opaque",
+            "data": {k: base64.b64encode(v.encode()).decode() for k, v in kv.items()},
+        }
+        secrets = f"/api/v1/namespaces/{self._ns}/secrets"
+        r = await self._api("POST", secrets, json_body=body)
+        if r.status_code == 409:
+            r = await self._api("PUT", f"{secrets}/{name}", json_body=body)
+        if r.status_code in (200, 201):
+            self._sync_secret_ready = True
+            log.info("[work] OSS 同步凭据 Secret %s/%s 已就位 (%s)", self._ns, name, remote)
+        else:
+            log.warning("[work] 写 OSS 同步凭据 Secret %s 失败: %s %s", name, r.status_code, r.text[:200])
+
+    def _sync_containers(self, hexid: str) -> tuple[dict, dict]:
+        """(恢复初始化容器, 同步器原生 sidecar)。两个都挂用户整棵目录 (<hexid>/) 到 /data。"""
+        common = {
+            "image": config.K8S_SYNC_IMAGE,
+            "envFrom": [{"secretRef": {"name": (config.K8S_SYNC_SECRET or "").strip()}}],
+            "env": [
+                {"name": "DSH_HEXID", "value": hexid},
+                {"name": "DSH_SYNC_INTERVAL", "value": str(config.K8S_SYNC_INTERVAL_S)},
+            ],
+            "volumeMounts": [{"name": _K8S_DATA_VOLUME, "mountPath": "/data", "subPath": hexid}],
+        }
+        flags = _K8S_RCLONE_FLAGS
+        restore = {
+            "name": "dsh-restore",
+            "command": ["sh", "-c", _K8S_RESTORE_SH % {"flags": flags}],
+            **common,
+        }
+        syncer = {
+            "name": "dsh-syncer",
+            # 原生 sidecar: 在其它初始化容器之前起、在应用容器退出之后才停。
+            "restartPolicy": "Always",
+            "command": ["sh", "-c", _K8S_SYNCER_SH % {"flags": flags}],
+            **common,
+        }
+        return restore, syncer
 
     def _data_volume(self) -> dict:
         pvc = (config.K8S_DATA_PVC or "").strip()
@@ -952,11 +1082,19 @@ class K8sBackend(Backend):
         volumes = [self._data_volume()]
         if init_containers or seeds or any(sc.seeds for sc in sidecars):
             volumes.append({"name": _SEED_VOLUME, "emptyDir": {}})
+        # OSS 同步: 恢复容器排在**所有**初始化容器之前 (产品的初始化容器可能往用户目录
+        # 写预置配置, 得先有正本再写); 同步器紧随其后起, 免得先推了一份空的。
+        sync = self._sync_enabled()
+        if sync:
+            restore, syncer = self._sync_containers(hexid)
+            inits = [restore, syncer, *inits]
         spec: dict = {
             # 与 ECI 同一条规则: 栈产品 Always (应用容器在中间件就绪前会崩, 靠重启
             # 拉起来), 单容器 Never (它退出就是真的死了, 终态由 inspect 清掉重建)。
             "restartPolicy": "Always" if sidecars else "Never",
-            "terminationGracePeriodSeconds": 5,
+            # 5 秒: 工作台没有要优雅收尾的东西 (状态在卷上)。开了 OSS 同步就不同了:
+            # 应用退出 + 全量推送要在这段时间里完成, 超时被杀等于推了一半。
+            "terminationGracePeriodSeconds": config.K8S_SYNC_GRACE_S if sync else 5,
             # 工作台里跑的是用户的智能体 —— 不给它集群凭据, 也不注入服务发现变量。
             "automountServiceAccountToken": False,
             "enableServiceLinks": False,
@@ -1086,6 +1224,7 @@ class K8sBackend(Backend):
             run_as_user=run_as_user,
         )
         await self._ensure_pull_secret()
+        await self._ensure_sync_secret()
         r = await self._api("POST", self._pods, json_body=body)
         if r.status_code == 409:
             # 同名 Pod 还在 —— 多半是上一台正在删 (名字要等它走完才空出来)。

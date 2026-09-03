@@ -665,6 +665,109 @@ def test_token_can_come_from_a_file(monkeypatch, tmp_path):
     assert K8sBackend()._token() == "secret-token"
 
 
+# --- OSS 同步: 正本在 OSS, 本地盘只是工作盘 ------------------------------------
+
+
+@pytest.fixture()
+def oss(monkeypatch):
+    monkeypatch.setattr(config, "K8S_SYNC_OSS_BUCKET", "dshcloud-work")
+    monkeypatch.setattr(config, "K8S_SYNC_OSS_PREFIX", "dshwork")
+    monkeypatch.setattr(config, "K8S_SYNC_OSS_ENDPOINT", "oss-ap-southeast-1-internal.aliyuncs.com")
+    monkeypatch.setattr(config, "K8S_SYNC_OSS_ACCESS_KEY_ID", "AKID")
+    monkeypatch.setattr(config, "K8S_SYNC_OSS_ACCESS_KEY_SECRET", "SK")
+    monkeypatch.setattr(config, "K8S_SYNC_SECRET", "dshwork-oss")
+    monkeypatch.setattr(config, "K8S_SYNC_IMAGE", "rclone/rclone:1.75")
+    monkeypatch.setattr(config, "K8S_SYNC_INTERVAL_S", 300)
+    monkeypatch.setattr(config, "K8S_SYNC_GRACE_S", 180)
+
+
+@pytest.mark.asyncio
+async def test_without_oss_config_no_sync_containers_and_short_grace(k8s, monkeypatch):
+    monkeypatch.setattr(config, "K8S_SYNC_OSS_BUCKET", "")
+    b, fake = k8s
+    await _create(b)
+    spec = fake.created()[0]["spec"]
+    assert "initContainers" not in spec
+    assert spec["terminationGracePeriodSeconds"] == 5
+    assert fake.secret_writes() == []
+
+
+@pytest.mark.asyncio
+async def test_sync_adds_restore_then_syncer_before_product_inits(k8s, oss):
+    """恢复容器排在所有初始化容器之前 (产品的初始化容器可能往用户目录写东西),
+    同步器紧随其后 (原生 sidecar), 免得先推一份空的上去。"""
+    b, fake = k8s
+    ic = (products.InitContainer(name="seed", image_ref="x/assets:1", cmd=("cp", "-r", "/a/.", "/seed/")),)
+    await _create(b, "u_abc~coze", init_containers=ic, seeds=(("", "/seed"),))
+    spec = fake.created()[0]["spec"]
+    names = [c["name"] for c in spec["initContainers"]]
+    assert names == ["dsh-restore", "dsh-syncer", "seed"]
+    restore, syncer = spec["initContainers"][:2]
+    assert "restartPolicy" not in restore
+    assert syncer["restartPolicy"] == "Always", "同步器必须是原生 sidecar: 应用退出之后才收 TERM"
+    assert spec["terminationGracePeriodSeconds"] == 180, "全量推送要时间, 5 秒会被杀在半路"
+
+
+@pytest.mark.asyncio
+async def test_sync_containers_mount_the_users_whole_tree_and_only_they_get_the_key(k8s, oss):
+    b, fake = k8s
+    await _create(b, "u_abc~pi")
+    spec = fake.created()[0]["spec"]
+    for c in spec["initContainers"]:
+        assert c["image"] == "rclone/rclone:1.75"
+        assert c["volumeMounts"] == [{"name": "dshwork-data", "mountPath": "/data", "subPath": "uabcpi"}]
+        assert c["envFrom"] == [{"secretRef": {"name": "dshwork-oss"}}]
+        assert {"name": "DSH_HEXID", "value": "uabcpi"} in c["env"]
+    # 用户的智能体跑在 app 容器里 —— 它拿不到 OSS 密钥, 否则能读别人的目录
+    app = spec["containers"][0]
+    assert "envFrom" not in app
+    assert not any(e["name"].startswith("RCLONE") for e in app["env"])
+
+
+@pytest.mark.asyncio
+async def test_sync_secret_holds_rclone_config_and_is_written_once(k8s, oss):
+    import base64
+
+    b, fake = k8s
+    await _create(b, "u_a~pi")
+    await _create(b, "u_b~pi")
+    writes = [p for _, p in fake.secret_writes()]
+    assert writes == ["/api/v1/namespaces/dsh/secrets"], "每个进程只写一次"
+    sec = fake.secrets["dshwork-oss"]
+    kv = {k: base64.b64decode(v).decode() for k, v in sec["data"].items()}
+    assert kv["RCLONE_CONFIG_OSS_TYPE"] == "s3" and kv["RCLONE_CONFIG_OSS_PROVIDER"] == "Alibaba"
+    assert kv["RCLONE_CONFIG_OSS_ENDPOINT"] == "oss-ap-southeast-1-internal.aliyuncs.com"
+    assert (
+        kv["RCLONE_CONFIG_OSS_ACCESS_KEY_ID"] == "AKID" and kv["RCLONE_CONFIG_OSS_SECRET_ACCESS_KEY"] == "SK"
+    )
+    assert kv["DSH_SYNC_REMOTE"] == "oss:dshcloud-work/dshwork"
+    # 密钥不进 Pod 清单
+    assert "SK" not in json.dumps(fake.created()[0])
+
+
+@pytest.mark.asyncio
+async def test_sync_scripts_guard_against_pushing_a_half_restore(k8s, oss):
+    """拉失败不落标记, 同步器见不到标记就不推 —— 半份数据推上去会把正本弄坏。"""
+    b, fake = k8s
+    await _create(b)
+    restore, syncer = fake.created()[0]["spec"]["initContainers"][:2]
+    r = restore["command"][2]
+    s_ = syncer["command"][2]
+    assert "rm -f /data/.dsh-restored" in r and ": > /data/.dsh-restored" in r
+    assert r.index("rclone sync") < r.index(": > /data/.dsh-restored"), "标记要在拉成功之后"
+    assert "local is authoritative" in r, "OSS 上没有这个用户时本地就是正本, 也要落标记"
+    assert "[ -e /data/.dsh-restored ] || continue" in s_
+    assert "trap final TERM" in s_ and 'rclone sync /data "$R"' in s_, "TERM 时全量推"
+    for flags in (
+        "--metadata",
+        "--links",
+        "--s3-directory-markers",
+        "--create-empty-src-dirs",
+        "--exclude '/.dsh-*'",
+    ):
+        assert flags in r and flags in s_, flags
+
+
 # --- 按产品分派 ---------------------------------------------------------------
 
 

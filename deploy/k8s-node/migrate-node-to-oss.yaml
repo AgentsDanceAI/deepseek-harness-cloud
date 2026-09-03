@@ -1,0 +1,42 @@
+# 一次性 Job (在节点上 `k3s kubectl apply -f migrate-node-to-oss.yaml`): 把节点本地盘
+# 上 PVC 里已有的用户目录推到 OSS。凭据用集群里的 Secret dshwork-oss (dhc-server 写的),
+# 密钥不经人手。rclone copy --update: OSS 上更新的文件不被旧的盖掉。
+# 跑完看日志: k3s kubectl -n dsh logs job/migrate-node-to-oss ; 然后 delete job。
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: migrate-node-to-oss
+  namespace: dsh
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 3600
+  template:
+    spec:
+      restartPolicy: Never
+      resources: {requests: {cpu: 250m, memory: 256Mi}, limits: {cpu: "2", memory: 1Gi}}
+      volumes:
+        - name: storage
+          hostPath: {path: /mnt/k3s/storage, type: Directory}
+      containers:
+        - name: rclone
+          image: rclone/rclone:1.75
+          envFrom: [{secretRef: {name: dshwork-oss}}]
+          volumeMounts: [{name: storage, mountPath: /storage, readOnly: true}]
+          command:
+            - sh
+            - -c
+            - |
+              set -u
+              SRC=$(ls -d /storage/pvc-*_dsh_dshwork-data | head -1) || { echo "no PVC dir"; exit 1; }
+              echo "==> $SRC -> $DSH_SYNC_REMOTE"
+              n=0
+              for d in "$SRC"/*/; do
+                h=$(basename "$d")
+                case "$h" in testhex|lost+found|.*) continue ;; esac
+                echo "--- $h"
+                rclone copy "$d" "$DSH_SYNC_REMOTE/$h" --metadata --links --fast-list --transfers 16 --checkers 32 \
+                  --s3-directory-markers --create-empty-src-dirs --exclude '/.dsh-*' --update --stats-one-line --stats 30s \
+                  || echo "!! $h failed" >&2
+                n=$((n + 1))
+              done
+              echo "==> pushed $n user dirs"
