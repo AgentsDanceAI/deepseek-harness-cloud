@@ -20,9 +20,11 @@ metadata:
 spec:
   hard:
     requests.cpu: "10"
-    requests.memory: 48Gi
+    # 节点给 Pod 的硬顶是 ~58 GiB (system-reserved); 配额贴着它放。48Gi 时 QA 账号
+    # 一口气开 12 个产品就满了 (Coze 16 + 其余各 1-4), 第 13 个吃到"名额已满"。
+    requests.memory: 56Gi
     limits.cpu: "40"
-    limits.memory: 48Gi
+    limits.memory: 56Gi
     pods: "60"
 ---
 # 用户数据卷 (K8S_DATA_PVC)。local-path 供应器把它放在 <data-dir>/storage 下;
