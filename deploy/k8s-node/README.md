@@ -26,7 +26,13 @@ k3s kubectl apply -f manifests.yaml
 - **`INSTALL_K3S_SYMLINK=skip`**: 机器上别人已经有 /usr/bin/kubectl 与 ctr,
   安装脚本会往 /usr/local/bin 放同名软链, PATH 里它排前面 —— 等于换掉别人的命令。
 - **`system-reserved`**: 共享机上这是硬保险 —— kubelet 把 Pod 总量卡在
-  capacity 减去它 (kubepods cgroup), 配额 (manifests.yaml) 只是第二道。
+  capacity 减去它 (kubepods cgroup), 配额 (manifests.yaml) 只是第二道。改它要
+  `systemctl restart k3s` (容器不受影响, 但别在拉镜像时重启, 拉取会被打断)。
+- **镜像预拉**: 全切之前先把 30 个镜像拉到节点 (一个跑 `sh -c exit 0` 的多容器
+  Pod 就行, 见 git 历史里的 prewarm-images), 串行拉约 20 分钟; 否则第一个打开
+  Coze 的人要等它拉 5 GB。
+- **`WORK_PROXY_CIDR=<TUNNEL_APP_IP>/32`**: Pod 看到的来源永远是隧道地址 (宿主与
+  Caddy 容器都被 MASQUERADE 成它), OpenClaw 那类只认信任代理的产品按这个配。
 - kubelet 会把 `vm.overcommit_memory` 设成 1、`kernel.panic` 设成 10 (它自己的
   内核参数清单)。装之前看一眼现值, 别在一台 `panic_on_oops=0` 的机器上惊讶。
 

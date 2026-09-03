@@ -4,7 +4,7 @@
 # ServiceAccount (dhc-server 拿它的 token 调 API)。
 #
 # 配额是共享机上的保险: kubelet 的 system-reserved (k3s-config.yaml) 已经把
-# Pod 总量硬卡在 ~6 CPU / ~27 GiB, 这里再按"请求"限一道, 超了创建直接 403,
+# Pod 总量硬卡在 ~10 CPU / ~58 GiB, 这里再按"请求"限一道, 超了创建直接 403,
 # dhc-server 把它翻成"名额已满"给用户看 (workbackend.K8sBackend.create)。
 # CPU 上限给得宽 (24): 工作台的 request 只有上限的 1/4, 大多数时间在等模型。
 apiVersion: v1
@@ -19,11 +19,11 @@ metadata:
   namespace: dsh
 spec:
   hard:
-    requests.cpu: "6"
-    requests.memory: 24Gi
-    limits.cpu: "24"
-    limits.memory: 24Gi
-    pods: "40"
+    requests.cpu: "10"
+    requests.memory: 48Gi
+    limits.cpu: "40"
+    limits.memory: 48Gi
+    pods: "60"
 ---
 # 用户数据卷 (K8S_DATA_PVC)。local-path 供应器把它放在 <data-dir>/storage 下;
 # 每个用户在卷上有 <hexid>/home 与 <hexid>/workspace 两个子路径, 由 kubelet 按需

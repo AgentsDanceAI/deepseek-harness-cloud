@@ -15,9 +15,11 @@ disable:
 disable-network-policy: true
 disable-helm-controller: true
 kubelet-arg:
-  # Shared machine: leave 10 CPU / 96 GiB to the existing services. Pods get ~6 CPU / ~27 GiB,
-  # enforced as a hard cap on the kubepods cgroup, whatever the namespace quotas say.
-  - "system-reserved=cpu=10,memory=96Gi"
+  # Shared machine: leave 6 CPU / 64 GiB to the existing services (they use ~35 GiB).
+  # Pods get ~10 CPU / ~58 GiB, enforced as a hard cap on the kubepods cgroup, whatever
+  # the namespace quotas say. (First cut was 96Gi reserved = 27 GiB for pods; Coze alone
+  # is 16 GiB, so three stack products filled it.)
+  - "system-reserved=cpu=6,memory=64Gi"
   - "eviction-hard=memory.available<1Gi,nodefs.available<10%"
   - "max-pods=60"
   # kernel 5.10 / cgroup v1 host: kubelet >= 1.36 refuses cgroup v1 unless told otherwise

@@ -67,6 +67,8 @@ class WorkInfo:
 class Backend(abc.ABC):
     #: docker can stop-and-resume; ECI cannot (create/delete only)
     resumable: bool = True
+    #: 启动等待页上那句"通常需要多久", 按后端说实话 (docker 是 stop/start)。
+    boot_hint: str = "5–20 秒"
 
     @abc.abstractmethod
     async def inspect(self, user_id: str) -> WorkInfo | None: ...
@@ -325,6 +327,7 @@ class EciBackend(Backend):
     """
 
     resumable = False
+    boot_hint = "20–40 秒"  # 每次都是新实例: 调度 + 建 EIP + 挂缓存 ≈ 25 秒起
 
     def __init__(self) -> None:
         self._ak = config.ECI_ACCESS_KEY_ID
@@ -760,6 +763,7 @@ class K8sBackend(Backend):
     """
 
     resumable = False
+    boot_hint = "5–15 秒"  # 镜像在节点上, Pod 一秒起, 剩下是应用自己的启动
 
     def __init__(self) -> None:
         self._ns = config.K8S_NAMESPACE or "dsh"
@@ -1142,6 +1146,7 @@ class RoutedBackend(Backend):
         self.default = default
         self.by_product = dict(by_product)
         self.resumable = default.resumable
+        self.boot_hint = default.boot_hint
 
     def _pick(self, user_id: str) -> Backend:
         from .products import split_key  # 延迟导入: products 不依赖这里, 但保持单向

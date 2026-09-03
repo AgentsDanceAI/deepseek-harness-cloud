@@ -1412,7 +1412,7 @@ def _boot_wait_hint() -> str:
     docker 使用 stop/start，卷和镜像保留在本机；ECI 每次创建新实例，通常需要
     更长的等待时间。用户界面的提示应按后端区分。
     """
-    return "20–40 秒" if not backend().resumable else "5–20 秒"
+    return backend().boot_hint
 
 
 @router.get("/work/starting")

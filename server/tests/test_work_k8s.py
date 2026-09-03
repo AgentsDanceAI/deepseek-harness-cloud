@@ -698,6 +698,14 @@ async def test_routed_image_identity_is_asked_of_the_products_own_backend():
     assert eci.for_product("pi") is eci  # 单后端: 自己就是答案
 
 
+def test_boot_hint_is_honest_per_backend():
+    """启动等待页那句话: k8s 节点上镜像在本地, 别再说 20–40 秒吓人。"""
+    assert K8sBackend.boot_hint == "5–15 秒"
+    assert workbackend.EciBackend.boot_hint == "20–40 秒"
+    r = RoutedBackend(_Stub("eci"), {"pi": K8sBackend()})
+    assert r.boot_hint == _Stub.boot_hint == "5–20 秒"  # 无键的问题按默认后端答
+
+
 def test_routed_keyless_questions_go_to_the_default():
     eci, k8s_ = _Stub("eci"), _Stub("k8s")
     k8s_.resumable = False
