@@ -10,7 +10,15 @@
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"; repo="$(cd "$here/../.." && pwd)"
 ENVFILE="${ENVFILE:-$repo/deploy/prod/.env}"
-if [ -f "$ENVFILE" ]; then set -a; . "$ENVFILE"; set +a; fi
+# **不要 source .env**: 它不是 shell 语法 (有带空格不加引号的值), source 会当命令执行。
+# 只按行取需要的几个键, 去掉两头的引号。
+envget() { grep -E "^$1=" "$ENVFILE" 2>/dev/null | tail -1 | cut -d= -f2- | sed -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'$//"; }
+K8S_SYNC_OSS_BUCKET="${K8S_SYNC_OSS_BUCKET:-$(envget K8S_SYNC_OSS_BUCKET)}"
+K8S_SYNC_OSS_PREFIX="${K8S_SYNC_OSS_PREFIX:-$(envget K8S_SYNC_OSS_PREFIX)}"
+K8S_SYNC_OSS_ENDPOINT="${K8S_SYNC_OSS_ENDPOINT:-$(envget K8S_SYNC_OSS_ENDPOINT)}"
+K8S_SYNC_OSS_ACCESS_KEY_ID="${K8S_SYNC_OSS_ACCESS_KEY_ID:-$(envget K8S_SYNC_OSS_ACCESS_KEY_ID)}"
+K8S_SYNC_OSS_ACCESS_KEY_SECRET="${K8S_SYNC_OSS_ACCESS_KEY_SECRET:-$(envget K8S_SYNC_OSS_ACCESS_KEY_SECRET)}"
+WORK_NAS_LOCAL_MOUNT_HOST="${WORK_NAS_LOCAL_MOUNT_HOST:-$(envget WORK_NAS_LOCAL_MOUNT_HOST)}"
 : "${K8S_SYNC_OSS_BUCKET:?K8S_SYNC_OSS_BUCKET 未配置}"
 : "${K8S_SYNC_OSS_ACCESS_KEY_ID:?}"; : "${K8S_SYNC_OSS_ACCESS_KEY_SECRET:?}"
 export RCLONE_CONFIG_OSS_TYPE=s3 RCLONE_CONFIG_OSS_PROVIDER=Alibaba

@@ -947,6 +947,10 @@ class K8sBackend(Backend):
             "RCLONE_CONFIG_OSS_ENDPOINT": config.K8S_SYNC_OSS_ENDPOINT,
             "RCLONE_CONFIG_OSS_ACCESS_KEY_ID": config.K8S_SYNC_OSS_ACCESS_KEY_ID,
             "RCLONE_CONFIG_OSS_SECRET_ACCESS_KEY": config.K8S_SYNC_OSS_ACCESS_KEY_SECRET,
+            # 密钥只对桶内对象有权限, 查桶 (HeadBucket) 会被拒 —— rclone 于是以为桶不存在,
+            # 去 CreateBucket, 撞 409 BucketAlreadyExists, 一个文件也传不上去 (2026-09-03
+            # 首次联调)。跳过查桶/建桶。
+            "RCLONE_CONFIG_OSS_NO_CHECK_BUCKET": "true",
             "DSH_SYNC_REMOTE": remote,
         }
         body = {

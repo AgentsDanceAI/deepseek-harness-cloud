@@ -741,6 +741,8 @@ async def test_sync_secret_holds_rclone_config_and_is_written_once(k8s, oss):
         kv["RCLONE_CONFIG_OSS_ACCESS_KEY_ID"] == "AKID" and kv["RCLONE_CONFIG_OSS_SECRET_ACCESS_KEY"] == "SK"
     )
     assert kv["DSH_SYNC_REMOTE"] == "oss:dshcloud-work/dshwork"
+    # 只限桶内的密钥查不了桶, 不跳过 rclone 会去建桶然后 409, 一个文件都传不上去
+    assert kv["RCLONE_CONFIG_OSS_NO_CHECK_BUCKET"] == "true"
     # 密钥不进 Pod 清单
     assert "SK" not in json.dumps(fake.created()[0])
 
