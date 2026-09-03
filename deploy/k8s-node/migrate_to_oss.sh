@@ -12,7 +12,9 @@ here="$(cd "$(dirname "$0")" && pwd)"; repo="$(cd "$here/../.." && pwd)"
 ENVFILE="${ENVFILE:-$repo/deploy/prod/.env}"
 # **不要 source .env**: 它不是 shell 语法 (有带空格不加引号的值), source 会当命令执行。
 # 只按行取需要的几个键, 去掉两头的引号。
-envget() { grep -E "^$1=" "$ENVFILE" 2>/dev/null | tail -1 | cut -d= -f2- | sed -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'$//"; }
+# `|| true`: 键不存在时 grep 返回 1, 在 set -e + pipefail 下命令替换失败会让**赋值本身**
+# 退出脚本 —— 首次跑就是这么在 K8S_SYNC_OSS_PREFIX (没配, 走默认) 上静默退出的。
+envget() { { grep -E "^$1=" "$ENVFILE" 2>/dev/null || true; } | tail -1 | cut -d= -f2- | sed -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'$//"; }
 K8S_SYNC_OSS_BUCKET="${K8S_SYNC_OSS_BUCKET:-$(envget K8S_SYNC_OSS_BUCKET)}"
 K8S_SYNC_OSS_PREFIX="${K8S_SYNC_OSS_PREFIX:-$(envget K8S_SYNC_OSS_PREFIX)}"
 K8S_SYNC_OSS_ENDPOINT="${K8S_SYNC_OSS_ENDPOINT:-$(envget K8S_SYNC_OSS_ENDPOINT)}"
