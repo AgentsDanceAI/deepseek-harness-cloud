@@ -79,11 +79,13 @@ chmod 0755 /root/dsh-k8s; chown 10001:10001 /root/dsh-k8s/token /root/dsh-k8s/ca
 
 ```
 K8S_API_URL=https://<TUNNEL_NODE_IP>:6443
-WORK_BACKEND_PRODUCTS=pi=k8s
+WORK_BACKEND=k8s                  # 全部产品; 或保持 eci 并用下一行只切几个
+# WORK_BACKEND_PRODUCTS=pi=k8s,openmanus=k8s
+WORK_PROXY_CIDR=<TUNNEL_APP_IP>/32      # Pod 看到的代理来源是隧道地址
 ```
 
 `K8S_TOKEN_FILE` / `K8S_CA_FILE` 在 compose 里给定; `K8S_NAMESPACE` / `K8S_DATA_PVC`
-的默认值与 manifests.yaml 一致。先只切一个产品, 看一天再加。
+的默认值与 manifests.yaml 一致。2026-09-03 先切 pi 试了一轮, 当天全切。
 
 验证 (应用机上):
 
