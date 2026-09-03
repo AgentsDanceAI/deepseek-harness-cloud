@@ -2554,8 +2554,9 @@ def _pi_boot() -> str:
     开机三件事, 都是**每次**做 (镜像文件系统每次开机都是新的, 而配置里有该用户
     的网关令牌, 每次建实例都会换):
     · ~/.pi/agent/models.json —— 自定义提供方 `dsh` 指向我们的网关, 走
-      openai-completions; apiKey 写成 "$OPENAI_API_KEY" 让它从环境变量取
-      (它文档支持的写法, 令牌不落盘)。型号列表由我们钉 —— 网关只放行在售目录;
+      **openai-responses** (网关的 /llm/v1/responses, Codex 也走这面); apiKey
+      写成 "$DSH_GATEWAY_KEY" 让它从环境变量取 (它文档支持的写法, 令牌不落盘)。
+      型号列表由我们钉 —— 网关只放行在售目录;
     · ~/.pi/agent/settings.json —— 默认提供方/型号, 遥测与分析关掉;
     · /workspace 建成 git 仓库 (它的 Git 面板要有仓库才有东西看)。
     /root 与 /workspace 都在 NAS 上: pi 的会话 (~/.pi/agent/sessions) 和
@@ -2590,19 +2591,22 @@ def _pi_boot() -> str:
             "providers": {
                 "dsh": {
                     "baseUrl": f"{gateway}/llm/v1",
-                    "api": "openai-completions",
+                    # Responses 面, 不是 chat/completions。2026-09-03 上游对 chat 面
+                    # 开始拒 "工具 + reasoning_effort" 的组合 (gpt-5.6-luna 回
+                    # "Function tools with reasoning_effort are not supported ...
+                    # use /v1/responses"), 而 pi 的每条消息都带工具 —— 思考一开就
+                    # 全废。Responses 面原生带 reasoning, 网关透传 (Codex 早就在走)。
+                    "api": "openai-responses",
                     # **不能叫 OPENAI_API_KEY**: pi 一看到这个变量就把内置的 OpenAI
                     # 提供方也点亮, 还排在前面 —— 探针实测界面选中的是 gpt-5.5,
                     # 拿我们的网关令牌去打 api.openai.com, 回 401 invalid_jwt。
                     # 令牌换个只有我们认的名字, 它就只剩 dsh 这一个提供方。
                     "apiKey": "$DSH_GATEWAY_KEY",
-                    # 网关是 OpenAI 兼容面: reasoning_effort 原样透传 (20 个型号实测
-                    # 都吃), 流式带 usage 也实测通。
+                    # 思考等级走 Responses 的 reasoning.effort (20 个型号实测都吃),
+                    # 流式带 usage 也实测通。
                     "compat": {
                         "supportsReasoningEffort": True,
-                        "thinkingFormat": "reasoning_effort",
                         "supportsUsageInStreaming": True,
-                        "maxTokensField": "max_tokens",
                     },
                     "models": entries,
                 }

@@ -340,7 +340,9 @@ def test_pi_slot_is_wired_to_the_gateway(monkeypatch):
     assert prod.ready_path == "/api/health"
 
     boot = products.boot_script("pi")
-    assert '"api": "openai-completions"' in boot
+    # Responses 面: chat 面上游 2026-09-03 起拒 "工具 + reasoning_effort", pi 每条消息都带工具
+    assert '"api": "openai-responses"' in boot
+    assert '"api": "openai-completions"' not in boot
     assert '"apiKey": "$DSH_GATEWAY_KEY"' in boot, "令牌要从环境变量取, 不落盘"
     assert "/llm/v1" in boot
     # 型号必须在售 —— 网关只放行目录里的
@@ -404,7 +406,7 @@ def test_pi_gets_the_whole_catalog_with_reasoning(monkeypatch):
         assert m["reasoning"] is bool(model_catalog.capabilities(m["id"])["reasoning"]), m["id"]
     assert sum(m["reasoning"] for m in prov["models"]) >= len(prov["models"]) - 2, "思考开关几乎全开"
     assert prov["compat"]["supportsReasoningEffort"] is True
-    assert prov["compat"]["thinkingFormat"] == "reasoning_effort"
+    assert "thinkingFormat" not in prov["compat"], "那是 chat 面的旋钮, Responses 面原生带 reasoning"
     # cost 一律 0: 它会在状态栏按这个算美元, 而用户付的是积分, 那个数只会误导
     assert all(m["cost"]["input"] == 0 and m["cost"]["output"] == 0 for m in prov["models"])
 
