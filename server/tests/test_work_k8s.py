@@ -663,11 +663,22 @@ async def test_routed_backend_sends_each_product_to_its_own_backend():
     r = RoutedBackend(eci, {"pi": k8s_})
     await r.create("u_a~pi", boot="", env={}, boot_fp="", image="")
     await r.inspect("u_a~pi")
+    await r.start("u_a~comfyui")  # 默认产品/没派出去的产品走默认后端
+    assert k8s_.seen == [("create", "u_a~pi"), ("inspect", "u_a~pi")]
+    assert eci.seen == [("start", "u_a~comfyui")]
+
+
+@pytest.mark.asyncio
+async def test_routed_reclaim_reaches_every_backend():
+    """把产品从 ECI 切到 k8s 的那一刻, ECI 上还有它的实例在跑: 回收器数得到它
+    (running_users 是并集), 但只删 k8s 那边就等于删了个不存在的 Pod —— ECI 那台
+    按秒计费到天荒地老。所以 release/destroy 问遍所有后端, 该产品的那个排最前。"""
+    eci, k8s_ = _Stub("eci"), _Stub("k8s")
+    r = RoutedBackend(eci, {"pi": k8s_, "openmanus": k8s_})
     await r.release("u_a~pi")
-    await r.destroy("u_a")  # 默认产品 (没有 ~) 走默认后端
-    await r.start("u_a~comfyui")
-    assert k8s_.seen == [("create", "u_a~pi"), ("inspect", "u_a~pi"), ("release", "u_a~pi")]
-    assert eci.seen == [("destroy", "u_a"), ("start", "u_a~comfyui")]
+    await r.destroy("u_b")
+    assert k8s_.seen == [("release", "u_a~pi"), ("destroy", "u_b")]
+    assert eci.seen == [("release", "u_a~pi"), ("destroy", "u_b")]
 
 
 @pytest.mark.asyncio

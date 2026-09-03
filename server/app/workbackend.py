@@ -1166,19 +1166,29 @@ class RoutedBackend(Backend):
     async def start(self, user_id: str) -> None:
         await self._pick(user_id).start(user_id)
 
+    def _all(self, first: Backend | None = None) -> list[Backend]:
+        """每个后端一次, 不重复; first 排最前。"""
+        out: list[Backend] = []
+        for b in [first, self.default, *self.by_product.values()]:
+            if b is not None and all(b is not o for o in out):
+                out.append(b)
+        return out
+
     async def release(self, user_id: str) -> None:
-        await self._pick(user_id).release(user_id)
+        # 回收要**问遍所有后端**, 不只是该产品现在派给的那个: 把一个产品从 ECI
+        # 切到 k8s 的那一刻, 它在 ECI 上还有实例在跑 —— running_users 数得到它
+        # (并集), 回收器于是来 release, 只删 k8s 那边等于删了个不存在的 Pod,
+        # ECI 那台按秒计费到天荒地老。删不存在的东西在每个后端都是空操作。
+        for b in self._all(self._pick(user_id)):
+            await b.release(user_id)
 
     async def destroy(self, user_id: str) -> None:
-        await self._pick(user_id).destroy(user_id)
+        for b in self._all(self._pick(user_id)):
+            await b.destroy(user_id)
 
     async def running_users(self) -> list[str]:
         users: list[str] = []
-        seen: set[int] = set()
-        for b in [self.default, *self.by_product.values()]:
-            if id(b) in seen:
-                continue
-            seen.add(id(b))
+        for b in self._all():
             users.extend(await b.running_users())
         return list(dict.fromkeys(users))
 
