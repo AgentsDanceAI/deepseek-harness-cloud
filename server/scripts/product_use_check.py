@@ -106,6 +106,16 @@ out = pathlib.Path("/work/out"); out.mkdir(parents=True, exist_ok=True)
 results = []
 
 
+# 标题与正文开头。页面正在跳转的那一瞬读它们会抛 Execution context was destroyed
+# —— 热节点 (k8s) 上 Pod 一秒起来, 启动页转跳快到正好撞上这一读, 2026-09-03 首验
+# 就这么把一次 5 秒的启动误报成"动不了"。抛了就当"还没稳", 下一轮再看。
+def _peek(page):
+    try:
+        return page.title() or "", page.content()[:2000] or ""
+    except Exception:
+        return "", ""
+
+
 # 冷启动: 我们自己的启动页会轮询, 等它跳走。
 def wait_started(page, url):
     # 两种"还没起来"长得完全不一样, 都要等:
@@ -115,14 +125,15 @@ def wait_started(page, url):
     #    然后报"点不动", 把一次冷启动误判成产品坏了 (刚为此白跑一轮)。
     # 5.8GB 的镜像就算命中缓存也要几分钟, 所以给到 6 分钟。
     for i in range(180):
-        if "502" in (page.title() or "") or "Bad Gateway" in (page.content()[:2000] or ""):
+        title, head = _peek(page)
+        if "502" in title or "Bad Gateway" in head:
             page.wait_for_timeout(4000)
             try:
                 page.goto(url, timeout=60000, wait_until="domcontentloaded")
             except Exception:
                 pass
             continue
-        if "/work/starting" not in page.url and "启动中" not in page.title():
+        if "/work/starting" not in page.url and "启动中" not in title and (title or head):
             return
         page.wait_for_timeout(2000)
 
