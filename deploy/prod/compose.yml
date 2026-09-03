@@ -66,9 +66,14 @@ services:
       # list and open a user's files while their container is asleep, which is
       # most of the time.
       WORK_VOLUME_ROOT: /hostvolumes
+      # k8s 后端 (deploy/k8s-node/README.md): 凭据从宿主 /root/dsh-k8s 只读挂进来。
+      # K8S_API_URL 留空时这两个文件不会被读, 没配 k8s 的机器上目录不存在也无妨。
+      K8S_TOKEN_FILE: /run/dsh-k8s/token
+      K8S_CA_FILE: /run/dsh-k8s/ca.crt
     volumes:
       - dhc-data:/app/data
       - ../../legal:/srv/operator-legal:ro
+      - ${K8S_CRED_DIR:-/root/dsh-k8s}:/run/dsh-k8s:ro
       # Read-only, and no new authority: dhc-server already drives container
       # creation through the socket proxy, which can bind-mount anything.
       # The path is the HOST's docker volume root and differs per machine —

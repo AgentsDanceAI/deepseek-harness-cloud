@@ -342,7 +342,9 @@ async def _image_is_stale(info: workbackend.WorkInfo, product: products.Product)
     is deliberately *not* stale: tearing a working workspace down over a failed
     lookup trades a cosmetic staleness for a real outage.
     """
-    want = await backend().current_image_id(product.image_ref or product.image)
+    # 按产品问它自己的后端 (WORK_BACKEND_PRODUCTS 可以把产品派给不同后端):
+    # docker 答镜像 ID、别的后端答引用本身, 问错后端就是永远"陈旧"、永远重建。
+    want = await backend().for_product(product.id).current_image_id(product.image_ref or product.image)
     return bool(want) and bool(info.image_id) and want != info.image_id
 
 

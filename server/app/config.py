@@ -233,9 +233,35 @@ DOCKER_PROXY_URL = _env("DOCKER_PROXY_URL", "http://dhc-docker-proxy:2375")
 #   eci     阿里云弹性容器实例。**没有"停止但保留"**, 闲置回收就是删除, 因此
 #           WORK_NAS_* 必须配上, 否则用户的文件和会话会随回收消失。
 WORK_BACKEND = _env("WORK_BACKEND", "docker")
+#   k8s     一台常驻节点上的 Kubernetes (k3s)。与 ECI 同为"创建/删除"语义, 但节点
+#           是热的 —— 镜像已在本地, 没有机房调度那 25 秒, Pod 起来就是应用自己
+#           的启动时间 (实测 nginx 1.7 秒)。用户文件落在 K8S_DATA_PVC 那个卷上。
+#           节点怎么搭见 deploy/k8s-node/README.md。
+# 按产品指定后端, 形如 "pi=k8s,openmanus=k8s"; 没列的产品走 WORK_BACKEND。
+# 工作台键里带产品 id (products.wskey), 所以每个调用都能自己找到该去哪。
+WORK_BACKEND_PRODUCTS = _env("WORK_BACKEND_PRODUCTS", "")
 # ECI 拉的是仓库引用 (ghcr.io/... 或 ACR), 本机 docker 拉的是本地 tag ——
 # 两者不是一回事, 所以分开配。留空则回落到 WORK_IMAGE。
 WORK_IMAGE_REF = _env("WORK_IMAGE_REF", "")
+
+# --- k8s 后端 ---------------------------------------------------------------
+# dhc-server 直接调 API server (Bearer token, 只给命名空间内 pods 的权限)。
+# 应用机与节点不在一个 VPC 时靠一条隧道: API_URL 与 Pod IP 都经隧道可达。
+K8S_API_URL = _env("K8S_API_URL", "")
+# 二选一: 直接给 token, 或给一个文件路径 (compose 里只读挂进来)。
+K8S_TOKEN = _env("K8S_TOKEN", "")
+K8S_TOKEN_FILE = _env("K8S_TOKEN_FILE", "")
+# API server 的 CA。留空 = 用系统根证书 (自建 k3s 的证书是自签的, 留空连不上)。
+K8S_CA_FILE = _env("K8S_CA_FILE", "")
+K8S_NAMESPACE = _env("K8S_NAMESPACE", "dsh")
+# 用户数据卷 (PersistentVolumeClaim 名)。每个用户在卷上有 <hexid>/home 与
+# <hexid>/workspace 两个子路径 —— 与 NAS 布局一致。留空 = 一次性工作台 (只用于
+# 冒烟验证), 每次创建都会告警。
+K8S_DATA_PVC = _env("K8S_DATA_PVC", "dshwork-data")
+# 私有仓库的拉取凭据 (命名空间里的 dockerconfigjson Secret 名)。配了 WORK_REGISTRY_*
+# 时 dhc-server 会自己把它写进命名空间 (与 ECI 同一份凭据); 没配就假定它是别人建
+# 好的。留空 = Pod 不带拉取凭据 (只适用于公开镜像)。
+K8S_IMAGE_PULL_SECRET = _env("K8S_IMAGE_PULL_SECRET", "dshwork-registry")
 
 # --- ComfyUI 工作台 -----------------------------------------------------------
 # 与 dsh 工作台同构的第二种产品: 每用户一个容器, 同一套回收与计费。

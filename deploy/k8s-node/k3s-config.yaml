@@ -1,0 +1,24 @@
+# /etc/rancher/k3s/config.yaml — DSH Cloud workspace node: single-node k3s on the shared <node>.
+# Everything k3s owns lives under /mnt/k3s (system disk is 82% full). Uninstall: /usr/local/bin/k3s-uninstall.sh
+data-dir: /mnt/k3s
+node-name: <node>
+node-ip: <NODE_PRIVATE_IP>
+tls-san:
+  - <TUNNEL_NODE_IP>          # tunnel address the DSH prod host reaches the API on
+  - <NODE_PRIVATE_IP>
+write-kubeconfig-mode: "0600"
+flannel-backend: host-gw   # single node: no vxlan device, no udp/8472 listener
+disable:
+  - traefik
+  - servicelb
+  - metrics-server
+disable-network-policy: true
+disable-helm-controller: true
+kubelet-arg:
+  # Shared machine: leave 10 CPU / 96 GiB to the existing services. Pods get ~6 CPU / ~27 GiB,
+  # enforced as a hard cap on the kubepods cgroup, whatever the namespace quotas say.
+  - "system-reserved=cpu=10,memory=96Gi"
+  - "eviction-hard=memory.available<1Gi,nodefs.available<10%"
+  - "max-pods=60"
+  # kernel 5.10 / cgroup v1 host: kubelet >= 1.36 refuses cgroup v1 unless told otherwise
+  - "fail-cgroupv1=false"

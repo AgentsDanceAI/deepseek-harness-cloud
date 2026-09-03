@@ -1,6 +1,6 @@
 """Where a user's workspace container actually runs.
 
-Two backends, same contract:
+Three backends, same contract:
 
   docker  本机 (或自部署) 的 docker 引擎, 经受限 socket 代理。容器可以 stop 后
           再 start, 命名卷保留状态。
@@ -8,20 +8,27 @@ Two backends, same contract:
           于是"闲置回收"等于销毁, 而恢复是一次完整冷启动。
           正因如此, ECI 后端下 /root 与 /workspace 必须落在 NAS 上: 容器一删,
           容器内的任何东西都不再存在。
+  k8s     一台常驻节点上的 Kubernetes (k3s)。语义与 ECI 一样是创建/删除, 但节点
+          是热的: 镜像已在本地, 没有机房调度那 25 秒, Pod 起来就是应用自己的
+          启动时间。用户文件落在一个 PVC 上, 布局与 NAS 一致。
 
 抽象出这层不是为了好看, 是因为 deploy/selfhost/ 那条路只有 docker: 把 docker
-换掉等于把自部署删掉。两边都实现同一个 Backend, 由 WORK_BACKEND 选。
+换掉等于把自部署删掉。三边都实现同一个 Backend, 由 WORK_BACKEND 选; 还可以
+按产品分派 (WORK_BACKEND_PRODUCTS, 见 RoutedBackend)。
 """
 
 from __future__ import annotations
 
 import abc
+import asyncio
 import base64
 import hashlib
 import hmac
+import json
 import logging
 import pathlib
 import re
+import ssl
 import time
 import uuid
 from dataclasses import dataclass
@@ -107,6 +114,11 @@ class Backend(abc.ABC):
 
     def capacity_reason(self) -> str:
         return ""
+
+    def for_product(self, product_id: str) -> Backend:
+        """这个产品的工作台实际由哪个后端管。单后端就是自己; RoutedBackend 按
+        产品分派。给那些手里只有产品、没有工作台键的调用方用 (镜像陈旧判定)。"""
+        return self
 
     def offline_workspace_dir(self, user_id: str) -> pathlib.Path | None:
         """应用机上能只读看到这个用户 /workspace 的路径, 没有则 None。
@@ -696,7 +708,513 @@ class EciBackend(Backend):
         return uniq
 
 
-def make_backend() -> Backend:
-    if (config.WORK_BACKEND or "docker").lower() == "eci":
+# --- k8s: 常驻节点上的 Kubernetes (k3s) -------------------------------------
+
+#: Pod 上的标签只用来"找出我们的 Pod"。**身份放注解**: label 值的字符集
+#: ([A-Za-z0-9-_.]) 装不下工作台键里的 "~" (products.wskey)。
+K8S_LABEL = "dshwork"
+K8S_ANN_USER = "dshwork/user"
+K8S_ANN_BOOTCFG = "dshwork/bootcfg"
+_K8S_DATA_VOLUME = "dshwork-data"
+#: 活着 = 还会变好。终态 (Succeeded / Failed / Unknown) 与 ECI 同一处理: 当作
+#: 不存在, 清掉以便重建 —— 对一个不可 start 的后端, "坏了就重建"是唯一的自愈。
+_K8S_ALIVE = {"Pending", "Running"}
+#: 这些等待原因不会自己好: 拉不到镜像、引用了不存在的 Secret (pull secret 名字
+#: 写错)。Pod 会一直 Pending, 对上层来说与"正在启动"一模一样, 所以要报出来。
+_K8S_STUCK_REASONS = {
+    "ErrImagePull",
+    "ImagePullBackOff",
+    "InvalidImageName",
+    "CreateContainerConfigError",
+    "CreateContainerError",
+}
+
+
+def pod_name(user_id: str) -> str:
+    """Pod 名: cname 的小写形式。k8s 的对象名是 DNS-1123 (只许小写), 而 cname 为
+    docker DNS 与 ECI 保留了大小写。用户 id 本身全小写 (u_ + 十六进制), 不会撞。"""
+    return cname(user_id).lower()
+
+
+def _millicores(v: float) -> str:
+    return f"{max(1, int(round(v * 1000)))}m"
+
+
+class K8sError(RuntimeError):
+    pass
+
+
+class K8sBackend(Backend):
+    """一台常驻节点上的 Kubernetes (k3s), dhc-server 直接调 API server。
+
+    与 ECI 同一套"创建/删除"语义 —— release 就是删 Pod; 用户的 /root 与
+    /workspace 落在 K8S_DATA_PVC 那个卷的 <hexid>/home、<hexid>/workspace 子路径
+    上 (布局与 NAS 一致, 子路径目录由 kubelet 按需创建)。不同的是节点是热的:
+    镜像已在本地, 没有机房调度那 25 秒, Pod 起来就是应用自己的启动时间。
+
+    产品的 cpu/mem 给在 **Pod 级** (k8s ≥ 1.34 的 pod-level resources): 组给总量,
+    容器之间自己挤 —— 与 ECI 容器组、compose 默认是同一个语义, 栈产品不用给
+    十个容器各算一份。CPU 只按上限的 1/4 预留 (request): 工作台大多数时间在等
+    模型回话, 按上限预留会把节点"算满"而实际空转; 内存按上限预留, 因为节点是
+    共享机, 超卖内存等于拿别人的服务赌。
+    """
+
+    resumable = False
+
+    def __init__(self) -> None:
+        self._ns = config.K8S_NAMESPACE or "dsh"
+        self._pods = f"/api/v1/namespaces/{self._ns}/pods"
+        self._tok: str | None = None
+        self._ssl: ssl.SSLContext | bool | None = None
+        self._warned_no_pvc = False
+        self._pull_secret_ready = False
+        self._stuck_reported: set[str] = set()
+
+    # -- transport ----------------------------------------------------------
+    def _token(self) -> str:
+        if self._tok is None:
+            f = (config.K8S_TOKEN_FILE or "").strip()
+            self._tok = pathlib.Path(f).read_text(encoding="ascii").strip() if f else config.K8S_TOKEN
+        return self._tok
+
+    def _verify(self) -> ssl.SSLContext | bool:
+        if self._ssl is None:
+            ca = (config.K8S_CA_FILE or "").strip()
+            self._ssl = ssl.create_default_context(cafile=ca) if ca else True
+        return self._ssl
+
+    async def _api(
+        self, method: str, path: str, *, json_body: dict | None = None, params: dict | None = None
+    ) -> httpx.Response:
+        async with httpx.AsyncClient(
+            base_url=config.K8S_API_URL,
+            verify=self._verify(),
+            timeout=30.0,
+            headers={"Authorization": f"Bearer {self._token()}"},
+        ) as client:
+            return await client.request(method, path, json=json_body, params=params)
+
+    async def _get(self, user_id: str) -> dict | None:
+        r = await self._api("GET", f"{self._pods}/{pod_name(user_id)}")
+        if r.status_code == 404:
+            return None
+        if r.status_code != 200:
+            raise K8sError(f"get pod {pod_name(user_id)}: {r.status_code} {r.text[:200]}")
+        return r.json()
+
+    async def _delete(self, user_id: str) -> None:
+        # 5 秒宽限: 工作台没有需要优雅收尾的东西 (状态在卷上), 而名字要等 Pod
+        # 真正消失才空出来 —— 拖着的删除就是拖着的下一次创建。
+        r = await self._api("DELETE", f"{self._pods}/{pod_name(user_id)}", params={"gracePeriodSeconds": 5})
+        if r.status_code == 404:
+            return  # 并发自愈时另一边可能已经删掉了 —— 那正是想要的结果
+        if r.status_code not in (200, 202):
+            log.warning("[work] 删 Pod %s 失败: %s %s", pod_name(user_id), r.status_code, r.text[:200])
+            return
+        log.info("[work] 删 Pod %s", pod_name(user_id))
+
+    # -- helpers ------------------------------------------------------------
+    async def _ensure_pull_secret(self) -> None:
+        """私有仓库的拉取凭据由 dhc-server **自己**写进命名空间。
+
+        与 ECI 那边 config.registry_credential 同源 (WORK_REGISTRY_*): 密码已经在
+        dhc-server 手里, 不用人再到节点上敲一遍。每个进程只写一次; 没配凭据就
+        什么都不写 —— 那种形态下 Secret 要么是别人建好的, 要么镜像是公开的。
+        写失败**不拦**创建: Pod 会卡在 ImagePullBackOff, inspect 会把那个报出来。
+        """
+        name = (config.K8S_IMAGE_PULL_SECRET or "").strip()
+        if self._pull_secret_ready or not name:
+            return
+        server, user, password = (
+            config.WORK_REGISTRY_SERVER,
+            config.WORK_REGISTRY_USERNAME,
+            config.WORK_REGISTRY_PASSWORD,
+        )
+        if not (server and user and password):
+            self._pull_secret_ready = True
+            return
+        auth = base64.b64encode(f"{user}:{password}".encode()).decode()
+        dockercfg = {"auths": {server: {"username": user, "password": password, "auth": auth}}}
+        body = {
+            "apiVersion": "v1",
+            "kind": "Secret",
+            "metadata": {"name": name, "namespace": self._ns},
+            "type": "kubernetes.io/dockerconfigjson",
+            "data": {".dockerconfigjson": base64.b64encode(json.dumps(dockercfg).encode()).decode()},
+        }
+        secrets = f"/api/v1/namespaces/{self._ns}/secrets"
+        r = await self._api("POST", secrets, json_body=body)
+        if r.status_code == 409:
+            r = await self._api("PUT", f"{secrets}/{name}", json_body=body)
+        if r.status_code in (200, 201):
+            self._pull_secret_ready = True
+            log.info("[work] 拉取凭据 Secret %s/%s 已就位 (%s)", self._ns, name, server)
+        else:
+            log.warning("[work] 写拉取凭据 Secret %s 失败: %s %s", name, r.status_code, r.text[:200])
+
+    def _data_volume(self) -> dict:
+        pvc = (config.K8S_DATA_PVC or "").strip()
+        if not pvc:
+            if not self._warned_no_pvc:
+                log.warning(
+                    "[work] k8s 后端未配置 K8S_DATA_PVC: 工作台是一次性的, 闲置回收会抹掉用户的文件与会话"
+                )
+                self._warned_no_pvc = True
+            return {"name": _K8S_DATA_VOLUME, "emptyDir": {}}
+        return {"name": _K8S_DATA_VOLUME, "persistentVolumeClaim": {"claimName": pvc}}
+
+    def _manifest(
+        self,
+        user_id: str,
+        *,
+        boot: str,
+        env: dict[str, str],
+        boot_fp: str,
+        image: str,
+        image_ref: str,
+        mem_mb: int,
+        cpus: float,
+        sidecars: tuple,
+        host_aliases: tuple,
+        init_containers: tuple,
+        seeds: tuple,
+        run_as_user: int | None,
+    ) -> dict:
+        hexid = cname(user_id)[len("dshwork-") :]
+        cpu = cpus or config.WORK_CPUS
+        mem = mem_mb or config.WORK_MEM_LIMIT_MB
+
+        def data_mount(sub: str, path: str) -> dict:
+            return {"name": _K8S_DATA_VOLUME, "mountPath": path, "subPath": f"{hexid}/{sub}"}
+
+        def seed_mount(sub: str, path: str) -> dict:
+            m = {"name": _SEED_VOLUME, "mountPath": path}
+            if sub:
+                m["subPath"] = sub
+            return m
+
+        def env_list(items) -> list[dict]:
+            return [{"name": k, "value": str(v)} for k, v in items]
+
+        app: dict = {
+            "name": "app",
+            "image": image_ref or image,
+            "command": ["sh", "-c", boot],
+            "workingDir": "/workspace",
+            "env": env_list(env.items()),
+            "volumeMounts": [
+                data_mount("home", "/root"),
+                data_mount("workspace", "/workspace"),
+                *(seed_mount(s, p) for s, p in seeds),
+            ],
+        }
+        if run_as_user is not None:
+            app["securityContext"] = {"runAsUser": run_as_user}
+        containers = [app]
+        # 伴随容器: 同一个 Pod 里共享网络命名空间 (互相 127.0.0.1), 与 ECI 容器组同义。
+        for sc in sidecars:
+            c: dict = {"name": sc.name, "image": sc.image_ref}
+            if sc.cmd:
+                c["command"] = list(sc.cmd)
+            if sc.args:
+                c["args"] = list(sc.args)
+            if sc.env:
+                c["env"] = env_list(sc.env)
+            if sc.run_as_user is not None:
+                c["securityContext"] = {"runAsUser": sc.run_as_user}
+            mounts = [data_mount(sub, p) for sub, p in sc.mounts] + [seed_mount(s, p) for s, p in sc.seeds]
+            if mounts:
+                c["volumeMounts"] = mounts
+            containers.append(c)
+        inits = []
+        for ic in init_containers:
+            c = {
+                "name": ic.name,
+                "image": ic.image_ref,
+                "volumeMounts": [
+                    {"name": _SEED_VOLUME, "mountPath": ic.seed_mount},
+                    *(data_mount(sub, p) for sub, p in ic.mounts),
+                ],
+            }
+            if ic.cmd:
+                c["command"] = list(ic.cmd)
+            inits.append(c)
+        volumes = [self._data_volume()]
+        if init_containers or seeds or any(sc.seeds for sc in sidecars):
+            volumes.append({"name": _SEED_VOLUME, "emptyDir": {}})
+        spec: dict = {
+            # 与 ECI 同一条规则: 栈产品 Always (应用容器在中间件就绪前会崩, 靠重启
+            # 拉起来), 单容器 Never (它退出就是真的死了, 终态由 inspect 清掉重建)。
+            "restartPolicy": "Always" if sidecars else "Never",
+            "terminationGracePeriodSeconds": 5,
+            # 工作台里跑的是用户的智能体 —— 不给它集群凭据, 也不注入服务发现变量。
+            "automountServiceAccountToken": False,
+            "enableServiceLinks": False,
+            "securityContext": {"seccompProfile": {"type": "RuntimeDefault"}},
+            "resources": {
+                "requests": {"cpu": _millicores(cpu / 4), "memory": f"{mem}Mi"},
+                "limits": {"cpu": _millicores(cpu), "memory": f"{mem}Mi"},
+            },
+            "containers": containers,
+            "volumes": volumes,
+        }
+        if inits:
+            spec["initContainers"] = inits
+        if host_aliases:
+            spec["hostAliases"] = [{"ip": "127.0.0.1", "hostnames": list(host_aliases)}]
+        secret = (config.K8S_IMAGE_PULL_SECRET or "").strip()
+        if secret:
+            spec["imagePullSecrets"] = [{"name": secret}]
+        return {
+            "apiVersion": "v1",
+            "kind": "Pod",
+            "metadata": {
+                "name": pod_name(user_id),
+                "namespace": self._ns,
+                "labels": {K8S_LABEL: "workspace"},
+                "annotations": {K8S_ANN_USER: user_id, K8S_ANN_BOOTCFG: boot_fp},
+            },
+            "spec": spec,
+        }
+
+    def _report_stuck(self, user_id: str, pod: dict) -> None:
+        if user_id in self._stuck_reported:
+            return
+        st = pod.get("status") or {}
+        for cs in (st.get("initContainerStatuses") or []) + (st.get("containerStatuses") or []):
+            w = (cs.get("state") or {}).get("waiting") or {}
+            if w.get("reason") in _K8S_STUCK_REASONS:
+                self._stuck_reported.add(user_id)
+                log.error(
+                    "[work] %s 卡在 Pending: 容器 %s %s —— %s",
+                    user_id,
+                    cs.get("name"),
+                    w.get("reason"),
+                    (w.get("message") or "")[:200],
+                )
+                return
+
+    # -- Backend ------------------------------------------------------------
+    async def inspect(self, user_id: str) -> WorkInfo | None:
+        pod = await self._get(user_id)
+        if pod is None:
+            return None
+        meta = pod.get("metadata") or {}
+        ann = meta.get("annotations") or {}
+        status = pod.get("status") or {}
+        spec = pod.get("spec") or {}
+        phase = status.get("phase", "")
+        image = ((spec.get("containers") or [{}])[0]).get("image", "")
+        if meta.get("deletionTimestamp"):
+            # 正在删。名字还被占着, 现在建会撞名 —— 报"存在但没在跑", 调用方会
+            # 当它在启动而等下一轮; 等它真消失了, inspect 答 None, 那时才重建。
+            return WorkInfo(
+                running=False,
+                boot_fp=ann.get(K8S_ANN_BOOTCFG, ""),
+                image_id=image,
+                host="",
+                state="Terminating",
+            )
+        if phase not in _K8S_ALIVE:
+            log.info("[work] %s 处于终态 %s, 清掉以便重建", user_id, phase or "?")
+            await self._delete(user_id)
+            self._stuck_reported.discard(user_id)
+            return None
+        if phase == "Pending":
+            self._report_stuck(user_id, pod)
+        else:
+            self._stuck_reported.discard(user_id)
+        return WorkInfo(
+            running=phase == "Running",
+            boot_fp=ann.get(K8S_ANN_BOOTCFG, ""),
+            image_id=image,
+            host=status.get("podIP", ""),
+            state=phase,
+        )
+
+    async def current_image_id(self, image: str) -> str:
+        """与 ECI 相同: 镜像身份就是仓库引用本身 (同名重推察觉不到, 镜像走版本号 tag)。"""
+        return image
+
+    async def create(
+        self,
+        user_id: str,
+        *,
+        boot: str,
+        env: dict[str, str],
+        boot_fp: str,
+        image: str,
+        image_ref: str = "",
+        mem_mb: int = 0,
+        cpus: float = 0.0,
+        sidecars: tuple = (),
+        host_aliases: tuple = (),
+        init_containers: tuple = (),
+        seeds: tuple = (),
+        run_as_user: int | None = None,
+    ) -> None:
+        body = self._manifest(
+            user_id,
+            boot=boot,
+            env=env,
+            boot_fp=boot_fp,
+            image=image,
+            image_ref=image_ref,
+            mem_mb=mem_mb,
+            cpus=cpus,
+            sidecars=sidecars,
+            host_aliases=host_aliases,
+            init_containers=init_containers,
+            seeds=seeds,
+            run_as_user=run_as_user,
+        )
+        await self._ensure_pull_secret()
+        r = await self._api("POST", self._pods, json_body=body)
+        if r.status_code == 409:
+            # 同名 Pod 还在 —— 多半是上一台正在删 (名字要等它走完才空出来)。
+            # 等它消失再建一次, 而不是把"撞名"当成功: 那样用户会连到旧的那台。
+            for _ in range(30):
+                await asyncio.sleep(0.5)
+                if await self._get(user_id) is None:
+                    break
+            r = await self._api("POST", self._pods, json_body=body)
+        if r.status_code == 403 and "exceeded quota" in r.text:
+            # 命名空间配额满了。上层把 "capacity" 翻成"名额已满"给用户看, 与
+            # WORK_MAX_CONCURRENT 撞顶是同一个页面 —— 这本来就是同一件事。
+            log.warning("[work] k8s 配额已满, 拒起 %s: %s", user_id, r.text[:200])
+            raise RuntimeError("capacity")
+        if r.status_code not in (200, 201, 202):
+            raise K8sError(f"pod create failed: {r.status_code} {r.text[:300]}")
+        res = body["spec"]["resources"]["limits"]
+        log.info(
+            "[work] 建 Pod %s user=%s cpu=%s mem=%s", pod_name(user_id), user_id, res["cpu"], res["memory"]
+        )
+
+    async def start(self, user_id: str) -> None:
+        """与 ECI 相同: 没有这个动作 —— Pod 一创建就在起。"""
+
+    async def release(self, user_id: str) -> None:
+        # 停不了, 只能删。用户的东西在卷上, 下次访问重建。
+        await self.destroy(user_id)
+
+    async def destroy(self, user_id: str) -> None:
+        await self._delete(user_id)
+
+    async def running_users(self) -> list[str]:
+        """计量与回收都遍历这个列表, 所以**漏掉一条 = 有人白用且永不回收**。
+        按 label 列出我们的 Pod, 身份从注解读; 靠 continue 令牌翻页。"""
+        users: list[str] = []
+        params: dict = {"labelSelector": f"{K8S_LABEL}=workspace"}
+        while True:
+            r = await self._api("GET", self._pods, params=params)
+            if r.status_code != 200:
+                raise K8sError(f"list pods: {r.status_code} {r.text[:200]}")
+            body = r.json()
+            for pod in body.get("items") or []:
+                meta = pod.get("metadata") or {}
+                if meta.get("deletionTimestamp"):
+                    continue
+                if (pod.get("status") or {}).get("phase") != "Running":
+                    continue
+                uid = (meta.get("annotations") or {}).get(K8S_ANN_USER, "")
+                if uid:
+                    users.append(uid)
+            cont = (body.get("metadata") or {}).get("continue")
+            if not cont:
+                break
+            params = {**params, "continue": cont}
+        return list(dict.fromkeys(users))
+
+
+# --- 按产品分派 ---------------------------------------------------------------
+
+
+class RoutedBackend(Backend):
+    """把不同产品的工作台交给不同后端 (WORK_BACKEND_PRODUCTS)。
+
+    工作台键里带产品 id (products.wskey), 所以带键的调用都能自己找到该去哪;
+    running_users 是各后端的并集 —— 计量与回收按人遍历, 少一边就是有人白用。
+    没有键的那几个 (capacity_reason / resumable) 按默认后端答: 前者只有 docker
+    后端真的会看宿主内存, 后者只用于启动等待页的一句提示。
+    """
+
+    def __init__(self, default: Backend, by_product: dict[str, Backend]) -> None:
+        self.default = default
+        self.by_product = dict(by_product)
+        self.resumable = default.resumable
+
+    def _pick(self, user_id: str) -> Backend:
+        from .products import split_key  # 延迟导入: products 不依赖这里, 但保持单向
+
+        _, pid = split_key(user_id)
+        return self.by_product.get(pid, self.default)
+
+    def for_product(self, product_id: str) -> Backend:
+        return self.by_product.get(product_id, self.default)
+
+    async def inspect(self, user_id: str) -> WorkInfo | None:
+        return await self._pick(user_id).inspect(user_id)
+
+    async def current_image_id(self, image: str) -> str:
+        # 没有键可以路由; 调用方应走 for_product(...).current_image_id。这里按
+        # 默认后端答, 让老调用方不至于炸掉。
+        return await self.default.current_image_id(image)
+
+    async def create(self, user_id: str, **kw) -> None:  # type: ignore[override]
+        await self._pick(user_id).create(user_id, **kw)
+
+    async def start(self, user_id: str) -> None:
+        await self._pick(user_id).start(user_id)
+
+    async def release(self, user_id: str) -> None:
+        await self._pick(user_id).release(user_id)
+
+    async def destroy(self, user_id: str) -> None:
+        await self._pick(user_id).destroy(user_id)
+
+    async def running_users(self) -> list[str]:
+        users: list[str] = []
+        seen: set[int] = set()
+        for b in [self.default, *self.by_product.values()]:
+            if id(b) in seen:
+                continue
+            seen.add(id(b))
+            users.extend(await b.running_users())
+        return list(dict.fromkeys(users))
+
+    def capacity_reason(self) -> str:
+        return self.default.capacity_reason()
+
+    def offline_workspace_dir(self, user_id: str) -> pathlib.Path | None:
+        return self._pick(user_id).offline_workspace_dir(user_id)
+
+
+def backend_named(name: str) -> Backend:
+    n = (name or "docker").strip().lower()
+    if n == "docker":
+        return DockerBackend()
+    if n == "eci":
         return EciBackend()
-    return DockerBackend()
+    if n == "k8s":
+        return K8sBackend()
+    raise ValueError(f"未知的工作台后端 {name!r} (可选 docker / eci / k8s)")
+
+
+def make_backend() -> Backend:
+    default = backend_named(config.WORK_BACKEND)
+    spec = (config.WORK_BACKEND_PRODUCTS or "").strip()
+    if not spec:
+        return default
+    instances: dict[str, Backend] = {(config.WORK_BACKEND or "docker").strip().lower(): default}
+    by_product: dict[str, Backend] = {}
+    for item in spec.split(","):
+        if not item.strip():
+            continue
+        pid, sep, name = item.partition("=")
+        pid, name = pid.strip(), name.strip().lower()
+        if not sep or not pid or not name:
+            raise ValueError(f"WORK_BACKEND_PRODUCTS 格式错误: {item!r} (应为 产品=后端, 逗号分隔)")
+        if name not in instances:
+            instances[name] = backend_named(name)
+        by_product[pid] = instances[name]
+    return RoutedBackend(default, by_product)

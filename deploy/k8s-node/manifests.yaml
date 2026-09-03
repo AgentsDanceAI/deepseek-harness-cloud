@@ -1,0 +1,89 @@
+# DSH Cloud 工作台命名空间 —— 在 k3s 节点上 `k3s kubectl apply -f manifests.yaml`。
+#
+# 一个命名空间、一个总配额、一个用户数据卷、一个只管这个命名空间里 Pod 的
+# ServiceAccount (dhc-server 拿它的 token 调 API)。
+#
+# 配额是共享机上的保险: kubelet 的 system-reserved (k3s-config.yaml) 已经把
+# Pod 总量硬卡在 ~6 CPU / ~27 GiB, 这里再按"请求"限一道, 超了创建直接 403,
+# dhc-server 把它翻成"名额已满"给用户看 (workbackend.K8sBackend.create)。
+# CPU 上限给得宽 (24): 工作台的 request 只有上限的 1/4, 大多数时间在等模型。
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: dsh
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: dsh-workspaces
+  namespace: dsh
+spec:
+  hard:
+    requests.cpu: "6"
+    requests.memory: 24Gi
+    limits.cpu: "24"
+    limits.memory: 24Gi
+    pods: "40"
+---
+# 用户数据卷 (K8S_DATA_PVC)。local-path 供应器把它放在 <data-dir>/storage 下;
+# 每个用户在卷上有 <hexid>/home 与 <hexid>/workspace 两个子路径, 由 kubelet 按需
+# 创建 —— 布局与 ECI 后端的 NAS 一致。容量数字对 local-path 没有约束意义。
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: dshwork-data
+  namespace: dsh
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 100Gi
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: dhc-server
+  namespace: dsh
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: dhc-server
+  namespace: dsh
+rules:
+  - apiGroups: [""]
+    resources: [pods, pods/log, pods/status, persistentvolumeclaims, secrets, configmaps]
+    verbs: [get, list, watch, create, delete, patch, update]
+  - apiGroups: [""]
+    resources: [events]
+    verbs: [get, list, watch]
+  - apiGroups: [""]
+    resources: [resourcequotas]
+    verbs: [get, list]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: dhc-server
+  namespace: dsh
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: dhc-server
+subjects:
+  - kind: ServiceAccount
+    name: dhc-server
+    namespace: dsh
+---
+# 不过期的 token (老式 service-account-token Secret)。给服务器到服务器用, 换的
+# 时候删掉重建这个 Secret 即可。取出来:
+#   k3s kubectl -n dsh get secret dhc-server-token -o jsonpath='{.data.token}' | base64 -d
+apiVersion: v1
+kind: Secret
+metadata:
+  name: dhc-server-token
+  namespace: dsh
+  annotations:
+    kubernetes.io/service-account.name: dhc-server
+type: kubernetes.io/service-account-token
