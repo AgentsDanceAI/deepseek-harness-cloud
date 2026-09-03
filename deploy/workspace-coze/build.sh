@@ -91,8 +91,19 @@ if [ "$n" != "1" ]; then
   exit 1
 fi
 
-# 就绪探针 (products.registry()["coze"].ready_path = /api/) 靠这条 location 转发去
-# coze-server。上游哪天改了 API 前缀, /api/ 就会落回 `location /` 那个静态首页 ——
+# 就绪探针的 location (/__dsh_ready, 见 products._coze_boot) 由 sed 锚在**行首的**
+# `server {` 后面插入。上游 conf 里另有一个注释掉的 `# server {` (HTTPS 样板), 所以
+# 只数行首的; 不是恰好 1 个就说明上游改了结构, 插入位置要重新看。
+n=$(grep -c '^server {' assets/nginx/conf.d/default.conf)
+if [ "$n" != "1" ]; then
+  echo "!! 行首的 'server {' 在上游配置里出现了 $n 次 (要求恰好 1 次) —— " >&2
+  echo "   products._coze_boot 里 /__dsh_ready 那条 sed 的锚点要跟着改, 否则探针要么没有、要么 nginx 起不来。" >&2
+  grep -n 'server {' assets/nginx/conf.d/default.conf | sed 's/^/     /' >&2
+  exit 1
+fi
+
+# 后端 API 那条 location (上游 `location ~ ^/(api|v[1-3]|admin)`): 代登录脚本要经它
+# 打 coze-server (探针本身已改探 /__dsh_ready)。上游哪天改了 API 前缀, /api/ 就会落回 `location /` 那个静态首页 ——
 # 而静态首页**永远回 200**, 判据 <500 当场失效: 探针在 coze-server 起来前就放人
 # 进去, 用户看到的是前端自己的报错页 (2026-08-30 Dify 那个洞的翻版, coze 实测坏
 # 窗口 96 秒)。这个错法完全静默, 所以在这里断言。

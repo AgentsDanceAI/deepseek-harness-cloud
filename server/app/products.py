@@ -1268,8 +1268,12 @@ def _coze_boot() -> str:
         " /etc/nginx/conf.d/default.conf\n"
         # 就绪探针的 location 塞进上游的 server 块 (文件在 = 200, 不在 = 503),
         # 标记由 dsh-coze-autologin 在会话注入之后落下。
+        # **锚在行首** (^server {): 上游那份 conf 第 61 行还有一个被注释掉的
+        # `# server {` (HTTPS 样板), 不锚行首会在注释块后面也插一行**没注释**的
+        # location —— 落在任何 server 块之外, nginx 直接起不来, 连静态页都没有。
+        # 构建期守卫见 deploy/workspace-coze/build.sh。
         "mkdir -p /run/dsh\n"
-        "sed -i '/server {/a\\    location = /__dsh_ready { root /run/dsh; try_files /__dsh_ready =503; }'"
+        "sed -i '/^server {/a\\    location = /__dsh_ready { root /run/dsh; try_files /__dsh_ready =503; }'"
         " /etc/nginx/conf.d/default.conf\n"
         "cat > /usr/local/bin/dsh-coze-autologin <<'AUTOLOGIN'\n" + _COZE_AUTOLOGIN + "AUTOLOGIN\n"
         "chmod +x /usr/local/bin/dsh-coze-autologin\n"

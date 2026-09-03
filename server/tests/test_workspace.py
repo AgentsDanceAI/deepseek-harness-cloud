@@ -2770,6 +2770,9 @@ def test_coze_ready_path_is_proxied_to_the_backend():
     conf = products.boot_script("coze")
     assert prod.ready_path == "/__dsh_ready"
     assert "location = /__dsh_ready { root /run/dsh; try_files /__dsh_ready =503; }" in conf
+    # 锚在行首: 上游 conf 里还有一个注释掉的 `# server {`, 不锚行首会往注释块后面
+    # 插一行没注释的 location, nginx 起不来
+    assert "sed -i '/^server {/a" in conf
     got_session = conf.index('[ -n "$SK" ] ||')
     assert conf.index("nginx -s reload\n", got_session) < conf.rindex("/run/dsh/__dsh_ready")
 
