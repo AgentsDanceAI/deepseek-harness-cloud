@@ -170,6 +170,20 @@ def main() -> int:
     if user is None:
         raise SystemExit(f"没有这个账号: {args.email}")
     token = security.sign_token(user["id"], epoch=user["session_epoch"])
+    # **先看机时够不够** (与 product_use_check 同一道闸)。机时耗尽时工作台把浏览器打回
+    # 定价页, 而定价页 HTTP 200、没有密码框、没有坏词 —— 下面的判读会给它打 ✓。
+    # 2026-09-04 全员回归跑到第 5 个产品机时归零, 后面 11 个全是"定价 — deepseek-harness-cloud"
+    # 却全绿。每个产品要冷启动并跑到回收 (十几分钟机时), 这活儿本来就费机时。
+    from app import work_access
+
+    state = work_access.state(user["id"])
+    left = state.get("minutes_left", state.get("remaining_minutes", 0)) or 0
+    need = len(prods) * 12
+    print(f"==> 机时余量 {left} 分钟 (这轮大约要 {need} 分钟)")
+    if left < need:
+        raise SystemExit(
+            f"!! 机时不够 ({left} < {need})。跑下去会把'没配额'验成'产品坏了' —— 先给 {args.email} 补一包机时再来。"
+        )
 
     spec = {
         "cookie_name": config.SESSION_COOKIE,
@@ -217,6 +231,20 @@ def main() -> int:
         # 假绿比假红严重: 假红我会去看图, 假绿谁也不会再看。
         if (e.get("status") or 200) >= 400:
             print(f"  ✗ {pid:14s} 打开就是 HTTP {e['status']}  ({e.get('shot')})")
+            bad += 1
+            continue
+        # **落在别的域上 = 根本没到产品**。工作台把人打回主站的情形有三种: 机时/积分
+        # 耗尽 (/pricing)、没登录 (/login)、超时还在启动页 (/work/starting) —— 三种页面
+        # 都是 HTTP 200、没有密码框、没有坏词, 下面的词表全部放行。2026-09-04 就这么给
+        # 11 个"定价 — deepseek-harness-cloud"打了 ✓。产品域名是硬的: 不在上面就是没过。
+        from urllib.parse import urlparse
+
+        want_host = urlparse(e.get("url") or "").hostname
+        got = urlparse(e.get("final_url") or "")
+        if want_host and got.hostname and got.hostname != want_host:
+            print(
+                f"  ✗ {pid:14s} 被带到 {got.hostname}{got.path} 而不是产品页 (机时/积分耗尽? 没登录? 启动超时?)  ({e.get('shot')})"
+            )
             bad += 1
             continue
         text = (e.get("text") or "").lower()
