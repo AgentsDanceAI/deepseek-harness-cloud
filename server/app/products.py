@@ -1389,12 +1389,34 @@ def _openclaw_boot() -> str:
         ensure_ascii=False,
         indent=2,
     )
+    # 老用户的配置文件是**上一版镜像写的**, 而 OpenClaw 的 schema 是 strictObject:
+    # 升级后多一个已废弃的键, 网关直接 exit 1, 容器起不来 —— 用户看到的只是"进不去",
+    # 服务端一切正常 (Pod 建得出来, 只是马上 Failed 被清掉再建, 无限循环)。
+    # 2026-09-04 老板的 openclaw 就是这样: 他那份里还留着我们自己在 2026.8.1 之前
+    # 写进去的 gateway.controlUi.allowInsecureAuth, 外加 meta.lastTouchedAt。
+    # config patch 是**递归合并**, 只会加键不会删键, 所以救不了自己写下的旧键。
+    # 上游给了修复命令 (doctor --fix, 无效配置下仍可运行), 实测能把这两个键清掉。
+    # 三段式: 先修一次 (让 patch 有个合法的底) -> 打我们的补丁 -> 再验一次;
+    # 还不合法就把它挪走用全新配置起 —— 用户的频道配置会丢, 但"根本进不去"更糟,
+    # 而挪走的文件还在, 事后能捞。
     return (
         "set -e\n"
         'mkdir -p "$OPENCLAW_STATE_DIR"\n'
+        "oc() { node /app/openclaw.mjs \"$@\"; }\n"
+        "ok() { oc config validate >/dev/null 2>&1; }\n"
+        'CFG="$OPENCLAW_STATE_DIR/openclaw.json"\n'
+        '[ -f "$CFG" ] && ! ok && { echo "[dsh] 配置被上游判为非法, 跑 doctor --fix"; '
+        "oc doctor --fix >/dev/null 2>&1 || true; }\n"
         # heredoc **不加引号**: 里面的 $DSH_CLOUD_TOKEN 要展开成真令牌。
-        # 配置里除它以外没有别的 $, 所以不会误伤。
-        "node /app/openclaw.mjs config patch --stdin <<PATCH\n" + patch + "\nPATCH\n"
+        # 配置里除它以外没有别的 $, 所以不会误伤。写成文件而不是直接管道, 因为下面
+        # 兜底那条要再用一次。
+        "cat > /tmp/dsh-openclaw-patch.json <<PATCH\n" + patch + "\nPATCH\n"
+        "oc config patch --stdin < /tmp/dsh-openclaw-patch.json || true\n"
+        'ok || { echo "[dsh] 打完补丁仍非法, 再修一次"; oc doctor --fix >/dev/null 2>&1 || true; }\n'
+        'ok || { echo "[dsh] 仍非法, 挪走旧配置用全新配置启动 (旧的留在 $CFG.invalid)"; '
+        'mv "$CFG" "$CFG.invalid.$(date +%s)" 2>/dev/null || true; '
+        "oc config patch --stdin < /tmp/dsh-openclaw-patch.json || true; }\n"
+        "rm -f /tmp/dsh-openclaw-patch.json\n"
         "exec node /app/openclaw.mjs gateway\n"
     )
 

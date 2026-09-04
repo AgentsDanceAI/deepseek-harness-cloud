@@ -1751,7 +1751,17 @@ def test_openclaw_patches_config_instead_of_overwriting(monkeypatch):
     _openclaw_ready(monkeypatch)
     boot = products.boot_script("openclaw")
     assert "config patch --stdin" in boot
-    assert "cat >" not in boot, "又变成整份覆盖了 —— 会抹掉用户接的频道"
+    # 判据是"**没有任何东西直接写那个配置文件**", 而不是"脚本里不许出现 cat >" ——
+    # 后者把 2026-09-04 那次修复 (补丁写进 /tmp 好让兜底路径复用) 也一起拦了。
+    import re as _re
+
+    # 只认**重定向进配置文件**这一件事 (`> "$CFG"` / `> .../openclaw.json`);
+    # `>/dev/null` 与 `mv "$CFG" ...` 都不算。
+    cfg_writes = [
+        ln for ln in boot.splitlines() if _re.search(r'>\s*"?(\$CFG\b|[^\s|;"]*openclaw\.json)', ln)
+    ]
+    assert not cfg_writes, f"有东西在直接写配置文件, 会抹掉用户接的频道: {cfg_writes}"
+    assert "/tmp/" in boot.split("cat >")[1].split("<<")[0], "补丁只能落在 /tmp, 不能落在配置目录里"
     # 令牌靠**不带引号**的 heredoc 展开; 加了引号就会把字面量写进配置
     assert "<<PATCH" in boot and "<<'PATCH'" not in boot
     assert "$DSH_CLOUD_TOKEN" in boot
@@ -1874,6 +1884,26 @@ def test_coze_is_not_ready_until_the_session_is_injected(monkeypatch):
     # 标记在 reload 之后; 放弃时也要放行
     assert boot.index("nginx -s reload\n") < boot.rindex("/run/dsh/__dsh_ready")
     assert "/run/dsh/__dsh_ready; exit 0" in boot
+
+
+def test_openclaw_repairs_a_config_written_by_an_older_image(monkeypatch):
+    """老用户的配置是上一版镜像写的, 而 OpenClaw 的 schema 是 strictObject —— 升级后
+    多一个废弃键网关就 exit 1, 表现为"进不去"而服务端毫无异常 (2026-09-04 老板的
+    openclaw: 里面还留着我们自己在 2026.8.1 前写的 controlUi.allowInsecureAuth)。
+    config patch 是递归合并, 只加不删, 救不了自己写下的旧键。"""
+    monkeypatch.setattr(config, "OPENCLAW_DOMAIN", "claw.test.local")
+    monkeypatch.setattr(config, "WORK_PROXY_CIDR", "<TUNNEL_APP_IP>/32")
+    boot = products.boot_script("openclaw")
+    assert "doctor --fix" in boot, "无效配置下上游唯一的修复路径"
+    assert "config validate" in boot
+    # 顺序: 先修 -> 打补丁 -> 再验 -> 兜底挪走
+    fix1 = boot.index("doctor --fix")
+    patch_at = boot.index("config patch --stdin")
+    assert fix1 < patch_at, "要先修出一个合法的底, 补丁才打得进去"
+    assert boot.index('mv "$CFG"') > patch_at, "挪走旧配置是最后的兜底"
+    assert ".invalid." in boot, "挪走而不是删掉 —— 事后要能捞"
+    # 兜底之后必须再打一次补丁, 否则起来的是一个没有我们鉴权配置的网关 (第二道登录墙)
+    assert boot.count("config patch --stdin") == 2
 
 
 def test_hermes_is_not_ready_until_the_autologin_landed(monkeypatch):
