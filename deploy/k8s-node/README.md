@@ -133,6 +133,43 @@ bash deploy/k8s-node/migrate_to_oss.sh          # NAS 上每个 <hexid>/ -> oss:
 Job 在节点上推 (凭据取集群里的 Secret, 不经人手); 先推节点 (新)、再推 NAS (旧),
 两边都是 `--update`, 新的不被旧的盖掉。
 
+## 5. 网络围栏 (安全)
+
+**工作台里跑的是用户敲进去的任意命令**, 而节点是公司的共享机、落在公司内网上。
+2026-09-03 迁移完成后实测 (从一个普通工作台 Pod 里打):
+
+| 目标 | 迁移后 (无策略) | 加上 netpol.yaml |
+|---|---|---|
+| 节点 22 / 6379 / 6443 / 9300 / 111 | 可达 | 拒绝 |
+| 节点上另一条线的 redis (免密, `PING` 回 `+PONG`) | 可达可写 | 拒绝 |
+| 公司内网其它机器 | 可达 | 拒绝 |
+| 节点上各 docker 网桥 (同机其它容器) | 可达 | 拒绝 |
+| 生产机 (隧道对端 <TUNNEL_APP_IP>) | 可达 | 拒绝 |
+| 邻居用户的工作台 Pod | 可达 | 拒绝 |
+| 阿里云元数据 100.100.100.200 | 可达 (该机没绑 RAM 角色, 未泄凭据) | 拒绝 |
+| 集群 API (匿名 401) | 可达 | 拒绝 |
+| 公网 / 我们的网关 / OSS 内网端点 | 可达 | 可达 (产品要用) |
+
+ECI 时代这些都被安全组挡着 —— 迁到 k8s 是一次**隔离降级**, 这份策略把那一档补回来:
+
+```sh
+k3s kubectl apply -f netpol.yaml     # 前提: k3s 没有 disable-network-policy
+```
+
+三个必须知道的细节:
+
+- **关着网络策略时这个文件照样 apply 成功**, `get netpol` 也照样列出来, 但一条都不生效。
+  唯一可靠的验证是从 Pod 里真打一次。
+- **验证要看耗时, 不能只看 `nc -z` 的返回码**: 被策略拒绝是 0ms 的 refused, 而
+  `nc -z` 在某些 busybox 构建上会把它读成成功。判据用
+  `curl --connect-timeout 3 -w '%{http_code}' telnet://IP:PORT` 加计时。
+- **新 Pod 有一个约 3 秒的窗口**策略还没下发到它 (实测 t=0 通、t=3 已挡)。这段时间里
+  跑的是我们自己的启动脚本, 用户还没拿到页面, 所以不是可利用的口子 —— 但别把"启动
+  瞬间打得通"当成策略没生效。
+
+命名空间还打了 PodSecurity `enforce=baseline`: 拒掉 privileged / hostPath / hostNetwork
+—— dhc-server 那个 token 有 create pod 权限, 没有这道闸, 它一旦泄漏就等于共享机的 root。
+
 ## 退场
 
 ```sh
@@ -147,6 +184,9 @@ systemctl disable --now dsh-tunnel; rm -f /etc/systemd/system/dsh-tunnel.service
 
 - 「個人成品」页对 k8s 产品是空的 (`offline_workspace_dir` 返回 None): 正本在 OSS,
   应用机上还没挂 (可以 ossfs 只读挂 bucket 再指 K8S 的本地路径)。
-- 隔离是容器级 (共享内核), ECI 是每实例一台微 VM。要补的话在节点上给
-  k3s 配 gVisor (`runtimeClassName`), 后端加一个字段即可。
+- 隔离是容器级 (共享内核) 且以 root 跑, ECI 是每实例一台微 VM。网络那一档已由
+  netpol.yaml 补回, 但**内核那一档没有** —— 一次容器逃逸就是公司共享机上的 root。
+  要补: 节点上装 gVisor, 后端给 Pod 加 `runtimeClassName`。
+- 用户数据卷没有配额: 一个用户写满 /mnt 会同时压垮 k3s 与同机的 docker (都在这块盘上)。
+  当前靠 71% 的余量和人盯着; 真要防得给 PVC 换带 project quota 的文件系统。
 - 单节点, 节点挂了这些产品整体不可用 —— 回落到 ECI 只要改 `WORK_BACKEND_PRODUCTS`。

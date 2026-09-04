@@ -12,7 +12,10 @@ disable:
   - traefik
   - servicelb
   - metrics-server
-disable-network-policy: true
+# **不要关网络策略。** 关了 netpol.yaml 里那道围栏一条都不生效 (还照样 apply 成功),
+# 而工作台里跑的是用户敲进去的任意命令, 节点又在公司内网上 —— 2026-09-03 实测: 从工作台
+# 能打到节点 22/6379/6443、公司内网其它机器、以及另一条线那个免密的 redis。
+# disable-network-policy: true
 disable-helm-controller: true
 kubelet-arg:
   # Shared machine: leave 6 CPU / 64 GiB to the existing services (they use ~35 GiB).

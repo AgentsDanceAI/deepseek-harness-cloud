@@ -14,9 +14,11 @@ spec:
     spec:
       restartPolicy: Never
       resources: {requests: {cpu: 250m, memory: 256Mi}, limits: {cpu: "2", memory: 1Gi}}
+      # 挂 PVC 整卷 (不带 subPath) 就能看到所有用户的目录 —— 不用 hostPath,
+      # 于是命名空间的 PodSecurity baseline 拦不着它。
       volumes:
         - name: storage
-          hostPath: {path: /mnt/k3s/storage, type: Directory}
+          persistentVolumeClaim: {claimName: dshwork-data}
       containers:
         - name: rclone
           image: rclone/rclone:1.75
@@ -27,7 +29,7 @@ spec:
             - -c
             - |
               set -u
-              SRC=$(ls -d /storage/pvc-*_dsh_dshwork-data | head -1) || { echo "no PVC dir"; exit 1; }
+              SRC=/storage
               echo "==> $SRC -> $DSH_SYNC_REMOTE"
               n=0
               for d in "$SRC"/*/; do

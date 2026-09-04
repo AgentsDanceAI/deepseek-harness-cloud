@@ -11,6 +11,14 @@ apiVersion: v1
 kind: Namespace
 metadata:
   name: dsh
+  labels:
+    # PodSecurity: baseline 拒掉 privileged / hostPath / hostNetwork / hostPID 这些
+    # "一步到节点 root" 的字段。工作台要以 root 跑 (产品镜像里 USER 就是 root), 所以
+    # 用不了 restricted; baseline 挡住的正是**拿到 dhc-server 那个 token 之后**能做的
+    # 最坏的事 —— 它有 create pod 权限, 没有这道闸就等于共享机的 root。
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/warn: baseline
 ---
 apiVersion: v1
 kind: ResourceQuota

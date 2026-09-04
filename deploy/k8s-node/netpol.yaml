@@ -1,0 +1,51 @@
+# 工作台 Pod 的网络围栏 —— 在 k3s 节点上 `k3s kubectl apply -f netpol.yaml`。
+#
+# 为什么必须有: 工作台的产品形态就是**让用户在终端里敲任意命令**。而节点是公司的
+# 共享机, 落在公司内网里 —— 没有这道围栏时, 从任何一个用户工作台实测可达 (2026-09-03):
+#   · 节点自身 22 / 6379 / 6443 / 9300 / 111
+#   · 节点上另一条线的 redis (6379), 免密, PING 回 +PONG
+#   · 公司内网其它机器 (192.168.0.1:22)
+#   · 节点上各 docker 网桥的网关 (等于同机其它容器)
+#   · 阿里云元数据 100.100.100.200 (该节点没绑 RAM 角色, 所以偷不到云凭据 —— 但换台
+#     绑了角色的机器就是一次云账号失陷)
+# ECI 时代这些都被安全组挡着; 迁到 k8s 是**隔离降级**, 这份策略把那一档补回来。
+#
+# ⚠️ 生效前提: k3s 不能带 `disable-network-policy: true` (见 k3s-config.yaml)。
+# 关着网络策略时这个文件照样 apply 成功、`get netpol` 照样列出来, 但**一条都不生效** ——
+# 唯一的验证办法是从 Pod 里真打一次 (deploy/k8s-node/README.md 第 5 节)。
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: dshwork-fence
+  namespace: dsh
+spec:
+  # 命名空间里的**每个** Pod, 不只带 dshwork 标签的那些: 我们自己的一次性 Job 也在这里,
+  # 而"忘了打标签的 Pod 不受约束"是这种策略最常见的漏法。
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    # 只有反代进得来。生产机的 Caddy 经隧道打过来, 源地址是隧道对端 <TUNNEL_APP_IP>
+    # (宿主与 Caddy 容器都被 MASQUERADE 成它)。同一个 Pod 内的容器走回环, 不受策略约束。
+    - from: [{ipBlock: {cidr: <TUNNEL_APP_IP>/32}}]
+  egress:
+    # DNS。集群 DNS 的服务地址在 10.43/16 里, 而下面那条把整个 10/8 排除了, 所以单独放行。
+    - to:
+        - namespaceSelector: {matchLabels: {"kubernetes.io/metadata.name": kube-system}}
+        - ipBlock: {cidr: 10.43.0.10/32}
+      ports: [{protocol: UDP, port: 53}, {protocol: TCP, port: 53}]
+    # 公网随便走 —— 智能体要装包、抓网页、调我们的网关 (dshcloud.online 是公网地址),
+    # 这是产品功能, 不能拦。拦的是**内网**:
+    #   10.0.0.0/8      节点所在 VPC 的一部分 + 集群 Pod/Service 网段 (邻居工作台)
+    #   172.16.0.0/12   生产机 VPC 与各 docker 网桥
+    #   192.168.0.0/16  公司内网 (含节点自身与隧道网段)
+    #   169.254.0.0/16  链路本地
+    #   100.100.100.200 阿里云元数据 (100.64/10 的其余部分要留着: OSS 内网端点就在里面)
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+              - 169.254.0.0/16
+              - 100.100.100.200/32
