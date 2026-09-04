@@ -1019,6 +1019,22 @@ class K8sBackend(Backend):
             return {"name": _K8S_DATA_VOLUME, "emptyDir": {}}
         return {"name": _K8S_DATA_VOLUME, "persistentVolumeClaim": {"claimName": pvc}}
 
+    @staticmethod
+    def _gvisor_products() -> set[str]:
+        return {p.strip() for p in (config.K8S_GVISOR_PRODUCTS or "").split(",") if p.strip()}
+
+    @staticmethod
+    def _drop_caps() -> list[str]:
+        return [c.strip().upper() for c in (config.K8S_DROP_CAPS or "").split(",") if c.strip()]
+
+    def _harden(self, container: dict) -> dict:
+        """每个容器都去掉用不着的 capability。与 runAsUser 合并进同一个 securityContext。"""
+        drop = self._drop_caps()
+        if drop:
+            sc = container.setdefault("securityContext", {})
+            sc["capabilities"] = {"drop": drop}
+        return container
+
     def _manifest(
         self,
         user_id: str,
@@ -1066,7 +1082,7 @@ class K8sBackend(Backend):
         }
         if run_as_user is not None:
             app["securityContext"] = {"runAsUser": run_as_user}
-        containers = [app]
+        containers = [self._harden(app)]
         # 伴随容器: 同一个 Pod 里共享网络命名空间 (互相 127.0.0.1), 与 ECI 容器组同义。
         for sc in sidecars:
             c: dict = {"name": sc.name, "image": sc.image_ref}
@@ -1081,7 +1097,7 @@ class K8sBackend(Backend):
             mounts = [data_mount(sub, p) for sub, p in sc.mounts] + [seed_mount(s, p) for s, p in sc.seeds]
             if mounts:
                 c["volumeMounts"] = mounts
-            containers.append(c)
+            containers.append(self._harden(c))
         inits = []
         for ic in init_containers:
             c = {
@@ -1094,7 +1110,7 @@ class K8sBackend(Backend):
             }
             if ic.cmd:
                 c["command"] = list(ic.cmd)
-            inits.append(c)
+            inits.append(self._harden(c))
         volumes = [self._data_volume()]
         if init_containers or seeds or any(sc.seeds for sc in sidecars):
             volumes.append({"name": _SEED_VOLUME, "emptyDir": {}})
@@ -1103,7 +1119,7 @@ class K8sBackend(Backend):
         sync = self._sync_enabled()
         if sync:
             restore, syncer = self._sync_containers(hexid)
-            inits = [restore, syncer, *inits]
+            inits = [self._harden(restore), self._harden(syncer), *inits]
         spec: dict = {
             # 与 ECI 同一条规则: 栈产品 Always (应用容器在中间件就绪前会崩, 靠重启
             # 拉起来), 单容器 Never (它退出就是真的死了, 终态由 inspect 清掉重建)。
@@ -1124,6 +1140,12 @@ class K8sBackend(Backend):
         }
         if inits:
             spec["initContainers"] = inits
+        # gVisor: 按产品开。工作台键里带产品 id (products.wskey)。
+        from .products import split_key  # 延迟导入, 保持单向依赖
+
+        _, product_id = split_key(user_id)
+        if product_id in self._gvisor_products() and (config.K8S_RUNTIME_CLASS or "").strip():
+            spec["runtimeClassName"] = config.K8S_RUNTIME_CLASS.strip()
         if host_aliases:
             ok = [h for h in host_aliases if _RFC1123.fullmatch(h)]
             bad = [h for h in host_aliases if h not in ok]

@@ -185,6 +185,45 @@ k3s kubectl apply -f netpol.yaml     # 前提: k3s 没有 disable-network-policy
 命名空间还打了 PodSecurity `enforce=baseline`: 拒掉 privileged / hostPath / hostNetwork
 —— dhc-server 那个 token 有 create pod 权限, 没有这道闸, 它一旦泄漏就等于共享机的 root。
 
+## 6. 内核隔离: gVisor (K8S_GVISOR_PRODUCTS)
+
+网络围栏挡的是"从容器往外打"; 挡不住的是**内核漏洞逃逸** —— 容器与宿主共用内核, 且
+以 root 跑, 而节点是台一年没重启的共享机。这台机没有嵌套虚拟化 (`/dev/kvm` 不存在),
+Kata/Firecracker 上不了; gVisor 不需要虚拟化, 是这里唯一能补内核那一档的办法。
+
+原理一句话: 容器的系统调用被一个用户态内核 (Sentry) 截走, 不再直达宿主内核; Sentry
+自己又被 seccomp 锁在约五十个宿主 syscall 里。逃逸要连破两层。
+
+节点上装 (k3s **不会**自动识别 runsc, 要手工告诉它的 containerd):
+
+```sh
+URL=https://storage.googleapis.com/gvisor/releases/release/latest/x86_64
+for f in runsc containerd-shim-runsc-v1; do curl -sfL -o $f $URL/$f; curl -sfL -o $f.sha512 $URL/$f.sha512; done
+sha512sum -c *.sha512 && install -m 0755 runsc containerd-shim-runsc-v1 /usr/local/bin/
+cp containerd-config-v3.toml.tmpl /mnt/k3s/agent/etc/containerd/   # 追加 runsc 运行时 (config-v3 = containerd 2.x)
+install -D -m 0644 runsc.toml /etc/containerd/runsc.toml
+systemctl restart k3s && grep -c runsc /mnt/k3s/agent/etc/containerd/config.toml   # 应 > 0
+k3s kubectl apply -f runtimeclass-gvisor.yaml
+```
+
+验证不能只看 Pod 起没起 —— 进去看 `uname -r`, gVisor 里是 `4.19.0-gvisor`, `dmesg`
+第一行 "Starting gVisor..."。
+
+**按产品开** (`K8S_GVISOR_PRODUCTS=pi,claude-code,...`), 不一刀切。实测代价 (同一节点):
+
+| 负载 | runc | gVisor |
+|---|---|---|
+| `npm install express` | 1 秒 | 7 秒 |
+| 纯计算 2e8 次循环 | 1 秒 | 1 秒 |
+| DNS / 网关 / 围栏 / emptyDir subPath | 正常 | 正常 |
+
+所以最该开的是**用户能拿到 shell 敲任意命令**的那几格; 而 Coze/Dify 那种十容器栈
+(MySQL/ES/Milvus, IO 最吃亏、用户在里面是填表单不是敲命令) 先留在 runc。
+
+另: 所有容器 (应用/伴随/初始化/同步) 都去掉了 `K8S_DROP_CAPS` 里的 capability
+(默认 NET_RAW/MKNOD/SYS_CHROOT/SETFCAP —— 历史逃逸链的常客, 工作台没有一个用得上)。
+没有开 `allowPrivilegeEscalation: false`: uid 1000 的产品 (Claude Code/Codex) 可能要 sudo。
+
 ## 退场
 
 ```sh
@@ -199,9 +238,8 @@ systemctl disable --now dsh-tunnel; rm -f /etc/systemd/system/dsh-tunnel.service
 
 - 「個人成品」页对 k8s 产品是空的 (`offline_workspace_dir` 返回 None): 正本在 OSS,
   应用机上还没挂 (可以 ossfs 只读挂 bucket 再指 K8S 的本地路径)。
-- 隔离是容器级 (共享内核) 且以 root 跑, ECI 是每实例一台微 VM。网络那一档已由
-  netpol.yaml 补回, 但**内核那一档没有** —— 一次容器逃逸就是公司共享机上的 root。
-  要补: 节点上装 gVisor, 后端给 Pod 加 `runtimeClassName`。
+- 内核隔离只覆盖 `K8S_GVISOR_PRODUCTS` 里的产品; 其余仍是共享内核 + root。节点内核
+  5.10, 一年没重启 —— 打补丁要重启, 那是机器管理员的决定。
 - 单个工作台有 20 GiB 上限, 但**没有全局上限**: 14 个工作台各写满仍会超过这块盘的
   余量。兜底是 kubelet 的 nodefs<10% 驱逐 —— 它保的是节点 (以及同机的 docker), 代价是
   驱逐我们自己的 Pod。

@@ -286,6 +286,16 @@ K8S_SYNC_GRACE_S = _env_int("K8S_SYNC_GRACE_S", 180)
 # 超限由 kubelet 驱逐 Pod —— 那个用户当次会话未推送的改动会丢, 但节点不会被写满
 # (节点整体还有 eviction-hard 的 nodefs<10% 兜底, 见 deploy/k8s-node/k3s-config.yaml)。
 K8S_WORK_DISK_GB = _env_int("K8S_WORK_DISK_GB", 20)
+# --- k8s: 隔离 -------------------------------------------------------------------
+# 工作台里跑的是用户敲的任意命令, 而节点是共享机: 容器与宿主共用内核, 一次内核漏洞
+# 逃逸就是节点 root。两道补:
+#   1) gVisor (RuntimeClass, 节点上装 runsc): 系统调用被用户态内核截走, 不再直达宿主
+#      内核。按产品开 —— 有终端让用户敲命令的那几格最需要, 而 IO 密集的栈产品最吃亏。
+#   2) 去掉工作台用不着的 capability (docker 默认给 14 个): NET_RAW / MKNOD /
+#      SYS_CHROOT / SETFCAP 都是历史逃逸链里的常客, 工作台没有一个用得上。
+K8S_RUNTIME_CLASS = _env("K8S_RUNTIME_CLASS", "gvisor")
+K8S_GVISOR_PRODUCTS = _env("K8S_GVISOR_PRODUCTS", "")
+K8S_DROP_CAPS = _env("K8S_DROP_CAPS", "NET_RAW,MKNOD,SYS_CHROOT,SETFCAP")
 
 # --- ComfyUI 工作台 -----------------------------------------------------------
 # 与 dsh 工作台同构的第二种产品: 每用户一个容器, 同一套回收与计费。

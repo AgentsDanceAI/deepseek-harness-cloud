@@ -1,0 +1,6 @@
+# gVisor 运行时选项 (containerd shim 读, 放 /etc/containerd/runsc.toml)。
+# systrap 是当前默认平台, 不需要 KVM (这台机也没有)。
+# 排障时开 debug = true, log = "/var/log/runsc/%ID%/gvisor.%COMMAND%.log"。
+[runsc_config]
+  platform = "systrap"
+  net-raw = "false"

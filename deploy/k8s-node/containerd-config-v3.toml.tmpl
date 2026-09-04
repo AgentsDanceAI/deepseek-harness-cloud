@@ -1,0 +1,10 @@
+{{ template "base" . }}
+
+# gVisor (runsc) —— DSH Cloud 工作台的沙箱运行时。RuntimeClass "gvisor" -> handler "runsc"。
+# k3s 自己不识别 runsc, 所以在它生成的配置后面追加这一段 (config-v3: containerd 2.x)。
+# 放到 <data-dir>/agent/etc/containerd/config-v3.toml.tmpl, 重启 k3s 生效。
+[plugins."io.containerd.cri.v1.runtime".containerd.runtimes.runsc]
+  runtime_type = "io.containerd.runsc.v1"
+  [plugins."io.containerd.cri.v1.runtime".containerd.runtimes.runsc.options]
+    TypeUrl = "io.containerd.runsc.v1.options"
+    ConfigPath = "/etc/containerd/runsc.toml"

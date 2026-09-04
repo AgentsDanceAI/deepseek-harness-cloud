@@ -360,9 +360,10 @@ async def test_single_container_products_keep_restart_never(k8s):
 async def test_run_as_user_lands_on_the_app_container(k8s):
     b, fake = k8s
     await _create(b, run_as_user=0)
-    assert fake.created()[0]["spec"]["containers"][0]["securityContext"] == {"runAsUser": 0}
+    assert fake.created()[0]["spec"]["containers"][0]["securityContext"]["runAsUser"] == 0
     await _create(b, "u_x~pi", run_as_user=None)
-    assert "securityContext" not in fake.created()[1]["spec"]["containers"][0]
+    # None = 用镜像自己的 USER; securityContext 里只剩 capability 那一项
+    assert "runAsUser" not in fake.created()[1]["spec"]["containers"][0].get("securityContext", {})
 
 
 @pytest.mark.asyncio
@@ -387,7 +388,7 @@ async def test_stack_product_becomes_one_pod_with_sidecar_containers(k8s):
     assert names == ["app", "postgres", "web"]
     pg = spec["containers"][1]
     assert pg["env"] == [{"name": "POSTGRES_PASSWORD", "value": "s"}]
-    assert pg["securityContext"] == {"runAsUser": 0}
+    assert pg["securityContext"]["runAsUser"] == 0
     assert pg["volumeMounts"] == [
         {"name": "dshwork-data", "mountPath": "/var/lib/postgresql/data", "subPath": "uabcdify/pg"}
     ]
@@ -792,6 +793,50 @@ async def test_sync_scripts_guard_against_pushing_a_half_restore(k8s, oss):
         "--exclude '/.dsh-*'",
     ):
         assert flags in r and flags in s_, flags
+
+
+# --- 隔离: gVisor 按产品开, capability 全员减 ------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_every_container_drops_the_capabilities_a_workspace_never_needs(k8s, oss, monkeypatch):
+    """docker 默认给 14 个 capability; NET_RAW/MKNOD/SYS_CHROOT/SETFCAP 是历史逃逸链的常客,
+    工作台没有一个用得上。应用、伴随、初始化、同步四类容器一个都不能漏。"""
+    monkeypatch.setattr(config, "K8S_DROP_CAPS", "NET_RAW,MKNOD,SYS_CHROOT,SETFCAP")
+    b, fake = k8s
+    sc = (products.Sidecar(name="pg", image_ref="postgres:15", run_as_user=0),)
+    ic = (products.InitContainer(name="seed", image_ref="x/assets:1", cmd=("true",)),)
+    await _create(b, "u_abc~dify", sidecars=sc, init_containers=ic, seeds=(("", "/seed"),), run_as_user=0)
+    spec = fake.created()[0]["spec"]
+    everyone = spec["containers"] + spec["initContainers"]
+    assert [c["name"] for c in everyone] == ["app", "pg", "dsh-restore", "dsh-syncer", "seed"]
+    for c in everyone:
+        assert c["securityContext"]["capabilities"] == {
+            "drop": ["NET_RAW", "MKNOD", "SYS_CHROOT", "SETFCAP"]
+        }, c["name"]
+    # 与 runAsUser 同住一个 securityContext, 不能互相覆盖
+    assert spec["containers"][0]["securityContext"]["runAsUser"] == 0
+    assert spec["containers"][1]["securityContext"]["runAsUser"] == 0
+
+
+@pytest.mark.asyncio
+async def test_gvisor_is_per_product(k8s, monkeypatch):
+    monkeypatch.setattr(config, "K8S_RUNTIME_CLASS", "gvisor")
+    monkeypatch.setattr(config, "K8S_GVISOR_PRODUCTS", "pi, claude-code")
+    b, fake = k8s
+    await _create(b, "u_a~pi")
+    await _create(b, "u_a~coze")
+    await _create(b, "u_a~claude-code")
+    rt = [body["spec"].get("runtimeClassName") for body in fake.created()]
+    assert rt == ["gvisor", None, "gvisor"]
+
+
+@pytest.mark.asyncio
+async def test_no_gvisor_products_means_no_runtime_class(k8s, monkeypatch):
+    monkeypatch.setattr(config, "K8S_GVISOR_PRODUCTS", "")
+    b, fake = k8s
+    await _create(b, "u_a~pi")
+    assert "runtimeClassName" not in fake.created()[0]["spec"]
 
 
 # --- 按产品分派 ---------------------------------------------------------------
