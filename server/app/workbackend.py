@@ -1027,9 +1027,16 @@ class K8sBackend(Backend):
     def _drop_caps() -> list[str]:
         return [c.strip().upper() for c in (config.K8S_DROP_CAPS or "").split(",") if c.strip()]
 
-    def _harden(self, container: dict) -> dict:
+    #: 伴随容器 (上游中间件镜像) 保留的 capability。bitnami 那一系 (redis/etcd/elasticsearch)
+    #: 的入口脚本以 root 起、再用 `chroot --userspec=1001:1001 /` 降权 —— 去掉 SYS_CHROOT
+    #: 它们一个都起不来 (`chroot: cannot change root directory to '/': Operation not
+    #: permitted`), 2026-09-04 全员回归 Coze 三个中间件各重启 10 次就是这个。
+    #: 用户的代码不在伴随容器里跑, 给它们留这一个不亏什么。
+    _SIDECAR_KEEP_CAPS = frozenset({"SYS_CHROOT"})
+
+    def _harden(self, container: dict, *, sidecar: bool = False) -> dict:
         """每个容器都去掉用不着的 capability。与 runAsUser 合并进同一个 securityContext。"""
-        drop = self._drop_caps()
+        drop = [c for c in self._drop_caps() if not (sidecar and c in self._SIDECAR_KEEP_CAPS)]
         if drop:
             sc = container.setdefault("securityContext", {})
             sc["capabilities"] = {"drop": drop}
@@ -1097,7 +1104,7 @@ class K8sBackend(Backend):
             mounts = [data_mount(sub, p) for sub, p in sc.mounts] + [seed_mount(s, p) for s, p in sc.seeds]
             if mounts:
                 c["volumeMounts"] = mounts
-            containers.append(self._harden(c))
+            containers.append(self._harden(c, sidecar=True))
         inits = []
         for ic in init_containers:
             c = {
