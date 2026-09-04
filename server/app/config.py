@@ -280,6 +280,12 @@ K8S_SYNC_INTERVAL_S = _env_int("K8S_SYNC_INTERVAL_S", 300)
 # 回收时留给"应用退出 + 全量推送"的宽限 (秒)。Coze 一个 MySQL+ES+Milvus 停机加推送
 # 要一两分钟; 超时 kubelet 直接杀, 推了一半的目录下次起动会不一致。
 K8S_SYNC_GRACE_S = _env_int("K8S_SYNC_GRACE_S", 180)
+# 一个工作台在节点本地盘上最多写多少 (GiB)。**只有开了 OSS 同步才谈得上这个上限**:
+# 那时本地盘只是工作副本 (emptyDir), 正本在 OSS, 于是可以给它设容量上限、Pod 一删就释放。
+# 没开同步时数据只有本地这一份 (PVC), 而 PVC 没有配额机制, 这个值不起作用。
+# 超限由 kubelet 驱逐 Pod —— 那个用户当次会话未推送的改动会丢, 但节点不会被写满
+# (节点整体还有 eviction-hard 的 nodefs<10% 兜底, 见 deploy/k8s-node/k3s-config.yaml)。
+K8S_WORK_DISK_GB = _env_int("K8S_WORK_DISK_GB", 20)
 
 # --- ComfyUI 工作台 -----------------------------------------------------------
 # 与 dsh 工作台同构的第二种产品: 每用户一个容器, 同一套回收与计费。

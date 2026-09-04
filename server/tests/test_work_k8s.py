@@ -693,6 +693,30 @@ async def test_without_oss_config_no_sync_containers_and_short_grace(k8s, monkey
 
 
 @pytest.mark.asyncio
+async def test_with_oss_the_local_copy_is_a_capped_emptydir_not_the_pvc(k8s, oss, monkeypatch):
+    """正本在 OSS 时本地只是工作副本: emptyDir 带上限 —— Pod 一删就释放, 写超了 kubelet 驱逐。
+    留在 PVC 上既清不掉 (每个用户×产品一份, 永远留着; 实测 22 个目录 717MB 而当时零个
+    工作台在跑) 又设不了上限 (PVC 没有配额机制)。"""
+    monkeypatch.setattr(config, "K8S_WORK_DISK_GB", 20)
+    b, fake = k8s
+    await _create(b, "u_abc~pi")
+    vols = fake.created()[0]["spec"]["volumes"]
+    assert {"name": "dshwork-data", "emptyDir": {"sizeLimit": "20Gi"}} in vols
+    assert not any("persistentVolumeClaim" in v for v in vols)
+    # 挂载点不变: 应用容器还是 home/workspace 两个子路径
+    app = fake.created()[0]["spec"]["containers"][0]
+    assert {"name": "dshwork-data", "mountPath": "/root", "subPath": "uabcpi/home"} in app["volumeMounts"]
+
+
+@pytest.mark.asyncio
+async def test_the_disk_cap_is_configurable(k8s, oss, monkeypatch):
+    monkeypatch.setattr(config, "K8S_WORK_DISK_GB", 50)
+    b, fake = k8s
+    await _create(b)
+    assert {"name": "dshwork-data", "emptyDir": {"sizeLimit": "50Gi"}} in fake.created()[0]["spec"]["volumes"]
+
+
+@pytest.mark.asyncio
 async def test_sync_adds_restore_then_syncer_before_product_inits(k8s, oss):
     """恢复容器排在所有初始化容器之前 (产品的初始化容器可能往用户目录写东西),
     同步器紧随其后 (原生 sidecar), 免得先推一份空的上去。"""

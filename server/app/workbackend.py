@@ -997,11 +997,23 @@ class K8sBackend(Backend):
         return restore, syncer
 
     def _data_volume(self) -> dict:
+        """用户目录挂在什么上面 —— 跟着"正本在哪"走。
+
+        开了 OSS 同步: 本地只是工作副本, 用 **emptyDir 并带容量上限**。三个好处:
+        Pod 一删空间就释放 (否则每个"用户 × 产品"的本地副本永远留着, 实测 22 个目录
+        717MB 而当时零个工作台在跑); 超限 kubelet 驱逐, 一个人写不满整块盘 (那块盘上
+        还有别人的服务); PVC 没有任何配额机制, 这是唯一能设上限的形态。
+
+        没开同步: 数据只有本地这一份, 必须是 PVC —— 那时不能设上限, 因为超限即销毁。
+        """
+        if self._sync_enabled():
+            return {"name": _K8S_DATA_VOLUME, "emptyDir": {"sizeLimit": f"{config.K8S_WORK_DISK_GB}Gi"}}
         pvc = (config.K8S_DATA_PVC or "").strip()
         if not pvc:
             if not self._warned_no_pvc:
                 log.warning(
-                    "[work] k8s 后端未配置 K8S_DATA_PVC: 工作台是一次性的, 闲置回收会抹掉用户的文件与会话"
+                    "[work] k8s 后端未配置 K8S_DATA_PVC 也没开 OSS 同步: 工作台是一次性的, "
+                    "闲置回收会抹掉用户的文件与会话"
                 )
                 self._warned_no_pvc = True
             return {"name": _K8S_DATA_VOLUME, "emptyDir": {}}

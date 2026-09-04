@@ -27,3 +27,8 @@ kubelet-arg:
   - "max-pods=60"
   # kernel 5.10 / cgroup v1 host: kubelet >= 1.36 refuses cgroup v1 unless told otherwise
   - "fail-cgroupv1=false"
+  # emptyDir 与容器可写层都在 kubelet 的 root-dir 下。默认 /var/lib/kubelet 在**系统盘**
+  # (这台机只剩 17G), 而开了 OSS 同步后工作台的本地副本就是带上限的 emptyDir —— 放系统盘
+  # 等于把风险从数据盘挪到更小的盘上。指到 /mnt 后 nodefs 也变成 /mnt, 于是上面
+  # eviction-hard 的 nodefs<10% 正好守住这块与公司 docker 共用的盘。
+  - "root-dir=/mnt/k3s/kubelet"

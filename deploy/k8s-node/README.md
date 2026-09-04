@@ -120,8 +120,23 @@ docker exec dhc-server curl -s http://<某个 Pod IP>:<端口>/  # 容器里直�
     "Resource": ["acs:oss:*:*:dshcloud-work", "acs:oss:*:*:dshcloud-work/*"]}]}
   ```
 
+**本地那份是工作副本, 不是正本**: 开了 OSS 同步后, 用户目录挂的是**带上限的
+emptyDir** (`K8S_WORK_DISK_GB`, 默认 20 GiB), 不再是 PVC。理由:
+
+- Pod 一删本地就释放。留在 PVC 上时每个"用户 × 产品"的副本永远留着 —— 实测某天
+  22 个目录 717 MB 而当时**零个**工作台在跑, 按用户数线性堆积。
+- PVC 没有任何配额机制, emptyDir 的 `sizeLimit` 是唯一能给单个工作台设上限的形态。
+  超限 kubelet 驱逐该 Pod (那次会话未推送的改动会丢), 但写不满整块盘 —— 那块盘上
+  还有公司的 docker 和别人的 workspace。
+- 节点整体另有 `eviction-hard: nodefs.available<10%` 兜底; 为此 kubelet 的
+  `root-dir` 必须指到 /mnt (见 k3s-config.yaml), 否则 emptyDir 落在系统盘上,
+  nodefs 也盯错盘。
+
+没开 OSS 同步的部署仍然用 PVC (`K8S_DATA_PVC`) 且不设上限 —— 那时数据只有本地这一份,
+超限即销毁。
+
 已知取舍: Pod 异常死亡会丢最后一次推送之后的改动 (间隔默认 5 分钟); 起动多一步
-下载, 单容器产品秒级, Coze 那种几百 MB 要十几秒。
+下载, 单容器产品秒级, Coze 那种几百 MB 实测 1 秒 (内网)。
 
 迁移 (一次性, 在应用机上, `.env` 里已有 K8S_SYNC_OSS_* 时):
 
@@ -187,6 +202,7 @@ systemctl disable --now dsh-tunnel; rm -f /etc/systemd/system/dsh-tunnel.service
 - 隔离是容器级 (共享内核) 且以 root 跑, ECI 是每实例一台微 VM。网络那一档已由
   netpol.yaml 补回, 但**内核那一档没有** —— 一次容器逃逸就是公司共享机上的 root。
   要补: 节点上装 gVisor, 后端给 Pod 加 `runtimeClassName`。
-- 用户数据卷没有配额: 一个用户写满 /mnt 会同时压垮 k3s 与同机的 docker (都在这块盘上)。
-  当前靠 71% 的余量和人盯着; 真要防得给 PVC 换带 project quota 的文件系统。
+- 单个工作台有 20 GiB 上限, 但**没有全局上限**: 14 个工作台各写满仍会超过这块盘的
+  余量。兜底是 kubelet 的 nodefs<10% 驱逐 —— 它保的是节点 (以及同机的 docker), 代价是
+  驱逐我们自己的 Pod。
 - 单节点, 节点挂了这些产品整体不可用 —— 回落到 ECI 只要改 `WORK_BACKEND_PRODUCTS`。
