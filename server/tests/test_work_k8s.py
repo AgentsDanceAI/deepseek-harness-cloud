@@ -811,9 +811,13 @@ async def test_every_container_drops_the_capabilities_a_workspace_never_needs(k8
     everyone = spec["containers"] + spec["initContainers"]
     assert [c["name"] for c in everyone] == ["app", "pg", "dsh-restore", "dsh-syncer", "seed"]
     for c in everyone:
-        assert c["securityContext"]["capabilities"] == {
-            "drop": ["NET_RAW", "MKNOD", "SYS_CHROOT", "SETFCAP"]
-        }, c["name"]
+        if c["name"] == "pg":
+            # 伴随容器保留 SYS_CHROOT: bitnami 系镜像靠 chroot --userspec 降权, 去掉它一个都起不来
+            assert c["securityContext"]["capabilities"] == {"drop": ["NET_RAW", "MKNOD", "SETFCAP"]}
+        else:
+            assert c["securityContext"]["capabilities"] == {
+                "drop": ["NET_RAW", "MKNOD", "SYS_CHROOT", "SETFCAP"]
+            }, c["name"]
     # 与 runAsUser 同住一个 securityContext, 不能互相覆盖
     assert spec["containers"][0]["securityContext"]["runAsUser"] == 0
     assert spec["containers"][1]["securityContext"]["runAsUser"] == 0
