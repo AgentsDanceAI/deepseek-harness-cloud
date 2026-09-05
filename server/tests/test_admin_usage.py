@@ -165,3 +165,22 @@ def test_sql_sentinel_survives_the_postgres_placeholder_rewrite():
         _db.query = orig
     assert seen and all(q == n for q, n in seen), seen
     assert not re.search(r"'[^']*\?[^']*'", " ".join(str(x) for x in seen))
+
+
+def test_per_user_listing_carries_each_users_breakdown():
+    d = admin.usage_users(days=30, _={})
+    assert [u["id"] for u in d["users"]] == ["u_a", "u_b"], "按积分降序"
+    ua, ub = d["users"]
+    assert ua["email"] == "u_a@t.local"
+    assert (ua["minutes"], ua["credits"], ua["calls"]) == (5, 52, 6)
+    assert [p["id"] for p in ua["products"]] == ["pi", "dsh", "desktop", "unattributed"]
+    assert ua["products"][0]["credits"] == 15
+    assert ub["products"] == [{"id": "coze", "name": "Coze Studio", "minutes": 1, "credits": 9, "calls": 1}]
+    assert d["totals"] == {"minutes": 6, "credits": 61, "calls": 7}
+
+
+def test_per_user_listing_respects_window():
+    d = admin.usage_users(days=0, _={})
+    ua = next(u for u in d["users"] if u["id"] == "u_a")
+    assert ua["credits"] == 152 and ua["minutes"] == 6
+    assert admin.usage_users(days=99999, _={})["days"] == 3650

@@ -620,6 +620,7 @@ def test_admin_page_has_per_product_usage(client):
     assert zh.status_code == 200
     body = zh.text
     assert 'id="usage-all"' in body and 'id="period"' in body
+    assert 'id="usage-users"' in body and "/api/admin/usage/users" in body and "按用户" in body
     assert "/api/admin/usage" in body
     assert "各产品消耗" in body and "机时(分钟)" in body
     # JS 里的文案经 tojson 输出, 非 ASCII 会被转义成 \uXXXX —— 按同样的写法找

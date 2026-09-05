@@ -54,40 +54,43 @@ _NON_PRODUCT = (USAGE_DESKTOP, USAGE_UNATTRIBUTED)
 _GONE = "#gone"
 
 
-@router.get("/usage")
-def usage(user_id: str = "", days: int = 30, _: dict = Depends(require_admin)):
-    """按产品拆开的消耗: 机时 + 积分 + 调用次数。user_id 空 = 全站。
+def _window(days: int) -> tuple[int, float]:
+    days = max(0, min(int(days), 3650))
+    return days, (time.time() - days * 86400 if days else 0.0)
+
+
+def _collect(since: float, user_id: str = "") -> dict[tuple[str, str], dict[str, int]]:
+    """(用户, 产品) -> {minutes, credits, calls}。user_id 空 = 全站。
 
     两种资源的归属方式不同, 因为记账时留下的线索不同:
       * 机时: 回收器每分钟给每个工作台记一行 (kind=workspace, model=work:<产品>),
         产品就写在 model 里 —— 直接按它分组。
       * 积分: 网关按调用记账, 行上只有 device_id; 工作台的凭据是一台 platform=cloud
         的设备, 它的 workspace 列是工作台键 (u_xxx~<产品>, 默认产品没有 ~) ——
-        经设备找到产品。桌面端/App 的设备没有 workspace, 归到 "desktop"。
+        经设备找到产品。归属线索分三种: 没有 device_id 的是网页/App 里凭会话直接发的;
+        有 device_id 且设备还在的, 按设备的 workspace 归产品 (桌面设备没有 workspace →
+        桌面端); 有 device_id 但设备行没了的, 是早先铸币时"只留最近两份、其余删掉"
+        清理掉的工作台凭据 —— 产品追不回来。2026-09-04 线上 30 天里这类行占积分消耗
+        的四分之一, 混进桌面端会误导。
     """
-    days = max(0, min(int(days), 3650))
-    since = time.time() - days * 86400 if days else 0.0
-    agg: dict[str, dict[str, int]] = {}
+    agg: dict[tuple[str, str], dict[str, int]] = {}
 
-    def bucket(pid: str) -> dict[str, int]:
-        return agg.setdefault(pid, {"minutes": 0, "credits": 0, "calls": 0})
+    def bucket(uid: str, pid: str) -> dict[str, int]:
+        return agg.setdefault((uid, pid), {"minutes": 0, "credits": 0, "calls": 0})
 
     scope = "AND user_id=?" if user_id else ""
     args: tuple = (user_id,) if user_id else ()
     for r in db.query(
-        f"SELECT model, COUNT(*) AS n FROM usage_log WHERE kind=? AND created>? {scope} GROUP BY model",
+        f"SELECT user_id, model, COUNT(*) AS n FROM usage_log WHERE kind=? AND created>? {scope} "
+        "GROUP BY user_id, model",
         (work_access.MINUTE_KIND, since, *args),
     ):
         model = r["model"] or ""
         pid = model[len("work:") :] if model.startswith("work:") else products.DEFAULT
-        bucket(pid)["minutes"] += int(r["n"] or 0)
+        bucket(r["user_id"], pid)["minutes"] += int(r["n"] or 0)
 
     marks = ",".join("?" * len(_SPEND_KINDS))
     scope_u = "AND u.user_id=?" if user_id else ""
-    # 归属线索分三种: 没有 device_id 的是网页/App 里凭会话直接发的; 有 device_id 且设备
-    # 还在的, 按设备的 workspace 归产品 (桌面设备没有 workspace → 桌面端); 有 device_id
-    # 但设备行没了的, 是早先铸币时"只留最近两份、其余删掉"清理掉的工作台凭据 —— 产品
-    # 追不回来。2026-09-04 线上 30 天里这类行占积分消耗的四分之一, 混进桌面端会误导。
     # 哨兵不能用 '?' —— db 层把 SQL 里**所有** ? 换成 %s 给 Postgres, 字面量里的也换;
     # SQLite 上测试全绿, 线上第一次调用就 "7 placeholders but 6 parameters" (1709c33)。
     ws_expr = (
@@ -95,9 +98,9 @@ def usage(user_id: str = "", days: int = 30, _: dict = Depends(require_admin)):
         f"WHEN d.id IS NULL THEN '{_GONE}' ELSE COALESCE(d.workspace,'') END"
     )
     for r in db.query(
-        f"SELECT {ws_expr} AS ws, COUNT(*) AS calls, COALESCE(SUM(u.credits),0) AS credits "
+        f"SELECT u.user_id, {ws_expr} AS ws, COUNT(*) AS calls, COALESCE(SUM(u.credits),0) AS credits "
         "FROM usage_log u LEFT JOIN devices d ON d.id=u.device_id "
-        f"WHERE u.kind IN ({marks}) AND u.created>? {scope_u} GROUP BY 1",
+        f"WHERE u.kind IN ({marks}) AND u.created>? {scope_u} GROUP BY 1, 2",
         (*_SPEND_KINDS, since, *args),
     ):
         ws = r["ws"] or ""
@@ -107,17 +110,20 @@ def usage(user_id: str = "", days: int = 30, _: dict = Depends(require_admin)):
             pid = USAGE_UNATTRIBUTED
         else:
             pid = products.split_key(ws)[1]
-        b = bucket(pid)
+        b = bucket(r["user_id"], pid)
         b["credits"] += int(r["credits"] or 0)
         b["calls"] += int(r["calls"] or 0)
+    return agg
 
+
+def _items(by_pid: dict[str, dict[str, int]]) -> tuple[list[dict], dict[str, int]]:
+    """按产品的行 + 合计。产品按花费降序; 两个非产品桶固定压在最后。"""
     reg = products.registry()
     items = [
         {"id": pid, "name": reg[pid].name if pid in reg else ("" if pid in _NON_PRODUCT else pid), **b}
-        for pid, b in agg.items()
+        for pid, b in by_pid.items()
         if any(b.values())
     ]
-    # 产品按花费降序; 两个非产品桶固定压在最后, 别让"桌面端"顶在产品报表的第一行。
     items.sort(
         key=lambda x: (
             _NON_PRODUCT.index(x["id"]) + 1 if x["id"] in _NON_PRODUCT else 0,
@@ -127,7 +133,49 @@ def usage(user_id: str = "", days: int = 30, _: dict = Depends(require_admin)):
         )
     )
     totals = {k: sum(i[k] for i in items) for k in ("minutes", "credits", "calls")}
+    return items, totals
+
+
+def _merge(agg, into: dict[str, dict[str, int]], key) -> None:
+    for (uid, pid), b in agg.items():
+        t = into.setdefault(key(uid, pid), {"minutes": 0, "credits": 0, "calls": 0})
+        for k, v in b.items():
+            t[k] += v
+
+
+@router.get("/usage")
+def usage(user_id: str = "", days: int = 30, _: dict = Depends(require_admin)):
+    """按产品拆开的消耗: 机时 + 积分 + 调用次数。user_id 空 = 全站。"""
+    days, since = _window(days)
+    by_pid: dict[str, dict[str, int]] = {}
+    _merge(_collect(since, user_id), by_pid, lambda uid, pid: pid)
+    items, totals = _items(by_pid)
     return {"days": days, "user_id": user_id, "products": items, "totals": totals}
+
+
+@router.get("/usage/users")
+def usage_users(days: int = 30, _: dict = Depends(require_admin)):
+    """每个用户的消耗, 各自再按产品拆开 —— 老板要的是"每个用户用哪个产品花了多少",
+    一次拿全, 页面上按用户列表、点开看明细, 不必逐个点用户去查。"""
+    days, since = _window(days)
+    agg = _collect(since)
+    per_user: dict[str, dict[str, dict[str, int]]] = {}
+    for (uid, pid), b in agg.items():
+        per_user.setdefault(uid, {})[pid] = b
+    emails: dict[str, str] = {}
+    if per_user:
+        marks = ",".join("?" * len(per_user))
+        for r in db.query(f"SELECT id, email FROM users WHERE id IN ({marks})", tuple(per_user)):
+            emails[r["id"]] = r["email"] or ""
+    users = []
+    for uid, by_pid in per_user.items():
+        items, totals = _items(by_pid)
+        if not items:
+            continue
+        users.append({"id": uid, "email": emails.get(uid, ""), **totals, "products": items})
+    users.sort(key=lambda u: (-u["credits"], -u["minutes"], u["email"], u["id"]))
+    totals = {k: sum(u[k] for u in users) for k in ("minutes", "credits", "calls")}
+    return {"days": days, "users": users, "totals": totals}
 
 
 @router.post("/grant-credits")

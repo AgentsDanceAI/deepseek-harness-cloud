@@ -16,18 +16,34 @@
     <div class="card block" style="margin-bottom:22px">
       <div class="card-row" style="align-items:center;margin-bottom:10px">
         <h2 style="margin:0">{{ t("admin.usage.title") }}</h2>
-        <select id="period" class="cap-input" style="width:120px">
-          <option value="7">{{ t("admin.usage.p7") }}</option>
-          <option value="30" selected>{{ t("admin.usage.p30") }}</option>
-          <option value="90">{{ t("admin.usage.p90") }}</option>
-          <option value="0">{{ t("admin.usage.pall") }}</option>
-        </select>
+        <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+          <div class="tabs" id="usage-view" style="margin:0;border-bottom:0">
+            <button type="button" class="active" data-view="product">{{ t("admin.usage.by_product") }}</button>
+            <button type="button" data-view="user">{{ t("admin.usage.by_user") }}</button>
+          </div>
+          <select id="period" class="cap-input" style="width:120px">
+            <option value="7">{{ t("admin.usage.p7") }}</option>
+            <option value="30" selected>{{ t("admin.usage.p30") }}</option>
+            <option value="90">{{ t("admin.usage.p90") }}</option>
+            <option value="0">{{ t("admin.usage.pall") }}</option>
+          </select>
+        </div>
       </div>
-      <div class="table-wrap">
+      <div class="table-wrap" id="usage-all-wrap">
         <table class="table" id="usage-all">
           <thead><tr>
             <th>{{ t("admin.usage.th.product") }}</th><th class="num">{{ t("admin.usage.th.minutes") }}</th>
             <th class="num">{{ t("admin.usage.th.credits") }}</th><th class="num">{{ t("admin.usage.th.calls") }}</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div class="table-wrap" id="usage-users-wrap" hidden>
+        <table class="table" id="usage-users">
+          <thead><tr>
+            <th>{{ t("admin.usage.th.user") }}</th><th class="num">{{ t("admin.usage.th.minutes") }}</th>
+            <th class="num">{{ t("admin.usage.th.credits") }}</th><th class="num">{{ t("admin.usage.th.calls") }}</th>
+            <th>{{ t("admin.usage.th.top") }}</th>
           </tr></thead>
           <tbody></tbody>
         </table>
@@ -113,6 +129,10 @@
   }
 
   function period() { return $("#period").value; }
+  function usageLabel(p) {
+    var label = { desktop: T.usage_desktop, unattributed: T.usage_unattributed }[p.id];
+    return p.name || label || p.id;
+  }
   // 一张"产品 | 机时 | 积分 | 调用"的小表, 全站和单个用户共用同一个画法。
   function renderUsage(tbody, d) {
     tbody.textContent = "";
@@ -124,8 +144,7 @@
     }
     items.forEach(function (p) {
       var tr = document.createElement("tr");
-      var label = { desktop: T.usage_desktop, unattributed: T.usage_unattributed }[p.id];
-      addCell(tr, p.name || label || p.id);
+      addCell(tr, usageLabel(p));
       addCell(tr, (p.minutes || 0).toLocaleString(), "num");
       addCell(tr, (p.credits || 0).toLocaleString(), "num");
       addCell(tr, (p.calls || 0).toLocaleString(), "num");
@@ -141,9 +160,71 @@
       tbody.appendChild(tt);
     }
   }
+  // 嵌套的明细小表 (表头 + 空 tbody), 给"按用户"的行和用户表的「用量」按钮共用。
+  function usageTable(cols) {
+    var tbl = document.createElement("table"); tbl.className = "table"; tbl.style.margin = "0";
+    var thead = document.createElement("thead"), hr = document.createElement("tr");
+    T.usage_th.forEach(function (h, i) {
+      var th = document.createElement("th"); th.textContent = h; if (i) th.className = "num"; hr.appendChild(th);
+    });
+    thead.appendChild(hr); tbl.appendChild(thead);
+    var body = document.createElement("tbody"); tbl.appendChild(body);
+    var td = document.createElement("td"); td.colSpan = cols; td.style.padding = "6px 12px 14px";
+    td.appendChild(tbl);
+    var row = document.createElement("tr"); row.appendChild(td);
+    return { row: row, body: body };
+  }
+  // "按用户": 每人一行 (机时 / 积分 / 调用 / 花得最多的几个产品), 点邮箱展开按产品明细。
+  function renderUsers(tbody, d) {
+    tbody.textContent = "";
+    var users = d.users || [];
+    if (!users.length) {
+      var e = document.createElement("tr");
+      var c = addCell(e, T.usage_empty, "muted"); c.colSpan = 5;
+      tbody.appendChild(e); return;
+    }
+    users.forEach(function (u) {
+      var tr = document.createElement("tr");
+      var td = document.createElement("td");
+      var btn = document.createElement("button"); btn.className = "link-btn";
+      btn.textContent = u.email || u.id; td.appendChild(btn); tr.appendChild(td);
+      addCell(tr, (u.minutes || 0).toLocaleString(), "num");
+      addCell(tr, (u.credits || 0).toLocaleString(), "num");
+      addCell(tr, (u.calls || 0).toLocaleString(), "num");
+      // 摘要列只看积分: 花了钱的按多少排, 没花钱的 (只跑了机时) 不占这几个字的位置。
+      var ranked = (u.products || []).filter(function (p) { return (p.credits || 0) > 0; })
+        .sort(function (a, b) { return (b.credits || 0) - (a.credits || 0); });
+      var top = ranked.slice(0, 3).map(function (p) { return usageLabel(p) + " " + (p.credits || 0).toLocaleString(); });
+      addCell(tr, top.length ? top.join(" · ") + (ranked.length > 3 ? "  +" + (ranked.length - 3) : "") : "—", "muted");
+      tbody.appendChild(tr);
+      var detail = null;
+      btn.onclick = function () {
+        if (detail) { detail.remove(); detail = null; return; }
+        var t = usageTable(5); detail = t.row; renderUsage(t.body, u); tr.after(detail);
+      };
+    });
+    if (users.length > 1 && d.totals) {
+      var tt = document.createElement("tr");
+      tt.style.fontWeight = "600";
+      addCell(tt, T.usage_total);
+      addCell(tt, (d.totals.minutes || 0).toLocaleString(), "num");
+      addCell(tt, (d.totals.credits || 0).toLocaleString(), "num");
+      addCell(tt, (d.totals.calls || 0).toLocaleString(), "num");
+      addCell(tt, "");
+      tbody.appendChild(tt);
+    }
+  }
+  var usageView = "product";
   function loadUsageAll() {
-    fetch("/api/admin/usage?days=" + period()).then(function (r) { return r.json(); })
-      .then(function (d) { renderUsage($("#usage-all tbody"), d); }).catch(function () {});
+    $("#usage-all-wrap").hidden = usageView !== "product";
+    $("#usage-users-wrap").hidden = usageView !== "user";
+    if (usageView === "product") {
+      fetch("/api/admin/usage?days=" + period()).then(function (r) { return r.json(); })
+        .then(function (d) { renderUsage($("#usage-all tbody"), d); }).catch(function () {});
+    } else {
+      fetch("/api/admin/usage/users?days=" + period()).then(function (r) { return r.json(); })
+        .then(function (d) { renderUsers($("#usage-users tbody"), d); }).catch(function () {});
+    }
   }
 
   function loadStats() {
@@ -244,21 +325,11 @@
           var detail = null;
           usageBtn.onclick = function () {
             if (detail) { detail.remove(); detail = null; return; }
-            detail = document.createElement("tr");
-            var td = document.createElement("td"); td.colSpan = 7; td.style.padding = "6px 12px 14px";
-            var tbl = document.createElement("table"); tbl.className = "table"; tbl.style.margin = "0";
-            var thead = document.createElement("thead"), hr = document.createElement("tr");
-            T.usage_th.forEach(function (h, i) {
-              var th = document.createElement("th"); th.textContent = h; if (i) th.className = "num"; hr.appendChild(th);
-            });
-            thead.appendChild(hr); tbl.appendChild(thead);
-            var body = document.createElement("tbody"); tbl.appendChild(body);
-            td.appendChild(tbl); detail.appendChild(td);
-            tr.after(detail);
+            var t = usageTable(7); detail = t.row; tr.after(detail);
             fetch("/api/admin/usage?user_id=" + encodeURIComponent(u.id) + "&days=" + period())
               .then(function (r) { return r.json(); })
-              .then(function (d) { renderUsage(body, d); })
-              .catch(function () { renderUsage(body, { products: [] }); });
+              .then(function (d) { renderUsage(t.body, d); })
+              .catch(function () { renderUsage(t.body, { products: [] }); });
           };
           act.appendChild(usageBtn);
           tb.appendChild(tr);
@@ -269,6 +340,12 @@
   $("#btn-search").addEventListener("click", loadUsers);
   $("#q").addEventListener("keydown", function (e) { if (e.key === "Enter") loadUsers(); });
   $("#period").addEventListener("change", function () { loadUsageAll(); loadUsers(); });
+  $("#usage-view").addEventListener("click", function (e) {
+    var b = e.target.closest("button[data-view]"); if (!b) return;
+    usageView = b.dataset.view;
+    $("#usage-view").querySelectorAll("button").forEach(function (x) { x.classList.toggle("active", x === b); });
+    loadUsageAll();
+  });
   loadStats(); loadUsageAll(); loadUsers();
 })();
 </script>
