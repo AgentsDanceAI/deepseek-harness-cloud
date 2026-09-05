@@ -917,9 +917,14 @@ class K8sBackend(Backend):
         return r.json()
 
     async def _delete(self, user_id: str) -> None:
-        # 5 秒宽限: 工作台没有需要优雅收尾的东西 (状态在卷上), 而名字要等 Pod
-        # 真正消失才空出来 —— 拖着的删除就是拖着的下一次创建。
-        r = await self._api("DELETE", f"{self._pods}/{pod_name(user_id)}", params={"gracePeriodSeconds": 5})
+        # 没开 OSS 同步: 5 秒宽限 —— 工作台没有需要优雅收尾的东西 (状态在卷上), 而名字
+        # 要等 Pod 真正消失才空出来, 拖着的删除就是拖着的下一次创建。
+        # 开了同步: **不许覆盖** Pod 自己的 terminationGracePeriodSeconds。这里传 5 会把
+        # 清单里的 180/600 秒整个作废, 同步器刚开始收尾推送就被 SIGKILL —— 小产品几秒推完
+        # 侥幸没事, Dify 每次都被杀在半路, OSS 里的库永远是残的 (2026-09-05 一天坏两次:
+        # 先是 WAL 旧于 pg_control, 后是整个 base/ 没推上去)。
+        params = None if self._sync_enabled() else {"gracePeriodSeconds": 5}
+        r = await self._api("DELETE", f"{self._pods}/{pod_name(user_id)}", params=params)
         if r.status_code == 404:
             return  # 并发自愈时另一边可能已经删掉了 —— 那正是想要的结果
         if r.status_code not in (200, 202):

@@ -1187,3 +1187,25 @@ async def test_stack_products_get_a_long_grace_and_push_middleware_dirs_first(k8
     )
     single_syncer = next(c for c in single["spec"]["initContainers"] if c["name"] == "dsh-syncer")
     assert {e["name"]: e["value"] for e in single_syncer["env"]}["DSH_SYNC_FIRST"] == ""
+
+
+@pytest.mark.asyncio
+async def test_delete_does_not_override_the_pods_grace_when_sync_is_on(k8s, monkeypatch):
+    """DELETE 带 gracePeriodSeconds=5 会作废清单里的 180/600 秒, 同步器的收尾推送当场被杀。"""
+    _sts_on(monkeypatch)
+    monkeypatch.setattr(config, "K8S_SYNC_STS_ROLE_ARN", "")
+    b, fake = k8s
+    await _create(b, "u_abc~dify")
+    await b.destroy("u_abc~dify")
+    deletes = [(p, params) for m, p, _, params in fake.calls if m == "DELETE" and "/pods/" in p]
+    assert deletes and all(not params or "gracePeriodSeconds" not in params for _, params in deletes), deletes
+    # 没开同步时仍是 5 秒 (状态在卷上, 没有收尾)
+    monkeypatch.setattr(config, "K8S_SYNC_OSS_BUCKET", "")
+    await _create(b, "u_abc~pi")
+    await b.destroy("u_abc~pi")
+    (_, params) = [
+        (p, params)
+        for m, p, _, params in fake.calls
+        if m == "DELETE" and p.endswith(workbackend.pod_name("u_abc~pi"))
+    ][-1]
+    assert params == {"gracePeriodSeconds": 5}
