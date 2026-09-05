@@ -16,13 +16,13 @@
     "icons": "python3 scripts/gen_icons.py"
   },
   "dependencies": {
-    "@capacitor/android": "^6.2.1",
-    "@capacitor/core": "^6.2.1",
-    "@capacitor/ios": "^6.2.1"
+    "@capacitor/android": "^8.5.1",
+    "@capacitor/core": "^8.5.1",
+    "@capacitor/ios": "^8.5.1"
   },
   "devDependencies": {
-    "@capacitor/cli": "^6.2.1",
-    "typescript": "^5.5.4"
+    "@capacitor/cli": "^8.5.1",
+    "typescript": "^7.0.2"
   },
   "overrides": {
     "tar": "7.5.22"
