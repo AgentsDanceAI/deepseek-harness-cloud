@@ -309,6 +309,9 @@ k3s kubectl -n dsh run probe --image=busybox --restart=Never -- true   # 应被�
 - STS 签发失败**直接拒起 Pod**, 绝不退回长期密钥。dhc-server 挂掉超过 TTL 时凭据会过期,
   但那时也没人在删 Pod, 数据仍在本地卷上; 它回来第一轮就把凭据全续上。
 
+**已启用 (2026-09-05)**: 角色 `acs:ram::<账号ID>:role/dshwork-pod`, `.env` 里 `K8S_SYNC_STS_ROLE_ARN`。
+命名空间里那份共享长期密钥 Secret (`dshwork-oss`) 已删 —— 撤回 ARN 时后端会自己重建它。
+
 **阿里云侧要做的 (一次, 需要账号管理权限)**:
 
 1. RAM 控制台建角色 `dshwork-pod`, 可信实体选「阿里云账号」, 当前账号, 信任策略里只允许
@@ -323,9 +326,22 @@ k3s kubectl -n dsh run probe --image=busybox --restart=Never -- true   # 应被�
 4. 角色的「最大会话时间」>= `K8S_SYNC_STS_TTL_S` (默认 3600, 角色默认最大 3600, 不用改)。
 5. `.env` 加 `K8S_SYNC_STS_ROLE_ARN=acs:ram::<账号ID>:role/dshwork-pod`, 部署。
 
-验证: 起一个工作台, 节点上 `k3s kubectl -n dsh get secret -l dshwork=creds` 能看到它那份;
-`k3s kubectl -n dsh logs <pod> -c dsh-syncer` 没有 AccessDenied; 拿它的临时凭据 (Secret 里
-的三个 RCLONE_* 值) `rclone lsf oss:dshcloud-work/dshwork/<别人的hexid>/` 必须 403。
+配置时踩到的:
+- **建策略和把策略挂到角色上是两个动作**, 只做前一个的表现是: AssumeRole 成功、会话策略也在拦,
+  但读自己的目录也被 OSS 拒。两种 403 要分开读: `Access denied by authorizer's policy` = 会话
+  策略拒的 (围栏在工作); `The bucket you access does not belong to you` = 角色自身没权限。
+  判据: 铸一把**不带**会话策略的凭据 (`policy=None`), 它等于角色的全部权限, 还被拒就是角色的问题。
+- `oss:ListObjectsV2` 不是有效的动作名, 用 `oss:ListObjects` (它同时管 v1/v2)。
+
+验证 (2026-09-05 全部实测通过): 起一个工作台后
+- `k3s kubectl -n dsh get secret -l dshwork=creds` 有它那份, 注解带 user 与到期时间;
+- Pod 里 `envFrom` 为空, 凭据以卷挂在 `/creds`, 值是 `STS.` 开头且带 session token;
+  **用户主容器里没有 /creds、没有 RCLONE_* 环境变量、没有 SA 令牌**;
+- 在 dsh-syncer 里用它自己的凭据: 读写自己的目录成功, 读/写别人的目录、列整个前缀全部 403;
+- 把 Secret 的到期注解改早, 回收循环 50 秒内换了新令牌 (比对**完整**哈希 —— 阿里云 STS 令牌
+  前缀都一样, 只比前几个字符看不出变化, 会误判成"没续期");
+- 删 Pod 后凭据 Secret 随之回收 (走服务端 destroy 是立即删; 用 kubectl 直接删 Pod 属于孤儿,
+  由回收循环在 10 分钟窗口后清)。
 
 ## 退场
 
