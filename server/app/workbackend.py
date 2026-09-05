@@ -778,6 +778,16 @@ _K8S_CREDS_SH = r"""creds() {
 }
 """
 
+# 数据子目录归给以非 root 跑的伴随容器 (见 products.Sidecar.mount_owner)。恢复之后跑:
+# k8s 给 subPath 建的目录是 root 0755, rclone 来回也不保留目录属主。
+_K8S_OWNER_SH = r"""set -u
+for kv in $DSH_OWNERS; do
+  d="/data/${kv%%=*}"; o="${kv#*=}"
+  mkdir -p "$d" && chown -R "$o:$o" "$d" && echo "owner: $d -> $o" || echo "owner: chown $d FAILED" >&2
+done
+exit 0
+"""
+
 _K8S_RESTORE_SH = (
     _K8S_CREDS_SH
     + r"""set -u
@@ -1183,6 +1193,19 @@ class K8sBackend(Backend):
             volumes.append({"name": _SEED_VOLUME, "emptyDir": {}})
         # OSS 同步: 恢复容器排在**所有**初始化容器之前 (产品的初始化容器可能往用户目录
         # 写预置配置, 得先有正本再写); 同步器紧随其后起, 免得先推了一份空的。
+        # 非 root 的伴随容器要写的数据目录先归给它 —— 排在恢复之后、产品自己的初始化之前
+        owners = sorted(
+            {f"{s}={sc.mount_owner}" for sc in sidecars if sc.mount_owner is not None for s, _ in sc.mounts}
+        )
+        if owners:
+            owner_c = {
+                "name": "dsh-owner",
+                "image": config.K8S_SYNC_IMAGE,
+                "command": ["sh", "-c", _K8S_OWNER_SH],
+                "env": [{"name": "DSH_OWNERS", "value": " ".join(owners)}],
+                "volumeMounts": [{"name": _K8S_DATA_VOLUME, "mountPath": "/data", "subPath": hexid}],
+            }
+            inits = [self._harden(owner_c), *inits]
         sync = self._sync_enabled()
         if sync:
             # 伴随容器挂的子目录 = 中间件的数据 (pg / weaviate / mysql / es ...), 收尾先推

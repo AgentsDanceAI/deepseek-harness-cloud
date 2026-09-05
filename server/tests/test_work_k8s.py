@@ -1209,3 +1209,32 @@ async def test_delete_does_not_override_the_pods_grace_when_sync_is_on(k8s, monk
         if m == "DELETE" and p.endswith(workbackend.pod_name("u_abc~pi"))
     ][-1]
     assert params == {"gracePeriodSeconds": 5}
+
+
+@pytest.mark.asyncio
+async def test_non_root_sidecar_data_dirs_are_chowned_after_restore(k8s, monkeypatch):
+    """Dify api 以 uid 1001 跑, k8s 给 subPath 建的目录是 root 0755, OSS 来回也不保留目录属主
+    → 首次 setup 写 privkeys 500, 新用户的 Dify 永远"启动中" (2026-09-05)。"""
+    _sts_on(monkeypatch)
+    monkeypatch.setattr(config, "K8S_SYNC_STS_ROLE_ARN", "")
+    b, fake = k8s
+    api = products.Sidecar(
+        name="api",
+        image_ref="langgenius/dify-api:1",
+        mounts=(("dify/storage", "/app/api/storage"),),
+        mount_owner=1001,
+    )
+    pg = products.Sidecar(
+        name="postgres", image_ref="postgres:15-alpine", mounts=(("dify/pg", "/var/lib/postgresql/data"),)
+    )
+    await _create(b, "u_abc~dify", sidecars=(api, pg))
+    inits = fake.created()[0]["spec"]["initContainers"]
+    names = [c["name"] for c in inits]
+    assert names[:3] == ["dsh-restore", "dsh-syncer", "dsh-owner"], names
+    owner = inits[2]
+    assert {e["name"]: e["value"] for e in owner["env"]}["DSH_OWNERS"] == "dify/storage=1001"
+    assert "chown -R" in owner["command"][-1]
+    assert owner["volumeMounts"][0]["subPath"] == workbackend.pod_name("u_abc~dify")[len("dshwork-") :]
+    # 没有非 root 伴随容器就没有这个初始化容器
+    await _create(b, "u_abc~pi")
+    assert "dsh-owner" not in [c["name"] for c in fake.created()[1]["spec"].get("initContainers", [])]

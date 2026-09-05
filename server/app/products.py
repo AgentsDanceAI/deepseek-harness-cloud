@@ -73,6 +73,11 @@ class Sidecar:
     # 是 root 的 —— 它们启动脚本里的 chown 会失败, 然后进程写不进数据目录。
     # 上游 compose 靠 `user: root` 解决, 这里是等价物 (0 = root)。
     run_as_user: int | None = None
+    # 镜像以非 root 跑、又要往数据目录里写时, 目录得归它: k8s 给 subPath 建出来的目录是
+    # root 0755, OSS 来回一趟也不保留目录属主 (rclone 只保文件的)。设了就在启动前
+    # `chown -R` 这个容器挂的每个数据子目录。2026-09-05: Dify api (uid 1001) 写不了
+    # storage/, 首次 setup 500, 新用户的 Dify 永远"启动中"。
+    mount_owner: int | None = None
 
 
 @dataclass(frozen=True)
@@ -305,14 +310,14 @@ def _dify_stack() -> tuple[Sidecar, ...]:
     v = config.DIFY_VERSION
     api_img = f"langgenius/dify-api:{v}"
     return (
-        Sidecar(name="api", image_ref=api_img,
+        Sidecar(name="api", image_ref=api_img, mount_owner=1001,
                 env=_DIFY_APP_ENV + (("MODE", "api"), ("DIFY_PORT", "5001")),
                 mounts=(("dify/storage", "/app/api/storage"),)),
         # 同一个镜像的第二份, 只为 websocket —— 必须换端口, 否则与 api 撞 5001
-        Sidecar(name="api-ws", image_ref=api_img,
+        Sidecar(name="api-ws", image_ref=api_img, mount_owner=1001,
                 env=_DIFY_APP_ENV + (("MODE", "api"), ("DIFY_PORT", "5011")),
                 mounts=(("dify/storage", "/app/api/storage"),)),
-        Sidecar(name="worker", image_ref=api_img,
+        Sidecar(name="worker", image_ref=api_img, mount_owner=1001,
                 env=_DIFY_APP_ENV + (("MODE", "worker"),),
                 mounts=(("dify/storage", "/app/api/storage"),)),
         Sidecar(name="web", image_ref=f"langgenius/dify-web:{v}", env=(
