@@ -3074,11 +3074,10 @@ def test_overdraft_is_reclaimed_without_asking(fake, monkeypatch):
     assert key not in workspace._reclaim_asked, "欠费不该挂牌"
 
 
-def test_dify_sandbox_entrypoint_is_wrapped_to_die_on_term():
-    """dify-sandbox 的 PID 1 是不转发信号的 bash 脚本; 不包住它, 删 Pod 要等满宽限期, 收尾推送
-    永远被一起杀掉 (2026-09-05)。线上 k3s 没开 ContainerStopSignals, stopSignal 会被 API 丢掉,
-    所以必须靠这层 sh 包装。"""
+def test_dify_sandbox_has_a_kill_all_prestop_and_keeps_its_own_entrypoint():
+    """dify-sandbox 的 PID 1 是不转发信号的 bash 脚本; 不处理它, 删 Pod 要等满宽限期, 收尾推送
+    永远被一起杀掉 (2026-09-05)。用 preStop 杀光容器里的进程 —— 不能改它的进程树 (包一层 sh
+    之后沙箱跑代码报 operation not permitted), 线上 k3s 也没开 stopSignal 的特性门。"""
     sb = next(s for s in products.registry()["dify"].sidecars if s.name == "sandbox")
-    assert sb.cmd[:2] == ("sh", "-c")
-    assert "trap 'kill -9 0' TERM INT" in sb.cmd[2] and "/entrypoint.sh & wait" in sb.cmd[2]
-    assert products.kill_on_term("/x") == ("sh", "-c", "trap 'kill -9 0' TERM INT; /x & wait")
+    assert sb.cmd == (), "沙箱的入口要保持镜像自己的"
+    assert sb.pre_stop == ("sh", "-c", "kill -9 -1")

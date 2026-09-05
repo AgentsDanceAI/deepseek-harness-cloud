@@ -1171,8 +1171,13 @@ class K8sBackend(Backend):
                 c["env"] = env_list(sc.env)
             if sc.run_as_user is not None:
                 c["securityContext"] = {"runAsUser": sc.run_as_user}
-            if sc.stop_signal:
-                c["lifecycle"] = {"stopSignal": sc.stop_signal}
+            if sc.stop_signal or sc.pre_stop:
+                lc: dict = {}
+                if sc.stop_signal:
+                    lc["stopSignal"] = sc.stop_signal
+                if sc.pre_stop:
+                    lc["preStop"] = {"exec": {"command": list(sc.pre_stop)}}
+                c["lifecycle"] = lc
             mounts = [data_mount(sub, p) for sub, p in sc.mounts] + [seed_mount(s, p) for s, p in sc.seeds]
             if mounts:
                 c["volumeMounts"] = mounts

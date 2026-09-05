@@ -1245,11 +1245,19 @@ async def test_sidecar_stop_signal_is_emitted_with_os_declared(k8s, monkeypatch)
     """PID 1 是 bash 脚本的镜像对 TERM 无动于衷, 而 k8s 要等所有常规容器退出才给同步 sidecar
     发 TERM —— 收尾推送永远等到被 SIGKILL。无状态的容器声明 SIGKILL。"""
     b, fake = k8s
-    sb = products.Sidecar(name="sandbox", image_ref="langgenius/dify-sandbox:0.2.15", stop_signal="SIGKILL")
+    sb = products.Sidecar(
+        name="sandbox",
+        image_ref="langgenius/dify-sandbox:0.2.15",
+        stop_signal="SIGKILL",
+        pre_stop=products.KILL_ALL_PRESTOP,
+    )
     pg = products.Sidecar(name="postgres", image_ref="postgres:15-alpine")
     await _create(b, "u_abc~dify", sidecars=(sb, pg))
     spec = fake.created()[0]["spec"]
     assert spec["os"] == {"name": "linux"}
     by = {c["name"]: c for c in spec["containers"]}
-    assert by["sandbox"]["lifecycle"] == {"stopSignal": "SIGKILL"}
+    assert by["sandbox"]["lifecycle"] == {
+        "stopSignal": "SIGKILL",
+        "preStop": {"exec": {"command": ["sh", "-c", "kill -9 -1"]}},
+    }
     assert "lifecycle" not in by["postgres"], "数据库要正常收 TERM 关库"
