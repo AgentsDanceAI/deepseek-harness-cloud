@@ -1238,3 +1238,18 @@ async def test_non_root_sidecar_data_dirs_are_chowned_after_restore(k8s, monkeyp
     # 没有非 root 伴随容器就没有这个初始化容器
     await _create(b, "u_abc~pi")
     assert "dsh-owner" not in [c["name"] for c in fake.created()[1]["spec"].get("initContainers", [])]
+
+
+@pytest.mark.asyncio
+async def test_sidecar_stop_signal_is_emitted_with_os_declared(k8s, monkeypatch):
+    """PID 1 是 bash 脚本的镜像对 TERM 无动于衷, 而 k8s 要等所有常规容器退出才给同步 sidecar
+    发 TERM —— 收尾推送永远等到被 SIGKILL。无状态的容器声明 SIGKILL。"""
+    b, fake = k8s
+    sb = products.Sidecar(name="sandbox", image_ref="langgenius/dify-sandbox:0.2.15", stop_signal="SIGKILL")
+    pg = products.Sidecar(name="postgres", image_ref="postgres:15-alpine")
+    await _create(b, "u_abc~dify", sidecars=(sb, pg))
+    spec = fake.created()[0]["spec"]
+    assert spec["os"] == {"name": "linux"}
+    by = {c["name"]: c for c in spec["containers"]}
+    assert by["sandbox"]["lifecycle"] == {"stopSignal": "SIGKILL"}
+    assert "lifecycle" not in by["postgres"], "数据库要正常收 TERM 关库"

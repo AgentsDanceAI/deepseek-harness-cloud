@@ -1171,6 +1171,8 @@ class K8sBackend(Backend):
                 c["env"] = env_list(sc.env)
             if sc.run_as_user is not None:
                 c["securityContext"] = {"runAsUser": sc.run_as_user}
+            if sc.stop_signal:
+                c["lifecycle"] = {"stopSignal": sc.stop_signal}
             mounts = [data_mount(sub, p) for sub, p in sc.mounts] + [seed_mount(s, p) for s, p in sc.seeds]
             if mounts:
                 c["volumeMounts"] = mounts
@@ -1228,6 +1230,8 @@ class K8sBackend(Backend):
             # 工作台里跑的是用户的智能体 —— 不给它集群凭据, 也不注入服务发现变量。
             "automountServiceAccountToken": False,
             "enableServiceLinks": False,
+            # lifecycle.stopSignal 要求声明 os (k8s 1.33+ ContainerStopSignals)
+            "os": {"name": "linux"},
             "securityContext": {"seccompProfile": {"type": "RuntimeDefault"}},
             "resources": {
                 "requests": {"cpu": _millicores(cpu / 4), "memory": f"{mem}Mi"},

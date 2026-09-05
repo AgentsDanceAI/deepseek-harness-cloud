@@ -78,6 +78,11 @@ class Sidecar:
     # `chown -R` 这个容器挂的每个数据子目录。2026-09-05: Dify api (uid 1001) 写不了
     # storage/, 首次 setup 500, 新用户的 Dify 永远"启动中"。
     mount_owner: int | None = None
+    # 停容器时发什么信号。默认 SIGTERM; PID 1 是 bash 脚本、不转发信号的镜像 (dify-sandbox
+    # 的 /bin/bash /entrypoint.sh) 会对 TERM 无动于衷 —— 而 k8s 要等**所有**常规容器退出才
+    # 给同步 sidecar 发 TERM, 于是收尾推送永远等到宽限期被一起 SIGKILL (2026-09-05, Dify
+    # 删一次 Pod 要整整 600 秒, 库一次都没完整推上去过)。无状态的容器直接 SIGKILL。
+    stop_signal: str | None = None
 
 
 @dataclass(frozen=True)
@@ -373,7 +378,7 @@ def _dify_stack() -> tuple[Sidecar, ...]:
         Sidecar(name="sandbox", image_ref=f"langgenius/dify-sandbox:{config.DIFY_SANDBOX_VERSION}", env=(
             ("API_KEY", _DIFY_SANDBOX_KEY), ("GIN_MODE", "release"),
             ("WORKER_TIMEOUT", "15"), ("ENABLE_NETWORK", "true"), ("SANDBOX_PORT", "8194"),
-        )),
+        ), stop_signal="SIGKILL"),
         Sidecar(name="postgres", image_ref="postgres:15-alpine", env=(
             ("POSTGRES_USER", "postgres"), ("POSTGRES_PASSWORD", _DIFY_DB_PASSWORD),
             ("POSTGRES_DB", "dify"),
