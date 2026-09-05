@@ -158,6 +158,22 @@ WAL 是旧的, 下次起来 postgres `PANIC: could not locate a valid checkpoint
 修复一份已经坏掉的库: 在该 Pod 的 dsh-syncer 容器里 `rclone purge "$DSH_SYNC_REMOTE/$DSH_HEXID/dify/pg"`
 + 清空本地 `/data/dify/pg`, postgres 重启会重新 initdb (该用户的 Dify 应用数据丢失)。
 
+同一天再挖出的三个前提, 缺一个收尾推送都跑不成:
+- **删 Pod 不能带 `gracePeriodSeconds=5`** —— 它覆盖清单里的 180/600 秒 (PVC 时代的写法, 开了同步
+  后 `_delete` 只在没同步时才传)。
+- **每个常规容器都要真的收 TERM 退出**: k8s 要等它们全部退出才给同步 sidecar 发 TERM。
+  dify-sandbox 的 PID 1 是 `/bin/bash /entrypoint.sh` (末行 `/main` 不是 `exec /main`), 对 TERM
+  无动于衷 → 整个 Pod 等满宽限期一起 SIGKILL。解: `Sidecar.pre_stop = KILL_ALL_PRESTOP`
+  (preStop 里 `kill -9 -1`)。不要改它的进程树 (包一层 sh 后沙箱跑代码报 operation not
+  permitted); `lifecycle.stopSignal` 在这台 k3s 上被 API 静默丢掉 (ContainerStopSignals 门没开)。
+  接新的栈产品时删一次 Pod 看 `crictl ps` 谁赖着不走。
+- **非 root 的伴随容器要写的目录得归它** (`Sidecar.mount_owner`, 初始化容器 dsh-owner 在恢复后
+  chown): k8s 给 subPath 建的目录是 root 0755, rclone 来回也不保留目录属主。Dify api (uid 1001)
+  写不了 storage/ → 首次 setup 500 → 新用户的 Dify 永远"启动中"。老数据是 NAS 时代建的, 这条路
+  从没走过, 所以到 2026-09-05 才发现。
+实测 (2026-09-05, 三条都修后): Dify 空库首启到就绪 46-51 秒, 删 Pod 15 秒内收尾完成, 重开
+postgres 直接 "Skipping initialization", 零重启。
+
 ## 5. 网络围栏 (安全)
 
 **工作台里跑的是用户敲进去的任意命令**, 而节点是公司的共享机、落在公司内网上。
