@@ -1,0 +1,64 @@
+# 命名空间 dsh 的准入策略: 每个 Pod 都必须在 gVisor 里跑, 且不许 privileged / hostPath /
+# hostNetwork / hostPID / hostIPC / 加 capability。
+#
+# 为什么: dhc-server 手里的服务账号能在这个命名空间随意建 Pod。它跑在对公网开的
+# 生产机上, 假设令牌有一天被偷 —— 没有这条策略, 偷到令牌的人能建一个 runc + root 的
+# Pod 直接对着节点内核 (5.10, 一年多没打补丁) 动手。策略是集群级对象, 那个服务账号
+# 改不了它。PodSecurity baseline 管不到 runtimeClassName, 所以要单独写。
+#
+# 前提: K8S_GVISOR_PRODUCTS=* 已经上线并逐个验过 —— 否则策略一开, runc 的产品全部起不来。
+#   k3s kubectl apply -f admission-gvisor.yaml
+#   k3s kubectl -n dsh run probe --image=busybox --restart=Never -- true   # 应被拒: runtimeClassName
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: dsh-require-gvisor
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["pods"]
+  variables:
+    - name: allContainers
+      expression: >-
+        object.spec.containers
+        + (has(object.spec.initContainers) ? object.spec.initContainers : [])
+        + (has(object.spec.ephemeralContainers) ? object.spec.ephemeralContainers : [])
+  validations:
+    - expression: "has(object.spec.runtimeClassName) && object.spec.runtimeClassName == 'gvisor'"
+      message: "dsh: pods must run under gVisor (spec.runtimeClassName=gvisor)"
+    - expression: "!has(object.spec.hostNetwork) || !object.spec.hostNetwork"
+      message: "dsh: hostNetwork is not allowed"
+    - expression: "!has(object.spec.hostPID) || !object.spec.hostPID"
+      message: "dsh: hostPID is not allowed"
+    - expression: "!has(object.spec.hostIPC) || !object.spec.hostIPC"
+      message: "dsh: hostIPC is not allowed"
+    - expression: "!has(object.spec.volumes) || object.spec.volumes.all(v, !has(v.hostPath))"
+      message: "dsh: hostPath volumes are not allowed"
+    - expression: >-
+        variables.allContainers.all(c,
+          !has(c.securityContext) || !has(c.securityContext.privileged) || !c.securityContext.privileged)
+      message: "dsh: privileged containers are not allowed"
+    - expression: >-
+        variables.allContainers.all(c,
+          !has(c.securityContext) || !has(c.securityContext.capabilities)
+          || !has(c.securityContext.capabilities.add) || size(c.securityContext.capabilities.add) == 0)
+      message: "dsh: adding capabilities is not allowed"
+    - expression: >-
+        variables.allContainers.all(c, !has(c.ports) || c.ports.all(p, !has(p.hostPort) || p.hostPort == 0))
+      message: "dsh: hostPort is not allowed"
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: dsh-require-gvisor
+spec:
+  policyName: dsh-require-gvisor
+  validationActions: ["Deny"]
+  matchResources:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: dsh

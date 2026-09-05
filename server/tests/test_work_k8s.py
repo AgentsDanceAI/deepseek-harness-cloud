@@ -836,6 +836,18 @@ async def test_gvisor_is_per_product(k8s, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_gvisor_wildcard_covers_everything_except_explicit_exclusions(k8s, monkeypatch):
+    """`*` 让新接的产品默认也进 gVisor —— 忘了加名单不该等于掉回共享内核。"""
+    monkeypatch.setattr(config, "K8S_RUNTIME_CLASS", "gvisor")
+    monkeypatch.setattr(config, "K8S_GVISOR_PRODUCTS", "*, -coze")
+    b, fake = k8s
+    for pid in ("pi", "coze", "dify"):
+        await _create(b, f"u_gv~{pid}")
+    rt = [body["spec"].get("runtimeClassName") for body in fake.created()]
+    assert rt == ["gvisor", None, "gvisor"]
+
+
+@pytest.mark.asyncio
 async def test_no_gvisor_products_means_no_runtime_class(k8s, monkeypatch):
     monkeypatch.setattr(config, "K8S_GVISOR_PRODUCTS", "")
     b, fake = k8s

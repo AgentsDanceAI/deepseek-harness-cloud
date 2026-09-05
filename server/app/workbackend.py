@@ -1020,8 +1020,13 @@ class K8sBackend(Backend):
         return {"name": _K8S_DATA_VOLUME, "persistentVolumeClaim": {"claimName": pvc}}
 
     @staticmethod
-    def _gvisor_products() -> set[str]:
-        return {p.strip() for p in (config.K8S_GVISOR_PRODUCTS or "").split(",") if p.strip()}
+    def _gvisor_for(product_id: str) -> bool:
+        """K8S_GVISOR_PRODUCTS: 逗号分隔的产品 id; `*` = 全部; `-id` = 从全部里排除。
+        `*` 是默认该有的形态 —— 新接的产品不该因为忘了加名单就掉回共享内核。"""
+        items = [p.strip() for p in (config.K8S_GVISOR_PRODUCTS or "").split(",") if p.strip()]
+        if "*" in items:
+            return f"-{product_id}" not in items
+        return product_id in items
 
     @staticmethod
     def _drop_caps() -> list[str]:
@@ -1151,7 +1156,7 @@ class K8sBackend(Backend):
         from .products import split_key  # 延迟导入, 保持单向依赖
 
         _, product_id = split_key(user_id)
-        if product_id in self._gvisor_products() and (config.K8S_RUNTIME_CLASS or "").strip():
+        if self._gvisor_for(product_id) and (config.K8S_RUNTIME_CLASS or "").strip():
             spec["runtimeClassName"] = config.K8S_RUNTIME_CLASS.strip()
         if host_aliases:
             ok = [h for h in host_aliases if _RFC1123.fullmatch(h)]

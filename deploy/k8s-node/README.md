@@ -209,7 +209,10 @@ k3s kubectl apply -f runtimeclass-gvisor.yaml
 验证不能只看 Pod 起没起 —— 进去看 `uname -r`, gVisor 里是 `4.19.0-gvisor`, `dmesg`
 第一行 "Starting gVisor..."。
 
-**按产品开** (`K8S_GVISOR_PRODUCTS=pi,claude-code,...`), 不一刀切。实测代价 (同一节点):
+`K8S_GVISOR_PRODUCTS` 支持按产品列 (`pi,claude-code,...`)、`*` (全部) 和 `*,-coze` (全部但
+例外)。**线上是 `*`** (2026-09-05 起): 每个产品都给用户代码执行 (shell 工具 / 自定义节点 /
+代码节点), 没有哪个"只是填表单"; 用 `*` 也让新接的产品默认进 gVisor, 不靠人记得加名单。
+实测代价 (同一节点):
 
 | 负载 | runc | gVisor |
 |---|---|---|
@@ -217,8 +220,9 @@ k3s kubectl apply -f runtimeclass-gvisor.yaml
 | 纯计算 2e8 次循环 | 1 秒 | 1 秒 |
 | DNS / 网关 / 围栏 / emptyDir subPath | 正常 | 正常 |
 
-所以最该开的是**用户能拿到 shell 敲任意命令**的那几格; 而 Coze/Dify 那种十容器栈
-(MySQL/ES/Milvus, IO 最吃亏、用户在里面是填表单不是敲命令) 先留在 runc。
+先开的是**用户能拿到 shell 敲任意命令**的那几格 (2026-09-04), 次日全量。Coze/Dify 那种
+十容器栈 (MySQL/ES/Milvus) IO 最吃亏, 冷启动会更慢, 但它们的代码节点 / 沙箱 / 插件
+一样是用户代码, 留在 runc 等于把最重的栈放在最薄的隔离上。
 
 另: 应用容器与我们的初始化/同步容器都去掉了 `K8S_DROP_CAPS` 里的 capability
 (默认 NET_RAW/MKNOD/SYS_CHROOT/SETFCAP —— 历史逃逸链的常客, 工作台没有一个用得上)。
@@ -227,6 +231,38 @@ k3s kubectl apply -f runtimeclass-gvisor.yaml
 日志最后一行 `chroot: cannot change root directory to '/'` (2026-09-04 全员回归抓到);
 Dify 用官方 postgres/redis 镜像 (gosu) 不受影响。用户代码不在伴随容器里跑, 留这一个不亏。
 没有开 `allowPrivilegeEscalation: false`: uid 1000 的产品 (Claude Code/Codex) 可能要 sudo。
+
+## 7. 隧道对端的防火墙 (tunnel-firewall.sh)
+
+隧道把生产机 (<TUNNEL_APP_IP>) 直接接到节点上。没有这道墙时, 生产机能碰到节点上所有监听
+0.0.0.0 的东西 —— 22、免密 redis 6379、kubelet 10250、frps 7000、别的组员的 python 服务
+—— 而且节点开着 ip_forward, 生产机加一条路由就能经节点进公司内网。生产机是对公网开的
+web 服务器, 假设它有一天被打穿。
+
+```
+scp tunnel-firewall.sh 248:/root/dsh-k8s-staging/
+bash /root/dsh-k8s-staging/tunnel-firewall.sh install   # 装到 /usr/local/sbin, 挂进 dsh-tunnel-up
+```
+
+只碰 `-i tun0` 的包, 两条自己的链 (DSH-TUN-IN / DSH-TUN-FWD): 入向只放行到本机 6443,
+转发只放行到 10.42/16 与 10.43/16, 其余记日志后丢。规则不持久, dsh-tunnel-up 在每次
+隧道会话建立时重放。验证 (在生产机): `bash -c 'cat </dev/null >/dev/tcp/<TUNNEL_NODE_IP>/6379'`
+应超时, 6443 应通。退场: `dsh-tunnel-firewall remove`。
+
+## 8. 准入策略: 命名空间里的 Pod 必须在 gVisor 里 (admission-gvisor.yaml)
+
+dhc-server 的服务账号能在 dsh 命名空间随意建 Pod; 令牌放在对公网开的生产机上。没有
+这条策略, 偷到令牌的人建一个 runc + root 的 Pod 就直接对着节点内核动手。PodSecurity
+baseline 管不到 runtimeClassName, 所以用 ValidatingAdmissionPolicy (集群级, 服务账号改不了):
+runtimeClassName 必须是 gvisor; 不许 privileged / hostPath / hostNetwork / hostPID /
+hostIPC / hostPort / 加 capability。
+
+```
+k3s kubectl apply -f admission-gvisor.yaml
+k3s kubectl -n dsh run probe --image=busybox --restart=Never -- true   # 应被拒
+```
+
+**前提是 `K8S_GVISOR_PRODUCTS=*` 已上线并逐个验过**, 否则 runc 的产品全部起不来。
 
 ## 退场
 
@@ -242,7 +278,7 @@ systemctl disable --now dsh-tunnel; rm -f /etc/systemd/system/dsh-tunnel.service
 
 - 「個人成品」页对 k8s 产品是空的 (`offline_workspace_dir` 返回 None): 正本在 OSS,
   应用机上还没挂 (可以 ossfs 只读挂 bucket 再指 K8S 的本地路径)。
-- 内核隔离只覆盖 `K8S_GVISOR_PRODUCTS` 里的产品; 其余仍是共享内核 + root。节点内核
+- 容器仍以 root 跑 (多数产品镜像假定 root); gVisor 之内的 root。节点内核
   5.10, 一年没重启 —— 打补丁要重启, 那是机器管理员的决定。
 - 单个工作台有 20 GiB 上限, 但**没有全局上限**: 14 个工作台各写满仍会超过这块盘的
   余量。兜底是 kubelet 的 nodefs<10% 驱逐 —— 它保的是节点 (以及同机的 docker), 代价是

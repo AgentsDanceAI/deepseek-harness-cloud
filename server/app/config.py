@@ -294,6 +294,7 @@ K8S_WORK_DISK_GB = _env_int("K8S_WORK_DISK_GB", 20)
 #   2) 去掉工作台用不着的 capability (docker 默认给 14 个): NET_RAW / MKNOD /
 #      SYS_CHROOT / SETFCAP 都是历史逃逸链里的常客, 工作台没有一个用得上。
 K8S_RUNTIME_CLASS = _env("K8S_RUNTIME_CLASS", "gvisor")
+#: 逗号分隔的产品 id; `*` = 全部 (推荐), `*,-coze` = 全部但 coze 例外。
 K8S_GVISOR_PRODUCTS = _env("K8S_GVISOR_PRODUCTS", "")
 K8S_DROP_CAPS = _env("K8S_DROP_CAPS", "NET_RAW,MKNOD,SYS_CHROOT,SETFCAP")
 
