@@ -139,3 +139,29 @@ def test_products_sorted_by_credits_and_non_product_buckets_last():
 def test_days_is_clamped():
     assert admin.usage(user_id="u_a", days=-5, _={})["days"] == 0
     assert admin.usage(user_id="u_a", days=99999, _={})["days"] == 3650
+
+
+def test_sql_sentinel_survives_the_postgres_placeholder_rewrite():
+    """db 层给 Postgres 把 SQL 里所有 ? 改成 %s、% 改成 %% —— 字符串字面量里的也改。
+    第一版哨兵是 '?', SQLite 下 753 个测试全绿, 线上一调就 "7 placeholders but 6
+    parameters"。SQLite 测不出这个, 只能钉住哨兵本身。"""
+    assert "?" not in admin._GONE and "%" not in admin._GONE
+    # 真跑一遍经过占位符改写的 SQL: 参数个数必须和 ? 个数一致
+    import re
+
+    from app import db as _db
+
+    seen: list[tuple[int, int]] = []
+    orig = _db.query
+
+    def spy(sql, params=()):
+        seen.append((sql.count("?"), len(params)))
+        return orig(sql, params)
+
+    _db.query = spy
+    try:
+        admin.usage(user_id="u_a", days=30, _={})
+    finally:
+        _db.query = orig
+    assert seen and all(q == n for q, n in seen), seen
+    assert not re.search(r"'[^']*\?[^']*'", " ".join(str(x) for x in seen))

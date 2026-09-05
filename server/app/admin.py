@@ -50,6 +50,8 @@ USAGE_DESKTOP = "desktop"
 #: 带 device_id 但设备行已经不在的调用: 产品追不回来了, 单列一栏, 不冒充桌面端。
 USAGE_UNATTRIBUTED = "unattributed"
 _NON_PRODUCT = (USAGE_DESKTOP, USAGE_UNATTRIBUTED)
+#: SQL 里标记"设备行已不在"的哨兵。不能含 ? 或 % (db 层会把它们当占位符改写)。
+_GONE = "#gone"
 
 
 @router.get("/usage")
@@ -86,9 +88,11 @@ def usage(user_id: str = "", days: int = 30, _: dict = Depends(require_admin)):
     # 还在的, 按设备的 workspace 归产品 (桌面设备没有 workspace → 桌面端); 有 device_id
     # 但设备行没了的, 是早先铸币时"只留最近两份、其余删掉"清理掉的工作台凭据 —— 产品
     # 追不回来。2026-09-04 线上 30 天里这类行占积分消耗的四分之一, 混进桌面端会误导。
+    # 哨兵不能用 '?' —— db 层把 SQL 里**所有** ? 换成 %s 给 Postgres, 字面量里的也换;
+    # SQLite 上测试全绿, 线上第一次调用就 "7 placeholders but 6 parameters" (1709c33)。
     ws_expr = (
         "CASE WHEN u.device_id IS NULL OR u.device_id='' THEN '' "
-        "WHEN d.id IS NULL THEN '?' ELSE COALESCE(d.workspace,'') END"
+        f"WHEN d.id IS NULL THEN '{_GONE}' ELSE COALESCE(d.workspace,'') END"
     )
     for r in db.query(
         f"SELECT {ws_expr} AS ws, COUNT(*) AS calls, COALESCE(SUM(u.credits),0) AS credits "
@@ -99,7 +103,7 @@ def usage(user_id: str = "", days: int = 30, _: dict = Depends(require_admin)):
         ws = r["ws"] or ""
         if not ws:
             pid = USAGE_DESKTOP
-        elif ws == "?":
+        elif ws == _GONE:
             pid = USAGE_UNATTRIBUTED
         else:
             pid = products.split_key(ws)[1]
