@@ -5,9 +5,11 @@
 running_users 永远为空, 计量与回收静默失效。
 """
 
+import base64
 import json
 import os
 import sys
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -50,7 +52,7 @@ class FakeK8s:
     async def call(self, method, path, *, json_body=None, params=None):
         self.calls.append((method, path, json_body, params))
         if "/secrets" in path:
-            return self._secrets(method, path, json_body)
+            return self._secrets(method, path, json_body, params)
         name = path.rsplit("/", 1)[-1] if path.count("/pods/") else None
         if method == "GET" and name:
             if name in self._lingering:
@@ -90,9 +92,19 @@ class FakeK8s:
     secrets: dict[str, dict] = {}
     secret_status = None  # 覆盖它让 secrets 接口固定回某个状态码
 
-    def _secrets(self, method, path, body):
+    def _secrets(self, method, path, body, params=None):
         if self.secret_status is not None:
             return _Resp(self.secret_status, {"message": "nope"})
+        if method == "GET":
+            if path.endswith("/secrets"):
+                sel = (params or {}).get("labelSelector", "")
+                items = [x for x in self.secrets.values() if not sel or self._matches(x, sel)]
+                return _Resp(200, {"items": items})
+            n = path.rsplit("/", 1)[-1]
+            return _Resp(200, self.secrets[n]) if n in self.secrets else _Resp(404, {})
+        if method == "DELETE":
+            n = path.rsplit("/", 1)[-1]
+            return _Resp(200, {}) if self.secrets.pop(n, None) is not None else _Resp(404, {})
         if method == "POST":
             n = body["metadata"]["name"]
             if n in self.secrets:
@@ -989,3 +1001,156 @@ async def test_a_broken_backend_does_not_stop_the_others_from_being_metered(capl
     with caplog.at_level("ERROR"):
         assert await r.running_users() == ["u_a", "u_b~comfyui"]
     assert any("_Broken.running_users 失败" in rec.message for rec in caplog.records)
+
+
+# --- 每 Pod 一份的 OSS 临时凭据 (STS) -------------------------------------------------
+
+
+def _sts_on(monkeypatch):
+    monkeypatch.setattr(config, "K8S_SYNC_OSS_BUCKET", "dshcloud-work")
+    monkeypatch.setattr(config, "K8S_SYNC_OSS_PREFIX", "dshwork")
+    monkeypatch.setattr(config, "K8S_SYNC_OSS_ENDPOINT", "oss-x.aliyuncs.com")
+    monkeypatch.setattr(config, "K8S_SYNC_OSS_ACCESS_KEY_ID", "AKID")
+    monkeypatch.setattr(config, "K8S_SYNC_OSS_ACCESS_KEY_SECRET", "SK")
+    monkeypatch.setattr(config, "K8S_SYNC_SECRET", "dshwork-oss")
+    monkeypatch.setattr(config, "K8S_SYNC_STS_ROLE_ARN", "acs:ram::1:role/dshwork-pod")
+    monkeypatch.setattr(config, "K8S_SYNC_STS_TTL_S", 3600)
+
+
+class _FakeSts:
+    def __init__(self, fail=False):
+        self.calls: list[dict] = []
+        self.fail = fail
+        self.n = 0
+
+    async def __call__(self, **kw):
+        self.calls.append(kw)
+        if self.fail:
+            raise workbackend.alists.StsError("403 NoPermission: nope")
+        self.n += 1
+        return {
+            "access_key_id": f"STS.k{self.n}",
+            "access_key_secret": "s",
+            "security_token": f"tok{self.n}",
+            "expires": time.time() + 3600,
+        }
+
+
+def _install_sts(monkeypatch, fail=False) -> _FakeSts:
+    fake = _FakeSts(fail)
+    monkeypatch.setattr(workbackend.alists, "assume_role", fake)
+    return fake
+
+
+def _secret_ann(fake, name):
+    return fake.secrets[name]["metadata"]["annotations"]
+
+
+@pytest.mark.asyncio
+async def test_sts_mode_mints_a_per_pod_credential_confined_to_the_users_prefix(k8s, monkeypatch):
+    """长期密钥不进 Pod: 每个 Pod 一份 Secret, 里面是 STS 临时凭据, 策略只放开它自己的目录,
+    以文件挂进恢复/同步容器 (续期后文件会换, env 不会)。"""
+    _sts_on(monkeypatch)
+    sts = _install_sts(monkeypatch)
+    b, fake = k8s
+    await _create(b, "u_abc~pi")
+    hexid = workbackend.pod_name("u_abc~pi")[len("dshwork-") :]
+    name = f"dshwork-oss-{hexid}"
+    assert name in fake.secrets and "dshwork-oss" not in fake.secrets, "共享的长期密钥 Secret 不该再写"
+    data = fake.secrets[name]["data"]
+    assert base64.b64decode(data["RCLONE_CONFIG_OSS_SESSION_TOKEN"]).decode() == "tok1"
+    assert base64.b64decode(data["RCLONE_CONFIG_OSS_ACCESS_KEY_ID"]).decode() == "STS.k1"
+    assert "AKID" not in {base64.b64decode(v).decode() for v in data.values()}, "长期密钥进了 Pod"
+    assert _secret_ann(fake, name)[workbackend.K8S_ANN_USER] == "u_abc~pi"
+    # 会话策略只放开这个用户的子树
+    (call,) = sts.calls
+    assert call["policy"]["Statement"][0]["Resource"] == [
+        f"acs:oss:*:*:dshcloud-work/dshwork/{hexid}",
+        f"acs:oss:*:*:dshcloud-work/dshwork/{hexid}/*",
+    ]
+    assert call["role_arn"] == "acs:ram::1:role/dshwork-pod" and call["duration_s"] == 3600
+    # Pod 侧: Secret 卷 + 两个同步容器都挂 /creds, 不再 envFrom
+    spec = fake.created()[0]["spec"]
+    vols = {v["name"]: v for v in spec["volumes"]}
+    assert vols["dshwork-oss-creds"]["secret"]["secretName"] == name
+    sync = [c for c in spec["initContainers"] if c["name"] in ("dsh-restore", "dsh-syncer")]
+    assert len(sync) == 2
+    for c in sync:
+        assert "envFrom" not in c
+        assert any(m["mountPath"] == "/creds" and m.get("readOnly") for m in c["volumeMounts"])
+        assert "creds()" in c["command"][-1] and "\ncreds\n" in c["command"][-1]
+
+
+@pytest.mark.asyncio
+async def test_sts_failure_blocks_pod_creation_instead_of_falling_back_to_the_master_key(k8s, monkeypatch):
+    _sts_on(monkeypatch)
+    _install_sts(monkeypatch, fail=True)
+    b, fake = k8s
+    with pytest.raises(workbackend.K8sError) as e:
+        await _create(b, "u_abc~pi")
+    assert "NoPermission" in str(e.value)
+    assert fake.created() == [] and fake.secrets == {}
+
+
+@pytest.mark.asyncio
+async def test_destroy_removes_the_pod_credential(k8s, monkeypatch):
+    _sts_on(monkeypatch)
+    _install_sts(monkeypatch)
+    b, fake = k8s
+    await _create(b, "u_abc~pi")
+    assert len(fake.secrets) == 1
+    await b.destroy("u_abc~pi")
+    assert fake.secrets == {}
+
+
+@pytest.mark.asyncio
+async def test_refresh_renews_expiring_credentials_and_removes_orphans(k8s, monkeypatch):
+    """回收循环每分钟叫一次: 剩余 < TTL/2 的续, Pod 已不在的 (且不是刚写的) 删。"""
+    _sts_on(monkeypatch)
+    sts = _install_sts(monkeypatch)
+    b, fake = k8s
+    await _create(b, "u_abc~pi")
+    hexid = workbackend.pod_name("u_abc~pi")[len("dshwork-") :]
+    name = f"dshwork-oss-{hexid}"
+    # 还很新鲜: 不续
+    await b.refresh_credentials()
+    assert len(sts.calls) == 1
+    # 快到期: 续, 令牌换新
+    fake.secrets[name]["metadata"]["annotations"][workbackend.K8S_ANN_EXPIRES] = str(int(time.time() + 100))
+    await b.refresh_credentials()
+    assert len(sts.calls) == 2
+    assert base64.b64decode(fake.secrets[name]["data"]["RCLONE_CONFIG_OSS_SESSION_TOKEN"]).decode() == "tok2"
+    # 孤儿: Pod 不在了 —— 老的删, 刚写的 (10 分钟窗口) 留
+    old_ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - 3600))
+    new_ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    for n, uid, ts in (("dshwork-oss-old", "u_old~pi", old_ts), ("dshwork-oss-new", "u_new~pi", new_ts)):
+        fake.secrets[n] = {
+            "metadata": {
+                "name": n,
+                "labels": {workbackend.K8S_LABEL: "creds"},
+                "annotations": {
+                    workbackend.K8S_ANN_USER: uid,
+                    workbackend.K8S_ANN_EXPIRES: str(int(time.time() + 3600)),
+                },
+                "creationTimestamp": ts,
+            },
+            "data": {},
+        }
+    await b.refresh_credentials()
+    assert (
+        "dshwork-oss-old" not in fake.secrets and "dshwork-oss-new" in fake.secrets and name in fake.secrets
+    )
+
+
+@pytest.mark.asyncio
+async def test_without_role_arn_the_shared_secret_path_is_unchanged(k8s, monkeypatch):
+    _sts_on(monkeypatch)
+    monkeypatch.setattr(config, "K8S_SYNC_STS_ROLE_ARN", "")
+    sts = _install_sts(monkeypatch)
+    b, fake = k8s
+    await _create(b, "u_abc~pi")
+    assert sts.calls == [] and "dshwork-oss" in fake.secrets
+    spec = fake.created()[0]["spec"]
+    assert all(v["name"] != "dshwork-oss-creds" for v in spec["volumes"])
+    sync = [c for c in spec["initContainers"] if c["name"] == "dsh-syncer"]
+    assert sync[0]["envFrom"] == [{"secretRef": {"name": "dshwork-oss"}}]

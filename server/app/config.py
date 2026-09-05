@@ -280,6 +280,11 @@ K8S_SYNC_INTERVAL_S = _env_int("K8S_SYNC_INTERVAL_S", 300)
 # 回收时留给"应用退出 + 全量推送"的宽限 (秒)。Coze 一个 MySQL+ES+Milvus 停机加推送
 # 要一两分钟; 超时 kubelet 直接杀, 推了一半的目录下次起动会不一致。
 K8S_SYNC_GRACE_S = _env_int("K8S_SYNC_GRACE_S", 180)
+# 每个 Pod 一把只能碰自己目录的 STS 临时凭据 (设了角色 ARN 就启用)。长期密钥只留在
+# dhc-server; Pod 里的凭据 TTL 一到期前由回收循环续。角色的 MaxSessionDuration 必须 >= TTL。
+K8S_SYNC_STS_ROLE_ARN = _env("K8S_SYNC_STS_ROLE_ARN", "")
+K8S_SYNC_STS_ENDPOINT = _env("K8S_SYNC_STS_ENDPOINT", "sts.aliyuncs.com")
+K8S_SYNC_STS_TTL_S = _env_int("K8S_SYNC_STS_TTL_S", 3600)
 # 一个工作台在节点本地盘上最多写多少 (GiB)。**只有开了 OSS 同步才谈得上这个上限**:
 # 那时本地盘只是工作副本 (emptyDir), 正本在 OSS, 于是可以给它设容量上限、Pod 一删就释放。
 # 没开同步时数据只有本地这一份 (PVC), 而 PVC 没有配额机制, 这个值不起作用。

@@ -1483,6 +1483,10 @@ async def work_starting(request: Request, state: str = ""):
 
 async def reaper_tick(now: float) -> None:
     """One meter/reaper pass over every running workspace."""
+    try:
+        await backend().refresh_credentials()
+    except Exception:  # noqa: BLE001
+        log.exception("workspace credential refresh failed")
     for uid in await _running_workspaces():
         # 按**容器存在的时间**计量, 不是按智能体干活的时间。
         #

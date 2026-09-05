@@ -22,6 +22,7 @@ from __future__ import annotations
 import abc
 import asyncio
 import base64
+import calendar
 import hashlib
 import hmac
 import json
@@ -36,7 +37,7 @@ from urllib.parse import quote
 
 import httpx
 
-from . import config
+from . import alists, config
 
 log = logging.getLogger("dhc.work")
 
@@ -116,6 +117,10 @@ class Backend(abc.ABC):
 
     def capacity_reason(self) -> str:
         return ""
+
+    async def refresh_credentials(self) -> None:
+        """周期维护 (回收循环每分钟叫一次)。默认无事可做; k8s 后端在这里续 OSS 临时凭据。"""
+        return None
 
     def for_product(self, product_id: str) -> Backend:
         """这个产品的工作台实际由哪个后端管。单后端就是自己; RoutedBackend 按
@@ -718,6 +723,10 @@ class EciBackend(Backend):
 K8S_LABEL = "dshwork"
 K8S_ANN_USER = "dshwork/user"
 K8S_ANN_BOOTCFG = "dshwork/bootcfg"
+K8S_ANN_EXPIRES = "dshwork/creds-expires"
+#: 每 Pod 一份的 OSS 临时凭据以文件形式挂在这里 (Secret 卷会随 Secret 更新而更新, env 不会)。
+_K8S_CREDS_VOLUME = "dshwork-oss-creds"
+_K8S_CREDS_PATH = "/creds"
 _K8S_DATA_VOLUME = "dshwork-data"
 #: 活着 = 还会变好。终态 (Succeeded / Failed / Unknown) 与 ECI 同一处理: 当作
 #: 不存在, 清掉以便重建 —— 对一个不可 start 的后端, "坏了就重建"是唯一的自愈。
@@ -743,6 +752,14 @@ _RFC1123 = re.compile(r"[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0
 #: (uid 1000 的产品、可执行文件都靠它); --links 把符号链接存成 .rclonelink 再还原;
 #: 目录标记 + 建空目录: S3 语义里没有目录, 而 Postgres 数据目录里有一堆必须存在的
 #: 空目录, 少一个就起不来。/.dsh-* 是我们自己的标记文件, 不进 OSS。
+def _parse_k8s_time(s: str) -> float:
+    """RFC 3339 'Z' 时间戳 -> epoch; 解析不了返回 0。"""
+    try:
+        return float(calendar.timegm(time.strptime(s, "%Y-%m-%dT%H:%M:%SZ")))
+    except (ValueError, TypeError):
+        return 0.0
+
+
 _K8S_RCLONE_FLAGS = (
     "--metadata --links --fast-list --transfers 16 --checkers 32 "
     "--s3-directory-markers --create-empty-src-dirs --exclude '/.dsh-*' "
@@ -753,7 +770,18 @@ _K8S_RCLONE_FLAGS = (
 #: 的东西会被删掉 (上次没推上去的改动就是这么丢的, 见 README "还没做的")。
 #: 拉失败**不落标记**, 同步器见不到标记就不推: 半份数据推上去会把正本也弄坏。
 #: OSS 上没有这个用户 (新用户, 或迁移前) 时保留本地、落标记 —— 本地就是正本。
-_K8S_RESTORE_SH = r"""set -u
+# 凭据挂成文件时 (STS 模式) 每次调 rclone 前重读一遍 —— Secret 续期后卷里的文件会换,
+# 读进 env 的不会。没有 /creds (长期密钥经 envFrom 注入) 时是空操作。
+_K8S_CREDS_SH = r"""creds() {
+  [ -d /creds ] || return 0
+  for f in /creds/*; do [ -f "$f" ] || continue; export "$(basename "$f")=$(cat "$f")"; done
+}
+"""
+
+_K8S_RESTORE_SH = (
+    _K8S_CREDS_SH
+    + r"""set -u
+creds
 R="$DSH_SYNC_REMOTE/$DSH_HEXID"
 mkdir -p /data/home /data/workspace
 rm -f /data/.dsh-restored
@@ -771,14 +799,19 @@ else
 fi
 exit 0
 """
+)
 
 #: 原生 sidecar: 运行中每隔 DSH_SYNC_INTERVAL 秒推 home/workspace; 收到 TERM (应用
 #: 容器已经退出) 后全量推一次再退出 —— 数据库目录只在这一刻推, 推的是停机后的
 #: 一致状态。周期推送在前台跑, TERM 来了 trap 会等它跑完再执行 (sh 在命令之间处理
 #: 信号), 所以两次推送不会重叠。
-_K8S_SYNCER_SH = r"""set -u
+_K8S_SYNCER_SH = (
+    _K8S_CREDS_SH
+    + r"""set -u
+creds
 R="$DSH_SYNC_REMOTE/$DSH_HEXID"
 final() {
+  creds
   if [ -e /data/.dsh-restored ]; then
     echo "final push: /data -> $R"
     rclone sync /data "$R" %(flags)s && echo "final push: done" || echo "final push: FAILED" >&2
@@ -792,12 +825,14 @@ echo "syncer: up, interval ${DSH_SYNC_INTERVAL}s"
 while :; do
   sleep "$DSH_SYNC_INTERVAL" & wait $!
   [ -e /data/.dsh-restored ] || continue
+  creds
   for d in home workspace; do
     [ -d "/data/$d" ] || continue
     rclone sync "/data/$d" "$R/$d" %(flags)s || echo "push $d: FAILED" >&2
   done
 done
 """
+)
 
 
 def pod_name(user_id: str) -> str:
@@ -974,13 +1009,19 @@ class K8sBackend(Backend):
         """(恢复初始化容器, 同步器原生 sidecar)。两个都挂用户整棵目录 (<hexid>/) 到 /data。"""
         common = {
             "image": config.K8S_SYNC_IMAGE,
-            "envFrom": [{"secretRef": {"name": (config.K8S_SYNC_SECRET or "").strip()}}],
             "env": [
                 {"name": "DSH_HEXID", "value": hexid},
                 {"name": "DSH_SYNC_INTERVAL", "value": str(config.K8S_SYNC_INTERVAL_S)},
             ],
             "volumeMounts": [{"name": _K8S_DATA_VOLUME, "mountPath": "/data", "subPath": hexid}],
         }
+        if self._sts_enabled():
+            # 每 Pod 一份、只能碰自己目录的临时凭据, 以文件挂进来 (续期后文件会换)。
+            common["volumeMounts"].append(
+                {"name": _K8S_CREDS_VOLUME, "mountPath": _K8S_CREDS_PATH, "readOnly": True}
+            )
+        else:
+            common["envFrom"] = [{"secretRef": {"name": (config.K8S_SYNC_SECRET or "").strip()}}]
         flags = _K8S_RCLONE_FLAGS
         restore = {
             "name": "dsh-restore",
@@ -1132,6 +1173,10 @@ class K8sBackend(Backend):
         if sync:
             restore, syncer = self._sync_containers(hexid)
             inits = [self._harden(restore), self._harden(syncer), *inits]
+            if self._sts_enabled():
+                volumes.append(
+                    {"name": _K8S_CREDS_VOLUME, "secret": {"secretName": self._creds_secret_name(user_id)}}
+                )
         spec: dict = {
             # 与 ECI 同一条规则: 栈产品 Always (应用容器在中间件就绪前会崩, 靠重启
             # 拉起来), 单容器 Never (它退出就是真的死了, 终态由 inspect 清掉重建)。
@@ -1274,7 +1319,10 @@ class K8sBackend(Backend):
             run_as_user=run_as_user,
         )
         await self._ensure_pull_secret()
-        await self._ensure_sync_secret()
+        if self._sts_enabled():
+            await self._ensure_pod_creds(user_id)
+        else:
+            await self._ensure_sync_secret()
         r = await self._api("POST", self._pods, json_body=body)
         if r.status_code == 409:
             # 同名 Pod 还在 —— 多半是上一台正在删 (名字要等它走完才空出来)。
@@ -1305,6 +1353,132 @@ class K8sBackend(Backend):
 
     async def destroy(self, user_id: str) -> None:
         await self._delete(user_id)
+        if self._sts_enabled():
+            await self._delete_creds(self._creds_secret_name(user_id))
+
+    # ---- 每 Pod 一份的 OSS 临时凭据 (STS) ------------------------------------------
+
+    def _sts_enabled(self) -> bool:
+        return self._sync_enabled() and bool((config.K8S_SYNC_STS_ROLE_ARN or "").strip())
+
+    @staticmethod
+    def _creds_secret_name(user_id: str) -> str:
+        return f"{(config.K8S_SYNC_SECRET or 'dshwork-oss').strip()}-{cname(user_id)[len('dshwork-') :]}"[
+            :253
+        ]
+
+    def _sync_static_kv(self) -> dict[str, str]:
+        remote = (
+            f"oss:{config.K8S_SYNC_OSS_BUCKET.strip()}/{(config.K8S_SYNC_OSS_PREFIX or 'dshwork').strip('/')}"
+        )
+        return {
+            "RCLONE_CONFIG_OSS_TYPE": "s3",
+            "RCLONE_CONFIG_OSS_PROVIDER": "Alibaba",
+            "RCLONE_CONFIG_OSS_ENDPOINT": config.K8S_SYNC_OSS_ENDPOINT,
+            "RCLONE_CONFIG_OSS_NO_CHECK_BUCKET": "true",
+            "DSH_SYNC_REMOTE": remote,
+        }
+
+    async def _mint_creds(self, user_id: str) -> tuple[dict[str, str], float]:
+        """向 STS 要一把只能碰 <prefix>/<hexid>/ 的临时凭据。失败就抛 —— **绝不**退回长期密钥。"""
+        hexid = cname(user_id)[len("dshwork-") :]
+        prefix = (config.K8S_SYNC_OSS_PREFIX or "dshwork").strip("/")
+        try:
+            cred = await alists.assume_role(
+                access_key_id=config.K8S_SYNC_OSS_ACCESS_KEY_ID,
+                access_key_secret=config.K8S_SYNC_OSS_ACCESS_KEY_SECRET,
+                role_arn=config.K8S_SYNC_STS_ROLE_ARN.strip(),
+                session=alists.session_name(hexid),
+                policy=alists.pod_policy(config.K8S_SYNC_OSS_BUCKET.strip(), prefix, hexid),
+                duration_s=config.K8S_SYNC_STS_TTL_S,
+                endpoint=config.K8S_SYNC_STS_ENDPOINT,
+            )
+        except alists.StsError as e:
+            raise K8sError(f"OSS 临时凭据签发失败 ({user_id}): {e}") from e
+        kv = {
+            **self._sync_static_kv(),
+            "RCLONE_CONFIG_OSS_ACCESS_KEY_ID": cred["access_key_id"],
+            "RCLONE_CONFIG_OSS_SECRET_ACCESS_KEY": cred["access_key_secret"],
+            "RCLONE_CONFIG_OSS_SESSION_TOKEN": cred["security_token"],
+        }
+        return kv, float(cred["expires"])
+
+    async def _write_creds(self, user_id: str, kv: dict[str, str], expires: float) -> None:
+        name = self._creds_secret_name(user_id)
+        body = {
+            "apiVersion": "v1",
+            "kind": "Secret",
+            "metadata": {
+                "name": name,
+                "namespace": self._ns,
+                "labels": {K8S_LABEL: "creds"},
+                "annotations": {K8S_ANN_USER: user_id, K8S_ANN_EXPIRES: str(int(expires))},
+            },
+            "type": "Opaque",
+            "data": {k: base64.b64encode(v.encode()).decode() for k, v in kv.items()},
+        }
+        secrets = f"/api/v1/namespaces/{self._ns}/secrets"
+        r = await self._api("POST", secrets, json_body=body)
+        if r.status_code == 409:
+            r = await self._api("PUT", f"{secrets}/{name}", json_body=body)
+        if r.status_code not in (200, 201):
+            raise K8sError(f"写 OSS 凭据 Secret {name} 失败: {r.status_code} {r.text[:200]}")
+
+    async def _ensure_pod_creds(self, user_id: str) -> None:
+        kv, expires = await self._mint_creds(user_id)
+        await self._write_creds(user_id, kv, expires)
+
+    async def _delete_creds(self, name: str) -> None:
+        r = await self._api("DELETE", f"/api/v1/namespaces/{self._ns}/secrets/{name}")
+        if r.status_code not in (200, 202, 404):
+            log.warning("[work] 删 OSS 凭据 Secret %s: %s %s", name, r.status_code, r.text[:200])
+
+    async def refresh_credentials(self) -> None:
+        """回收循环每分钟叫一次: 快到期的续 (剩余 < TTL/2), Pod 已经不在的删。
+
+        续期写回同一个 Secret, kubelet 在一分钟内把新文件换进卷里, 同步器每次调 rclone 前
+        重读 —— 所以一把凭据的有效期只要能盖住"续期间隔 + 卷更新延迟"就够。
+        dhc-server 挂掉超过 TTL 时凭据会过期, 那时也没人在删 Pod, 数据仍在本地卷上;
+        它回来第一轮就把所有凭据续上。"""
+        if not self._sts_enabled():
+            return
+        now = time.time()
+        pods: set[str] = set()
+        r = await self._api("GET", self._pods, params={"labelSelector": f"{K8S_LABEL}=workspace"})
+        if r.status_code != 200:
+            raise K8sError(f"list pods: {r.status_code} {r.text[:200]}")
+        for pod in r.json().get("items") or []:
+            pods.add((pod.get("metadata") or {}).get("name", ""))
+        secrets = f"/api/v1/namespaces/{self._ns}/secrets"
+        r = await self._api("GET", secrets, params={"labelSelector": f"{K8S_LABEL}=creds"})
+        if r.status_code != 200:
+            raise K8sError(f"list secrets: {r.status_code} {r.text[:200]}")
+        for sec in r.json().get("items") or []:
+            meta = sec.get("metadata") or {}
+            ann = meta.get("annotations") or {}
+            uid = ann.get(K8S_ANN_USER, "")
+            name = meta.get("name", "")
+            if not uid or not name:
+                continue
+            if pod_name(uid) not in pods:
+                # Pod 没了凭据还在 —— destroy 时没删成, 或 Pod 建失败。留 10 分钟窗口给
+                # "Secret 刚写好、Pod 还没建出来"的正常时序。
+                created = _parse_k8s_time(meta.get("creationTimestamp", ""))
+                if created and now - created > 600:
+                    await self._delete_creds(name)
+                continue
+            try:
+                expires = float(ann.get(K8S_ANN_EXPIRES, "0"))
+            except ValueError:
+                expires = 0.0
+            if expires - now < config.K8S_SYNC_STS_TTL_S / 2:
+                try:
+                    kv, exp = await self._mint_creds(uid)
+                    await self._write_creds(uid, kv, exp)
+                except K8sError:
+                    log.exception(
+                        "[work] 续 OSS 临时凭据失败 (%s), 现有凭据 %.0f 秒后过期", uid, expires - now
+                    )
 
     async def running_users(self) -> list[str]:
         """计量与回收都遍历这个列表, 所以**漏掉一条 = 有人白用且永不回收**。
@@ -1392,6 +1566,13 @@ class RoutedBackend(Backend):
     async def destroy(self, user_id: str) -> None:
         for b in self._all(self._pick(user_id)):
             await b.destroy(user_id)
+
+    async def refresh_credentials(self) -> None:
+        for b in self._all():
+            try:
+                await b.refresh_credentials()
+            except Exception:  # noqa: BLE001
+                log.exception("[work] %s.refresh_credentials 失败", type(b).__name__)
 
     async def running_users(self) -> list[str]:
         """各后端的并集。一个后端挂了 (k8s 节点掉线、凭据读不了) **不能拖着别的

@@ -6,7 +6,7 @@
 # Pod 直接对着节点内核 (5.10, 一年多没打补丁) 动手。策略是集群级对象, 那个服务账号
 # 改不了它。PodSecurity baseline 管不到 runtimeClassName, 所以要单独写。
 #
-# 前提: K8S_GVISOR_PRODUCTS=* 已经上线并逐个验过 —— 否则策略一开, runc 的产品全部起不来。
+# 前提: K8S_GVISOR_PRODUCTS=*,-dify 已经上线并逐个验过 —— 否则策略一开, runc 的产品全部起不来。
 #   k3s kubectl apply -f admission-gvisor.yaml
 #   k3s kubectl -n dsh run probe --image=busybox --restart=Never -- true   # 应被拒: runtimeClassName
 apiVersion: admissionregistration.k8s.io/v1
@@ -27,9 +27,24 @@ spec:
         object.spec.containers
         + (has(object.spec.initContainers) ? object.spec.initContainers : [])
         + (has(object.spec.ephemeralContainers) ? object.spec.ephemeralContainers : [])
+    # 唯一的 runc 例外: Dify。它的代码沙箱 (dify-sandbox) 在 gVisor 里装不上自己的 seccomp
+    # 过滤器 ("could not create filter", 2026-09-05 实测), 代码节点全废。例外只认 Dify 栈的
+    # 镜像 —— 偷到令牌的人最多能用这几个镜像起 runc 容器, 不能带任意镜像。
+    - name: difyImages
+      expression: >-
+        ['langgenius/dify-', 'nginx:1.27-alpine', 'postgres:15-alpine', 'redis:6-alpine',
+         'semitechnologies/weaviate:', 'rclone/rclone:']
+    - name: isDifyStack
+      expression: >-
+        has(object.metadata.annotations) && 'dshwork/user' in object.metadata.annotations
+        && object.metadata.annotations['dshwork/user'].endsWith('~dify')
+        && variables.allContainers.all(c, variables.difyImages.exists(p, c.image.startsWith(p)))
   validations:
-    - expression: "has(object.spec.runtimeClassName) && object.spec.runtimeClassName == 'gvisor'"
-      message: "dsh: pods must run under gVisor (spec.runtimeClassName=gvisor)"
+    - expression: >-
+        (has(object.spec.runtimeClassName) && object.spec.runtimeClassName == 'gvisor') || variables.isDifyStack
+      message: >-
+        dsh: pods must run under gVisor (spec.runtimeClassName=gvisor); the only runc exception is the
+        Dify stack with the Dify images
     - expression: "!has(object.spec.hostNetwork) || !object.spec.hostNetwork"
       message: "dsh: hostNetwork is not allowed"
     - expression: "!has(object.spec.hostPID) || !object.spec.hostPID"

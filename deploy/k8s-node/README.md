@@ -264,6 +264,38 @@ k3s kubectl -n dsh run probe --image=busybox --restart=Never -- true   # 应被�
 
 **前提是 `K8S_GVISOR_PRODUCTS=*` 已上线并逐个验过**, 否则 runc 的产品全部起不来。
 
+## 9. 每个 Pod 一把只能碰自己目录的 OSS 凭据 (STS, K8S_SYNC_STS_ROLE_ARN)
+
+原来所有 Pod 的同步伴随容器里都是同一把桶级长期密钥: 谁从自己的工作台逃到伴随容器,
+拿到的就是**全部**用户的数据。设了 `K8S_SYNC_STS_ROLE_ARN` 之后:
+
+- 长期密钥只留在 dhc-server。每建一个 Pod, dhc-server 向 STS `AssumeRole` 要一把临时凭据,
+  会话策略只放开 `<bucket>/<prefix>/<hexid>` 这棵子树 (列桶也只许带这个前缀), 写成该 Pod
+  自己的 Secret (`dshwork-oss-<hexid>`, label `dshwork=creds`), 以**文件**挂进恢复/同步容器的
+  `/creds` —— 同步器每次调 rclone 前重读, 所以续期后的新凭据自动生效 (env 做不到)。
+- 回收循环每分钟续一次快到期的 (剩余 < TTL/2), Pod 不在了的 Secret 顺手删 (留 10 分钟窗口
+  给"Secret 刚写、Pod 还没建出来")。销毁 Pod 时也删。
+- STS 签发失败**直接拒起 Pod**, 绝不退回长期密钥。dhc-server 挂掉超过 TTL 时凭据会过期,
+  但那时也没人在删 Pod, 数据仍在本地卷上; 它回来第一轮就把凭据全续上。
+
+**阿里云侧要做的 (一次, 需要账号管理权限)**:
+
+1. RAM 控制台建角色 `dshwork-pod`, 可信实体选「阿里云账号」, 当前账号, 信任策略里只允许
+   那个持有长期密钥的 RAM 用户:
+   ```json
+   {"Version":"1","Statement":[{"Effect":"Allow","Action":"sts:AssumeRole",
+     "Principal":{"RAM":["acs:ram::<账号ID>:user/<持密钥的RAM用户名>"]}}]}
+   ```
+2. 给角色挂权限: 桶 `dshcloud-work` 的完整对象读写 (和那个 RAM 用户现在的策略一样即可 ——
+   生效权限 = 角色权限 ∩ 会话策略, 会话策略再收窄到每个用户的目录)。
+3. 给那个 RAM 用户加一条权限: `sts:AssumeRole` on `acs:ram::<账号ID>:role/dshwork-pod`。
+4. 角色的「最大会话时间」>= `K8S_SYNC_STS_TTL_S` (默认 3600, 角色默认最大 3600, 不用改)。
+5. `.env` 加 `K8S_SYNC_STS_ROLE_ARN=acs:ram::<账号ID>:role/dshwork-pod`, 部署。
+
+验证: 起一个工作台, 节点上 `k3s kubectl -n dsh get secret -l dshwork=creds` 能看到它那份;
+`k3s kubectl -n dsh logs <pod> -c dsh-syncer` 没有 AccessDenied; 拿它的临时凭据 (Secret 里
+的三个 RCLONE_* 值) `rclone lsf oss:dshcloud-work/dshwork/<别人的hexid>/` 必须 403。
+
 ## 退场
 
 ```sh
