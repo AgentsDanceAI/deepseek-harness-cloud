@@ -601,3 +601,33 @@ def test_tab_icon_is_wired_up(client):
     assert ico.status_code == 200
     assert ico.headers["content-type"].startswith("image/")
     assert len(ico.content) > 500
+
+
+# --- admin console ----------------------------------------------------------
+
+
+def test_admin_page_has_per_product_usage(client):
+    """老板要看"每个用户用哪个产品, 积分和时长消耗在哪": 页面必须带全站消耗卡、
+    周期选择器和用户行上的「用量」展开; 两种语言都得渲染出来 (JS 文案走 tojson,
+    缺一个键整页脚本就挂, 而模板测试不会执行 JS —— 所以这里直接查键)。"""
+    import json
+
+    from app import db, i18n
+
+    signup(client, "boss@t.local")
+    db.query("UPDATE users SET role='admin' WHERE email=?", ("boss@t.local",))
+    zh = client.get("/console/admin?lang=zh")
+    assert zh.status_code == 200
+    body = zh.text
+    assert 'id="usage-all"' in body and 'id="period"' in body
+    assert "/api/admin/usage" in body
+    assert "各产品消耗" in body and "机时(分钟)" in body
+    # JS 里的文案经 tojson 输出, 非 ASCII 会被转义成 \uXXXX —— 按同样的写法找
+    assert json.dumps(i18n.t("zh", "admin.usage.desktop")) in body
+    for key in ("usage_btn", "usage_empty", "usage_desktop", "usage_total", "usage_th", "role_grant"):
+        assert f"{key}:" in body, f"JS 文案缺 {key}"
+    en = client.get("/console/admin?lang=en").text
+    assert "Consumption by product" in en and '"Desktop / App"' in en
+    # 非管理员看不到这页
+    signup(client, "pleb@t.local")
+    assert client.get("/console/admin", follow_redirects=False).status_code == 303

@@ -7,7 +7,7 @@ import time
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from . import config, credits, db, plans, work_access
+from . import config, credits, db, plans, products, work_access
 from .accounts import resolve_user
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
@@ -40,6 +40,66 @@ def list_users(q: str = "", limit: int = 50, _: dict = Depends(require_admin)):
         d["admin_from_env"] = (r["email"] or "").lower() in config.ADMIN_EMAILS
         out.append(d)
     return {"users": out}
+
+
+#: 扣积分的调用种类。grant_* 是发放、refund 是退款、workspace 是机时 (不扣积分) ——
+#: 都不算"消耗", 算进去数字会对不上。
+_SPEND_KINDS = ("llm", "search", "image", "video", "embedding")
+#: 不是工作台的设备 (桌面端 / App) 发起的调用归到这一栏。
+USAGE_DESKTOP = "desktop"
+
+
+@router.get("/usage")
+def usage(user_id: str = "", days: int = 30, _: dict = Depends(require_admin)):
+    """按产品拆开的消耗: 机时 + 积分 + 调用次数。user_id 空 = 全站。
+
+    两种资源的归属方式不同, 因为记账时留下的线索不同:
+      * 机时: 回收器每分钟给每个工作台记一行 (kind=workspace, model=work:<产品>),
+        产品就写在 model 里 —— 直接按它分组。
+      * 积分: 网关按调用记账, 行上只有 device_id; 工作台的凭据是一台 platform=cloud
+        的设备, 它的 workspace 列是工作台键 (u_xxx~<产品>, 默认产品没有 ~) ——
+        经设备找到产品。桌面端/App 的设备没有 workspace, 归到 "desktop"。
+    """
+    days = max(0, min(int(days), 3650))
+    since = time.time() - days * 86400 if days else 0.0
+    agg: dict[str, dict[str, int]] = {}
+
+    def bucket(pid: str) -> dict[str, int]:
+        return agg.setdefault(pid, {"minutes": 0, "credits": 0, "calls": 0})
+
+    scope = "AND user_id=?" if user_id else ""
+    args: tuple = (user_id,) if user_id else ()
+    for r in db.query(
+        f"SELECT model, COUNT(*) AS n FROM usage_log WHERE kind=? AND created>? {scope} GROUP BY model",
+        (work_access.MINUTE_KIND, since, *args),
+    ):
+        model = r["model"] or ""
+        pid = model[len("work:") :] if model.startswith("work:") else products.DEFAULT
+        bucket(pid)["minutes"] += int(r["n"] or 0)
+
+    marks = ",".join("?" * len(_SPEND_KINDS))
+    scope_u = "AND u.user_id=?" if user_id else ""
+    for r in db.query(
+        "SELECT COALESCE(d.workspace,'') AS ws, COUNT(*) AS calls, COALESCE(SUM(u.credits),0) AS credits "
+        "FROM usage_log u LEFT JOIN devices d ON d.id=u.device_id "
+        f"WHERE u.kind IN ({marks}) AND u.created>? {scope_u} GROUP BY COALESCE(d.workspace,'')",
+        (*_SPEND_KINDS, since, *args),
+    ):
+        ws = r["ws"] or ""
+        pid = products.split_key(ws)[1] if ws else USAGE_DESKTOP
+        b = bucket(pid)
+        b["credits"] += int(r["credits"] or 0)
+        b["calls"] += int(r["calls"] or 0)
+
+    reg = products.registry()
+    items = [
+        {"id": pid, "name": reg[pid].name if pid in reg else ("" if pid == USAGE_DESKTOP else pid), **b}
+        for pid, b in agg.items()
+        if any(b.values())
+    ]
+    items.sort(key=lambda x: (-x["credits"], -x["minutes"], x["id"]))
+    totals = {k: sum(i[k] for i in items) for k in ("minutes", "credits", "calls")}
+    return {"days": days, "user_id": user_id, "products": items, "totals": totals}
 
 
 @router.post("/grant-credits")

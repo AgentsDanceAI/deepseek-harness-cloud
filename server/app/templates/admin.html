@@ -13,6 +13,28 @@
       <div class="card stat"><div class="stat-label">{{ t("admin.stat.calls") }}</div><div class="stat-value" id="s-calls">—</div></div>
     </div>
 
+    <div class="card block" style="margin-bottom:22px">
+      <div class="card-row" style="align-items:center;margin-bottom:10px">
+        <h2 style="margin:0">{{ t("admin.usage.title") }}</h2>
+        <select id="period" class="cap-input" style="width:120px">
+          <option value="7">{{ t("admin.usage.p7") }}</option>
+          <option value="30" selected>{{ t("admin.usage.p30") }}</option>
+          <option value="90">{{ t("admin.usage.p90") }}</option>
+          <option value="0">{{ t("admin.usage.pall") }}</option>
+        </select>
+      </div>
+      <div class="table-wrap">
+        <table class="table" id="usage-all">
+          <thead><tr>
+            <th>{{ t("admin.usage.th.product") }}</th><th class="num">{{ t("admin.usage.th.minutes") }}</th>
+            <th class="num">{{ t("admin.usage.th.credits") }}</th><th class="num">{{ t("admin.usage.th.calls") }}</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <p class="muted small" style="margin-top:10px">{{ t("admin.usage.note") }}</p>
+    </div>
+
     <div class="card block">
       <div class="card-row" style="align-items:center;margin-bottom:14px">
         <h2 style="margin:0">{{ t("admin.users.title") }}</h2>
@@ -57,7 +79,17 @@
     grant_prompt: {{ t("admin.js.grant_prompt") | tojson }},
     suspend: {{ t("admin.js.suspend") | tojson }},
     restore: {{ t("admin.js.restore") | tojson }},
-    suspend_confirm: {{ t("admin.js.suspend_confirm") | tojson }}
+    suspend_confirm: {{ t("admin.js.suspend_confirm") | tojson }},
+    role_grant: {{ t("admin.js.role_grant") | tojson }},
+    role_revoke: {{ t("admin.js.role_revoke") | tojson }},
+    role_grant_confirm: {{ t("admin.js.role_grant_confirm") | tojson }},
+    role_revoke_confirm: {{ t("admin.js.role_revoke_confirm") | tojson }},
+    usage_btn: {{ t("admin.js.usage_btn") | tojson }},
+    usage_empty: {{ t("admin.usage.empty") | tojson }},
+    usage_desktop: {{ t("admin.usage.desktop") | tojson }},
+    usage_total: {{ t("admin.usage.total") | tojson }},
+    usage_th: [{{ t("admin.usage.th.product") | tojson }}, {{ t("admin.usage.th.minutes") | tojson }},
+               {{ t("admin.usage.th.credits") | tojson }}, {{ t("admin.usage.th.calls") | tojson }}]
   };
 
   function post(url, body) {
@@ -77,6 +109,39 @@
     cell.textContent = text;
     row.appendChild(cell);
     return cell;
+  }
+
+  function period() { return $("#period").value; }
+  // 一张"产品 | 机时 | 积分 | 调用"的小表, 全站和单个用户共用同一个画法。
+  function renderUsage(tbody, d) {
+    tbody.textContent = "";
+    var items = d.products || [];
+    if (!items.length) {
+      var e = document.createElement("tr");
+      var c = addCell(e, T.usage_empty, "muted"); c.colSpan = 4;
+      tbody.appendChild(e); return;
+    }
+    items.forEach(function (p) {
+      var tr = document.createElement("tr");
+      addCell(tr, p.name || (p.id === "desktop" ? T.usage_desktop : p.id));
+      addCell(tr, (p.minutes || 0).toLocaleString(), "num");
+      addCell(tr, (p.credits || 0).toLocaleString(), "num");
+      addCell(tr, (p.calls || 0).toLocaleString(), "num");
+      tbody.appendChild(tr);
+    });
+    if (items.length > 1 && d.totals) {
+      var tt = document.createElement("tr");
+      tt.style.fontWeight = "600";
+      addCell(tt, T.usage_total);
+      addCell(tt, (d.totals.minutes || 0).toLocaleString(), "num");
+      addCell(tt, (d.totals.credits || 0).toLocaleString(), "num");
+      addCell(tt, (d.totals.calls || 0).toLocaleString(), "num");
+      tbody.appendChild(tt);
+    }
+  }
+  function loadUsageAll() {
+    fetch("/api/admin/usage?days=" + period()).then(function (r) { return r.json(); })
+      .then(function (d) { renderUsage($("#usage-all tbody"), d); }).catch(function () {});
   }
 
   function loadStats() {
@@ -169,6 +234,31 @@
               .then(loadUsers).catch(function (e) { alert(e.message); });
           };
           act.appendChild(role);
+
+          // 用量: 点一下在这一行下面展开该用户按产品的消耗 (机时 / 积分 / 调用), 再点收起。
+          var usageBtn = document.createElement("button");
+          usageBtn.className = "link-btn"; usageBtn.style.marginLeft = "10px";
+          usageBtn.textContent = T.usage_btn;
+          var detail = null;
+          usageBtn.onclick = function () {
+            if (detail) { detail.remove(); detail = null; return; }
+            detail = document.createElement("tr");
+            var td = document.createElement("td"); td.colSpan = 7; td.style.padding = "6px 12px 14px";
+            var tbl = document.createElement("table"); tbl.className = "table"; tbl.style.margin = "0";
+            var thead = document.createElement("thead"), hr = document.createElement("tr");
+            T.usage_th.forEach(function (h, i) {
+              var th = document.createElement("th"); th.textContent = h; if (i) th.className = "num"; hr.appendChild(th);
+            });
+            thead.appendChild(hr); tbl.appendChild(thead);
+            var body = document.createElement("tbody"); tbl.appendChild(body);
+            td.appendChild(tbl); detail.appendChild(td);
+            tr.after(detail);
+            fetch("/api/admin/usage?user_id=" + encodeURIComponent(u.id) + "&days=" + period())
+              .then(function (r) { return r.json(); })
+              .then(function (d) { renderUsage(body, d); })
+              .catch(function () { renderUsage(body, { products: [] }); });
+          };
+          act.appendChild(usageBtn);
           tb.appendChild(tr);
         });
       }).catch(function () {});
@@ -176,7 +266,8 @@
 
   $("#btn-search").addEventListener("click", loadUsers);
   $("#q").addEventListener("keydown", function (e) { if (e.key === "Enter") loadUsers(); });
-  loadStats(); loadUsers();
+  $("#period").addEventListener("change", function () { loadUsageAll(); loadUsers(); });
+  loadStats(); loadUsageAll(); loadUsers();
 })();
 </script>
 {% endblock %}
