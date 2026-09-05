@@ -1598,6 +1598,28 @@ def test_opening_one_workspace_does_not_kill_the_others_credential(monkeypatch):
     assert len(comfy_live) == 1, f"同一工作台重铸后应只剩一份有效凭据: {len(comfy_live)}"
 
 
+def test_revoked_workspace_credentials_are_kept_for_usage_attribution(monkeypatch):
+    """usage_log 的积分行只带 device_id —— 被顶替掉的工作台凭据是那些行通往"花在哪个
+    产品"的唯一线索。原先只留最近两份, 管理台 30 天里六成积分行找不到设备 (2026-09-04)。
+    """
+    monkeypatch.setattr(config, "COMFY_IMAGE", "comfy:test")
+    monkeypatch.setattr(config, "COMFY_DOMAIN", "comfy.test.local")
+    c, uid = _user("keep-revoked@test.local")
+    user = db.query_one("SELECT id, session_epoch FROM users WHERE id=?", (uid,))
+    reg = products.registry()
+    for _ in range(5):
+        workspace._mint_workspace_token(dict(user), reg["comfyui"])
+    rows = db.query(
+        "SELECT revoked FROM devices WHERE user_id=? AND platform='cloud' AND workspace=?",
+        (uid, products.wskey(uid, "comfyui")),
+    )
+    assert len(rows) == 5, f"被顶替的凭据被删了 (剩 {len(rows)} 行), 积分行从此归不了产品"
+    assert sum(1 for r in rows if not r["revoked"]) == 1
+    # 但用户的设备列表里不能堆着四行"已撤销的云工作台" —— 只见那一份有效的
+    shown = [d for d in c.get("/api/auth/devices").json()["devices"] if d["platform"] == "cloud"]
+    assert len(shown) == 1 and not shown[0]["revoked"], shown
+
+
 def test_legacy_credentials_are_adopted_by_dsh_not_left_unrevocable(monkeypatch):
     """迁移前铸的凭据没有 workspace —— 不认领的话新逻辑永远撤不到它们, 那就成了
     系统再也收不回的长期凭据。归属到 dsh (ComfyUI 是 2026-08 才有的)。

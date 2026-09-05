@@ -45,8 +45,11 @@ def list_users(q: str = "", limit: int = 50, _: dict = Depends(require_admin)):
 #: 扣积分的调用种类。grant_* 是发放、refund 是退款、workspace 是机时 (不扣积分) ——
 #: 都不算"消耗", 算进去数字会对不上。
 _SPEND_KINDS = ("llm", "search", "image", "video", "embedding")
-#: 不是工作台的设备 (桌面端 / App) 发起的调用归到这一栏。
+#: 不经工作台的调用 (桌面端设备, 或网页/App 里用会话直接发的) 归到这一栏。
 USAGE_DESKTOP = "desktop"
+#: 带 device_id 但设备行已经不在的调用: 产品追不回来了, 单列一栏, 不冒充桌面端。
+USAGE_UNATTRIBUTED = "unattributed"
+_NON_PRODUCT = (USAGE_DESKTOP, USAGE_UNATTRIBUTED)
 
 
 @router.get("/usage")
@@ -79,25 +82,46 @@ def usage(user_id: str = "", days: int = 30, _: dict = Depends(require_admin)):
 
     marks = ",".join("?" * len(_SPEND_KINDS))
     scope_u = "AND u.user_id=?" if user_id else ""
+    # 归属线索分三种: 没有 device_id 的是网页/App 里凭会话直接发的; 有 device_id 且设备
+    # 还在的, 按设备的 workspace 归产品 (桌面设备没有 workspace → 桌面端); 有 device_id
+    # 但设备行没了的, 是早先铸币时"只留最近两份、其余删掉"清理掉的工作台凭据 —— 产品
+    # 追不回来。2026-09-04 线上 30 天里这类行占积分消耗的四分之一, 混进桌面端会误导。
+    ws_expr = (
+        "CASE WHEN u.device_id IS NULL OR u.device_id='' THEN '' "
+        "WHEN d.id IS NULL THEN '?' ELSE COALESCE(d.workspace,'') END"
+    )
     for r in db.query(
-        "SELECT COALESCE(d.workspace,'') AS ws, COUNT(*) AS calls, COALESCE(SUM(u.credits),0) AS credits "
+        f"SELECT {ws_expr} AS ws, COUNT(*) AS calls, COALESCE(SUM(u.credits),0) AS credits "
         "FROM usage_log u LEFT JOIN devices d ON d.id=u.device_id "
-        f"WHERE u.kind IN ({marks}) AND u.created>? {scope_u} GROUP BY COALESCE(d.workspace,'')",
+        f"WHERE u.kind IN ({marks}) AND u.created>? {scope_u} GROUP BY 1",
         (*_SPEND_KINDS, since, *args),
     ):
         ws = r["ws"] or ""
-        pid = products.split_key(ws)[1] if ws else USAGE_DESKTOP
+        if not ws:
+            pid = USAGE_DESKTOP
+        elif ws == "?":
+            pid = USAGE_UNATTRIBUTED
+        else:
+            pid = products.split_key(ws)[1]
         b = bucket(pid)
         b["credits"] += int(r["credits"] or 0)
         b["calls"] += int(r["calls"] or 0)
 
     reg = products.registry()
     items = [
-        {"id": pid, "name": reg[pid].name if pid in reg else ("" if pid == USAGE_DESKTOP else pid), **b}
+        {"id": pid, "name": reg[pid].name if pid in reg else ("" if pid in _NON_PRODUCT else pid), **b}
         for pid, b in agg.items()
         if any(b.values())
     ]
-    items.sort(key=lambda x: (-x["credits"], -x["minutes"], x["id"]))
+    # 产品按花费降序; 两个非产品桶固定压在最后, 别让"桌面端"顶在产品报表的第一行。
+    items.sort(
+        key=lambda x: (
+            _NON_PRODUCT.index(x["id"]) + 1 if x["id"] in _NON_PRODUCT else 0,
+            -x["credits"],
+            -x["minutes"],
+            x["id"],
+        )
+    )
     totals = {k: sum(i[k] for i in items) for k in ("minutes", "credits", "calls")}
     return {"days": days, "user_id": user_id, "products": items, "totals": totals}
 

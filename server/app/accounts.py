@@ -436,9 +436,11 @@ def change_password(body: dict, user: dict = Depends(resolve_user)):
 
 @router.get("/devices")
 def list_devices(user: dict = Depends(resolve_user)):
+    # 被顶替的工作台凭据留在表里是为了给积分行归产品 (见 workspace._mint_workspace_token),
+    # 用户对它们没有任何可做的操作, 每开一次工作台多一行 —— 不进列表。
     rows = db.query(
         "SELECT id, name, platform, last_seen, created, revoked FROM devices "
-        "WHERE user_id=? ORDER BY created DESC",
+        "WHERE user_id=? AND NOT (platform='cloud' AND revoked=1) ORDER BY created DESC",
         (user["id"],),
     )
     return {"devices": [dict(r) for r in rows]}

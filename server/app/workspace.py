@@ -180,14 +180,9 @@ def _mint_workspace_token(user: dict, product: products.Product) -> str:
             "UPDATE devices SET revoked=1 WHERE user_id=? AND platform='cloud' AND workspace=? AND revoked=0",
             (user["id"], key),
         )
-        # 留最近几条备查, 其余删掉
-        stale = conn.execute(
-            "SELECT id FROM devices WHERE user_id=? AND platform='cloud' AND workspace=? "
-            "AND revoked=1 ORDER BY created DESC",
-            (user["id"], key),
-        ).fetchall()
-        for row in stale[2:]:
-            conn.execute("DELETE FROM devices WHERE id=?", (row["id"],))
+        # 撤销的凭据**留着不删**: usage_log 的积分行只带 device_id, 这一行是它通往
+        # "花在哪个产品"的唯一线索。原先"只留最近两份、其余删掉", 结果管理台 30 天内
+        # 六成积分行找不到设备, 只能归成"无法归属" (2026-09-04)。一行几十字节, 不值得省。
         conn.execute(
             "INSERT INTO devices (id, user_id, name, platform, workspace, token_hash, epoch, "
             "last_seen, created) VALUES (?,?,?,?,?,?,?,?,?)",

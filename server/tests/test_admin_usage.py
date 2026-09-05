@@ -82,6 +82,8 @@ def _seed():
     _log("u_a", "search", device="dev1", credits=5)
     _log("u_a", "llm", device="dev2", credits=7)
     _log("u_a", "image", device="dev3", credits=4)
+    _log("u_a", "video", device="", credits=20)  # 网页里直接发的: 没有设备
+    _log("u_a", "llm", device="dev_gone", credits=6)  # 设备行已被删: 产品追不回
     _log("u_b", "llm", device="dev4", credits=9)
     # 不算消耗的行: 发放、退款、以及一条 30 天前的旧调用
     _log("u_a", "grant_admin", device="", credits=1000)
@@ -99,16 +101,18 @@ def test_one_users_consumption_is_split_by_product():
     by = _by_id(d)
     assert by["pi"] == {"id": "pi", "name": "pi", "minutes": 3, "credits": 15, "calls": 2}
     assert by["dsh"]["minutes"] == 2 and by["dsh"]["credits"] == 7 and by["dsh"]["calls"] == 1
-    # 桌面端的调用不属于任何工作台, 单独一栏, name 留空让前端翻译
-    assert by["desktop"] == {"id": "desktop", "name": "", "minutes": 0, "credits": 4, "calls": 1}
+    # 不经工作台的调用 (桌面设备 + 网页无设备) 单独一栏, name 留空让前端翻译
+    assert by["desktop"] == {"id": "desktop", "name": "", "minutes": 0, "credits": 24, "calls": 2}
+    # 设备行没了的不能冒充桌面端 —— 单列"无法归属"
+    assert by["unattributed"] == {"id": "unattributed", "name": "", "minutes": 0, "credits": 6, "calls": 1}
     assert "coze" not in by, "别人的消耗不能混进来"
-    assert d["totals"] == {"minutes": 5, "credits": 26, "calls": 4}
+    assert d["totals"] == {"minutes": 5, "credits": 52, "calls": 6}
 
 
 def test_grants_refunds_and_minute_rows_are_not_consumption():
     d = admin.usage(user_id="u_a", days=30, _={})
     # 1000 的发放和 -3 的退款都没进积分; 机时行不带积分
-    assert d["totals"]["credits"] == 26
+    assert d["totals"]["credits"] == 52
 
 
 def test_period_window_and_all_time():
@@ -123,12 +127,13 @@ def test_site_wide_when_no_user_given():
     by = _by_id(d)
     assert by["coze"]["minutes"] == 1 and by["coze"]["credits"] == 9
     assert by["pi"]["credits"] == 15
-    assert d["totals"]["credits"] == 35
+    assert d["totals"]["credits"] == 61
 
 
-def test_sorted_by_credits_then_minutes():
+def test_products_sorted_by_credits_and_non_product_buckets_last():
     d = admin.usage(user_id="u_a", days=30, _={})
-    assert [p["id"] for p in d["products"]] == ["pi", "dsh", "desktop"]
+    # desktop 24 积分比 pi 还多, 但它不是产品, 固定压在产品后面; 无法归属排最后
+    assert [p["id"] for p in d["products"]] == ["pi", "dsh", "desktop", "unattributed"]
 
 
 def test_days_is_clamped():

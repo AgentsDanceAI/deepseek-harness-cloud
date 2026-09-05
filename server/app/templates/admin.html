@@ -87,6 +87,7 @@
     usage_btn: {{ t("admin.js.usage_btn") | tojson }},
     usage_empty: {{ t("admin.usage.empty") | tojson }},
     usage_desktop: {{ t("admin.usage.desktop") | tojson }},
+    usage_unattributed: {{ t("admin.usage.unattributed") | tojson }},
     usage_total: {{ t("admin.usage.total") | tojson }},
     usage_th: [{{ t("admin.usage.th.product") | tojson }}, {{ t("admin.usage.th.minutes") | tojson }},
                {{ t("admin.usage.th.credits") | tojson }}, {{ t("admin.usage.th.calls") | tojson }}]
@@ -123,7 +124,8 @@
     }
     items.forEach(function (p) {
       var tr = document.createElement("tr");
-      addCell(tr, p.name || (p.id === "desktop" ? T.usage_desktop : p.id));
+      var label = { desktop: T.usage_desktop, unattributed: T.usage_unattributed }[p.id];
+      addCell(tr, p.name || label || p.id);
       addCell(tr, (p.minutes || 0).toLocaleString(), "num");
       addCell(tr, (p.credits || 0).toLocaleString(), "num");
       addCell(tr, (p.calls || 0).toLocaleString(), "num");

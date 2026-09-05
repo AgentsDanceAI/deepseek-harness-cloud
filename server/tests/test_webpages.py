@@ -627,7 +627,7 @@ def test_admin_page_has_per_product_usage(client):
     for key in ("usage_btn", "usage_empty", "usage_desktop", "usage_total", "usage_th", "role_grant"):
         assert f"{key}:" in body, f"JS 文案缺 {key}"
     en = client.get("/console/admin?lang=en").text
-    assert "Consumption by product" in en and '"Desktop / App"' in en
+    assert "Consumption by product" in en and '"Desktop / Web"' in en
     # 非管理员看不到这页
     signup(client, "pleb@t.local")
     assert client.get("/console/admin", follow_redirects=False).status_code == 303
