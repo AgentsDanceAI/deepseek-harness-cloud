@@ -280,6 +280,10 @@ K8S_SYNC_INTERVAL_S = _env_int("K8S_SYNC_INTERVAL_S", 300)
 # 回收时留给"应用退出 + 全量推送"的宽限 (秒)。Coze 一个 MySQL+ES+Milvus 停机加推送
 # 要一两分钟; 超时 kubelet 直接杀, 推了一半的目录下次起动会不一致。
 K8S_SYNC_GRACE_S = _env_int("K8S_SYNC_GRACE_S", 180)
+# 栈产品 (Coze/Dify: 十来个容器 + 一两万个文件) 的收尾: 中间件退出 + 全量推送要在这段
+# 时间里做完。2026-09-05 实测 Dify 在 180 秒里被杀在推送中途, OSS 里 pg_control 是新的、
+# WAL 是旧的, 下次起来 PANIC could not locate a valid checkpoint record。
+K8S_SYNC_GRACE_STACK_S = _env_int("K8S_SYNC_GRACE_STACK_S", 600)
 # 每个 Pod 一把只能碰自己目录的 STS 临时凭据 (设了角色 ARN 就启用)。长期密钥只留在
 # dhc-server; Pod 里的凭据 TTL 一到期前由回收循环续。角色的 MaxSessionDuration 必须 >= TTL。
 K8S_SYNC_STS_ROLE_ARN = _env("K8S_SYNC_STS_ROLE_ARN", "")

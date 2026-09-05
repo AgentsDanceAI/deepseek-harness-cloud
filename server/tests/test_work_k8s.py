@@ -1154,3 +1154,36 @@ async def test_without_role_arn_the_shared_secret_path_is_unchanged(k8s, monkeyp
     assert all(v["name"] != "dshwork-oss-creds" for v in spec["volumes"])
     sync = [c for c in spec["initContainers"] if c["name"] == "dsh-syncer"]
     assert sync[0]["envFrom"] == [{"secretRef": {"name": "dshwork-oss"}}]
+
+
+@pytest.mark.asyncio
+async def test_stack_products_get_a_long_grace_and_push_middleware_dirs_first(k8s, monkeypatch):
+    """2026-09-05: Dify 被删时 180 秒宽限期把收尾推送杀在半路, OSS 里 pg_control 新、WAL 旧,
+    下次起来 PANIC。栈产品宽限期 10 分钟; 收尾先单独推中间件目录, 再推整棵树。"""
+    _sts_on(monkeypatch)
+    monkeypatch.setattr(config, "K8S_SYNC_STS_ROLE_ARN", "")
+    monkeypatch.setattr(config, "K8S_SYNC_GRACE_S", 180)
+    monkeypatch.setattr(config, "K8S_SYNC_GRACE_STACK_S", 600)
+    b, fake = k8s
+    pg = products.Sidecar(
+        name="postgres", image_ref="postgres:15-alpine", mounts=(("dify/pg", "/var/lib/postgresql/data"),)
+    )
+    wv = products.Sidecar(
+        name="weaviate",
+        image_ref="semitechnologies/weaviate:1.27.0",
+        mounts=(("dify/weaviate", "/var/lib/weaviate"),),
+    )
+    await _create(b, "u_abc~dify", sidecars=(pg, wv))
+    await _create(b, "u_abc~pi")
+    stack, single = fake.created()
+    assert stack["spec"]["terminationGracePeriodSeconds"] == 600
+    assert single["spec"]["terminationGracePeriodSeconds"] == 180
+    syncer = next(c for c in stack["spec"]["initContainers"] if c["name"] == "dsh-syncer")
+    env = {e["name"]: e["value"] for e in syncer["env"]}
+    assert env["DSH_SYNC_FIRST"] == "dify/pg dify/weaviate"
+    script = syncer["command"][-1]
+    assert "for d in $DSH_SYNC_FIRST" in script and script.index("$DSH_SYNC_FIRST") < script.index(
+        'rclone sync /data "$R"'
+    )
+    single_syncer = next(c for c in single["spec"]["initContainers"] if c["name"] == "dsh-syncer")
+    assert {e["name"]: e["value"] for e in single_syncer["env"]}["DSH_SYNC_FIRST"] == ""

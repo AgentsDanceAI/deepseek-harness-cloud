@@ -813,6 +813,13 @@ R="$DSH_SYNC_REMOTE/$DSH_HEXID"
 final() {
   creds
   if [ -e /data/.dsh-restored ]; then
+    # 中间件 (数据库/向量库) 的目录先推、单独推: 到这里它们已经退出, 目录是自洽的;
+    # 万一后面被宽限期杀掉, 至少库是完整的一份 —— 半新半旧的库比旧库糟得多。
+    for d in $DSH_SYNC_FIRST; do
+      [ -d "/data/$d" ] || continue
+      echo "final push (first): /data/$d -> $R/$d"
+      rclone sync "/data/$d" "$R/$d" %(flags)s || echo "final push $d: FAILED" >&2
+    done
     echo "final push: /data -> $R"
     rclone sync /data "$R" %(flags)s && echo "final push: done" || echo "final push: FAILED" >&2
   else
@@ -1005,13 +1012,15 @@ class K8sBackend(Backend):
         else:
             log.warning("[work] 写 OSS 同步凭据 Secret %s 失败: %s %s", name, r.status_code, r.text[:200])
 
-    def _sync_containers(self, hexid: str) -> tuple[dict, dict]:
-        """(恢复初始化容器, 同步器原生 sidecar)。两个都挂用户整棵目录 (<hexid>/) 到 /data。"""
+    def _sync_containers(self, hexid: str, first_dirs: tuple[str, ...] = ()) -> tuple[dict, dict]:
+        """(恢复初始化容器, 同步器原生 sidecar)。两个都挂用户整棵目录 (<hexid>/) 到 /data。
+        first_dirs: 收尾时先单独推的子目录 (中间件的数据目录)。"""
         common = {
             "image": config.K8S_SYNC_IMAGE,
             "env": [
                 {"name": "DSH_HEXID", "value": hexid},
                 {"name": "DSH_SYNC_INTERVAL", "value": str(config.K8S_SYNC_INTERVAL_S)},
+                {"name": "DSH_SYNC_FIRST", "value": " ".join(first_dirs)},
             ],
             "volumeMounts": [{"name": _K8S_DATA_VOLUME, "mountPath": "/data", "subPath": hexid}],
         }
@@ -1171,7 +1180,9 @@ class K8sBackend(Backend):
         # 写预置配置, 得先有正本再写); 同步器紧随其后起, 免得先推了一份空的。
         sync = self._sync_enabled()
         if sync:
-            restore, syncer = self._sync_containers(hexid)
+            # 伴随容器挂的子目录 = 中间件的数据 (pg / weaviate / mysql / es ...), 收尾先推
+            stack_dirs = tuple(sorted({s for sc in sidecars for s, _ in sc.mounts}))
+            restore, syncer = self._sync_containers(hexid, stack_dirs)
             inits = [self._harden(restore), self._harden(syncer), *inits]
             if self._sts_enabled():
                 volumes.append(
@@ -1183,7 +1194,9 @@ class K8sBackend(Backend):
             "restartPolicy": "Always" if sidecars else "Never",
             # 5 秒: 工作台没有要优雅收尾的东西 (状态在卷上)。开了 OSS 同步就不同了:
             # 应用退出 + 全量推送要在这段时间里完成, 超时被杀等于推了一半。
-            "terminationGracePeriodSeconds": config.K8S_SYNC_GRACE_S if sync else 5,
+            "terminationGracePeriodSeconds": (
+                (config.K8S_SYNC_GRACE_STACK_S if sidecars else config.K8S_SYNC_GRACE_S) if sync else 5
+            ),
             # 工作台里跑的是用户的智能体 —— 不给它集群凭据, 也不注入服务发现变量。
             "automountServiceAccountToken": False,
             "enableServiceLinks": False,
@@ -1327,7 +1340,8 @@ class K8sBackend(Backend):
         if r.status_code == 409:
             # 同名 Pod 还在 —— 多半是上一台正在删 (名字要等它走完才空出来)。
             # 等它消失再建一次, 而不是把"撞名"当成功: 那样用户会连到旧的那台。
-            for _ in range(30):
+            # 栈产品收尾 (全量推送) 现在最长 10 分钟, 绝大多数在 90 秒内结束。
+            for _ in range(180):
                 await asyncio.sleep(0.5)
                 if await self._get(user_id) is None:
                     break

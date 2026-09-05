@@ -148,6 +148,16 @@ bash deploy/k8s-node/migrate_to_oss.sh          # NAS 上每个 <hexid>/ -> oss:
 Job 在节点上推 (凭据取集群里的 Secret, 不经人手); 先推节点 (新)、再推 NAS (旧),
 两边都是 `--update`, 新的不被旧的盖掉。
 
+**收尾推送与中间件数据 (2026-09-05 事故)**: 删 Pod 时常规容器先收 TERM, 同步器 (原生
+sidecar) 在它们全部退出后才收到 TERM 做全量推送 —— 这一段要在 `terminationGracePeriodSeconds`
+里做完, 超时被 SIGKILL 就推了一半。Dify 一万四千个文件, 180 秒不够: OSS 里 pg_control 是新的、
+WAL 是旧的, 下次起来 postgres `PANIC: could not locate a valid checkpoint record`, 整个栈
+跟着崩 (api/worker/plugind 各重启 7 次)。现在: 栈产品宽限期 `K8S_SYNC_GRACE_STACK_S` (600),
+收尾先单独推伴随容器挂的子目录 (`DSH_SYNC_FIRST`, 即 pg / weaviate / mysql / es ... 的数据),
+再推整棵树 —— 就算还是被杀, 库至少是自洽的一份。周期推送只推 home/workspace, 从不碰库目录。
+修复一份已经坏掉的库: 在该 Pod 的 dsh-syncer 容器里 `rclone purge "$DSH_SYNC_REMOTE/$DSH_HEXID/dify/pg"`
++ 清空本地 `/data/dify/pg`, postgres 重启会重新 initdb (该用户的 Dify 应用数据丢失)。
+
 ## 5. 网络围栏 (安全)
 
 **工作台里跑的是用户敲进去的任意命令**, 而节点是公司的共享机、落在公司内网上。
