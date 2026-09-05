@@ -78,11 +78,21 @@ class Sidecar:
     # `chown -R` 这个容器挂的每个数据子目录。2026-09-05: Dify api (uid 1001) 写不了
     # storage/, 首次 setup 500, 新用户的 Dify 永远"启动中"。
     mount_owner: int | None = None
-    # 停容器时发什么信号。默认 SIGTERM; PID 1 是 bash 脚本、不转发信号的镜像 (dify-sandbox
-    # 的 /bin/bash /entrypoint.sh) 会对 TERM 无动于衷 —— 而 k8s 要等**所有**常规容器退出才
-    # 给同步 sidecar 发 TERM, 于是收尾推送永远等到宽限期被一起 SIGKILL (2026-09-05, Dify
-    # 删一次 Pod 要整整 600 秒, 库一次都没完整推上去过)。无状态的容器直接 SIGKILL。
+    # 停容器时发什么信号 (k8s 1.33+ lifecycle.stopSignal)。**线上的 k3s 没开 ContainerStopSignals
+    # 这个门, API 会把字段静默丢掉** —— 所以对 TERM 无动于衷的镜像别指望它, 用 kill_on_term
+    # 包住入口才是真管用的; 这个字段留着, 门开了就多一层。
     stop_signal: str | None = None
+
+
+def kill_on_term(entrypoint: str) -> tuple[str, ...]:
+    """把镜像的入口包进一个会处理信号的 sh: 收到 TERM/INT 就把整个进程组 SIGKILL。
+
+    给 PID 1 是 bash 脚本、不转发信号的镜像用 (dify-sandbox 的 `/bin/bash /entrypoint.sh`
+    最后一行是 `/main` 而不是 `exec /main`)。这种容器收到 TERM 不退出, 而 k8s 要等**所有**
+    常规容器退出才给同步 sidecar 发 TERM —— 于是收尾推送永远等到宽限期一起被 SIGKILL,
+    2026-09-05 Dify 删一次 Pod 整整 600 秒, 库一次都没完整推上 OSS。只用于无状态的容器。
+    """
+    return ("sh", "-c", f"trap 'kill -9 0' TERM INT; {entrypoint} & wait")
 
 
 @dataclass(frozen=True)
@@ -378,7 +388,7 @@ def _dify_stack() -> tuple[Sidecar, ...]:
         Sidecar(name="sandbox", image_ref=f"langgenius/dify-sandbox:{config.DIFY_SANDBOX_VERSION}", env=(
             ("API_KEY", _DIFY_SANDBOX_KEY), ("GIN_MODE", "release"),
             ("WORKER_TIMEOUT", "15"), ("ENABLE_NETWORK", "true"), ("SANDBOX_PORT", "8194"),
-        ), stop_signal="SIGKILL"),
+        ), cmd=kill_on_term("/entrypoint.sh"), stop_signal="SIGKILL"),
         Sidecar(name="postgres", image_ref="postgres:15-alpine", env=(
             ("POSTGRES_USER", "postgres"), ("POSTGRES_PASSWORD", _DIFY_DB_PASSWORD),
             ("POSTGRES_DB", "dify"),

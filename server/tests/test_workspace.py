@@ -3072,3 +3072,13 @@ def test_overdraft_is_reclaimed_without_asking(fake, monkeypatch):
     asyncio.run(workspace.reaper_tick(now))
     assert stopped == [key], "欠费还先问一句 —— 问了也留不住, 白等 120 秒机时"
     assert key not in workspace._reclaim_asked, "欠费不该挂牌"
+
+
+def test_dify_sandbox_entrypoint_is_wrapped_to_die_on_term():
+    """dify-sandbox 的 PID 1 是不转发信号的 bash 脚本; 不包住它, 删 Pod 要等满宽限期, 收尾推送
+    永远被一起杀掉 (2026-09-05)。线上 k3s 没开 ContainerStopSignals, stopSignal 会被 API 丢掉,
+    所以必须靠这层 sh 包装。"""
+    sb = next(s for s in products.registry()["dify"].sidecars if s.name == "sandbox")
+    assert sb.cmd[:2] == ("sh", "-c")
+    assert "trap 'kill -9 0' TERM INT" in sb.cmd[2] and "/entrypoint.sh & wait" in sb.cmd[2]
+    assert products.kill_on_term("/x") == ("sh", "-c", "trap 'kill -9 0' TERM INT; /x & wait")
