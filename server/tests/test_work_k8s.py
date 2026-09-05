@@ -160,7 +160,7 @@ class FakeK8s:
 
 @pytest.fixture()
 def k8s(monkeypatch):
-    monkeypatch.setattr(config, "K8S_API_URL", "https://<TUNNEL_NODE_IP>:6443")
+    monkeypatch.setattr(config, "K8S_API_URL", "https://10.200.0.2:6443")
     monkeypatch.setattr(config, "K8S_TOKEN", "tok")
     monkeypatch.setattr(config, "K8S_TOKEN_FILE", "")
     monkeypatch.setattr(config, "K8S_NAMESPACE", "dsh")

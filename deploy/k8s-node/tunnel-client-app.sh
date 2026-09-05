@@ -2,18 +2,23 @@
 # DSH Cloud tunnel — client side, runs ON the prod host as root.
 # Installs:
 #   /usr/local/sbin/dsh-tunnel-local-up    LocalCommand hook: addresses the tun device, adds k3s routes
-#   /etc/systemd/system/dsh-tunnel.service ssh -w tunnel to <node>:<TUNNEL_PORT>, auto-restart
-# and pins the node's host key for port <TUNNEL_PORT> in /root/.ssh/known_hosts (must equal the port-22 key).
-# Usage:  bash tunnel-client-app.sh <node public IP>      (or DSH_NODE_IP=... in the environment)
+#   /etc/systemd/system/dsh-tunnel.service ssh -w tunnel to <node>:<port>, auto-restart
+# and pins the node's host key for that port in /root/.ssh/known_hosts (must equal the port-22 key).
+# Addresses and the port are NOT in git: they live in deploy/prod/.env (DSH_NODE_IP, DSH_TUNNEL_PORT,
+# DSH_TUNNEL_APP_IP, DSH_TUNNEL_NODE_IP). Export them first, e.g.
+#   export $(grep -E '^DSH_(NODE_IP|TUNNEL_[A-Z_]+)=' deploy/prod/.env | xargs)
+# Usage:  bash tunnel-client-app.sh [node public IP] [tunnel port]   (arguments override the env)
 # Uninstall: systemctl disable --now dsh-tunnel; rm -f the two files above.
 set -euo pipefail
-R="${1:-${DSH_NODE_IP:-}}"; P=<TUNNEL_PORT>
-[ -n "$R" ] || { echo "usage: $0 <node public IP>" >&2; exit 2; }
+R="${1:-${DSH_NODE_IP:-}}"; P="${2:-${DSH_TUNNEL_PORT:-}}"
+LOCAL="${DSH_TUNNEL_APP_IP:-}"; PEER="${DSH_TUNNEL_NODE_IP:-}"
+[ -n "$R" ] && [ -n "$P" ] && [ -n "$LOCAL" ] && [ -n "$PEER" ] || {
+  echo "usage: DSH_TUNNEL_APP_IP=<app tunnel ip> DSH_TUNNEL_NODE_IP=<node tunnel ip> $0 <node public IP> <tunnel port>" >&2; exit 2; }
 
 install -m 0755 /dev/stdin /usr/local/sbin/dsh-tunnel-local-up <<'EOF'
 #!/bin/bash
 # Called by ssh (LocalCommand "%T") once the tunnel channel is open; $1 is the local tun device.
-DEV="${1:-}"; LOCAL=<TUNNEL_APP_IP>; PEER=<TUNNEL_NODE_IP>
+DEV="${1:-}"; LOCAL=__APP_IP__; PEER=__NODE_IP__
 [ -n "$DEV" ] && [ "$DEV" != NONE ] || { echo "dsh-tunnel: no tun device" >&2; exit 1; }
 ip addr flush dev "$DEV" 2>/dev/null
 ip addr add "$LOCAL" peer "$PEER/32" dev "$DEV"
@@ -22,6 +27,7 @@ ip route replace 10.42.0.0/16 dev "$DEV"   # k3s pod CIDR on the node
 ip route replace 10.43.0.0/16 dev "$DEV"   # k3s service CIDR on the node
 logger -t dsh-tunnel "$DEV up: $LOCAL <-> $PEER, routes 10.42/16 10.43/16 via $DEV"
 EOF
+sed -i "s|__APP_IP__|$LOCAL|; s|__NODE_IP__|$PEER|" /usr/local/sbin/dsh-tunnel-local-up
 
 install -m 0644 /dev/stdin /etc/systemd/system/dsh-tunnel.service <<EOF
 [Unit]
@@ -49,8 +55,8 @@ echo "host key pinned for [$R]:$P"
 
 systemctl daemon-reload
 systemctl enable --now dsh-tunnel.service
-for _ in $(seq 1 20); do ip -4 addr show to <TUNNEL_APP_IP> 2>/dev/null | grep -q <TUNNEL_APP_IP> && break; sleep 0.5; done
+for _ in $(seq 1 20); do ip -4 addr show to "$LOCAL" 2>/dev/null | grep -q "$LOCAL" && break; sleep 0.5; done
 systemctl --no-pager --lines=8 status dsh-tunnel.service || true
 ip -br addr | grep -E "^tun" || echo "no tun device yet"
 ip route | grep -E "^10\.4[23]\." || true
-ping -c 3 -W 2 <TUNNEL_NODE_IP> && echo "TUNNEL OK: <TUNNEL_APP_IP> <-> <TUNNEL_NODE_IP>"
+ping -c 3 -W 2 "$PEER" && echo "TUNNEL OK: $LOCAL <-> $PEER"

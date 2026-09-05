@@ -24,9 +24,10 @@ spec:
   podSelector: {}
   policyTypes: [Ingress, Egress]
   ingress:
-    # 只有反代进得来。生产机的 Caddy 经隧道打过来, 源地址是隧道对端 <TUNNEL_APP_IP>
+    # 只有反代进得来。生产机的 Caddy 经隧道打过来, 源地址是隧道对端 (生产机的隧道地址,
+    # 不进 git: apply 前用 sed 把 ${DSH_TUNNEL_APP_IP} 换成 deploy/prod/.env 里的值)
     # (宿主与 Caddy 容器都被 MASQUERADE 成它)。同一个 Pod 内的容器走回环, 不受策略约束。
-    - from: [{ipBlock: {cidr: <TUNNEL_APP_IP>/32}}]
+    - from: [{ipBlock: {cidr: ${DSH_TUNNEL_APP_IP}/32}}]
   egress:
     # DNS。集群 DNS 的服务地址在 10.43/16 里, 而下面那条把整个 10/8 排除了, 所以单独放行。
     - to:

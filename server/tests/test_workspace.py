@@ -1914,7 +1914,7 @@ def test_openclaw_repairs_a_config_written_by_an_older_image(monkeypatch):
     openclaw: 里面还留着我们自己在 2026.8.1 前写的 controlUi.allowInsecureAuth)。
     config patch 是递归合并, 只加不删, 救不了自己写下的旧键。"""
     monkeypatch.setattr(config, "OPENCLAW_DOMAIN", "claw.test.local")
-    monkeypatch.setattr(config, "WORK_PROXY_CIDR", "<TUNNEL_APP_IP>/32")
+    monkeypatch.setattr(config, "WORK_PROXY_CIDR", "10.200.0.1/32")
     boot = products.boot_script("openclaw")
     assert "doctor --fix" in boot, "无效配置下上游唯一的修复路径"
     assert "config validate" in boot

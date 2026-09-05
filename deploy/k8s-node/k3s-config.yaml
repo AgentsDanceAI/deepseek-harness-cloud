@@ -5,7 +5,7 @@ data-dir: /mnt/k3s
 node-name: dsh-node-1
 node-ip: <NODE_PRIVATE_IP>
 tls-san:
-  - <TUNNEL_NODE_IP>          # tunnel address the DSH prod host reaches the API on
+  - <TUNNEL_NODE_IP>   # tunnel address the DSH prod host reaches the API on (DSH_TUNNEL_NODE_IP in .env)
   - <NODE_PRIVATE_IP>
 write-kubeconfig-mode: "0600"
 flannel-backend: host-gw   # single node: no vxlan device, no udp/8472 listener

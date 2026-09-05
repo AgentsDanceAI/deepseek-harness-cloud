@@ -43,6 +43,11 @@ k3s kubectl apply -f manifests.yaml
 
 ## 2. 应用机与节点之间的隧道 (不在一个 VPC 时)
 
+**地址与端口不进仓库。** 节点公网 IP、隧道端口、两端的隧道地址都放在应用机的
+`deploy/prod/.env` (`DSH_NODE_IP` / `DSH_TUNNEL_PORT` / `DSH_TUNNEL_APP_IP` / `DSH_TUNNEL_NODE_IP`),
+跑下面任何脚本前先 `export $(grep -E '^DSH_(NODE_IP|TUNNEL_[A-Z_]+)=' deploy/prod/.env | xargs)`。
+本文里的 `<TUNNEL_APP_IP>` 之类都是占位符。
+
 应用机 (dhc-server 与 Caddy 所在) 要能**直接打到 Pod IP** —— 它把 Pod IP 写进
 `X-Work-Upstream` 交给 Caddy 反代, 与 ECI 的内网 IP 是同一条路。两台机不在一个
 VPC、又打不通对等连接时, 走一条 `ssh -w` 三层隧道:
@@ -194,7 +199,7 @@ postgres 直接 "Skipping initialization", 零重启。
 ECI 时代这些都被安全组挡着 —— 迁到 k8s 是一次**隔离降级**, 这份策略把那一档补回来:
 
 ```sh
-k3s kubectl apply -f netpol.yaml     # 前提: k3s 没有 disable-network-policy
+sed "s|\${DSH_TUNNEL_APP_IP}|$DSH_TUNNEL_APP_IP|" netpol.yaml | k3s kubectl apply -f -   # 前提: k3s 没有 disable-network-policy
 ```
 
 三个必须知道的细节:
@@ -267,7 +272,7 @@ web 服务器, 假设它有一天被打穿。
 
 ```
 scp tunnel-firewall.sh <node>:/root/dsh-k8s-staging/
-bash /root/dsh-k8s-staging/tunnel-firewall.sh install   # 装到 /usr/local/sbin, 挂进 dsh-tunnel-up
+bash /root/dsh-k8s-staging/tunnel-firewall.sh install <TUNNEL_APP_IP>   # 装到 /usr/local/sbin, 挂进 dsh-tunnel-up
 ```
 
 只碰 `-i tun0` 的包, 两条自己的链 (DSH-TUN-IN / DSH-TUN-FWD): 入向只放行到本机 6443,
