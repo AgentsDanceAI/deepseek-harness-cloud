@@ -220,8 +220,12 @@ k3s kubectl apply -f runtimeclass-gvisor.yaml
 所以最该开的是**用户能拿到 shell 敲任意命令**的那几格; 而 Coze/Dify 那种十容器栈
 (MySQL/ES/Milvus, IO 最吃亏、用户在里面是填表单不是敲命令) 先留在 runc。
 
-另: 所有容器 (应用/伴随/初始化/同步) 都去掉了 `K8S_DROP_CAPS` 里的 capability
+另: 应用容器与我们的初始化/同步容器都去掉了 `K8S_DROP_CAPS` 里的 capability
 (默认 NET_RAW/MKNOD/SYS_CHROOT/SETFCAP —— 历史逃逸链的常客, 工作台没有一个用得上)。
+**产品自带的伴随容器保留 SYS_CHROOT**: bitnami 系镜像 (Coze 的 redis/etcd/elasticsearch)
+入口脚本以 root 起再 `chroot --userspec=1001 /` 降权, 去掉它三个中间件各重启 10 次,
+日志最后一行 `chroot: cannot change root directory to '/'` (2026-09-04 全员回归抓到);
+Dify 用官方 postgres/redis 镜像 (gosu) 不受影响。用户代码不在伴随容器里跑, 留这一个不亏。
 没有开 `allowPrivilegeEscalation: false`: uid 1000 的产品 (Claude Code/Codex) 可能要 sudo。
 
 ## 退场
