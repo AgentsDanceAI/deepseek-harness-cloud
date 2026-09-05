@@ -5,7 +5,7 @@
 ECI 同样的东西 34 秒)。后端实现见 `server/app/workbackend.py` 的 `K8sBackend`,
 按产品分派见 `RoutedBackend` (`WORK_BACKEND_PRODUCTS=pi=k8s,openmanus=k8s`)。
 
-首个节点是组内共享的 GPU 机 <node> (新加坡, 16C/123G, 与应用机不在一个 VPC)。
+首个节点是组内共享的一台 GPU 机 (新加坡, 16C/123G, 与应用机不在一个 VPC)。
 下面所有步骤都以"不重启、不碰机器上现有服务"为前提, 都能整条退掉。
 
 ## 1. 节点上装 k3s
@@ -250,7 +250,7 @@ Dify 用官方 postgres/redis 镜像 (gosu) 不受影响。用户代码不在伴
 web 服务器, 假设它有一天被打穿。
 
 ```
-scp tunnel-firewall.sh 248:/root/dsh-k8s-staging/
+scp tunnel-firewall.sh <node>:/root/dsh-k8s-staging/
 bash /root/dsh-k8s-staging/tunnel-firewall.sh install   # 装到 /usr/local/sbin, 挂进 dsh-tunnel-up
 ```
 

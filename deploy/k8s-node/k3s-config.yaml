@@ -1,7 +1,8 @@
-# /etc/rancher/k3s/config.yaml — DSH Cloud workspace node: single-node k3s on the shared <node>.
+# /etc/rancher/k3s/config.yaml — DSH Cloud workspace node: single-node k3s on a shared machine.
+# Replace <NODE_PRIVATE_IP> with the node's VPC address before installing.
 # Everything k3s owns lives under /mnt/k3s (system disk is 82% full). Uninstall: /usr/local/bin/k3s-uninstall.sh
 data-dir: /mnt/k3s
-node-name: <node>
+node-name: dsh-node-1
 node-ip: <NODE_PRIVATE_IP>
 tls-san:
   - <TUNNEL_NODE_IP>          # tunnel address the DSH prod host reaches the API on

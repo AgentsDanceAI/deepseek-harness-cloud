@@ -1,5 +1,5 @@
 #!/bin/bash
-# DSH Cloud tunnel — server side, runs ON <node> as root.
+# DSH Cloud tunnel — server side, runs ON the k3s node as root.
 # Installs a SEPARATE sshd instance on port <TUNNEL_PORT> (the main sshd on port 22 is not touched):
 #   /etc/ssh/sshd_tunnel_config            key-only, single key, tun-only, no shell/forwarding
 #   /etc/ssh/dsh_tunnel_authorized_keys    the prod host's key with restrict + forced command
@@ -16,7 +16,7 @@ if ss -tln "sport = :<TUNNEL_PORT>" | grep -q <TUNNEL_PORT>; then echo "port <TU
 
 install -m 0644 /dev/stdin /etc/ssh/sshd_tunnel_config <<'EOF'
 # DSH Cloud tunnel sshd — separate instance from the main sshd (port 22), which it never touches.
-# Purpose: one ssh -w layer-3 tunnel from the DSH prod host (<PROD_HOST_IP>) to the k3s node here.
+# Purpose: one ssh -w layer-3 tunnel from the DSH prod host to the k3s node here.
 # Key-only, a single authorized key (/etc/ssh/dsh_tunnel_authorized_keys), tun only, no shell/forwarding.
 Port <TUNNEL_PORT>
 ListenAddress 0.0.0.0:<TUNNEL_PORT>
