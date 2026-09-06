@@ -60,12 +60,24 @@ chmod 0600 "$CREDS/token" "$CREDS/ca.crt"
 [ -s "$CREDS/token" ] && [ -s "$CREDS/ca.crt" ] && pass "token / ca.crt 已就位 ($CREDS)" || fail "凭据没取到"
 
 echo "=== 4/6 k8s API 走隧道通不通 ==="
-code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 --cacert "$CREDS/ca.crt" \
-        -H "Authorization: Bearer $(cat "$CREDS/token" 2>/dev/null)" \
-        "https://$T_NODE:6443/api/v1/namespaces/dsh/pods" 2>/dev/null)"
-[ "$code" = 200 ] && pass "API 200 (namespace dsh 可列)" || fail "API 返回 ${code:-无响应}"
+# resume 之后 k3s 要几十秒才起来 (2026-09-06 实测: 盒子 ready 之后 k3s 又过了约 1 分钟
+# 才 active, 而自愈闸要重解包时更久)。头一版只探一次就判死, 于是隧道明明通了却报
+# "API 000", 后面三步跟着全红 —— 判据比被判的东西快, 报出来的就是假故障。
+code=""
+for i in $(seq 1 40); do
+  code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 --cacert "$CREDS/ca.crt" \
+          -H "Authorization: Bearer $(cat "$CREDS/token" 2>/dev/null)" \
+          "https://$T_NODE:6443/api/v1/namespaces/dsh/pods" 2>/dev/null)"
+  [ "$code" = 200 ] && break
+  [ "$i" = 1 ] && echo "  等 k3s 起来 (最多 3 分钟)…"
+  sleep 5
+done
+[ "$code" = 200 ] && pass "API 200 (namespace dsh 可列)" || fail "API 返回 ${code:-无响应} —— 盒子里看 systemctl status k3s"
 
-echo "=== 5/6 烟测: 真起一个 Pod, 且必须落在 gVisor 里 ==="
+echo "=== 5/6 烟测: 真起一个 Pod — gVisor + 用户数据卷都要真验 ==="
+# 挂上 dshwork-data 并按 <hexid>/workspace 的布局写一个文件: 那是所有用户数据走的路,
+# 而 local-path 是 WaitForFirstConsumer, 没有 Pod 用过它就一直 Pending —— "PVC 建了"
+# 证明不了"能用"。落点在 /opt/dsh-k3s/storage 下, 所以也跟着进快照。
 box run "$BOX" 'sudo k3s kubectl -n dsh delete pod dsh-smoke --ignore-not-found >/dev/null 2>&1
 cat <<Y | sudo k3s kubectl apply -f - >/dev/null
 apiVersion: v1
@@ -73,10 +85,12 @@ kind: Pod
 metadata: {name: dsh-smoke, namespace: dsh}
 spec:
   runtimeClassName: gvisor
+  volumes: [{name: data, persistentVolumeClaim: {claimName: dshwork-data}}]
   containers:
   - name: c
     image: busybox:1.36
-    command: ["sh","-c","echo ok > /tmp/x; httpd -f -p 8080 -h /tmp"]
+    command: ["sh","-c","echo ok > /tmp/x; date > /workspace/.dsh-probe; httpd -f -p 8080 -h /tmp"]
+    volumeMounts: [{name: data, mountPath: /workspace, subPath: dshprobe/workspace}]
     resources: {requests: {cpu: 50m, memory: 64Mi}, limits: {cpu: 200m, memory: 128Mi}}
 Y
 for i in $(seq 1 40); do
@@ -85,11 +99,16 @@ for i in $(seq 1 40); do
 done
 echo "phase=$p"
 echo "kernel=$(sudo k3s kubectl -n dsh exec dsh-smoke -- uname -r 2>/dev/null)"
-echo "podip=$(sudo k3s kubectl -n dsh get pod dsh-smoke -o jsonpath="{.status.podIP}" 2>/dev/null)"' > /tmp/dsh-smoke.out 2>&1
+echo "podip=$(sudo k3s kubectl -n dsh get pod dsh-smoke -o jsonpath="{.status.podIP}" 2>/dev/null)"
+echo "pvc=$(sudo k3s kubectl -n dsh get pvc dshwork-data -o jsonpath="{.status.phase}" 2>/dev/null)"
+echo "pvcfile=$(sudo k3s kubectl -n dsh exec dsh-smoke -- cat /workspace/.dsh-probe 2>/dev/null | wc -c)"' > /tmp/dsh-smoke.out 2>&1
 sed 's/^/  /' /tmp/dsh-smoke.out
 grep -q "phase=Running" /tmp/dsh-smoke.out && pass "Pod 起来了" || fail "Pod 没到 Running"
 # uname 必须是 gVisor 的内核号 —— 只看"起没起"证明不了它在沙箱里 (248 上的老教训)。
 grep -qE "kernel=4\.19\.[0-9]+-gvisor" /tmp/dsh-smoke.out && pass "确认在 gVisor 内核里" || fail "内核不是 gvisor 的 —— 沙箱没生效"
+grep -q "pvc=Bound" /tmp/dsh-smoke.out && pass "用户数据卷 dshwork-data 已绑定" || fail "PVC 没绑上"
+[ "$(sed -n 's/^pvcfile=//p' /tmp/dsh-smoke.out | tr -d '[:space:]')" -gt 0 ] 2>/dev/null \
+  && pass "卷里写得进也读得回" || fail "卷挂上了但读写不通"
 
 echo "=== 6/6 应用机 → Pod 直连 (Caddy 就是这么反代的) ==="
 POD_IP="$(sed -n 's/^podip=//p' /tmp/dsh-smoke.out | tr -d '[:space:]')"
