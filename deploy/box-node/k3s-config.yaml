@@ -1,0 +1,39 @@
+# /etc/rancher/k3s/config.yaml —— Box 上的备用工作台节点。
+# 由 provision.sh 渲染 (__占位符__ 会被换掉), 不要直接 cp。
+#
+# 与 ../k8s-node/k3s-config.yaml (248) 的每一处不同都有理由:
+#
+# · data-dir 在 /opt 而不是 /mnt —— **这是 Box 上最要命的一条**。Box 的快照只收
+#   /etc /usr /opt /root /srv /home/user 和 docker 命名卷; /var 不在里面。k3s 默认
+#   把数据 (含 containerd 的镜像层) 放 /var/lib/rancher, 照默认装, 停机一次整个集群
+#   连同几十 GB 镜像一起消失, 而 resume 回来 k3s 会"干净地"重新初始化 —— 不报错,
+#   只是空的。备用节点的全部价值在于停机免费且能原样醒来, 所以必须落在 /opt。
+# · 不写 fail-cgroupv1: Box 是 Ubuntu 24.04 / 内核 6.8 / cgroup v2, 248 那台是
+#   5.10 + cgroup v1 才需要那行。
+# · system-reserved 按机器大小算 (provision.sh 填): 248 是组内共享的 GPU 机, 要给
+#   别人留 6C/64G; Box 是我们独占的, 只留住系统自己要的那点。
+# · cluster-cidr / service-cidr 不用默认的 10.42/10.43: 应用机上 248 那条隧道已经
+#   把这两段路由走了, 撞车就没法在不停 248 的情况下演练。换段之后两条隧道能同时在,
+#   备用节点可以随时拉起来对着打一遍。
+data-dir: /opt/dsh-k3s
+node-name: __NODE_NAME__
+tls-san:
+  - __TUNNEL_NODE_IP__
+cluster-cidr: __CLUSTER_CIDR__
+service-cidr: __SERVICE_CIDR__
+cluster-dns: __CLUSTER_DNS__
+write-kubeconfig-mode: "0600"
+flannel-backend: host-gw   # 单节点: 不要 vxlan 设备, 不要 udp/8472 监听
+disable:
+  - traefik
+  - servicelb
+  - metrics-server
+# **不要关网络策略。** 关了 netpol.yaml 那道围栏一条都不生效 (还照样 apply 成功),
+# 而工作台里跑的是用户敲进去的任意命令。
+disable-helm-controller: true
+kubelet-arg:
+  - "system-reserved=cpu=__RESERVE_CPU__,memory=__RESERVE_MEM__"
+  - "eviction-hard=memory.available<300Mi,nodefs.available<10%"
+  - "max-pods=__MAX_PODS__"
+  # emptyDir 与容器可写层都在 kubelet 的 root-dir 下 —— 一样必须进快照, 跟着 data-dir 走。
+  - "root-dir=/opt/dsh-k3s/kubelet"
