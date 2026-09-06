@@ -663,6 +663,9 @@ def test_unlock_banner_shows_the_price_with_decimals(client, monkeypatch):
     body = client.get("/pricing?reason=locked&product_id=dify&cur=CNY&lang=zh").text
     assert 'id="unlock"' in body and 'data-item="pass:dify"' in body
     assert "9.90" in body, "冲动价要显示到分"
+    # 说明文案不能让人以为机时和积分要另外买 —— 它们照当前套餐的额度算
+    assert "不附赠机时和积分" in body and "Free 权益" in body
+    assert "另外两份额度" not in body, "旧文案容易被读成「要另外买」"
     assert "Dify" in body
     # 没上锁的产品不给横幅 —— 否则等于卖一个不用买的东西
     monkeypatch.setattr(config, "WORK_LOCKED_PRODUCTS", "")
