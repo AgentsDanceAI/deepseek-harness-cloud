@@ -552,7 +552,6 @@
   "pricing.unlock.days": "{days} 天",
   "pricing.unlock.h": "开通「{name}」",
   "pricing.unlock.lede": "开通后 {days} 天内随时进出这一格。",
-  "pricing.unlock.note": "只解锁这一格，不附赠机时和积分 —— 这两份仍按你当前套餐的额度算，免费用户即 Free 权益。",
   "product.cloud.body": "每个人一个隔离的云端容器，智能体在里面读写文件、跑命令、装依赖。手机上也能用——把网页添加到主屏，就是一个 App。做出来的网页可以通过个人成品直接公网打开。",
   "product.cloud.check_hours": "每人 {hours} 小时免费机时，只按智能体",
   "product.cloud.check_hours_em": "运行时长",

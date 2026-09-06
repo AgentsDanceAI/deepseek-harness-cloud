@@ -23,7 +23,6 @@
       <p style="margin:0 0 14px"><span class="price-now">{{ currency_symbol }}{{ "%.2f"|format(unlock.cents / 100) }}</span>
         <span class="muted small">/ {{ _t("pricing.unlock.days", days=unlock.days) }}</span></p>
       <button class="btn btn-primary buy-btn" data-item="pass:{{ unlock.id }}" type="button">{{ _t("pricing.unlock.buy") }}</button>
-      <p class="muted small" style="margin:12px 0 0">{{ _t("pricing.unlock.note") }}</p>
     </div>
     {% endif %}
 
