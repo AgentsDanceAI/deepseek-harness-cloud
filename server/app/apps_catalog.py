@@ -166,9 +166,17 @@ def site_apps() -> set[str]:
     return {"avatar"} if live else set()
 
 
-def entries_with_status(enabled_ids: set[str]) -> list[dict]:
-    """给模板用: 目录 + 实时上线状态。live 的判据只有一个 —— registry 里启用了."""
-    return [
+def entries_with_status(enabled_ids: set[str], minutes: dict[str, int] | None = None) -> list[dict]:
+    """给模板用: 目录 + 实时上线状态。live 的判据只有一个 —— registry 里启用了。
+
+    `minutes` 给了就**按使用时长从多到少排** (老板 2026-09-06: 让用得多的排前面)。
+    排序只在这里做, 主页与 /apps 共用同一份 —— 两处各排一次必然漂。
+
+    没上线的卡一律沉底: 一张点不进去的卡排在第一屏, 比排序本身更碍事。时长相同
+    (比如都是 0) 时按目录原序, 这样没有用量的新站看到的还是手工编排的那个顺序。
+    """
+    order = {a.id: i for i, a in enumerate(CATALOG)}
+    out = [
         {
             "id": a.id,
             "name": a.name,
@@ -176,6 +184,10 @@ def entries_with_status(enabled_ids: set[str]) -> list[dict]:
             "icon": a.icon,
             "href": a.href,
             "live": a.id in enabled_ids,
+            "minutes": int((minutes or {}).get(a.id, 0)),
         }
         for a in CATALOG
     ]
+    if minutes:
+        out.sort(key=lambda a: (not a["live"], -a["minutes"], order[a["id"]]))
+    return out

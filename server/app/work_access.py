@@ -21,9 +21,13 @@ cannot spend the team's month.
 
 from __future__ import annotations
 
+import logging
+import threading
 import time
 
 from . import config, db, plans, security
+
+log = logging.getLogger("dhc.work")
 
 # usage_log rows written by the reaper carry this kind; one row == one minute.
 MINUTE_KIND = "workspace"
@@ -75,6 +79,42 @@ def used_minutes(user_id: str, since: float | None = None) -> int:
         (user_id, MINUTE_KIND, since),
     )
     return int((row["n"] if row is not None else 0) or 0)
+
+
+_POPULARITY_TTL_S = 300.0
+_popularity: tuple[float, dict[str, int]] = (0.0, {})
+_popularity_lock = threading.Lock()
+
+
+def minutes_by_product(days: int = 30) -> dict[str, int]:
+    """全站每个产品最近 N 天累计开了多少分钟 (不折算 —— "时长"就是时长)。
+
+    云空间那页每次访问都要用它排序, 所以缓存 5 分钟: 这是个全表扫的分组查询, 而
+    排序结果慢五分钟没有任何人看得出来。**缓存失败要返回空字典, 不能抛** —— 排序
+    是锦上添花, 数据库抖一下不该让整页打不开。
+    """
+    now = time.time()
+    with _popularity_lock:
+        at, cached = _popularity
+        if cached and now - at < _POPULARITY_TTL_S:
+            return cached
+    out: dict[str, int] = {}
+    try:
+        rows = db.query(
+            "SELECT model, COUNT(*) AS n FROM usage_log WHERE kind=? AND created>? GROUP BY model",
+            (MINUTE_KIND, now - max(1, days) * 86400),
+        )
+        for r in rows:
+            model = r["model"] or ""
+            pid = model[len("work:") :] if model.startswith("work:") else ""
+            if pid:
+                out[pid] = out.get(pid, 0) + int(r["n"] or 0)
+    except Exception:  # noqa: BLE001
+        log.warning("按产品统计时长失败, 这一轮不排序", exc_info=True)
+        return {}
+    with _popularity_lock:
+        globals()["_popularity"] = (now, out)
+    return out
 
 
 def wall_clock_minutes(user_id: str, since: float | None = None) -> int:

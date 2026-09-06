@@ -193,3 +193,58 @@ def test_consume_minute_drains_across_grants():
             )
     work_access.consume_minute(uid, 8)
     assert work_access.minute_packs_left(uid) == 5, "3 + 10 扣掉 8 应剩 5"
+
+
+# ---- 云空间那页按使用时长排序 (老板 2026-09-06 定) --------------------------
+
+
+def test_catalog_sorts_by_usage_and_sinks_the_offline_ones():
+    """用得多的排前面; 没上线的一律沉底 —— 一张点不进去的卡排在第一屏, 比不排序更碍事。"""
+    from app import apps_catalog
+
+    ids = [a.id for a in apps_catalog.CATALOG]
+    live = set(ids[:4])
+    minutes = {ids[3]: 900, ids[1]: 100, ids[0]: 5}
+    out = apps_catalog.entries_with_status(live, minutes)
+    assert [a["id"] for a in out[:4]] == [ids[3], ids[1], ids[0], ids[2]], "按时长, 同为 0 的按目录原序"
+    assert all(not a["live"] for a in out[4:]), "没上线的沉底"
+    assert len(out) == len(ids), "一张卡都不能丢"
+
+
+def test_catalog_keeps_hand_order_when_there_is_no_usage():
+    """没有用量的新站看到的还是手工编排的那个顺序 —— 不能因为都是 0 就洗牌。"""
+    from app import apps_catalog
+
+    ids = [a.id for a in apps_catalog.CATALOG]
+    assert [a["id"] for a in apps_catalog.entries_with_status(set(ids), {})] == ids
+    assert [a["id"] for a in apps_catalog.entries_with_status(set(ids), None)] == ids
+
+
+def test_minutes_by_product_ignores_credit_rows_and_caches():
+    uid = _user("u_pop")
+    now = time.time()
+    with db.tx() as c:
+        c.execute("DELETE FROM usage_log")
+        for i in range(3):
+            c.execute(
+                "INSERT INTO usage_log (id,user_id,device_id,kind,model,credits,request_id,created) "
+                "VALUES (?,?,?,?,?,?,?,?)",
+                (f"ul_p{i}", uid, "", work_access.MINUTE_KIND, "work:coze", 0, "", now),
+            )
+        # 积分行不是时长, 不能混进来
+        c.execute(
+            "INSERT INTO usage_log (id,user_id,device_id,kind,model,credits,request_id,created) "
+            "VALUES (?,?,?,?,?,?,?,?)",
+            ("ul_llm", uid, "", "llm", "gpt-x", 9, "", now),
+        )
+    work_access._popularity = (0.0, {})
+    got = work_access.minutes_by_product()
+    assert got == {"coze": 3}, got
+    # 缓存: 再插一行也不该立刻变
+    with db.tx() as c:
+        c.execute(
+            "INSERT INTO usage_log (id,user_id,device_id,kind,model,credits,request_id,created) "
+            "VALUES (?,?,?,?,?,?,?,?)",
+            ("ul_p9", uid, "", work_access.MINUTE_KIND, "work:coze", 0, "", now),
+        )
+    assert work_access.minutes_by_product() == {"coze": 3}, "五分钟内应走缓存"

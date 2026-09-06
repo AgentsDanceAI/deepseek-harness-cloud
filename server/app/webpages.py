@@ -369,10 +369,10 @@ def _apps_ctx() -> dict:
     clickable 与 base 分开给: 本站前缀是空串, 在 Jinja 里是假值, 合成一个变量
     会把上线的卡误判成不可点 (踩过)。
     """
-    from . import apps_catalog, products
+    from . import apps_catalog, products, work_access
 
     enabled = {p.id for p in products.enabled()} | apps_catalog.site_apps()
-    apps = apps_catalog.entries_with_status(enabled)
+    apps = apps_catalog.entries_with_status(enabled, work_access.minutes_by_product())
     if config.WORK_ENABLED:
         target = ""
     else:
