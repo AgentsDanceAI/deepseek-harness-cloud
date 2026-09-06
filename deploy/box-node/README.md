@@ -27,8 +27,11 @@
   (`uname -r` = `4.19.0-gvisor`) → 应用机与 dhc-server 容器都能直连 Pod IP。
 - 已实测通过: **停机 → 开机, 集群原样回来** (节点 Ready, 配额/PVC/服务账号/围栏/
   准入策略/已拉的镜像全在)。这是"背着"能成立的前提。
-- **一个没通的环节**: 隧道传输, 见下面「未决: 隧道怎么走」。演练时用的 `ssh -w`
-  在 Box 落到 baremetal 之后开不了 tun, 需要老板在两个方案里挑一个。
+- 隧道已改成 **WireGuard** (老板 2026-09-06 定)。两端都配好了: 应用机
+  `wg-quick@dshbox0` 起着、对端已登记、10.44/10.45 的路由与围栏都在; 盒子里
+  `wg-quick@dsh0` 已 enable (resume 后自己回来)。
+- **就差一件**: 阿里云安全组放行应用机的**入站 UDP 51820**。没有它接口起着但一次
+  握手都不会有 —— `activate.sh` 第 2 步会明确报这个。
 
 ## 一、建/重建一台 (底片没了才需要)
 
@@ -37,9 +40,16 @@ export BOX_ENVFILE=/path/to/.env          # 里面要有 BOX_API_KEY
 bash deploy/box-node/box.sh limits        # 先看还能不能开 (试用档只有 2 台并发)
 BOX=$(bash deploy/box-node/box.sh new default 7200)
 
+# 应用机: 生成密钥并拿到公钥 (已经跑过就跳过, 重跑不会换密钥)
+bash deploy/box-node/tunnel-wg-144.sh init
+
 tar -cz deploy/k8s-node deploy/box-node | ssh user@<box> 'tar -xz -C /tmp'
-ssh user@<box> "sudo DSH_APP_IP=<应用机公网IP> DSH_TUNNEL_NODE_IP=10.99.1.2 \
-                DSH_TUNNEL_APP_IP=10.99.1.1 bash /tmp/deploy/box-node/provision.sh '<应用机 root 公钥>'"
+ssh user@<box> "sudo DSH_WG_SERVER_PUBKEY=<上面那个公钥> DSH_WG_ENDPOINT=<应用机IP:51820> \
+                DSH_TUNNEL_NODE_IP=10.99.1.2 DSH_TUNNEL_APP_IP=10.99.1.1 \
+                bash /tmp/deploy/box-node/provision.sh"
+# provision 末尾会打印盒子的公钥, 拿回来登记:
+bash deploy/box-node/tunnel-wg-144.sh peer <盒子公钥>
+bash deploy/box-node/tunnel-wg-144.sh up
 
 bash deploy/box-node/box.sh snap $BOX dsh-node     # 存成底片
 bash deploy/box-node/box.sh stop $BOX              # 停机 = 免费
@@ -55,7 +65,7 @@ BOX_ENVFILE=... bash deploy/box-node/activate.sh <box id>
 BOX_ENVFILE=... DSH_FROM_SNAPSHOT=dsh-node bash deploy/box-node/activate.sh
 ```
 
-七步: 开机 → 钉主机密钥 → 隧道 → 取凭据 → API 200 → 起 Pod 验 gVisor → 应用机直连 Pod。
+六步: 开机 → 隧道握手 → 取凭据 → API 200 → 起 Pod 验 gVisor → 应用机直连 Pod。
 **它不切流量。** 全绿之后最后三步是人手做的 (脚本会把命令打出来):
 
 1. `deploy/prod/.env`: `K8S_API_URL=https://10.99.1.2:6443`, `WORK_PROXY_CIDR=10.99.1.1/32`
@@ -68,12 +78,12 @@ BOX_ENVFILE=... DSH_FROM_SNAPSHOT=dsh-node bash deploy/box-node/activate.sh
 
 ## 三、演练 (不影响 248)
 
-地址段是错开的 —— 248 是隧道 10.99.0.x + 集群 10.42/10.43, Box 是 10.99.1.x +
-集群 10.44/10.45, 单元名也带 `-box`。两条隧道能同时在, 所以演练随时可做:
+地址段是错开的 —— 248 是隧道 10.99.0.x + 集群 10.42/10.43 + `tun0`, Box 是 10.99.1.x +
+集群 10.44/10.45 + `dshbox0`。两条隧道能同时在, 所以演练随时可做:
 
 ```sh
 BOX_ENVFILE=... bash deploy/box-node/activate.sh <box id>   # 全绿即可, 不要切 .env
-systemctl disable --now dsh-tunnel-box
+bash deploy/box-node/tunnel-wg-144.sh down
 bash deploy/box-node/box.sh stop <box id>
 ```
 
@@ -99,8 +109,10 @@ k3s 默认把数据放 `/var/lib/rancher`, 照默认装, 停一次机整个集�
 - **`ip` 字段可能是 IPv6**, 落到 baremetal 时就是 —— 应用机没有 v6 出口, 直接不可达。
   这时 `sshEndpoint` 才有值, 给的是 IPv4:高端口。`box.sh ssh` 按 sshEndpoint → IPv4
   的顺序取, 脚本一律用它, **别用 `ip`**。
-- 主机密钥每次都变 (快照不含机器身份)。所以 `tunnel-client-box.sh` 不预置 known_hosts,
-  由 `activate.sh` 每次经 ascii.dev 的 API 通道取回来现钉 —— 那是比 TOFU 更硬的信任根。
+- 主机密钥每次都变 (快照不含机器身份), `known_hosts` 里的旧条目会让 ssh 直接拒连。
+  隧道改成 WireGuard 之后**日常不再依赖 ssh** (它只认公钥, 不认地址); 只有装机/重装
+  要 ssh 进去传文件时才会撞上, 那时先 `ssh-keygen -R <地址>` 再连, 或者干脆
+  `bash box.sh run <box> ...` 走 ascii.dev 的 API 通道。
 
 **4. 除 22 外的入站端口全被挡。** 实测: 自己在盒子里起的 50005 从外面不通, 22 通。
 `POST /boxes/{id}/host` 只开 HTTPS 路由 (`https://<子域>-<端口>.on.ascii.dev`, 最多 50 个,
@@ -123,30 +135,45 @@ sshEndpoint 代理, **sshd 开不了 tun**, `-w any:0` 与 `-w any:any` 都是
 建节点前先 `box.sh ls` 看看那边有没有人在用。真要上生产, DSH 应该单开一把 key ——
 否则两条产品线抢并发, 账单也分不开谁花的。
 
-## 未决: 隧道怎么走
+## 隧道 (WireGuard)
 
 应用机需要**主动**连到节点的两样东西: `6443` (k8s API) 和**任意 Pod IP 的任意端口**
-(Caddy 就是按 `X-Work-Upstream: <pod ip>:<port>` 反代的)。所以必须是三层通路, 端口转发
-不够。248 上用的是 `ssh -w` L3 隧道, 在 Box 上不可靠 (见坑 5)。两条路, 都要老板点头:
+(Caddy 就是按 `X-Work-Upstream: <pod ip>:<port>` 反代的)。所以必须是三层通路, 端口
+转发不够。
 
-**A. WireGuard (推荐)** —— 盒子出站拨到应用机。免疫地址变化、自动重连、开销比 ssh 低。
-代价: 要在**阿里云安全组**给应用机开一个入站 UDP 端口 (实测 51820 现在是不通的,
-从盒子打过去应用机上一个包都收不到)。这一步只有你能点。
+248 上用的是 `ssh -w`; Box 上不行 (见坑 5), 改成 **WireGuard, 由盒子出站拨过来**:
 
-**B. sshuttle** —— 只用已经开着的出站 ssh, 不用动安全组, 今天就能通。
-代价: 应用机上要 `apt install sshuttle` (Ubuntu 源里有, 1.1.1), 而且它会在应用机上
-下 iptables 规则做透明拦截 (只针对 10.44/16 与 10.45/16 两段, 不碰 248 的 10.42/10.43)。
-装东西和改生产机的 iptables 这两件我没自己做。
+    盒子 dsh0 (10.99.1.2)  --UDP-->  应用机 dshbox0 (10.99.1.1):51820
 
-选定之后剩下的活很小: 换掉 `tunnel-client-box.sh` 这一个文件, `activate.sh` 的其余
-六步都不动。
+- 应用机侧的对端**不写 Endpoint** —— 盒子每次 resume 换地址, WireGuard 记住最近一次
+  握手的来源即可。所以 resume 之后不用改任何配置, 这正是选它而不是 ssh 的原因。
+- 盒子侧 `AllowedIPs` 只有 `10.99.1.1/32`: 节点不需要经隧道去别处, 而 AllowedIPs
+  同时是"只接受这个对端发来的这些源地址"的白名单, 写宽了等于把围栏拆了。
+- 密钥在两端的 `/etc/wireguard` 里 (Box 那份进快照, 所以**重装/resume 都不用重配对端**)。
+  `provision.sh` 只在没有密钥时才生成 —— 换密钥会让应用机登记的对端当场失效, 而症状
+  只是"隧道就是不通", 没有一处会说是为什么。
+- 方向是单向的: 应用机主动连节点, 节点**不需要**反过来碰应用机 (工作台 Pod 调网关
+  走公网, netpol 的出站白名单把整个 10/8 排除了)。所以应用机侧的围栏
+  (`dsh-box-wg-fence`, 由 wg-quick 的 PostUp 挂上) 只放行"已建立"的回程包 —— 盒子那把
+  私钥即使泄了也主动进不来。节点侧的围栏沿用 `k8s-node/tunnel-firewall.sh` (只放行到
+  6443 与转发到 10.44/10.45)。
+
+**前提: 阿里云安全组放行应用机的入站 UDP 51820。** 只有控制台能点。没放行时的症状是
+接口起着、`wg show` 里 `latest handshake` 一直空 —— `activate.sh` 第 2 步会直接这么报。
+WireGuard 对没带正确密钥的包一个字节都不回, 所以开着这个端口不增加可被扫描的面。
+
+应用机上装了 `wireguard-tools` (内核模块本来就有)。查状态:
+
+```sh
+bash deploy/box-node/tunnel-wg-144.sh status
+wg show dshbox0 latest-handshakes        # 第二列非 0 = 通了
+```
 
 ## 退场
 
 ```sh
 # 应用机
-systemctl disable --now dsh-tunnel-box; rm -f /etc/systemd/system/dsh-tunnel-box.service \
-  /usr/local/sbin/dsh-tunnel-box-local-up /root/.ssh/known_hosts_dsh_box; systemctl daemon-reload
+bash deploy/box-node/tunnel-wg-144.sh remove
 rm -rf /root/dsh-k8s-box
 # Box
 bash deploy/box-node/box.sh stop <box id>     # 停机就不花钱了; 要彻底删再 rm

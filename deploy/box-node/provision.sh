@@ -2,24 +2,27 @@
 # 在一台 ascii.dev Box 上装出一个**和 248 等价的**工作台节点 (备用节点)。
 # 在盒子里以 root 跑:
 #
-#   tar -cz deploy/k8s-node deploy/box-node | ssh user@<box ip> 'tar -xz -C /tmp'
-#   ssh user@<box ip> "sudo DSH_APP_IP=... DSH_TUNNEL_NODE_IP=... DSH_TUNNEL_APP_IP=... \
-#                      bash /tmp/deploy/box-node/provision.sh '<应用机 root 公钥>'"
+#   # 先在应用机上 `bash tunnel-wg-144.sh init`, 拿它打印的公钥
+#   tar -cz deploy/k8s-node deploy/box-node | ssh user@<box> 'tar -xz -C /tmp'
+#   ssh user@<box> "sudo DSH_WG_SERVER_PUBKEY=<应用机公钥> DSH_WG_ENDPOINT=<应用机IP:51820> \
+#                   DSH_TUNNEL_NODE_IP=10.99.1.2 DSH_TUNNEL_APP_IP=10.99.1.1 \
+#                   bash /tmp/deploy/box-node/provision.sh"
+#   # 装完它会打印盒子的公钥, 回应用机 `bash tunnel-wg-144.sh peer <盒子公钥>`
 #
 # 地址一律从环境变量来, 不进 git (与 ../k8s-node/ 同规矩)。装完打印应用机要的
 # token / ca.crt / .env 片段。可重复跑 —— 每一步都先看现状再动手。
 #
 # 装的东西 (全部可退, 见 README 的「退场」):
-#   /etc/ssh/sshd_config.d/60-dsh-tunnel.conf   root 只能从应用机来、只能开隧道
-#   /root/.ssh/authorized_keys                  应用机的 key, 带 restrict + 强制命令
-#   /usr/local/sbin/dsh-tunnel-up               强制命令: 配 tun0, 重放防火墙, 守着
+#   /etc/wireguard/dsh0.conf + wg-quick@dsh0    出站拨到应用机的 WireGuard (systemd 使能
+#                                               → resume 后自动回来; /etc 进快照 → 密钥不变)
+#   /usr/local/sbin/dsh-tunnel-firewall         隧道这一侧的围栏, 由 wg-quick 的 PostUp 挂上
 #   /etc/rancher/k3s/config.yaml + k3s          数据在 /opt/dsh-k3s (**必须**, 见 k3s-config.yaml)
 #   /usr/local/bin/runsc, containerd-shim-runsc-v1, /etc/containerd/runsc.toml
 set -uo pipefail
 
-PUB="${1:-}"; [ -n "$PUB" ] || read -r PUB || true
-case "$PUB" in ssh-ed25519\ *|ssh-rsa\ *|ecdsa-*) ;; *) echo "要应用机的 root 公钥作参数或 stdin" >&2; exit 2;; esac
-APP_IP="${DSH_APP_IP:?要 DSH_APP_IP (应用机公网 IP, 用来把 root 登录锁死在它身上)}"
+WG_SPUB="${DSH_WG_SERVER_PUBKEY:?要 DSH_WG_SERVER_PUBKEY (应用机上 tunnel-wg-144.sh init 打印的那个)}"
+WG_ENDPOINT="${DSH_WG_ENDPOINT:?要 DSH_WG_ENDPOINT (应用机公网IP:UDP端口, 例如 1.2.3.4:51820)}"
+WG_IF="${DSH_WG_IF:-dsh0}"
 T_NODE="${DSH_TUNNEL_NODE_IP:?要 DSH_TUNNEL_NODE_IP}"
 T_APP="${DSH_TUNNEL_APP_IP:?要 DSH_TUNNEL_APP_IP}"
 CLUSTER_CIDR="${DSH_CLUSTER_CIDR:-10.44.0.0/16}"
@@ -36,53 +39,57 @@ step() { printf '\n=== %s ===\n' "$*"; }
 pass() { printf 'PASS  %s\n' "$*"; }
 fail() { printf 'FAIL  %s\n' "$*"; rc=1; }
 
-# ── 1. 隧道入口 ───────────────────────────────────────────────────────────────
-# 248 上是**另起一个 sshd** 挂在非标准端口 (那台机的 22 是公司的, 碰不得)。Box 上
-# 反过来: ascii.dev 的防火墙只放行 22 (实测 09-06: 22 通, 自己起的 50005 被挡, 别的
-# 端口一律不通), 所以只能走 22, 而 22 上跑的是盒子自带的 sshd。于是改成往它加一个
-# drop-in, 且只对 "root 且来自应用机" 生效 —— 盒子自己的 user 账号 (ascii.dev 的
-# 命令通道、桌面流都靠它) 一个字节都不动。
-step "1/6 隧道入口 (sshd drop-in, 只放应用机的 root)"
-install -d -m 0700 /root/.ssh
-printf 'restrict,tunnel="0",command="/usr/local/sbin/dsh-tunnel-up" %s\n' "$PUB" > /root/.ssh/authorized_keys
-chmod 0600 /root/.ssh/authorized_keys
-# ⚠️ Ubuntu 的 sshd_config 在**开头**就 Include 这个目录, 所以 drop-in 里一个没关的
-# Match 会把主配置剩下的全部吞进去。最后那行 `Match all` 是必须的。
-cat > /etc/ssh/sshd_config.d/60-dsh-tunnel.conf <<EOF
-# DSH Cloud 备用节点的隧道入口。只给 root、只给应用机、只给开隧道。
-Match User root Address $APP_IP
-  PermitRootLogin prohibit-password
-  PermitTunnel point-to-point
-  PasswordAuthentication no
-  AllowTcpForwarding no
-  AllowAgentForwarding no
-  X11Forwarding no
-  PermitTTY no
-Match all
-EOF
-chmod 0644 /etc/ssh/sshd_config.d/60-dsh-tunnel.conf
-if sshd -t; then
-  systemctl reload ssh 2>/dev/null || systemctl reload sshd 2>/dev/null || true
-  pass "sshd 配置合法并已 reload"
-else
-  fail "sshd -t 不过 —— 上面有详情; 已写的 drop-in 先删掉再排查"
+# ── 1. 隧道 (WireGuard) ──────────────────────────────────────────────────────
+# 为什么不是 248 那种 ssh -w: Box 每次 resume 都可能换到另一台机器, 落到 baremetal 时
+# sshd 就开不出 tun 了 (2026-09-06 实测, -w any:any 也不行), 而落点不由我们定。改成
+# **盒子出站**拨 WireGuard: 盒子地址怎么变都无所谓, 应用机只认公钥; 而且出站永远通,
+# 不像入站那样只剩一个 22。
+#
+# 密钥放 /etc/wireguard (进快照) 且**只在没有时才生成** —— 重跑本脚本不换密钥, 否则
+# 应用机那边登记的对端当场失效, 而症状是"隧道就是不通", 没有任何一处会说是为什么。
+step "1/6 隧道 (WireGuard: 盒子 → 应用机 $WG_ENDPOINT)"
+# 先清掉 ssh 隧道那一版留下的东西 —— 换了传输就不该再让一台公网机器开着 root 登录。
+# (2026-09-06 上午先按 ssh -w 做过一版, 落到 baremetal 时 sshd 开不出 tun 才改的 wg。)
+if [ -f /etc/ssh/sshd_config.d/60-dsh-tunnel.conf ] || [ -f /usr/local/sbin/dsh-tunnel-up ]; then
+  rm -f /etc/ssh/sshd_config.d/60-dsh-tunnel.conf /usr/local/sbin/dsh-tunnel-up /root/.ssh/authorized_keys
+  sshd -t && { systemctl reload ssh 2>/dev/null || systemctl reload sshd 2>/dev/null || true; }
+  pass "ssh 隧道那一版的残留已清 (root 登录关回去了)"
 fi
+command -v wg >/dev/null || { apt-get update -qq && apt-get install -y -qq wireguard-tools; }
+install -d -m 0700 /etc/wireguard
+[ -s /etc/wireguard/$WG_IF.key ] || (umask 077; wg genkey > /etc/wireguard/$WG_IF.key)
+wg pubkey < /etc/wireguard/$WG_IF.key > /etc/wireguard/$WG_IF.pub
 
-install -m 0755 /dev/stdin /usr/local/sbin/dsh-tunnel-up <<EOF
-#!/bin/bash
-# 隧道 key 的强制命令。sshd 已经为这次会话建好 tun0, 这里给它地址, 重放防火墙,
-# 然后守着 —— 设备消失 (会话结束) 就退出。
-DEV=tun0; LOCAL=$T_NODE; PEER=$T_APP
-for _ in \$(seq 1 50); do ip link show "\$DEV" >/dev/null 2>&1 && break; sleep 0.1; done
-ip link show "\$DEV" >/dev/null 2>&1 || { echo "dsh-tunnel-up: \$DEV 一直没出现" >&2; exit 1; }
-ip addr flush dev "\$DEV" 2>/dev/null
-ip addr add "\$LOCAL" peer "\$PEER/32" dev "\$DEV"
-ip link set "\$DEV" up
-[ -x /usr/local/sbin/dsh-tunnel-firewall ] && /usr/local/sbin/dsh-tunnel-firewall apply "$T_APP" >/dev/null 2>&1
-logger -t dsh-tunnel "\$DEV up: \$LOCAL <-> \$PEER (from \${SSH_CLIENT%% *})"
-while ip link show "\$DEV" >/dev/null 2>&1; do sleep 5; done
+# 隧道这一侧的围栏先装好 —— 它是下面 wg-quick 的 PostUp, 顺序反了第一次起不来。
+sed -e "s|10\.42\.0\.0/16|$CLUSTER_CIDR|g" -e "s|10\.43\.0\.0/16|$SERVICE_CIDR|g" \
+    -e "s|^DEV=tun0|DEV=$WG_IF|" "$K8SN/tunnel-firewall.sh" > /tmp/dsh-tunnel-firewall.sh
+DSH_TUNNEL_APP_IP="$T_APP" bash /tmp/dsh-tunnel-firewall.sh install "$T_APP" >/dev/null 2>&1 \
+  && pass "节点侧围栏已装 (只放行到 6443 与转发到 $CLUSTER_CIDR/$SERVICE_CIDR)" || fail "围栏安装失败"
+
+umask 077
+cat > /etc/wireguard/$WG_IF.conf <<EOF
+[Interface]
+Address = $T_NODE/32
+PostUp = /usr/local/sbin/dsh-tunnel-firewall apply $T_APP
+PostDown = /usr/local/sbin/dsh-tunnel-firewall remove
 EOF
-pass "dsh-tunnel-up 已装"
+printf 'PrivateKey = %s\n' "$(cat /etc/wireguard/$WG_IF.key)" >> /etc/wireguard/$WG_IF.conf
+cat >> /etc/wireguard/$WG_IF.conf <<EOF
+
+[Peer]
+# 应用机。AllowedIPs 只有它的隧道地址一个 —— 节点不需要经隧道去别处, 而 AllowedIPs
+# 同时是"只接受这个对端发来的这些源地址"的白名单, 写宽了等于把围栏拆了。
+PublicKey = $WG_SPUB
+Endpoint = $WG_ENDPOINT
+AllowedIPs = $T_APP/32
+# 盒子多半在 NAT 后面 (baremetal 落点是私网 IPv4), 靠它把回程路径撑着。
+PersistentKeepalive = 25
+EOF
+chmod 0600 /etc/wireguard/$WG_IF.conf
+umask 022
+systemctl enable --now "wg-quick@$WG_IF" >/dev/null 2>&1 || systemctl restart "wg-quick@$WG_IF"
+systemctl is-active --quiet "wg-quick@$WG_IF" && pass "wg-quick@$WG_IF 已起并 enable (resume 后自动回来)" \
+  || fail "wg-quick@$WG_IF 没起来 (journalctl -u wg-quick@$WG_IF)"
 
 # ── 2. k3s ───────────────────────────────────────────────────────────────────
 step "2/6 k3s (数据落 /opt/dsh-k3s —— /var 不进 Box 快照)"
@@ -181,12 +188,20 @@ k3s kubectl apply -f /tmp/dsh-netpol.yaml >/dev/null && pass "网络围栏已 ap
 k3s kubectl apply -f "$K8SN/runtimeclass-gvisor.yaml" >/dev/null && pass "RuntimeClass gvisor 已 apply" || fail "runtimeclass apply 失败"
 k3s kubectl apply -f "$K8SN/admission-gvisor.yaml" >/dev/null && pass "准入策略已 apply" || fail "准入策略 apply 失败"
 
-# ── 5. 隧道对端防火墙 ────────────────────────────────────────────────────────
-step "5/6 隧道对端防火墙"
-sed -e "s|10\.42\.0\.0/16|$CLUSTER_CIDR|g" -e "s|10\.43\.0\.0/16|$SERVICE_CIDR|g" \
-    "$K8SN/tunnel-firewall.sh" > /tmp/dsh-tunnel-firewall.sh
-DSH_TUNNEL_APP_IP="$T_APP" bash /tmp/dsh-tunnel-firewall.sh install "$T_APP" >/dev/null 2>&1 \
-  && pass "防火墙已装 (每次隧道建立时由 dsh-tunnel-up 重放)" || fail "防火墙安装失败"
+# ── 5. 隧道自检 ─────────────────────────────────────────────────────────────
+step "5/6 隧道自检"
+if wg show "$WG_IF" >/dev/null 2>&1; then
+  hs="$(wg show "$WG_IF" latest-handshakes | awk '{print $2}' | head -1)"
+  if [ "${hs:-0}" -gt 0 ] 2>/dev/null; then
+    pass "已与应用机握手 (最近一次 $(( $(date +%s) - hs )) 秒前)"
+  else
+    # 安全组没放行 UDP 就是这个样子: 接口起着、一次握手也没有。
+    fail "接口在但从未握手 —— 多半是应用机的入站 UDP 没放行, 或对端公钥还没登记"
+    echo "      应用机上: bash deploy/box-node/tunnel-wg-144.sh peer $(cat /etc/wireguard/$WG_IF.pub)"
+  fi
+else
+  fail "wg show $WG_IF 失败"
+fi
 
 # ── 6. 应用机要的东西 ────────────────────────────────────────────────────────
 step "6/6 应用机那边要贴的"
@@ -201,6 +216,9 @@ if [ -n "$TOKEN" ] && [ -n "$CA" ]; then
 else
   fail "读不到服务账号 token —— 看 k3s kubectl -n dsh get secret dhc-server-token"
 fi
+echo
+echo "  这台盒子的 WireGuard 公钥 (回应用机跑 tunnel-wg-144.sh peer <它>):"
+echo "    $(cat /etc/wireguard/$WG_IF.pub)"
 echo
 echo "  .env 片段 (激活时才换上去, 演练不要动线上这几行):"
 echo "    K8S_API_URL=https://$T_NODE:6443"
