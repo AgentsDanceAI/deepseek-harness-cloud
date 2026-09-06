@@ -451,6 +451,11 @@ def test_openmausbot_nginx_repeats_headers_in_every_location():
     for b in proxying:
         assert "proxy_set_header Cookie $dsh_up;" in b, f"这个 location 丢了注入的会话: {b[:40]}"
     assert "proxy_buffering off;" in conf, "事件流不关缓冲, 界面看着像卡死"
+    # 首跑表单 + 遥测: 都是浏览器 localStorage 里的开关, 只能在 bundle 跑之前写进去
+    assert "sub_filter '</head>'" in conf
+    assert "omb-email-gate" in conf, "不压掉的话首屏是一张要姓名和邮箱的表单"
+    assert "omb-analytics-opt-out" in conf, "不关的话用户行为上报到上游的 PostHog"
+    assert 'proxy_set_header Accept-Encoding "";' in conf, "响应压着的话 sub_filter 什么都替换不到"
 
 
 def test_openmausbot_models_go_through_our_gateway(monkeypatch):

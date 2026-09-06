@@ -2767,6 +2767,18 @@ _OMB_NGINX = """server {
     proxy_http_version 1.1;
     proxy_read_timeout 3600s;
     proxy_send_timeout 3600s;
+    # 首跑表单与遥测都是**浏览器 localStorage 里的开关** (src/lib/analytics.ts 的
+    # omb-email-gate / omb-analytics-opt-out), 服务端够不着 —— 只能在应用自己的
+    # bundle 跑起来之前把值写进去 (与 CloudCLI 那格同一手法)。
+    #   · omb-email-gate: 不写的话首屏是一张"留下姓名和邮箱"的表单。拆了登录墙却
+    #     把人放进必填表单, 对用户没区别 (老板的铁律)。
+    #   · omb-analytics-opt-out: 不写的话每个用户的行为会上报到上游的 PostHog。
+    # 响应是 gzip 的话 sub_filter 看到的是压缩字节, 什么都替换不到 —— 所以要
+    # 明确告诉上游别压 (Accept-Encoding 置空)。
+    proxy_set_header Accept-Encoding "";
+    sub_filter_once on;
+    sub_filter_types text/html;
+    sub_filter '</head>' '<script>try{localStorage.setItem("omb-email-gate","skipped");localStorage.setItem("omb-analytics-opt-out","1")}catch(e){}</script></head>';
   }
 }
 """
