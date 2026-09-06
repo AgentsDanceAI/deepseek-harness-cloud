@@ -55,6 +55,18 @@ USE = {
         "fail_extra2": ["0↑ 0↓"],
         "why": "发一句话没反应 (它的日志走 stderr, 外壳只读 stdout)",
     },
+    "openmausbot": {
+        "kind": "chat",
+        # 输入框是 "Message <机器人名>" —— 名字是它自己随机起的 (首次见到的是
+        # Noodle), 所以只匹配前缀。
+        "placeholder": "Message ",
+        "send": "{a} 加 {b} 等于几? 只回数字, 不要解释",
+        "want": ["{sum}"],
+        # 拆配对墙没拆干净的样子 / 引擎 CLI 没接上网关的样子
+        "fail_extra": ["Pair this device", "pairing code", "No engines"],
+        "fail_extra2": ["Invalid API key", "authentication_error", "401"],
+        "why": "首屏是配对页 / 机器人不说话 (引擎 CLI 没接上网关)",
+    },
     "pi": {
         "kind": "chat",
         # pi-web-ui 的输入框 (中文界面): "给 pi 发送消息 — Enter 发送，/ 查看命令"。
