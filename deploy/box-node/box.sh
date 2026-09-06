@@ -4,7 +4,8 @@
 #   BOX_ENVFILE=deploy/prod/.env bash deploy/box-node/box.sh <子命令> [参数]
 #
 #   ls                          列出账上所有 Box (id / 状态 / 规格 / 公网 IP)
-#   limits                      当前档位、并发上限、还能不能开
+#   limits                      当前档位、并发上限、还能不能开 (按 BOX_ORG 指定的钱包)
+#   orgs                        列出能用的钱包 (哪个是 standard 就把它设成 BOX_ORG)
 #   new [type] [ttl]            开一台 (默认 default / 7200s; 试用档强制 ttl<=7200)
 #   from <名字快照> [type]      从命名快照开一台 —— 这是"激活备用节点"的正路
 #   get <box>                   一台的详情
@@ -19,6 +20,12 @@
 #   rm <box>                    删除 (要带确认头, 值就是 box id)
 #
 # 密钥: BOX_API_KEY。优先取环境变量, 否则从 BOX_ENVFILE 里读那一行。**不打印、不进日志。**
+#
+# ⚠️ BOX_ORG —— 付费记在哪个钱包上。2026-09-06 实测: 订阅买在 org 上, 而 API key 默认
+# 走 Personal 钱包, 于是账号明明付过钱, `limits` 还报 trial、开到第 3 台就
+# `limit_reached: Trial accounts can run 2 concurrent boxes`。带上 org 之后同一把 key
+# 立刻是 standard/100 台 (实测连开 10 台, 每台约 1 秒)。
+# org id 用 `box.sh orgs` 查; 不设就是个人钱包。
 set -euo pipefail
 
 API="${BOX_API_BASE:-https://ascii.dev/api/box/v1}"
@@ -32,6 +39,7 @@ fi
 req() {  # req <方法> <路径> [json 体] [额外 header...]
   local m="$1" p="$2" body="${3:-}"; shift 3 2>/dev/null || shift 2
   local args=(-sS -X "$m" -H "authorization: Bearer $BOX_API_KEY" --max-time "${BOX_TIMEOUT:-180}")
+  [ -n "${BOX_ORG:-}" ] && args+=(-H "X-Box-Org: $BOX_ORG")
   [ -n "$body" ] && args+=(-H 'content-type: application/json' -d "$body")
   for h in "$@"; do args+=(-H "$h"); done
   curl "${args[@]}" "$API$p"
@@ -54,6 +62,10 @@ cmd="${1:-}"; shift || true
 case "$cmd" in
 ls)
   req GET /boxes | check | jq_py 'print("\n".join("%-14s %-11s %-8s %-16s %s" % (b["id"],b["state"],b["type"],b.get("ip") or "-",b.get("name") or "") for b in d["boxes"])) if d["boxes"] else print("(账上没有 Box)")' ;;
+orgs)
+  # 哪个钱包是 standard 就把它的 id 设成 BOX_ORG —— 订阅可能买在 org 上而不是个人名下。
+  req GET /orgs | check | jq_py 'print("\n".join("%-42s %-10s %s" % (o["id"], o["type"], o["name"]) for o in d["orgs"]))'
+  echo "(逐个查档位: BOX_ORG=<id> bash $0 limits)" ;;
 limits)
   req GET /limits | check | jq_py 'c=d["currentLimits"];print("档位 %s  并发上限 %s/分钟建 %s  blocked=%s" % (d["accessTier"],c["activeBoxes"],c["creationRatePerMinute"],d.get("blockedReason")))' ;;
 new)
@@ -101,7 +113,9 @@ snap)
 snaps)
   req GET /named-snapshots | check | jq_py 'ss=d.get("snapshots") or d.get("namedSnapshots") or [];print("\n".join("%-24s %s" % (s.get("name"),s.get("createdAt","")) for s in ss)) if ss else print("(没有命名快照)")' ;;
 rm)
-  b="${1:?}"; req POST "/boxes/$b/delete" "" "X-Ascii-Confirm-Delete: $b" | check >/dev/null && echo "已删除 $b" ;;
+  # 是 DELETE /boxes/{id}, 不是文档正文写的 POST /boxes/{id}/delete (后者 404)。
+  # 确认头的值必须**就是**那台的 id, 否则 409。
+  b="${1:?}"; req DELETE "/boxes/$b" "" "X-Ascii-Confirm-Delete: $b" | check >/dev/null && echo "已删除 $b" ;;
 *)
   sed -n '2,25p' "$0" >&2; exit 2 ;;
 esac

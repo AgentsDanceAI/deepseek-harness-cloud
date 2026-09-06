@@ -132,9 +132,23 @@ sshEndpoint 代理, **sshd 开不了 tun**, `-w any:0` 与 `-w any:any` 都是
 **6. REST 路径和文档正文对不上。** 以 `https://docs.ascii.dev/openapi/box-v1.yaml`
 为准: 是 `/boxes/{id}/sshkey` 不是 `/ssh-key`, `/boxes/{id}/host` 不是 `/hosting`,
 存命名快照是 `POST /named-snapshots {boxId,name}` 不是 `POST /boxes/{id}/snapshots/{name}`,
-装公钥的字段叫 `key` 不是 `publicKey`。
+删除是 `DELETE /boxes/{id}` 不是 `POST /boxes/{id}/delete`, 装公钥的字段叫 `key` 不是 `publicKey`。
 
-**7. 试用档 = 2 台并发 / 25 小时 / 只有 small 与 default / ttl 必须 ≤ 7200s。**
+**7. 付费记在哪个钱包上, 要显式指定 (`BOX_ORG`)。** 2026-09-06 实测: 订阅买在
+`AgentsDance` 这个 org 上, 而 API key 默认走 `Personal` 钱包 —— 于是账号明明扣过款,
+`limits` 还报 `trial`、开到第 3 台就 `limit_reached: Trial accounts can run 2 concurrent
+boxes`。**症状看起来像"付款没到账", 实际是问错了钱包。** 带上 org 之后同一把 key 立刻是
+standard/100 台 (实测连开 10 台, 每台约 1 秒, 全部删除干净)。
+
+```sh
+bash deploy/box-node/box.sh orgs                    # 列钱包
+BOX_ORG=<id> bash deploy/box-node/box.sh limits     # 哪个是 standard 用哪个
+```
+
+`box.sh` 认 `BOX_ORG` 环境变量 (转成 `X-Box-Org` 头)。⚠️ 口袋专家那条线的
+`backend/dataset/agent_box.py` **没有**带 org, 所以云电脑现在是花在个人的试用额度上。
+
+**8. 试用档 = 2 台并发 / 25 小时 / 只有 small 与 default / ttl 必须 ≤ 7200s。**
 `box.sh limits` 随时可查。并发池是**和口袋专家的云电脑共用的**(同一把 `BOX_API_KEY`),
 建节点前先 `box.sh ls` 看看那边有没有人在用。真要上生产, DSH 应该单开一把 key ——
 否则两条产品线抢并发, 账单也分不开谁花的。
