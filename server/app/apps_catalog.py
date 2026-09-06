@@ -153,6 +153,15 @@ CATALOG: tuple[AppEntry, ...] = (
 # fmt: on
 
 
+def name_of(app_id: str) -> str:
+    """目录里这一格叫什么。加锁与售卖认的是**目录条目**, 不是工作台产品 —— 数字人
+    就没有工作台 (它住在主站的 /avatar), 但它同样是这十六格之一, 同样可以上锁。"""
+    for a in CATALOG:
+        if a.id == app_id:
+            return a.name
+    return ""
+
+
 def site_apps() -> set[str]:
     """住在主站上的产品里, 本实例**真配好了**的那些 —— 与 products.enabled()
     对云工作台的作用相同, 只是判据不在 registry 里 (它们没有容器)。

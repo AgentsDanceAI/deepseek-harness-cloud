@@ -1273,12 +1273,9 @@ async def work_status(request: Request):
         "phase": phase,
         "state": "running" if ready else ("starting" if info and info.running else state),
         "url": _work_url("/", product),
-        # **机时不扣积分** (回收循环那一行写的是扣 0)。这个值只是给界面显示的,
-        # 而工作台外壳的页脚拿它写成"N 积分/分钟" —— 那句话是假的。真正扣的是
-        # 机时份数, 见下面的 minute_units。外壳的文案改起来要重建镜像, 先把
-        # 真实的数送过去, 页脚下次重建时一起改 (2026-09-06 记)。
-        "credits_per_min": config.WORK_CREDITS_PER_MIN,
         # 这个格子跑一分钟扣几份机时 (按内存折算, 见 products.minute_units)。
+        # **不再送 credits_per_min**: 机时扣的是 0 积分 (回收循环那一行就是 0),
+        # 而外壳的页脚拿它写成"N 积分/分钟" —— 那句话是假的, 2026-09-06 一起清掉。
         "minute_units": products.minute_units(product.id),
         "idle_stop_min": config.WORK_IDLE_STOP_MIN,
         "balance": credits.balance(user["id"]),
@@ -1607,10 +1604,11 @@ async def reaper_tick(now: float) -> None:
 
 
 async def billing_reaper_loop() -> None:
+    # 机时**不扣积分** —— 这句原先写的是"N credits per ACTIVE min", 与实际扣的
+    # 0 积分对不上 (2026-09-06 一起清掉)。扣的是机时份数, 见 products.minute_units。
     log.info(
-        "workspace billing/reaper loop started (%s credits per ACTIVE min, "
-        "idle-stop %s min, agent-idle-stop %s min)",
-        config.WORK_CREDITS_PER_MIN,
+        "workspace 计量/回收循环已启动 (机时按内存折算, 一份 = %s MB; 闲置 %s 分钟回收, 智能体闲置 %s 分钟)",
+        config.WORK_MINUTE_BASE_MB,
         config.WORK_IDLE_STOP_MIN,
         config.WORK_AGENT_IDLE_STOP_MIN,
     )

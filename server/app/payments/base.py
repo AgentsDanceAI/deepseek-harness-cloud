@@ -68,20 +68,22 @@ def resolve_item(item: str, cur: str | None = None) -> dict:
     if parts[0] == "pass" and len(parts) == 2:
         # 一格一张的通行证 (老板 2026-09-06: "9.9 才给开通试用")。价与天数在价目表的
         # passes 里, 一格一个键; 表里没有这一格就不是可买的东西。
+        from .. import apps_catalog as _catalog
         from .. import products as _products
 
         pid = parts[1]
         pdef = (p.get("passes") or {}).get(pid)
         if not pdef or not _products.is_locked(pid):
             raise HTTPException(400, "unknown_item")
-        prod = _products.get(pid)
+        # 名字从**目录**取: 数字人没有工作台产品, 但它是这十六格之一, 一样能上锁售卖。
+        name = _catalog.name_of(pid) or pid
         return {
             "kind": "pass",
             "product_id": pid,
             "days": int(pdef["days"]),
             "amount_cents": int(pdef["cents"]),
             "currency": p["currency"],
-            "description": f"{prod.name if prod else pid} 试用 {int(pdef['days'])} 天",
+            "description": f"{name} 试用 {int(pdef['days'])} 天",
         }
     if parts[0] == "plan" and len(parts) == 3:
         tier, cycle = parts[1], parts[2]

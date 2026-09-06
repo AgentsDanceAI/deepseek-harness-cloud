@@ -130,7 +130,9 @@ async def credits() -> dict:
         return {
             "available": True,
             "balance": d.get("balance"),
-            "credits_per_min": d.get("credits_per_min"),
+            # 机时**不扣积分** (网关那边回收循环记的就是 0)。页脚原先写"N 积分/分钟",
+            # 那句话是假的; 真正扣的是机时份数, 一份 = 2G 内存跑一分钟 (2026-09-06)。
+            "minute_units": d.get("minute_units"),
             "minutes_left": d.get("minutes_left"),
             "plan": d.get("plan_name"),
             "idle_stop_min": d.get("idle_stop_min"),

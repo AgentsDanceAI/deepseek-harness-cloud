@@ -21,7 +21,8 @@ async function refreshCredits() {
   $("#cBalance").textContent = d.balance ?? "—";
   $("#cPlan").textContent = d.plan || "";
   $("#cMinutes").textContent = d.minutes_left != null ? `剩 ${d.minutes_left} 分钟` : "";
-  $("#sideFoot").textContent = `${d.credits_per_min ?? "?"} 积分/分钟 · 闲置 ${d.idle_stop_min ?? "?"} 分钟回收`;
+  // 机时不扣积分 —— 这里原先写"N 积分/分钟", 是假的 (2026-09-06 清掉)。
+  $("#sideFoot").textContent = `1 分钟计 ${d.minute_units ?? "?"} 份机时 · 闲置 ${d.idle_stop_min ?? "?"} 分钟回收`;
 }
 
 /* ---------- 会话 ---------- */

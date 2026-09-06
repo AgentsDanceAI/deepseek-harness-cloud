@@ -347,10 +347,6 @@ WORK_NAS_LOCAL_MOUNT = _env("WORK_NAS_LOCAL_MOUNT", "")
 # 发出的带凭据 POST。真正吃重的是 accounts._cookie_write_allowed 那道 Origin
 # 白名单 —— 这个域绝不能出现在白名单里。
 PREVIEW_DOMAIN = _env("PREVIEW_DOMAIN", "")
-# Billed per ACTIVE minute — a minute in which the agent actually called our
-# gateway. Reading a reply or leaving a tab open is free (an open tab polls
-# /api/work/route forever, so wall-clock billing charged people for nothing).
-WORK_CREDITS_PER_MIN = _env_int("WORK_CREDITS_PER_MIN", 2)
 # Host path where the per-user workspace volumes live, mounted read-only. The
 # workspace is reclaimed once nobody is using it, but its volume outlives it, so
 # this is what lets 個人成品 keep showing a user's files instead of an empty page

@@ -7,6 +7,7 @@ httpx boundary so the whole ensure/route/bill flow runs without Docker.
 import asyncio
 import json
 import os
+import pathlib
 import shutil
 import subprocess
 import tempfile
@@ -21,7 +22,6 @@ os.environ.update(
         "DHC_DATA_DIR": _TMP,
         "DB_PATH": os.path.join(_TMP, "test.db"),
         "WORK_ENABLED": "1",
-        "WORK_CREDITS_PER_MIN": "2",
         "WORK_MAX_CONCURRENT": "2",
         "UPSTREAM_API_KEY": "sk-upstream-test",
         "FREE_SIGNUP_CREDITS": "500",
@@ -131,7 +131,6 @@ def _work_config(monkeypatch):
     # suite passes regardless of which module imported config first.
     monkeypatch.setattr(config, "WORK_ENABLED", True)
     monkeypatch.setattr(config, "WORK_MAX_CONCURRENT", 2)
-    monkeypatch.setattr(config, "WORK_CREDITS_PER_MIN", 2)
     monkeypatch.setattr(config, "UPSTREAM_API_KEY", "sk-upstream-test")
     rate_limit._windows.clear()  # shared process global: reset per test so the
     # suite's cumulative registrations don't trip the per-IP register cap
@@ -506,7 +505,8 @@ def test_status_reports_state(fake):
     c.get("/api/work/route")
     s = c.get("/api/work/status").json()
     assert s["enabled"] is True
-    assert s["credits_per_min"] == 2
+    # 机时不扣积分 —— 状态里送的是"这一格一分钟折几份机时" (2026-09-06)
+    assert s["minute_units"] >= 1 and "credits_per_min" not in s
     assert s["state"] in ("running", "starting")
 
 
@@ -3081,3 +3081,14 @@ def test_dify_sandbox_has_a_kill_all_prestop_and_keeps_its_own_entrypoint():
     sb = next(s for s in products.registry()["dify"].sidecars if s.name == "sandbox")
     assert sb.cmd == (), "沙箱的入口要保持镜像自己的"
     assert sb.pre_stop == ("sh", "-c", "kill -9 -1")
+
+
+def test_workspace_status_no_longer_claims_a_credit_rate():
+    """页脚原先写"N 积分/分钟", 而机时扣的是 0 积分 —— 那句话是假的 (2026-09-06 清掉)。
+    真正扣的是机时份数, 状态里送的就是它。"""
+    from app import config
+
+    assert not hasattr(config, "WORK_CREDITS_PER_MIN"), "留着这个值只会再骗一次人"
+    src = (pathlib.Path(__file__).parent.parent / "app" / "workspace.py").read_text()
+    assert '"credits_per_min"' not in src
+    assert '"minute_units"' in src

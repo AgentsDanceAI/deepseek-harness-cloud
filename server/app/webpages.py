@@ -83,7 +83,6 @@ def _ctx(request: Request, page: str, **extra) -> dict:
         "hosted_site": config.HOSTED_SITE
         if config.HOSTED_SITE not in ("", config.PUBLIC_BASE.rstrip("/"))
         else "",
-        "work_credits_per_min": config.WORK_CREDITS_PER_MIN,
         "work_idle_stop_min": config.WORK_IDLE_STOP_MIN,
         "work_free_minutes": config.WORK_FREE_MINUTES,
         **_stars_ctx(),
@@ -435,8 +434,16 @@ def avatar_page(request: Request):
     未登录先送去登录: 页面上**每一个**动作都要账号 (形象清单、背景图、通话本身
     全挂 resolve_user)。让人先看到界面再一路 401, 只会像是坏了。
     """
-    if try_resolve_user(request) is None:
+    user = try_resolve_user(request)
+    if user is None:
         return RedirectResponse("/login?next=/avatar", status_code=303)
+    # 数字人也可以上锁 (老板 2026-09-06 锁了它和 Coze)。它不是工作台, 所以
+    # /api/work/route 那道闸够不着它 —— 页面这里自己拦一道。
+    from . import products as _products
+    from . import work_access as _wa
+
+    if _products.is_locked("avatar") and not _wa.pass_active(user["id"], "avatar"):
+        return RedirectResponse("/pricing?reason=locked&product_id=avatar#unlock", status_code=303)
     return _render(request, "avatar.html", "avatar")
 
 
@@ -641,18 +648,14 @@ def pricing_page(request: Request):
     # 直接走到"多少钱、买"。价来自价目表 (与结账用的是同一处, 不会两处各写一遍)。
     unlock = None
     if reason == "locked":
+        from . import apps_catalog as _catalog
         from . import products as _products
 
         pid = request.query_params.get("product_id") or ""
         pdef = (pricing.get("passes") or {}).get(pid)
-        prod = _products.get(pid)
-        if pdef and prod and _products.is_locked(pid):
-            unlock = {
-                "id": pid,
-                "name": prod.name,
-                "cents": int(pdef["cents"]),
-                "days": int(pdef["days"]),
-            }
+        name = _catalog.name_of(pid)
+        if pdef and name and _products.is_locked(pid):
+            unlock = {"id": pid, "name": name, "cents": int(pdef["cents"]), "days": int(pdef["days"])}
     return _render(
         request,
         "pricing.html",

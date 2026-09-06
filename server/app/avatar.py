@@ -63,6 +63,12 @@ def avatar_session(user: dict = Depends(resolve_user)):
     """
     if not config.AVATAR_TOKEN_SECRET:
         raise HTTPException(503, "avatar_not_configured")
+    # 上锁时接口也要拦: 页面那道闸只挡浏览器地址栏, 而这条路是能直接打的。
+    from . import products as _products
+    from . import work_access as _wa
+
+    if _products.is_locked("avatar") and not _wa.pass_active(user["id"], "avatar"):
+        raise HTTPException(402, "locked")
     bal = credits.balance(user["id"])
     if bal < config.AVATAR_CREDITS_PER_MIN:
         return JSONResponse(
