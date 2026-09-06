@@ -667,3 +667,30 @@ def test_unlock_banner_shows_the_price_with_decimals(client, monkeypatch):
     # 没上锁的产品不给横幅 —— 否则等于卖一个不用买的东西
     monkeypatch.setattr(config, "WORK_LOCKED_PRODUCTS", "")
     assert 'id="unlock"' not in client.get("/pricing?reason=locked&product_id=dify&lang=zh").text
+
+
+def test_home_tiles_respect_the_lock_too(client, monkeypatch):
+    """首页的瓦片是 _app_card.html 之外的**第二份拷贝**。漏了它的表现是: /apps 上锁了,
+    首页照旧直进工作台, 点进去才被弹回来 (2026-09-06 老板实测到的正是这个)。"""
+    from app import config
+
+    monkeypatch.setattr(config, "WORK_ENABLED", True)
+    monkeypatch.setattr(config, "DIFY_DOMAIN", "dify.test.local")
+    monkeypatch.setattr(config, "COMFY_IMAGE", "comfy:test")
+    monkeypatch.setattr(config, "COMFY_DOMAIN", "comfy.test.local")
+    monkeypatch.setattr(config, "WORK_LOCKED_PRODUCTS", "dify")
+    body = client.get("/?lang=zh").text
+    assert "reason=locked&product_id=dify" in body, "首页也得指向解锁"
+    assert "/work?product_id=dify" not in body, "首页不能还留着直进工作台的链接"
+    assert "/work?product_id=comfyui" in body, "没上锁的照旧直达"
+
+
+def test_workspace_pass_reaches_the_payment_provider():
+    """通行证要能换出支付通道认的商品号。seats 与 pass 都曾掉进 order['pack'] 那条
+    兜底路径直接 KeyError —— 表现是点"开通"报 500 (2026-09-06 老板实测到)。"""
+    from app.payments import waffo_provider
+
+    assert waffo_provider._item_of({"kind": "pass", "product_id": "coze"}) == "pass:coze"
+    assert waffo_provider._item_of({"kind": "plan", "tier": "pro", "cycle": "monthly"}) == "plan:pro:monthly"
+    assert waffo_provider._item_of({"kind": "seats", "seats": 5}) == "seats:5"
+    assert waffo_provider._item_of({"kind": "pack", "pack": "pack1000"}) == "pack:pack1000"

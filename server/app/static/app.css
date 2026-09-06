@@ -1295,6 +1295,8 @@ td.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size
 .hero-app .ha-txt i { font-style: normal; font-size: 11px; color: #93a7cc; }
 .hero-app .ha-dot { width: 7px; height: 7px; border-radius: 50%; background: rgba(255, 255, 255, .22); margin-left: auto; flex: none; }
 .hero-app .ha-dot.on { background: #5fd39a; box-shadow: 0 0 8px rgba(95, 211, 154, .75); }
+/* 上锁的格子: 亮着但不是绿灯 —— 它已上线, 只是要先开通 (2026-09-06)。 */
+.hero-app .ha-dot.lock { background: #7aa2ff; box-shadow: 0 0 8px rgba(122, 162, 255, .7); }
 .hero-app:hover { background: rgba(255, 255, 255, .11); border-color: rgba(255, 255, 255, .24); transform: translateY(-1px); }
 .hero-app.soon { opacity: .58; }
 .hero-app.soon:hover { opacity: .8; }

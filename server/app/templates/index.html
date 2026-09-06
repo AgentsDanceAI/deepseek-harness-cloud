@@ -22,7 +22,13 @@
        已上线的直达工作台; 没上线的去 /apps 看全景, 不是死链接。 #}
     <div class="hero-apps">
       {% for app in apps %}
-      {% if app.live and apps_clickable %}
+      {% if app.live and apps_clickable and app.locked %}
+      {# 上锁的格子指向解锁 —— 这里是 _app_card.html 之外的**第二份拷贝**, 漏了它
+         的表现是: /apps 上锁了, 首页照旧直进工作台, 点进去才被弹回来
+         (2026-09-06 老板实测到的正是这个)。原地打开: 那是本站页面。 #}
+      <a class="hero-app is-live is-locked"
+         href="{{ apps_base }}/pricing?reason=locked&product_id={{ app.id }}#unlock">
+      {% elif app.live and apps_clickable %}
       {# 新标签打开 (本站页面除外), 理由同 _app_card.html #}
       {% set app_href = app.href or ('/work' if app.id == 'dsh' else '/work?product_id=' + app.id) %}
       <a class="hero-app is-live" href="{{ apps_base }}{{ app_href }}"
@@ -32,7 +38,7 @@
       {% endif %}
         <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{{ app.icon | safe }}</svg>
         <span class="ha-txt"><b>{{ app.name }}</b><i>{{ t("apps.tag." + app.tag) }}</i></span>
-        <span class="ha-dot {{ 'on' if app.live }}" aria-hidden="true"></span>
+        <span class="ha-dot {{ 'lock' if app.locked else ('on' if app.live) }}" aria-hidden="true"></span>
       </a>
       {% endfor %}
     </div>
