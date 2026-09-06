@@ -74,6 +74,7 @@ def spend(
     cache_read: int = 0,
     output: int = 0,
     request_id: str = "",
+    units: int = 0,
 ) -> None:
     """Deduct `amount` credits and record a usage_log row. Never raises for
     insufficient funds — admission control happens before the request; the
@@ -129,7 +130,7 @@ def spend(
                 )
         conn.execute(
             "INSERT INTO usage_log (id, user_id, device_id, kind, model, uncached_input, cache_read, "
-            "output, credits, request_id, created) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            "output, credits, request_id, created, units) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 security.new_id("use_"),
                 user_id,
@@ -142,6 +143,7 @@ def spend(
                 amount,
                 request_id,
                 now,
+                int(units),
             ),
         )
 

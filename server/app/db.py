@@ -346,6 +346,9 @@ MIGRATIONS: list[tuple[str, str, str]] = [
     ("org_members", "minute_cap", "INTEGER"),
     ("orgs", "default_credit_cap", "INTEGER"),
     ("orgs", "default_minute_cap", "INTEGER"),
+    # 这一分钟机时折了几份 (见 products.minute_units)。老行没有这一列 —— 读的时候
+    # 当 1 份算, 所以加权是从上线那一刻起生效的, 不会追溯改写谁的历史用量。
+    ("usage_log", "units", "INTEGER"),
 ]
 
 

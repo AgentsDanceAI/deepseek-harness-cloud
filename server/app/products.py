@@ -3091,6 +3091,20 @@ def _pick_media_model(offered: list | None, key: str, prefer: tuple[str, ...]) -
     return {key: ids[0]} if ids else {}
 
 
+def minute_units(product_id: str) -> int:
+    """这个产品跑一分钟, 从用户的机时额度里扣几份。
+
+    按内存折算 (见 config.WORK_MINUTE_BASE_MB): 2G 一份, 不足一份按一份算。
+    所以 dsh (1G) 与 pi (2G) 都是 1, OpenMausBot (4G) 是 2, Coze (16G) 是 8。
+
+    **不按 CPU 折**: 节点上先撑爆的是内存, CPU 请求只按上限的四分之一记, 远没到顶。
+    """
+    p = registry().get(product_id)
+    mem = (p.mem_mb if p and p.mem_mb else config.WORK_MEM_LIMIT_MB) or config.WORK_MEM_LIMIT_MB
+    base = max(1, config.WORK_MINUTE_BASE_MB)
+    return max(1, -(-int(mem) // base))
+
+
 def env_for(product_id: str, token: str, secret: str = "") -> dict[str, str]:
     gateway = config.PUBLIC_BASE.rstrip("/")
     if product_id == "hermes":

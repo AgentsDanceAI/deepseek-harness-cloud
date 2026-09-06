@@ -61,7 +61,24 @@ def included_minutes(user_id: str) -> int:
 
 
 def used_minutes(user_id: str, since: float | None = None) -> int:
-    """Active workspace minutes this period — one usage_log row per minute."""
+    """本期已用的机时**份数** —— 每分钟一行, 但一行折几份看格子多大。
+
+    2026-09-06 之前一行就是一份, 与格子多大无关 (那是 0.5 核 1G 时代的口径)。现在
+    按 products.minute_units 折算, 写在行上的 units 里。**老行没有这一列, 一律当
+    1 份** —— 加权从上线那一刻起生效, 不追溯改写谁的历史用量 (追溯的话有人会在毫无
+    动作的情况下突然超额)。
+    """
+    since = period_start(user_id) if since is None else since
+    row = db.query_one(
+        "SELECT COALESCE(SUM(CASE WHEN units IS NULL OR units < 1 THEN 1 ELSE units END), 0) AS n "
+        "FROM usage_log WHERE user_id=? AND kind=? AND created>?",
+        (user_id, MINUTE_KIND, since),
+    )
+    return int((row["n"] if row is not None else 0) or 0)
+
+
+def wall_clock_minutes(user_id: str, since: float | None = None) -> int:
+    """本期实际开着的**分钟数** (不折算)。给报表用 —— 额度看份数, 而"开了多久"看这个。"""
     since = period_start(user_id) if since is None else since
     row = db.query_one(
         "SELECT COUNT(*) AS n FROM usage_log WHERE user_id=? AND kind=? AND created>?",
@@ -93,22 +110,30 @@ def grant_minutes(user_id: str, minutes: int, ttl_s: float, kind: str, ref: str 
     return gid
 
 
-def consume_minute(user_id: str) -> None:
-    """Draw one minute: the plan allowance first, then purchased packs.
+def consume_minute(user_id: str, units: int = 1) -> None:
+    """扣 `units` 份机时: 先吃套餐额度, 再吃买来的机时券。
 
-    Called after the minute has already been served — we never interrupt work in
-    flight; the gate below decides whether the NEXT task may start.
+    在这一分钟**已经服务完**之后调用 —— 我们从不打断正在进行的活儿; 下一件事能不能
+    开由后面的闸决定。
+
+    一份不够扣时要**跨券排干** (一张券只剩 3 份而这一分钟要 8 份, 得接着扣下一张)。
+    原先一次只扣一张券的一份, 加权之后那样会少扣。
     """
     if used_minutes(user_id) <= included_minutes(user_id):
-        return  # still inside the plan's allowance; nothing to decrement
+        return  # 还在套餐额度里, 不动券
+    left = max(1, int(units))
     with db.tx() as conn:
-        row = conn.execute(
-            "SELECT id FROM minute_grants WHERE user_id=? AND expires>? AND remaining>0 "
-            "ORDER BY expires ASC LIMIT 1",
-            (user_id, time.time()),
-        ).fetchone()
-        if row is not None:
-            conn.execute("UPDATE minute_grants SET remaining=remaining-1 WHERE id=?", (row["id"],))
+        while left > 0:
+            row = conn.execute(
+                "SELECT id, remaining FROM minute_grants WHERE user_id=? AND expires>? AND remaining>0 "
+                "ORDER BY expires ASC LIMIT 1",
+                (user_id, time.time()),
+            ).fetchone()
+            if row is None:
+                return  # 券也用完了 —— 闸会拦住下一件事, 这一分钟照样如实记账
+            take = min(left, int(row["remaining"]))
+            conn.execute("UPDATE minute_grants SET remaining=remaining-? WHERE id=?", (take, row["id"]))
+            left -= take
 
 
 def state(user_id: str) -> dict:

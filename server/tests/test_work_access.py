@@ -11,6 +11,7 @@ The rules that must hold no matter what the client sends:
 
 import os
 import tempfile
+import time
 
 _TMP = tempfile.mkdtemp(prefix="dhc-wa-")
 os.environ.update(
@@ -134,3 +135,61 @@ def test_purchased_minutes_extend_beyond_the_plan():
     assert work_access.state(uid)["minutes_left"] == 300
     _burn(uid, 10)
     assert work_access.minute_packs_left(uid) == 290
+
+
+# ---- 机时按格子大小折算 (老板 2026-09-06 定) --------------------------------
+
+
+def test_minute_units_scale_with_memory():
+    """原先一分钟就是一分钟, 与格子多大无关 —— 那是 0.5 核 1G 时代的口径, 而 Coze
+    占的内存是 dsh 的十六倍, 花的却是同样的额度。"""
+    from app import products
+
+    assert products.minute_units("dsh") == 1, "1G 不足一份, 按一份算"
+    assert products.minute_units("pi") == 1, "2G 正好一份"
+    assert products.minute_units("openmausbot") == 2, "4G 两份"
+    assert products.minute_units("coze") == 8, "16G 八份"
+    assert products.minute_units("这个产品不存在") >= 1, "认不出来也要有个下限, 不能白用"
+
+
+def test_used_minutes_counts_units_and_treats_legacy_rows_as_one():
+    """加权是从上线那一刻起生效的 —— 老行没有 units 列, 一律当一份。追溯改写的话
+    会有人在毫无动作的情况下突然超额。"""
+    uid = _user("u_units")
+    now = time.time()
+    with db.tx() as c:
+        # 老行: units 为空
+        c.execute(
+            "INSERT INTO usage_log (id,user_id,device_id,kind,model,credits,request_id,created) "
+            "VALUES (?,?,?,?,?,?,?,?)",
+            ("ul_old", uid, "", work_access.MINUTE_KIND, "work:coze", 0, "", now),
+        )
+        # 新行: 八份
+        c.execute(
+            "INSERT INTO usage_log (id,user_id,device_id,kind,model,credits,request_id,created,units) "
+            "VALUES (?,?,?,?,?,?,?,?,?)",
+            ("ul_new", uid, "", work_access.MINUTE_KIND, "work:coze", 0, "", now, 8),
+        )
+    assert work_access.used_minutes(uid, since=0) == 9, "老行 1 份 + 新行 8 份"
+    assert work_access.wall_clock_minutes(uid, since=0) == 2, "实际只开了两分钟"
+
+
+def test_consume_minute_drains_across_grants():
+    """一张券只剩 3 份而这一分钟要 8 份 —— 得接着扣下一张。原先一次只扣一份, 加权
+    之后那样会少扣。"""
+    uid = _user("u_drain")
+    work_access.grant_minutes(uid, 3, ttl_s=86400, kind="grant_admin")
+    work_access.grant_minutes(uid, 10, ttl_s=86400, kind="grant_admin")
+    before = work_access.minute_packs_left(uid)
+    assert before == 13
+    # 先把套餐额度耗掉, 否则不动券
+    now = time.time()
+    with db.tx() as c:
+        for i in range(work_access.included_minutes(uid) + 1):
+            c.execute(
+                "INSERT INTO usage_log (id,user_id,device_id,kind,model,credits,request_id,created,units) "
+                "VALUES (?,?,?,?,?,?,?,?,?)",
+                (f"ul_d{i}", uid, "", work_access.MINUTE_KIND, "work:dsh", 0, "", now, 1),
+            )
+    work_access.consume_minute(uid, 8)
+    assert work_access.minute_packs_left(uid) == 5, "3 + 10 扣掉 8 应剩 5"

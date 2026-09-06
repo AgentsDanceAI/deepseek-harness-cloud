@@ -1266,7 +1266,13 @@ async def work_status(request: Request):
         "phase": phase,
         "state": "running" if ready else ("starting" if info and info.running else state),
         "url": _work_url("/", product),
+        # **机时不扣积分** (回收循环那一行写的是扣 0)。这个值只是给界面显示的,
+        # 而工作台外壳的页脚拿它写成"N 积分/分钟" —— 那句话是假的。真正扣的是
+        # 机时份数, 见下面的 minute_units。外壳的文案改起来要重建镜像, 先把
+        # 真实的数送过去, 页脚下次重建时一起改 (2026-09-06 记)。
         "credits_per_min": config.WORK_CREDITS_PER_MIN,
+        # 这个格子跑一分钟扣几份机时 (按内存折算, 见 products.minute_units)。
+        "minute_units": products.minute_units(product.id),
         "idle_stop_min": config.WORK_IDLE_STOP_MIN,
         "balance": credits.balance(user["id"]),
         # The workspace runs on its own subdomain and renders dsh's UI, so it
@@ -1500,14 +1506,18 @@ async def reaper_tick(now: float) -> None:
         # uid 是**工作台键**, 不是用户 id —— 多产品之后二者不再相同。机时记在人
         # 头上 (同一个人的 dsh 与 ComfyUI 花的是同一份额度), 而回收计时按工作台。
         owner, product_id = products.split_key(uid)
+        # 这一分钟折几份, 看格子多大 (products.minute_units)。2026-09-06 之前一律
+        # 一份 —— 那是 0.5 核 1G 时代的口径, 而 Coze 占的内存是 dsh 的十六倍。
+        units = products.minute_units(product_id)
         credits.spend(
             owner,
             0,
             kind=work_access.MINUTE_KIND,
             model=f"work:{product_id}",
             request_id=f"ws-{product_id}-{int(now // 60)}",
+            units=units,
         )
-        work_access.consume_minute(owner)
+        work_access.consume_minute(owner, units)
         last = _last_seen.setdefault(uid, now)  # re-seed after restart
         started = _started_at.setdefault(uid, now)  # re-seed after restart
         # 口径: **打开一次, 持续做事, 只关一次。**

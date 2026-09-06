@@ -56,8 +56,11 @@ STEP = {"JPY": 100}
 TIERS = [
     # id,   name,   $/mo, credits/mo, concurrency, minutes/mo, yearly off %, first-month off %
     ("plus", "Plus", 10, 1000, 2, 6000, 30, 25),
-    ("pro", "Pro", 50, 5000, 5, 21600, 30, 25),
-    ("max", "Max", 100, 10000, 10, 32400, 30, 25),
+    # 并发 2026-09-06 老板定成 1/2/3/4 (原来是 1/2/5/10)。**这是节点的物理约束**:
+    # 一格现在平均 4G, Max 的 10 并发就是 40G, 而整个节点可分配 58G —— 两个 Max
+    # 用户就把机器占满了。
+    ("pro", "Pro", 50, 5000, 3, 21600, 30, 25),
+    ("max", "Max", 100, 10000, 4, 32400, 30, 25),
 ]
 FREE = {"work_minutes": 180, "signup_credits": 500, "concurrency": 1}
 

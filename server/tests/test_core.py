@@ -171,7 +171,7 @@ def test_plan_apply_and_renewal():
         )
     plans.apply_plan(uid, "pro", "monthly", order_id="o1")
     first = plans.current_plan(uid)
-    assert first["tier"] == "pro" and first["concurrency"] == 5
+    assert first["tier"] == "pro" and first["concurrency"] == 3
     assert credits.balance(uid) == plans.pricing()["tiers"]["pro"]["monthly_credits"]
 
     plans.apply_plan(uid, "pro", "monthly", order_id="o2")  # renewal extends

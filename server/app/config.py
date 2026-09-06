@@ -554,6 +554,12 @@ WORK_RECLAIM_ASK_SEC = _env_int("WORK_RECLAIM_ASK_SEC", 120)
 # carries no work_minutes for it. The workspace pass that used to top this up
 # was withdrawn — machine hours now come from a plan or from nowhere.
 WORK_FREE_MINUTES = _env_int("WORK_FREE_MINUTES", 180)
+# **一份机时 = 多大的格子** (老板 2026-09-06 定)。原先一分钟就是一分钟, 与格子多大
+# 无关 —— 那是 0.5 核 1G 时代定的, 而现在 Coze 是 16G, 占的内存是 dsh 的十六倍却花
+# 同样的额度。现在按内存折算: 每分钟扣 ceil(内存 / 这个基准) 份, 最少 1 份。
+# 为什么按内存而不是 CPU: 节点上先撑爆的是内存 (可分配 58G 对 10 核, 而 CPU 请求只
+# 按上限的四分之一算), 内存才是真正的稀缺资源。
+WORK_MINUTE_BASE_MB = _env_int("WORK_MINUTE_BASE_MB", 2048)
 
 # --- teams ------------------------------------------------------------------
 # Seats bound how many people may share an organisation's credit pool. Price is
