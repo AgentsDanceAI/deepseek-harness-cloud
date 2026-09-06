@@ -385,12 +385,14 @@ PI_IMAGE_REF = _env("PI_IMAGE_REF", "ghcr.io/agentsdancepro/pi-web-ui:0.59.1-r1"
 PI_MEM_LIMIT_MB = _env_int("PI_MEM_LIMIT_MB", 2048)
 PI_CPUS = _env_float("PI_CPUS", 1.0)
 PI_TAB_GRACE_MIN = _env_int("PI_TAB_GRACE_MIN", 10)
-# CrewAI 那一格 (老板 2026-09-02 拍板: 社区的 CrewAI-Studio 当前端, 顶掉我们自己套的聊天框)。
-CREWAI_STUDIO_IMAGE_REF = _env("CREWAI_STUDIO_IMAGE_REF", "ghcr.io/agentsdancepro/crewai-studio:8b123b3-r1")
-CREWAI_STUDIO_MEM_LIMIT_MB = _env_int("CREWAI_STUDIO_MEM_LIMIT_MB", 4096)
-CREWAI_STUDIO_CPUS = _env_float("CREWAI_STUDIO_CPUS", 2.0)
-# 4 核不是阔气: 起沙箱时它另跑一个 agent server 进程, 而应用只等 120 秒 ——
-# 2 核上那堆 import 走不完, 页面就一直"等待沙盒"。
+# OpenMausBot 那一格 (老板 2026-09-05 拍板, 顶掉 CrewAI)。上游 milind-soni/OpenMausBot,
+# 一个群聊形态的多智能体外壳: 群里若干机器人, 每个背后是一个命令行智能体。
+# 镜像见 deploy/workspace-openmausbot —— 上游服务端 + 我们的 nginx 外壳 + 引擎 CLI。
+OPENMAUSBOT_IMAGE_REF = _env("OPENMAUSBOT_IMAGE_REF", "ghcr.io/agentsdancepro/openmausbot:acf88c4-r1")
+OPENMAUSBOT_MEM_LIMIT_MB = _env_int("OPENMAUSBOT_MEM_LIMIT_MB", 4096)
+OPENMAUSBOT_CPUS = _env_float("OPENMAUSBOT_CPUS", 2.0)
+# 4G/2 核不是阔气: 一个群里可以同时挂几个机器人, 每个机器人是一个独立的 CLI 进程
+# (Node + 它自己的工具链), 一人一进程地并发跑。
 
 # AutoGen Studio —— 微软的多智能体搭建台 (2026-09-01)。上游没有官方镜像, 这是
 # 我们打的 (deploy/workspace-autogen)。镜像里打了补丁把写死的模型名换成读环境
@@ -411,13 +413,13 @@ LANGCHAIN_MEM_LIMIT_MB = _env_int("LANGCHAIN_MEM_LIMIT_MB", 2048)
 LANGCHAIN_CPUS = _env_float("LANGCHAIN_CPUS", 1.0)
 LANGCHAIN_TAB_GRACE_MIN = _env_int("LANGCHAIN_TAB_GRACE_MIN", 10)
 
-# OpenManus 与 CrewAI —— 两个产品**共用一个镜像** (deploy/workspace-frameworks),
+# OpenManus 的镜像 (deploy/workspace-frameworks; 原先与 CrewAI 那格共用一份),
 # 因为它们的依赖高度重叠, 分开打两份等于让 ECI 多存一份、冷启动多拉一次。
-# 两个都没有自己的界面 (OpenManus 是命令行智能体, CrewAI 是 Python 库), 所以
-# 这一格的界面是浏览器里的终端 (ttyd)。
+# OpenManus 没有自己的界面 (它是命令行智能体), 所以这一格的界面是浏览器里的终端 (ttyd)。
+# (这个镜像原先还带着 CrewAI, 2026-09-05 那格换成 OpenMausBot 之后只剩 OpenManus。)
 FRAMEWORKS_IMAGE_REF = _env("FRAMEWORKS_IMAGE_REF", "")
 OPENMANUS_DOMAIN = _env("OPENMANUS_DOMAIN", "")
-CREWAI_DOMAIN = _env("CREWAI_DOMAIN", "")
+OPENMAUSBOT_DOMAIN = _env("OPENMAUSBOT_DOMAIN", "")
 FRAMEWORKS_MEM_LIMIT_MB = _env_int("FRAMEWORKS_MEM_LIMIT_MB", 2048)
 FRAMEWORKS_CPUS = _env_float("FRAMEWORKS_CPUS", 1.0)
 FRAMEWORKS_TAB_GRACE_MIN = _env_int("FRAMEWORKS_TAB_GRACE_MIN", 10)

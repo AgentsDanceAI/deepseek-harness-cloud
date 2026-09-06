@@ -143,9 +143,11 @@ CATALOG: tuple[AppEntry, ...] = (
         '<path d="M6.3 6.3 8.8 8.8M15.2 15.2l2.5 2.5M17.7 6.3 15.2 8.8M8.8 15.2l-2.5 2.5"/>',
     ),
     AppEntry(
-        "crewai", "CrewAI", "crewai",
-        '<circle cx="9" cy="8" r="3"/><path d="M3.5 19a5.5 5.5 0 0 1 11 0"/>'
-        '<circle cx="17" cy="9.5" r="2.2"/><path d="M14.8 19a4.4 4.4 0 0 1 5.7-4.2"/>',
+        "openmausbot", "OpenMausBot", "openmausbot",
+        # 一个聊天气泡, 里面两个小机器人 —— 群聊 + 多机器人, 这格的特色就是这个
+        '<path d="M4 5.5h16v10H9l-4 3.5v-3.5H4z"/>'
+        '<circle cx="10" cy="10.5" r="1.4"/><circle cx="15" cy="10.5" r="1.4"/>'
+        '<path d="M10 7.6V6.2M15 7.6V6.2"/>',
     ),
 )
 # fmt: on

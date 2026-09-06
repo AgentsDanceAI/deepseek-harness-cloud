@@ -419,28 +419,53 @@ def test_model_capabilities_fall_back_to_defaults():
     assert cap["reasoning"] is True and cap["vision"] is False and cap["context_window"] == 128000
 
 
-# ---- CrewAI (CrewAI-Studio 前端) --------------------------------------------
+# ---- OpenMausBot (顶掉 CrewAI, 老板 2026-09-05) ------------------------------
 
 
-def test_crewai_slot_runs_the_studio(monkeypatch):
-    """CrewAI 那格换成社区的 CrewAI-Studio (老板 2026-09-02): 端口/探针/启动/示例队伍。"""
-    from app import config, model_catalog
+def test_openmausbot_slot_is_fronted_by_our_own_shell(monkeypatch):
+    """上游服务端只监听回环, 且按 **Host 头**判定"本机可信" —— 直接暴露出去用户
+    撞的是配对墙。所以这格的主容器是我们的 nginx 外壳, 探针也不能用它的 /api/health
+    (那条在鉴权之前, 配没配对都答 200)。"""
+    from app import config
 
-    monkeypatch.setattr(config, "CREWAI_DOMAIN", "crew.test.local")
-    prod = products.registry()["crewai"]
-    assert prod.port == 8501 and prod.ready_path == "/_stcore/health"
-    boot = products.boot_script("crewai")
-    assert "seed_demo.py" in boot, "空 Studio 不叫开箱即用 —— 开机要种示例队伍"
-    assert "--client.toolbarMode minimal" in boot, "右上角 Deploy 是它家的入口"
-    assert "--browser.gatherUsageStats false" in boot
-    assert boot.index("seed_demo.py") < boot.index("exec streamlit")
-    env = products.env_for("crewai", "tok")
-    assert env["OPENAI_API_BASE"].endswith("/llm/v1")
-    assert env["DB_URL"].startswith("sqlite:////root/"), "库要落 NAS, 不然回收就没了"
-    assert env["DEFAULT_LANGUAGE"] == "zh"
-    assert env["CREWAI_TRACING_ENABLED"] == "false" and env["CREWAI_DISABLE_TELEMETRY"] == "true"
-    models = env["OPENAI_PROXY_MODELS"].split(",")
-    assert set(models) == set(model_catalog.catalog()) and models[0] == products._codecli_model("codex")
+    monkeypatch.setattr(config, "OPENMAUSBOT_DOMAIN", "maus.test.local")
+    prod = products.registry()["openmausbot"]
+    assert prod.port == 80, "对外的是 nginx 外壳, 不是上游的 8799"
+    assert prod.ready_path == "/__dsh_ready", "它的 /api/health 配没配对都 200, 探它等于没探"
+    assert prod.run_as_user == 0, "/root 是挂进来的, 属主 root"
+    boot = products.boot_script("openmausbot")
+    assert "dsh-omb-autologin" in boot and "/api/auth/pairing" in boot
+    assert "exec node /app/dist-server/index.js" in boot
+    assert boot.index("nginx\n") < boot.index("exec node"), "外壳要先起, 否则首访打空"
+    assert "hasCompletedOnboarding" in boot, "不压首跑向导, 机器人第一次说话卡在选主题"
+
+
+def test_openmausbot_nginx_repeats_headers_in_every_location():
+    """nginx 的 proxy_set_header 一旦在子层出现, 父层那组整体作废 —— 只在 server 层
+    写一次的话, 带 Upgrade 的 location / 会把注入的 Cookie 一起丢掉, 表现是首页转圈
+    然后弹配对页。"""
+    conf = products._OMB_NGINX
+    bodies = conf.split("location ")[1:]
+    proxying = [b for b in bodies if "proxy_pass http://127.0.0.1:8799" in b]
+    assert len(proxying) >= 2
+    for b in proxying:
+        assert "proxy_set_header Cookie $dsh_up;" in b, f"这个 location 丢了注入的会话: {b[:40]}"
+    assert "proxy_buffering off;" in conf, "事件流不关缓冲, 界面看着像卡死"
+
+
+def test_openmausbot_models_go_through_our_gateway(monkeypatch):
+    """模型走它内置的 claude / codex 驱动 —— 它的 openai-compat 自定义引擎上游明说
+    不支持工具调用, 接了等于把能操作电脑的智能体降级成聊天框。"""
+    from app import config
+
+    monkeypatch.setattr(config, "OPENMAUSBOT_DOMAIN", "maus.test.local")
+    env = products.env_for("openmausbot", "tok")
+    assert env["ANTHROPIC_BASE_URL"].endswith("/llm/anthropic")
+    assert env["OPENAI_BASE_URL"].endswith("/llm/v1")
+    assert env["ANTHROPIC_AUTH_TOKEN"] == "tok" and env["OPENAI_API_KEY"] == "tok"
+    # 型号要钉在在售目录里 —— 网关只放行目录内的, 不钉就是每次 404
+    assert env["ANTHROPIC_MODEL"] == products._codecli_model("claude-code")
+    assert env["OMB_PUBLIC_URL"] == "https://maus.test.local", "不设它界面里的 hook 地址是 127.0.0.1"
 
 
 def test_openmanus_no_longer_seeds_a_crew_project(monkeypatch):

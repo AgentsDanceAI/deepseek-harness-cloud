@@ -2311,8 +2311,8 @@ def registry() -> dict[str, Product]:
             # Next.js 起没起来 —— 而没有后端的聊天界面是个死壳。
             ready_path="/langgraph/info",
         ),
-        # OpenManus 与 CrewAI: 同一个镜像, 靠启动脚本区分 —— 两个产品共用一份
-        # ECI 镜像缓存。界面是浏览器终端 (ttyd), 因为这两个框架都没有界面。
+        # 界面是浏览器终端 (ttyd), 因为 OpenManus 本身没有界面。
+        # (这个镜像原先还带着 CrewAI 那格, 2026-09-05 换成 OpenMausBot 之后只剩它一个。)
         "openmanus": Product(
             id="openmanus",
             name="OpenManus",
@@ -2328,19 +2328,24 @@ def registry() -> dict[str, Product]:
             reports_presence=False,
             tab_grace_min=config.FRAMEWORKS_TAB_GRACE_MIN,
         ),
-        "crewai": Product(
-            id="crewai",
-            name="CrewAI",
-            image=config.CREWAI_STUDIO_IMAGE_REF,
-            image_ref=config.CREWAI_STUDIO_IMAGE_REF,
-            port=8501,
-            # Streamlit 的健康接口, 答 "ok"。首页是 SPA 外壳, 后端没起来也 200。
-            ready_path="/_stcore/health",
-            mem_mb=config.CREWAI_STUDIO_MEM_LIMIT_MB,
-            cpus=config.CREWAI_STUDIO_CPUS,
-            domain=config.CREWAI_DOMAIN,
+        "openmausbot": Product(
+            id="openmausbot",
+            name="OpenMausBot",
+            image=config.OPENMAUSBOT_IMAGE_REF,
+            image_ref=config.OPENMAUSBOT_IMAGE_REF,
+            # 主容器是我们的 nginx 外壳 (见 _openmausbot_boot), 上游服务端退到回环 8799。
+            port=80,
+            # **不能探它的 /api/health**: 那条路在鉴权之前, 配没配对都答 200 ——
+            # 拿来当探针等于把用户放进配对页。标记由 dsh-omb-autologin 在会话注入
+            # 之后落下 (与 Dify/Coze 同款)。
+            ready_path="/__dsh_ready",
+            mem_mb=config.OPENMAUSBOT_MEM_LIMIT_MB,
+            cpus=config.OPENMAUSBOT_CPUS,
+            domain=config.OPENMAUSBOT_DOMAIN,
             reports_presence=False,
             tab_grace_min=config.FRAMEWORKS_TAB_GRACE_MIN,
+            # /root 与 /workspace 是挂进来的, 属主是 root; 服务端要写 /root/.openmausbot。
+            run_as_user=0,
         ),
     }
 # fmt: on
@@ -2715,23 +2720,178 @@ def _pi_boot() -> str:
     )
 
 
-def _crewai_studio_boot() -> str:
-    """CrewAI 那一格: 社区的 CrewAI-Studio (Streamlit) 当前端。
+#: 见 _openmausbot_boot。外壳的 nginx 配置。
+_OMB_NGINX = """server {
+  listen 80;
+  server_name _;
+  client_max_body_size 200m;
+  # 就绪标记 (Product.ready_path)。文件在 = 200, 不在 = 503; 由 dsh-omb-autologin
+  # 在会话注入之后落下。
+  location = /__dsh_ready {
+    root /run/dsh;
+    try_files /__dsh_ready =503;
+  }
+  # **每个 location 都要把这组头写全**: nginx 的 proxy_set_header 一旦在子层出现,
+  # 父层那组就整体作废 —— 只在 server 层写一次的话, 带 Upgrade 的 location / 会把
+  # 注入的 Cookie 一起丢掉, 表现是首页转圈然后弹配对页。
+  location /hooks/ {
+    proxy_pass http://127.0.0.1:8800;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_http_version 1.1;
+  }
+  location /api/events {
+    proxy_pass http://127.0.0.1:8799;
+    proxy_set_header Cookie $dsh_up;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_http_version 1.1;
+    # 事件流: 缓冲一开, 消息要攒够一块才吐, 界面看着像卡死。
+    proxy_buffering off;
+    proxy_cache off;
+    proxy_read_timeout 3600s;
+  }
+  location / {
+    proxy_pass http://127.0.0.1:8799;
+    proxy_set_header Cookie $dsh_up;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection $connection_upgrade;
+    proxy_http_version 1.1;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+  }
+}
+"""
 
-    老板 2026-09-02: "CrewAI 换 CrewAI-Studio" —— 它的形态正是 CrewAI 的特色: 用表单
-    搭队伍、定角色和任务、一键 kickoff 看结果, 有简体中文。
-    开机三件事: 库落 NAS (/root/crewai-studio/crewai.db, 跨实例留着); 一支队伍都
-    没有时种一支示例队伍 (空 Studio 首屏是 "No crews defined yet", 要先建两个
-    Agent、两个 Task 才能跑第一次 —— 那不叫开箱即用); 起 Streamlit, 工具栏收成
-    minimal (右上角那个 Deploy 是它家的入口), 不上报使用统计。
+
+#: 见 _openmausbot_boot。
+_OMB_AUTOLOGIN = r"""#!/bin/sh
+# 由 products.py 下发。工作台替用户完成一次配对, 把会话注入到**上游方向** ——
+# 浏览器那边什么都不用拿, 于是不必伺候 Secure / SameSite / CSRF 那一串。
+#
+# 为什么非做不可: 上游服务端判定"本机可信"看的是 **Host 头 + 有没有代理头**
+# (server/request-auth.ts 的 isLoopbackHost 与 isProxied), 不是连接来源。我们的
+# 反代两条都不满足 —— 实测 /api/auth/session 返回 403 "this request came through
+# a proxy (pair this device to use the server)", 就是一堵配对墙。
+API=http://127.0.0.1:8799
+CONF=/etc/nginx/conf.d/00-autologin.conf
+SAVED=/root/.openmausbot/.dsh-session
+LOGF=/root/.openmausbot/.dsh-autologin.log
+log() {
+  printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" >> "$LOGF" 2>/dev/null
+  tail -n 200 "$LOGF" > "$LOGF.t" 2>/dev/null && mv "$LOGF.t" "$LOGF" 2>/dev/null
+}
+
+# 会话有 30 天, 而数据目录跨实例留着 —— 先试上一次那份。每次冷启动都新配一个的话,
+# 用户的"已配对设备"列表里会堆一长串同名的 DSH Cloud。
+reuse() {
+  [ -s "$SAVED" ] || return 1
+  CK=$(cat "$SAVED")
+  curl -fsS -m 10 -o /dev/null -H "Cookie: $CK" "$API/api/auth/session" 2>/dev/null
+}
+
+mint() {
+  CODE=$(curl -fsS -m 15 -X POST -H 'content-type: application/json' \
+    -d '{"label":"DSH Cloud","scopes":["admin","client"]}' "$API/api/auth/pairing" \
+    | sed 's/.*"code":"\([^"]*\)".*/\1/')
+  [ -n "$CODE" ] || { log "没拿到配对码"; return 1; }
+  CK=$(curl -fsS -m 15 -i -X POST -H 'content-type: application/json' \
+    -d "{\"code\":\"$CODE\",\"label\":\"DSH Cloud\",\"cookie\":true}" "$API/api/auth/pair" \
+    | grep -i '^set-cookie:' | sed 's/^[Ss]et-[Cc]ookie: //; s/;.*//' | tr -d '\r')
+  case "$CK" in
+    omb_session_*) ;;
+    *) log "会话 cookie 形状不对: $(printf '%s' "$CK" | cut -c1-40)"; return 1 ;;
+  esac
+  printf '%s' "$CK" > "$SAVED" && chmod 600 "$SAVED"
+}
+
+while :; do
+  curl -fsS -m 5 -o /dev/null "$API/api/health" 2>/dev/null && break
+  sleep 1
+done
+if reuse; then log "沿用上次的会话"; elif mint; then log "新配了一个会话"; else
+  log "配对失败 —— 用户会看到配对页"; exit 1
+fi
+cat > "$CONF" <<EOF
+map \$http_upgrade \$connection_upgrade { default upgrade; "" ""; }
+map \$http_cookie \$dsh_up { default "$CK"; }
+EOF
+nginx -s reload 2>/dev/null || nginx
+mkdir -p /run/dsh && : > /run/dsh/__dsh_ready
+log "会话已注入 (${CK%%=*})"
+"""
+
+
+def _openmausbot_boot() -> str:
+    """OpenMausBot 那一格 (老板 2026-09-05 定, 顶掉 CrewAI)。
+
+    形态是一个群聊: 群里若干个各有性格的机器人, 每个背后是一个命令行智能体,
+    能开电脑、连应用、跑工具。
+
+    主容器是 **nginx 外壳**, 上游服务端退到回环 8799 —— 它只监听回环, 而且按
+    Host 头判定"本机可信", 直接暴露出去用户会撞上配对墙 (见 _OMB_AUTOLOGIN)。
+
+    模型走它内置的 claude / codex 驱动, 网关接线由 env_for 下发。**不用它的
+    openai-compat 自定义引擎**: 那条路上游明说不支持工具调用, 接了等于把一个能
+    操作电脑的智能体降级成聊天框。
     """
+    import json as _json
+
+    claude_seed = _json.dumps(
+        {
+            "hasCompletedOnboarding": True,
+            "theme": "dark",
+            "autoUpdates": False,
+            "projects": {"/workspace": {"hasTrustDialogAccepted": True}},
+        },
+        ensure_ascii=False,
+        indent=2,
+    )
+    gateway = config.PUBLIC_BASE.rstrip("/")
+    codex_toml = (
+        f'model = "{_codecli_model("codex")}"\n'
+        'model_provider = "dshcloud"\n'
+        "\n"
+        "[model_providers.dshcloud]\n"
+        'name = "DSH Cloud"\n'
+        f'base_url = "{gateway}/llm/v1"\n'
+        'env_key = "OPENAI_API_KEY"\n'
+        'wire_api = "responses"\n'
+        "\n"
+        '[projects."/workspace"]\n'
+        'trust_level = "trusted"\n'
+    )
     return (
         "set -e\n"
-        "mkdir -p /root/crewai-studio /workspace\n"
-        "python /opt/dsh/seed_demo.py 2>/dev/null | tail -1\n"
-        "cd /opt/cs\n"
-        "exec streamlit run app/app.py --server.port 8501 --server.address 0.0.0.0 "
-        "--server.headless true --browser.gatherUsageStats false --client.toolbarMode minimal\n"
+        "mkdir -p /run/dsh /root/.openmausbot /root/.codex /workspace\n"
+        # 首跑向导: 不压掉的话机器人第一次说话卡在选主题 (与 agentui 那格同一份)。
+        # 只在文件不存在时写 —— 之后那是用户自己的偏好。
+        "if [ ! -f /root/.claude.json ]; then\n"
+        "cat > /root/.claude.json <<'DSHEOF'\n" + claude_seed + "\nDSHEOF\n"
+        "fi\n"
+        # 每次重写: 里面有该用户的网关令牌变量名与型号, 令牌每次建实例都会换。
+        "cat > /root/.codex/config.toml <<'DSHEOF'\n" + codex_toml + "DSHEOF\n"
+        # nginx 现在就要能起, 而会话要等服务端起来才拿得到 —— 先落一份能通过
+        # 配置检查的默认值 (原样透传浏览器自己的 cookie), autologin 拿到会话后覆盖。
+        "cat > /etc/nginx/conf.d/00-autologin.conf <<'AUTOCONF'\n"
+        'map $http_upgrade $connection_upgrade { default upgrade; "" ""; }\n'
+        "map $http_cookie $dsh_up { default $http_cookie; }\n"
+        "AUTOCONF\n"
+        "cat > /etc/nginx/conf.d/default.conf <<'NGINXCONF'\n" + _OMB_NGINX + "NGINXCONF\n"
+        "cat > /usr/local/bin/dsh-omb-autologin <<'AUTOLOGIN'\n" + _OMB_AUTOLOGIN + "AUTOLOGIN\n"
+        "chmod +x /usr/local/bin/dsh-omb-autologin\n"
+        "nginx\n"
+        "/usr/local/bin/dsh-omb-autologin >/dev/null 2>&1 &\n"
+        "cd /root\n"
+        "exec node /app/dist-server/index.js\n"
     )
 
 
@@ -2808,15 +2968,6 @@ _FRAMEWORK_HELLO = {
         "    python run_flow.py                      # 多智能体编排\n"
         "    python run_mcp.py                       # MCP 服务\n"
     ),
-    "crewai": (
-        "CrewAI —— 把智能体组成一支船员队, 各有角色和任务。**左边直接说话就行**: "
-        "你说的话会作为输入交给 /workspace/crew 那支队伍。\n"
-        "队伍是可以改的, 改完左边和这里跑的都是同一份:\n"
-        "    src/dsh_crew/config/agents.yaml   # 谁, 什么角色\n"
-        "    src/dsh_crew/config/tasks.yaml    # 干什么, 要什么产出\n"
-        "    crewai run                        # 在终端里手动跑一轮\n"
-        "工具包按需装: pip install crewai-tools (没预装 —— 它拖一大串, 该由你按用途选)\n"
-    ),
 }
 
 
@@ -2832,10 +2983,11 @@ def _frameworks_boot(product_id: str) -> str:
     config/config.toml —— 镜像里烤的是占位值, 不换成这个用户的令牌, 他发第一句
     话就是 401。
 
-    (CrewAI 2026-09-02 起换成 CrewAI-Studio, 见 _crewai_studio_boot; 这格只剩 OpenManus。)
+    (原先 CrewAI 也走这里; 那格 2026-09-02 换成 CrewAI-Studio、2026-09-05 又换成
+    OpenMausBot, 所以这条路现在只剩 OpenManus 一个。)
     """
     hello = _FRAMEWORK_HELLO[product_id].replace("'", "'\\''")
-    venv = "openmanus" if product_id == "openmanus" else "crewai"
+    venv = "openmanus"
     return (
         "set -e\n"
         "mkdir -p /workspace\n"
@@ -2893,7 +3045,7 @@ _BOOTS = {
     "autogen": _autogen_boot,
     "langchain": _langchain_boot,
     "openmanus": lambda: _frameworks_boot("openmanus"),
-    "crewai": _crewai_studio_boot,
+    "openmausbot": _openmausbot_boot,
 }
 
 
@@ -2930,30 +3082,21 @@ def env_for(product_id: str, token: str, secret: str = "") -> dict[str, str]:
             "HERMES_USER": "owner",
             "HERMES_PASS": autologin_password(secret),
         }
-    if product_id == "crewai":
-        gateway_v1 = f"{gateway}/llm/v1"
+    if product_id == "openmausbot":
+        # 模型走它内置的 claude / codex 驱动 —— 与 claude-code / codex 两格同一套接线。
+        # 它的 openai-compat 自定义引擎不支持工具调用, 所以不走那条。
         return {
             "HOME": "/root",
-            # CrewAI-Studio 的 "OpenAI" 那条路 (构建期已改名 DSH) 认这三个: 密钥、
-            # 端点、型号清单 (逗号分隔, 出现在下拉里)。型号按在售目录给全。
+            "ANTHROPIC_BASE_URL": f"{gateway}/llm/anthropic",
+            "ANTHROPIC_AUTH_TOKEN": token,
+            "ANTHROPIC_MODEL": _codecli_model("claude-code"),
+            "ANTHROPIC_SMALL_FAST_MODEL": _codecli_model("claude-code"),
             "OPENAI_API_KEY": token,
-            "OPENAI_API_BASE": gateway_v1,
-            "OPENAI_PROXY_MODELS": ",".join(
-                [_codecli_model("codex")]
-                + [m for m in model_catalog.catalog() if m != _codecli_model("codex")]
-            ),
-            "DSH_MODEL": _codecli_model("codex"),
-            "DB_URL": "sqlite:////root/crewai-studio/crewai.db",
-            "DEFAULT_LANGUAGE": "zh",
-            "AGENTOPS_ENABLED": "False",
-            # CrewAI 第一次 kickoff 会弹一个"要不要开 tracing"的交互提问 (在线程里
-            # 拿 stdin, 卡一会儿才自动放弃), 之后还会上报遥测。全关。
-            "CREWAI_TRACING_ENABLED": "false",
-            "CREWAI_DISABLE_TELEMETRY": "true",
-            "OTEL_SDK_DISABLED": "true",
-            # 它用 langchain 的抓取工具, 不设 UA 会每次启动抱怨一句
-            "USER_AGENT": "dsh-cloud",
-            "DSH_CLOUD_TOKEN": token,
+            "OPENAI_BASE_URL": f"{gateway}/llm/v1",
+            # 界面里显示的 webhook 地址与配对链接用这两个。不设的话它写 127.0.0.1,
+            # 用户复制出去的 hook 地址是打不通的。
+            "OMB_PUBLIC_URL": f"https://{config.OPENMAUSBOT_DOMAIN}",
+            "OMB_WEBHOOK_PUBLIC_URL": f"https://{config.OPENMAUSBOT_DOMAIN}",
         }
     if product_id == "openmanus":
         return {

@@ -23,7 +23,7 @@ workspace_visual_check 只证明"页面渲染出来了、没有登录墙"。2026
 用法::
 
     bash scripts/product_use_check.sh                    # 全部会用的产品
-    bash scripts/product_use_check.sh openmanus crewai   # 只试这几个
+    bash scripts/product_use_check.sh openmanus pi   # 只试这几个
 
 退出码 0 = 都真的能用。
 """
@@ -54,16 +54,6 @@ USE = {
         # 永远是 0 —— 不报错、不变红, 而积分是这个产品的核心机制。
         "fail_extra2": ["0↑ 0↓"],
         "why": "发一句话没反应 (它的日志走 stderr, 外壳只读 stdout)",
-    },
-    "crewai": {
-        # 2026-09-02 起这格是 CrewAI-Studio (Streamlit): 进「执行!」页, 给示例队伍的
-        # {question} 占位符填题, 点「运行团队!」, 答案出现在「最终输出」里。
-        "kind": "studio",
-        "send": "{a} 加 {b} 等于几? 只回数字, 不要解释",
-        "want": ["{sum}"],
-        # 提供方没钉住的样子 (下拉里混进别家型号) / 示例队伍没种上的样子
-        "fail_extra": ["还未定义任何团队", "No crews defined"],
-        "why": "首屏是空 Studio / 运行报 LLM 提供方错误",
     },
     "pi": {
         "kind": "chat",

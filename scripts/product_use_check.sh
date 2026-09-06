@@ -2,7 +2,7 @@
 # 云产品的**动手**验收: 真敲命令 / 真发消息, 看有没有真回应。在应用机上跑。
 #
 #   bash scripts/product_use_check.sh                    # 全部会用的产品
-#   bash scripts/product_use_check.sh openmanus crewai   # 只试这几个
+#   bash scripts/product_use_check.sh openmanus pi   # 只试这几个
 #
 # 与 visual_check.sh 的分工: 那个开页面查登录墙 (首屏), 这个动手查能不能用。
 # 2026-09-01 老板逐个点开新接的四个产品, 四个全废, 而 visual_check 对它们全报 ✓
