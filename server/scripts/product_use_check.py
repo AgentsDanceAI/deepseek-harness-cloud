@@ -156,6 +156,13 @@ with sync_playwright() as p:
         # WebSocket 也要记: "正在连接…"这类卡住多半卡在它上面, 而 WS 不算 request,
         # requestfailed 抓不到。
         page.on("websocket", lambda ws: e.setdefault("ws", []).append(ws.url[:150]))
+        # 页面里的 JS 异常。"点了没反应""发不出去"这类形状, 十次有八次是一条
+        # 没人看见的异常 —— 不抓的话判读只会说"没看到预期回应", 查不到原因。
+        page.on("pageerror", lambda ex: e.setdefault("bad", []).append(f"JS 异常 {ex}"[:200]))
+        page.on(
+            "console",
+            lambda m: m.type == "error" and e.setdefault("bad", []).append(f"console {m.text}"[:200]),
+        )
         page.on("response", lambda r: r.status >= 400 and e.setdefault("bad", []).append(f"{r.status} {r.url}"[:150]))
         try:
             page.goto(prod["url"], timeout=60000, wait_until="domcontentloaded")
@@ -205,17 +212,25 @@ with sync_playwright() as p:
             elif kind == "chat":
                 # 占位符按产品给 —— 两家的文案差两个词, 写死一个就永远找不到另一个。
                 box = page.get_by_placeholder(prod.get("placeholder") or "Type your message...")
-                box.click(); box.fill(prod["send"])
-                page.keyboard.press("Enter")
-                # **回车没发出去就点发送按钮**。fill() 把值塞进 DOM, React 的受控
-                # 状态跟上了 (按钮会亮), 但有些编辑器的 Enter 处理挂在真实按键序列上,
+                box.click()
+                # **逐字敲, 不用 fill()**: fill 直接写 DOM 值再补一个 input 事件,
+                # 而有些编辑器的发送挂在真实按键序列上 (组合输入标志、keydown 顺序),
                 # 于是消息躺在输入框里不动 —— 页面一切正常, 只是什么都没发生
-                # (2026-09-05 OpenMausBot 第一次动手验收就是这个形状)。
+                # (2026-09-05 接 OpenMausBot 第一次动手验收就是这个形状)。
+                page.keyboard.type(prod["send"], delay=15)
+                page.keyboard.press("Enter")
                 page.wait_for_timeout(1500)
-                if "".join(prod["send"].split()) in "".join((box.input_value() or "").split()):
-                    for sel in ("button[type=submit]", 'button[aria-label*="end" i]', "form button:last-of-type"):
+                # 还留在框里就点发送按钮。按**可访问名**找 —— 按 CSS 找等于把别人的
+                # 类名当契约, 换个版本就失灵。
+                still = ""
+                try:
+                    still = box.input_value() or ""
+                except Exception:  # noqa: BLE001
+                    still = ""
+                if "".join(prod["send"].split()) in "".join(still.split()):
+                    for name in ("Send message", "Send", "发送"):
                         try:
-                            page.locator(sel).last.click(timeout=4000)
+                            page.get_by_role("button", name=name).last.click(timeout=4000)
                             break
                         except Exception:  # noqa: BLE001
                             continue

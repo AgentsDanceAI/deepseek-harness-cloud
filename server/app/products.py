@@ -2739,7 +2739,7 @@ _OMB_NGINX = """server {
     proxy_set_header Host $host;
     proxy_set_header X-Real-IP $remote_addr;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-Proto $dsh_proto;
     proxy_http_version 1.1;
   }
   location /api/events {
@@ -2748,7 +2748,7 @@ _OMB_NGINX = """server {
     proxy_set_header Host $host;
     proxy_set_header X-Real-IP $remote_addr;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-Proto $dsh_proto;
     proxy_http_version 1.1;
     # 事件流: 缓冲一开, 消息要攒够一块才吐, 界面看着像卡死。
     proxy_buffering off;
@@ -2761,7 +2761,7 @@ _OMB_NGINX = """server {
     proxy_set_header Host $host;
     proxy_set_header X-Real-IP $remote_addr;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-Proto $dsh_proto;
     proxy_set_header Upgrade $http_upgrade;
     proxy_set_header Connection $connection_upgrade;
     proxy_http_version 1.1;
@@ -2777,7 +2777,6 @@ _OMB_NGINX = """server {
     # 明确告诉上游别压 (Accept-Encoding 置空)。
     proxy_set_header Accept-Encoding "";
     sub_filter_once on;
-    sub_filter_types text/html;
     sub_filter '</head>' '<script>try{localStorage.setItem("omb-email-gate","skipped");localStorage.setItem("omb-analytics-opt-out","1")}catch(e){}</script></head>';
   }
 }
@@ -2834,6 +2833,7 @@ if reuse; then log "沿用上次的会话"; elif mint; then log "新配了一个
 fi
 cat > "$CONF" <<EOF
 map \$http_upgrade \$connection_upgrade { default upgrade; "" ""; }
+map \$http_x_forwarded_proto \$dsh_proto { default \$http_x_forwarded_proto; "" \$scheme; }
 map \$http_cookie \$dsh_up { default "$CK"; }
 EOF
 nginx -s reload 2>/dev/null || nginx
@@ -2895,6 +2895,12 @@ def _openmausbot_boot() -> str:
         # 配置检查的默认值 (原样透传浏览器自己的 cookie), autologin 拿到会话后覆盖。
         "cat > /etc/nginx/conf.d/00-autologin.conf <<'AUTOCONF'\n"
         'map $http_upgrade $connection_upgrade { default upgrade; "" ""; }\n'
+        # **不能用 $scheme**: Caddy 终止 TLS, 到我们这儿是明文 http, 而它拿
+        # X-Forwarded-Proto 拼出"这个请求自己的源地址"再和浏览器的 Origin 比
+        # (request-auth.ts 的 requestOrigin / isSameOrigin)。覆盖成 http 的话
+        # https://maus... 对不上 http://maus..., 发消息一律 403 —— 页面不报错,
+        # 消息就是发不出去 (2026-09-05 实测)。
+        'map $http_x_forwarded_proto $dsh_proto { default $http_x_forwarded_proto; "" $scheme; }\n'
         "map $http_cookie $dsh_up { default $http_cookie; }\n"
         "AUTOCONF\n"
         "cat > /etc/nginx/conf.d/default.conf <<'NGINXCONF'\n" + _OMB_NGINX + "NGINXCONF\n"

@@ -456,6 +456,17 @@ def test_openmausbot_nginx_repeats_headers_in_every_location():
     assert "omb-email-gate" in conf, "不压掉的话首屏是一张要姓名和邮箱的表单"
     assert "omb-analytics-opt-out" in conf, "不关的话用户行为上报到上游的 PostHog"
     assert 'proxy_set_header Accept-Encoding "";' in conf, "响应压着的话 sub_filter 什么都替换不到"
+    # 同源判定: 它拿 X-Forwarded-Proto 拼请求自己的源地址再和浏览器的 Origin 比。
+    # Caddy 终止 TLS, 到我们这儿是明文 —— 用 $scheme 覆盖就等于把 https 说成 http,
+    # 发消息一律 403, 而页面不报错 (2026-09-05 实测)。
+    assert "$scheme;" not in conf.replace("proxy_set_header X-Forwarded-Proto $dsh_proto;", "")
+    assert conf.count("proxy_set_header X-Forwarded-Proto $dsh_proto;") == 3
+
+
+def test_openmausbot_keeps_the_incoming_forwarded_proto():
+    boot = products.boot_script("openmausbot")
+    assert "map $http_x_forwarded_proto $dsh_proto" in boot, "默认那份 map 少了它, nginx 起不来"
+    assert boot.count("dsh_proto") >= 2, "autologin 覆盖 map 时也要带上, 否则重载后变量没定义"
 
 
 def test_openmausbot_models_go_through_our_gateway(monkeypatch):
