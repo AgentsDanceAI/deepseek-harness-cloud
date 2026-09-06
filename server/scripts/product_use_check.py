@@ -207,6 +207,18 @@ with sync_playwright() as p:
                 box = page.get_by_placeholder(prod.get("placeholder") or "Type your message...")
                 box.click(); box.fill(prod["send"])
                 page.keyboard.press("Enter")
+                # **回车没发出去就点发送按钮**。fill() 把值塞进 DOM, React 的受控
+                # 状态跟上了 (按钮会亮), 但有些编辑器的 Enter 处理挂在真实按键序列上,
+                # 于是消息躺在输入框里不动 —— 页面一切正常, 只是什么都没发生
+                # (2026-09-05 OpenMausBot 第一次动手验收就是这个形状)。
+                page.wait_for_timeout(1500)
+                if "".join(prod["send"].split()) in "".join((box.input_value() or "").split()):
+                    for sel in ("button[type=submit]", 'button[aria-label*="end" i]', "form button:last-of-type"):
+                        try:
+                            page.locator(sel).last.click(timeout=4000)
+                            break
+                        except Exception:  # noqa: BLE001
+                            continue
                 # **等答案出现**, 不是干等一个固定秒数: 答得快就早走, 答得慢
                 # (冷启动第一句) 也不会被腰斩。最多三分钟。
                 want = ["".join(w.split()) for w in (prod.get("want") or [])]
