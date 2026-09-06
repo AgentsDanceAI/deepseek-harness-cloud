@@ -13,8 +13,9 @@
 # token / ca.crt / .env 片段。可重复跑 —— 每一步都先看现状再动手。
 #
 # 装的东西 (全部可退, 见 README 的「退场」):
-#   /etc/wireguard/dsh0.conf + wg-quick@dsh0    出站拨到应用机的 WireGuard (systemd 使能
-#                                               → resume 后自动回来; /etc 进快照 → 密钥不变)
+#   /opt/dsh-wg/dsh0.{conf,key,pub} + dsh-wg.service   出站拨到应用机的 WireGuard。
+#                                               **不能放 /etc/wireguard** —— 那是 ascii.dev
+#                                               的目录, 每次开机被它重置 (见步骤 1 的注释)
 #   /usr/local/sbin/dsh-tunnel-firewall         隧道这一侧的围栏, 由 wg-quick 的 PostUp 挂上
 #   /etc/rancher/k3s/config.yaml + k3s          数据在 /opt/dsh-k3s (**必须**, 见 k3s-config.yaml)
 #   /usr/local/bin/runsc, containerd-shim-runsc-v1, /etc/containerd/runsc.toml
@@ -45,7 +46,7 @@ fail() { printf 'FAIL  %s\n' "$*"; rc=1; }
 # **盒子出站**拨 WireGuard: 盒子地址怎么变都无所谓, 应用机只认公钥; 而且出站永远通,
 # 不像入站那样只剩一个 22。
 #
-# 密钥放 /etc/wireguard (进快照) 且**只在没有时才生成** —— 重跑本脚本不换密钥, 否则
+# 密钥只在没有时才生成 —— 重跑本脚本不换密钥, 否则
 # 应用机那边登记的对端当场失效, 而症状是"隧道就是不通", 没有任何一处会说是为什么。
 step "1/6 隧道 (WireGuard: 盒子 → 应用机 $WG_ENDPOINT)"
 # 先清掉 ssh 隧道那一版留下的东西 —— 换了传输就不该再让一台公网机器开着 root 登录。
@@ -56,25 +57,34 @@ if [ -f /etc/ssh/sshd_config.d/60-dsh-tunnel.conf ] || [ -f /usr/local/sbin/dsh-
   pass "ssh 隧道那一版的残留已清 (root 登录关回去了)"
 fi
 command -v wg >/dev/null || { apt-get update -qq && apt-get install -y -qq wireguard-tools; }
-install -d -m 0700 /etc/wireguard
-[ -s /etc/wireguard/$WG_IF.key ] || (umask 077; wg genkey > /etc/wireguard/$WG_IF.key)
-wg pubkey < /etc/wireguard/$WG_IF.key > /etc/wireguard/$WG_IF.pub
 
-# 隧道这一侧的围栏先装好 —— 它是下面 wg-quick 的 PostUp, 顺序反了第一次起不来。
+# ⚠️ **不要把配置放 /etc/wireguard。** 那是 ascii.dev 自己的地盘 (它的 wg0 就在那儿),
+# 盒子每次开机会把整个目录重置成只剩它自己的 box.key + wg0.conf —— 我们放进去的
+# dsh0.conf 和私钥一起消失, 而 wg-quick@dsh0 还留在 enabled 状态, 于是"接口没起来、
+# 配置也不见了、systemd 说它是 enabled"。2026-09-06 第一次跨 resume 就栽在这里。
+# 放 /opt (进快照, ascii.dev 不碰), 用自己的 unit: wg-quick 接受完整路径, 接口名取
+# 文件名。私钥也在这儿, 所以 resume 之后**公钥不变**, 应用机那边不用重新登记。
+WG_DIR=/opt/dsh-wg
+install -d -m 0700 "$WG_DIR"
+[ -s "$WG_DIR/$WG_IF.key" ] || (umask 077; wg genkey > "$WG_DIR/$WG_IF.key")
+wg pubkey < "$WG_DIR/$WG_IF.key" > "$WG_DIR/$WG_IF.pub"
+systemctl disable --now "wg-quick@$WG_IF" >/dev/null 2>&1 || true   # 老路径那版, 退场
+
+# 隧道这一侧的围栏先装好 —— 它是下面的 PostUp, 顺序反了第一次起不来。
 sed -e "s|10\.42\.0\.0/16|$CLUSTER_CIDR|g" -e "s|10\.43\.0\.0/16|$SERVICE_CIDR|g" \
     -e "s|^DEV=tun0|DEV=$WG_IF|" "$K8SN/tunnel-firewall.sh" > /tmp/dsh-tunnel-firewall.sh
 DSH_TUNNEL_APP_IP="$T_APP" bash /tmp/dsh-tunnel-firewall.sh install "$T_APP" >/dev/null 2>&1 \
   && pass "节点侧围栏已装 (只放行到 6443 与转发到 $CLUSTER_CIDR/$SERVICE_CIDR)" || fail "围栏安装失败"
 
 umask 077
-cat > /etc/wireguard/$WG_IF.conf <<EOF
+cat > "$WG_DIR/$WG_IF.conf" <<EOF
 [Interface]
 Address = $T_NODE/32
 PostUp = /usr/local/sbin/dsh-tunnel-firewall apply $T_APP
 PostDown = /usr/local/sbin/dsh-tunnel-firewall remove
 EOF
-printf 'PrivateKey = %s\n' "$(cat /etc/wireguard/$WG_IF.key)" >> /etc/wireguard/$WG_IF.conf
-cat >> /etc/wireguard/$WG_IF.conf <<EOF
+printf 'PrivateKey = %s\n' "$(cat "$WG_DIR/$WG_IF.key")" >> "$WG_DIR/$WG_IF.conf"
+cat >> "$WG_DIR/$WG_IF.conf" <<EOF
 
 [Peer]
 # 应用机。AllowedIPs 只有它的隧道地址一个 —— 节点不需要经隧道去别处, 而 AllowedIPs
@@ -82,14 +92,34 @@ cat >> /etc/wireguard/$WG_IF.conf <<EOF
 PublicKey = $WG_SPUB
 Endpoint = $WG_ENDPOINT
 AllowedIPs = $T_APP/32
-# 盒子多半在 NAT 后面 (baremetal 落点是私网 IPv4), 靠它把回程路径撑着。
+# 盒子在 NAT 后面 (baremetal 落点是私网 IPv4), 靠它把回程路径撑着。
 PersistentKeepalive = 25
 EOF
-chmod 0600 /etc/wireguard/$WG_IF.conf
+chmod 0600 "$WG_DIR/$WG_IF.conf"
 umask 022
-systemctl enable --now "wg-quick@$WG_IF" >/dev/null 2>&1 || systemctl restart "wg-quick@$WG_IF"
-systemctl is-active --quiet "wg-quick@$WG_IF" && pass "wg-quick@$WG_IF 已起并 enable (resume 后自动回来)" \
-  || fail "wg-quick@$WG_IF 没起来 (journalctl -u wg-quick@$WG_IF)"
+
+cat > /etc/systemd/system/dsh-wg.service <<EOF
+[Unit]
+Description=DSH Cloud standby-node tunnel (WireGuard $WG_IF, config outside /etc/wireguard)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/wg-quick up $WG_DIR/$WG_IF.conf
+ExecStop=/usr/bin/wg-quick down $WG_DIR/$WG_IF.conf
+Restart=on-failure
+RestartSec=10s
+
+[Install]
+WantedBy=multi-user.target
+EOF
+systemctl daemon-reload
+systemctl restart dsh-wg 2>/dev/null || systemctl start dsh-wg
+systemctl enable dsh-wg >/dev/null 2>&1
+systemctl is-active --quiet dsh-wg && pass "dsh-wg 已起并 enable (配置在 $WG_DIR, resume 后自动回来)" \
+  || fail "dsh-wg 没起来 (journalctl -u dsh-wg)"
 
 # ── 2. k3s ───────────────────────────────────────────────────────────────────
 step "2/6 k3s (数据落 /opt/dsh-k3s —— /var 不进 Box 快照)"
@@ -197,7 +227,7 @@ if wg show "$WG_IF" >/dev/null 2>&1; then
   else
     # 安全组没放行 UDP 就是这个样子: 接口起着、一次握手也没有。
     fail "接口在但从未握手 —— 多半是应用机的入站 UDP 没放行, 或对端公钥还没登记"
-    echo "      应用机上: bash deploy/box-node/tunnel-wg-144.sh peer $(cat /etc/wireguard/$WG_IF.pub)"
+    echo "      应用机上: bash deploy/box-node/tunnel-wg-144.sh peer $(cat /opt/dsh-wg/$WG_IF.pub)"
   fi
 else
   fail "wg show $WG_IF 失败"
@@ -218,7 +248,7 @@ else
 fi
 echo
 echo "  这台盒子的 WireGuard 公钥 (回应用机跑 tunnel-wg-144.sh peer <它>):"
-echo "    $(cat /etc/wireguard/$WG_IF.pub)"
+echo "    $(cat /opt/dsh-wg/$WG_IF.pub)"
 echo
 echo "  .env 片段 (激活时才换上去, 演练不要动线上这几行):"
 echo "    K8S_API_URL=https://$T_NODE:6443"
