@@ -40,8 +40,8 @@
 ## 一、建/重建一台 (底片没了才需要)
 
 ```sh
-export BOX_ENVFILE=/path/to/.env          # 里面要有 BOX_API_KEY
-bash deploy/box-node/box.sh limits        # 先看还能不能开 (试用档只有 2 台并发)
+# 凭据默认从应用机的 /root/dsh-k8s-box/box.env 读 (BOX_API_KEY + BOX_ORG), 不用设环境变量
+bash deploy/box-node/box.sh limits        # 应该显示 standard; 显示 trial 就是 org 没带上
 BOX=$(bash deploy/box-node/box.sh new default 7200)
 
 # 应用机: 生成密钥并拿到公钥 (已经跑过就跳过, 重跑不会换密钥)
@@ -64,7 +64,7 @@ bash deploy/box-node/box.sh stop $BOX              # 停机 = 免费
 ## 二、激活 (248 没了的那天)
 
 ```sh
-BOX_ENVFILE=... bash deploy/box-node/activate.sh <box id>
+bash deploy/box-node/activate.sh <box id>
 # 或者从底片新开一台:
 BOX_ENVFILE=... DSH_FROM_SNAPSHOT=dsh-node bash deploy/box-node/activate.sh
 ```
@@ -86,7 +86,7 @@ BOX_ENVFILE=... DSH_FROM_SNAPSHOT=dsh-node bash deploy/box-node/activate.sh
 集群 10.44/10.45 + `dshbox0`。两条隧道能同时在, 所以演练随时可做:
 
 ```sh
-BOX_ENVFILE=... bash deploy/box-node/activate.sh <box id>   # 全绿即可, 不要切 .env
+bash deploy/box-node/activate.sh <box id>   # 全绿即可, 不要切 .env
 bash deploy/box-node/tunnel-wg-144.sh down
 bash deploy/box-node/box.sh stop <box id>
 ```
@@ -145,7 +145,10 @@ bash deploy/box-node/box.sh orgs                    # 列钱包
 BOX_ORG=<id> bash deploy/box-node/box.sh limits     # 哪个是 standard 用哪个
 ```
 
-`box.sh` 认 `BOX_ORG` 环境变量 (转成 `X-Box-Org` 头)。⚠️ 口袋专家那条线的
+`box.sh` 默认从应用机的 `/root/dsh-k8s-box/box.env` 读 `BOX_API_KEY` 与 `BOX_ORG`
+(转成 `X-Box-Org` 头), 所以不用每次记得设; `BOX_ORG` 为空时它会在 stderr 上吵一句 ——
+这个失败是静默的, 不吵就会有人以为「付过钱怎么只能开 2 台」。**故意不放
+`deploy/prod/.env`**: 那份被 compose 以 `env_file` 注进 dhc-server, 而它根本不用 Box。⚠️ 口袋专家那条线的
 `backend/dataset/agent_box.py` **没有**带 org, 所以云电脑现在是花在个人的试用额度上。
 
 **8. 试用档 = 2 台并发 / 25 小时 / 只有 small 与 default / ttl 必须 ≤ 7200s。**

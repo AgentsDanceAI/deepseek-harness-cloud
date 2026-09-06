@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ascii.dev Box 的一层薄壳 (只用 curl, 不引 SDK) —— 备用工作台节点的全部操作都从这里走。
 #
-#   BOX_ENVFILE=deploy/prod/.env bash deploy/box-node/box.sh <子命令> [参数]
+#   bash deploy/box-node/box.sh <子命令> [参数]      # 密钥与 org 默认从 /root/dsh-k8s-box/box.env 读
 #
 #   ls                          列出账上所有 Box (id / 状态 / 规格 / 公网 IP)
 #   limits                      当前档位、并发上限、还能不能开 (按 BOX_ORG 指定的钱包)
@@ -29,12 +29,24 @@
 set -euo pipefail
 
 API="${BOX_API_BASE:-https://ascii.dev/api/box/v1}"
-ENVFILE="${BOX_ENVFILE:-}"
-if [ -z "${BOX_API_KEY:-}" ] && [ -n "$ENVFILE" ] && [ -r "$ENVFILE" ]; then
-  # 别 source .env —— 里面有带空格不加引号的值, source 会把它们当命令执行。
-  BOX_API_KEY="$({ grep -E '^BOX_API_KEY=' "$ENVFILE" || true; } | tail -1 | cut -d= -f2- | sed -e 's/^"//' -e 's/"$//')"
+# 默认从应用机上那份 box.env 读 (BOX_API_KEY + BOX_ORG)。**不要**放进
+# deploy/prod/.env —— compose 对 dhc-server 是 `env_file: [".env"]`, 放那儿等于把
+# Box 的密钥注进应用容器, 而它根本不用 Box。
+ENVFILE="${BOX_ENVFILE:-/root/dsh-k8s-box/box.env}"
+envget() {  # 别 source —— .env 里有带空格不加引号的值, source 会把它们当命令执行
+  { grep -E "^$1=" "$ENVFILE" 2>/dev/null || true; } | tail -1 | cut -d= -f2- | sed -e 's/^"//' -e 's/"$//'
+}
+if [ -r "$ENVFILE" ]; then
+  [ -n "${BOX_API_KEY:-}" ] || BOX_API_KEY="$(envget BOX_API_KEY)"
+  [ -n "${BOX_ORG:-}" ]     || BOX_ORG="$(envget BOX_ORG)"
 fi
-[ -n "${BOX_API_KEY:-}" ] || { echo "没有 BOX_API_KEY (设环境变量, 或 BOX_ENVFILE 指到含它的 .env)" >&2; exit 2; }
+[ -n "${BOX_API_KEY:-}" ] || { echo "没有 BOX_API_KEY (设环境变量, 或让 BOX_ENVFILE 指到含它的文件; 当前找的是 $ENVFILE)" >&2; exit 2; }
+# 没有 org = 这次请求记在个人钱包上, 而个人钱包多半还是 trial —— 症状是"明明付过钱
+# 却只能开 2 台", 且没有任何一处会说破。所以这里必须吵。
+if [ -z "${BOX_ORG:-}" ] && [ "${1:-}" != "orgs" ]; then
+  echo "⚠️  没有 BOX_ORG: 这次请求算在**个人钱包**上 (多半是 trial, 2 台并发)。" >&2
+  echo "    \`bash $0 orgs\` 找到 standard 那个, 写进 $ENVFILE 的 BOX_ORG=" >&2
+fi
 
 req() {  # req <方法> <路径> [json 体] [额外 header...]
   local m="$1" p="$2" body="${3:-}"; shift 3 2>/dev/null || shift 2
