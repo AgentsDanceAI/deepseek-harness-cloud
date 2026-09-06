@@ -150,3 +150,16 @@ def test_tables_match_the_generator():
     gen = CONFIG.parent / "scripts" / "gen_pricing.py"
     r = subprocess.run([sys.executable, str(gen), "--check"], capture_output=True, text=True)
     assert r.returncode == 0, f"price tables are stale, re-run gen_pricing.py:\n{r.stderr}"
+
+
+def test_every_catalog_app_has_a_pass_price():
+    """目录里的每一格都要有通行证价 —— 漏一格的表现是: 锁得上、卡片也变了样, 但点
+    "开通"报 unknown_item, 卖不出去 (2026-09-06 数字人就漏过一次)。"""
+    from app import apps_catalog, plans
+
+    for cur in ("USD", "CNY"):
+        passes = plans.pricing(cur)["passes"]
+        missing = [a.id for a in apps_catalog.CATALOG if a.id not in passes]
+        assert not missing, f"{cur} 少了这几格的价: {missing}"
+        for pid, d in passes.items():
+            assert int(d["cents"]) > 0 and int(d["days"]) > 0, (cur, pid)

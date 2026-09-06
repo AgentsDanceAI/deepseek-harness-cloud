@@ -72,22 +72,26 @@ FREE = {"work_minutes": 180, "signup_credits": 500, "concurrency": 1}
 # 定价页的卡片仍是整数, 而解锁那个横幅自己按两位小数渲染。
 PASS_DAYS = 7
 PASS_CENTS = {"USD": 149, "CNY": 990, "EUR": 139, "GBP": 119, "HKD": 1190, "JPY": 20000}
+# **目录里的每一格都要在这**, 包括数字人那种没有工作台的 (它住在主站的 /avatar,
+# 一样是十六格之一, 一样能上锁)。漏一格的表现是: 锁得上、卡片也变了样, 但点"开通"
+# 报 unknown_item —— 卖不出去。test_every_catalog_app_has_a_pass_price 钉住这条。
 PASS_PRODUCTS = [
-    "coze",
+    "dsh",
     "comfyui",
     "dify",
-    "openmausbot",
+    "coze",
+    "openclaw",
+    "hermes",
     "claude-code",
     "codex",
-    "hermes",
-    "openclaw",
-    "agents-team",
     "open-design",
+    "agents-team",
     "pi",
     "autogen",
     "langchain",
     "openmanus",
-    "dsh",
+    "openmausbot",
+    "avatar",
 ]
 
 # id,        $,  base credits, bonus %

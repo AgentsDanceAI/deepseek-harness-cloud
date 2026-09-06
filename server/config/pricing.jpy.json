@@ -74,7 +74,7 @@
     }
   },
   "passes": {
-    "coze": {
+    "dsh": {
       "days": 7,
       "cents": 20000
     },
@@ -86,7 +86,15 @@
       "days": 7,
       "cents": 20000
     },
-    "openmausbot": {
+    "coze": {
+      "days": 7,
+      "cents": 20000
+    },
+    "openclaw": {
+      "days": 7,
+      "cents": 20000
+    },
+    "hermes": {
       "days": 7,
       "cents": 20000
     },
@@ -98,19 +106,11 @@
       "days": 7,
       "cents": 20000
     },
-    "hermes": {
-      "days": 7,
-      "cents": 20000
-    },
-    "openclaw": {
+    "open-design": {
       "days": 7,
       "cents": 20000
     },
     "agents-team": {
-      "days": 7,
-      "cents": 20000
-    },
-    "open-design": {
       "days": 7,
       "cents": 20000
     },
@@ -130,7 +130,11 @@
       "days": 7,
       "cents": 20000
     },
-    "dsh": {
+    "openmausbot": {
+      "days": 7,
+      "cents": 20000
+    },
+    "avatar": {
       "days": 7,
       "cents": 20000
     }
