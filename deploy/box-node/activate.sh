@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # 把备用节点拉起来 —— 在**应用机**上以 root 跑。演练和真出事用的是同一条命令。
 #
-#   BOX_ENVFILE=/path/to/.env bash deploy/box-node/activate.sh <box id>     # 唤醒一台已有的
-#   BOX_ENVFILE=... DSH_FROM_SNAPSHOT=dsh-node bash deploy/box-node/activate.sh   # 从底片新开一台
+#   bash deploy/box-node/activate.sh <box id>                      # 唤醒一台已有的
+#   DSH_FROM_SNAPSHOT=dsh-node bash deploy/box-node/activate.sh    # 从底片新开一台
+#   (凭据与 org 由 box.sh 从 /root/dsh-k8s-box/box.env 读, 不用设环境变量)
 #
 # 做完这六步, 节点就绪、隧道在、烟测过。**它不改任何线上配置** —— 最后那一步
 # (.env 换 K8S_API_URL 并重启 api) 打印出来给人自己贴, 因为那一下是真切流量。

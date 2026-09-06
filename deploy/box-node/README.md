@@ -66,7 +66,7 @@ bash deploy/box-node/box.sh stop $BOX              # 停机 = 免费
 ```sh
 bash deploy/box-node/activate.sh <box id>
 # 或者从底片新开一台:
-BOX_ENVFILE=... DSH_FROM_SNAPSHOT=dsh-node bash deploy/box-node/activate.sh
+DSH_FROM_SNAPSHOT=dsh-node bash deploy/box-node/activate.sh
 ```
 
 六步: 开机 → 隧道握手 → 取凭据 → API 200 → 起 Pod 验 gVisor → 应用机直连 Pod。
