@@ -3091,6 +3091,15 @@ def _pick_media_model(offered: list | None, key: str, prefer: tuple[str, ...]) -
     return {key: ids[0]} if ids else {}
 
 
+def locked_ids() -> set[str]:
+    """要买通行证才能开的产品 id (config.WORK_LOCKED_PRODUCTS)。"""
+    return {p.strip() for p in (config.WORK_LOCKED_PRODUCTS or "").split(",") if p.strip()}
+
+
+def is_locked(product_id: str) -> bool:
+    return product_id in locked_ids()
+
+
 def minute_units(product_id: str) -> int:
     """这个产品跑一分钟, 从用户的机时额度里扣几份。
 

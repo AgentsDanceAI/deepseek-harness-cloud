@@ -362,7 +362,7 @@ def markdown_to_html(md: str) -> str:
 # --- landing -----------------------------------------------------------------
 
 
-def _apps_ctx() -> dict:
+def _apps_ctx(user: dict | None = None) -> dict:
     """云空间目录 + 实时上线状态 + 链接语义。主页与 /apps 共用 —— 两处各算一份
     必然漂, 漂的结果是主页能点而 /apps 不能 (或反过来)。
 
@@ -372,7 +372,10 @@ def _apps_ctx() -> dict:
     from . import apps_catalog, products, work_access
 
     enabled = {p.id for p in products.enabled()} | apps_catalog.site_apps()
-    apps = apps_catalog.entries_with_status(enabled, work_access.minutes_by_product())
+    # 没登录的人看到的是"要买"的样子 —— 那正是实情, 而且比登录后才发现要买诚实。
+    # 查证失败当作没买 (work_access.pass_active 自己兜底), 宁可多问一次也不白送。
+    locked = {pid for pid in products.locked_ids() if not (user and work_access.pass_active(user["id"], pid))}
+    apps = apps_catalog.entries_with_status(enabled, work_access.minutes_by_product(), locked)
     if config.WORK_ENABLED:
         target = ""
     else:
@@ -389,7 +392,7 @@ def _apps_ctx() -> dict:
 @router.get("/")
 def landing(request: Request):
     pricing = _pricing_safe()
-    return _render(request, "index.html", "landing", pricing=pricing, **_apps_ctx())
+    return _render(request, "index.html", "landing", pricing=pricing, **_apps_ctx(try_resolve_user(request)))
 
 
 # --- auth pages --------------------------------------------------------------
@@ -445,7 +448,7 @@ def apps_page(request: Request):
     愿景清单, registry 才是事实。本实例没开云工作台时 (自部署默认), 卡片指向
     官方托管版; 连托管地址都没配就只作陈列, 不放会 404 的按钮。
     """
-    return _render(request, "apps.html", "apps", **_apps_ctx())
+    return _render(request, "apps.html", "apps", **_apps_ctx(try_resolve_user(request)))
 
 
 @router.get("/solutions")
@@ -634,13 +637,30 @@ def pricing_page(request: Request):
     # told why makes the price list look like an ad. `reason` was already being
     # passed on those redirects and had never been rendered.
     reason = request.query_params.get("reason")
+    # 从上锁的格子跳过来时, 顶部给一条"买这一格"的横幅 —— 让人从"为什么进不去"
+    # 直接走到"多少钱、买"。价来自价目表 (与结账用的是同一处, 不会两处各写一遍)。
+    unlock = None
+    if reason == "locked":
+        from . import products as _products
+
+        pid = request.query_params.get("product_id") or ""
+        pdef = (pricing.get("passes") or {}).get(pid)
+        prod = _products.get(pid)
+        if pdef and prod and _products.is_locked(pid):
+            unlock = {
+                "id": pid,
+                "name": prod.name,
+                "cents": int(pdef["cents"]),
+                "days": int(pdef["days"]),
+            }
     return _render(
         request,
         "pricing.html",
         "pricing",
         pricing=pricing,
         tier_order=tier_order,
-        reason=reason if reason in ("work", "credits") else None,
+        reason=reason if reason in ("work", "credits", "locked") else None,
+        unlock=unlock,
     )
 
 

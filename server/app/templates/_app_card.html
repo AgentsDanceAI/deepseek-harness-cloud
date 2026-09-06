@@ -1,6 +1,11 @@
 {# 一张云空间产品卡。/apps 与主页共用 —— 两份必然漂, 漂的结果是主页说已上线
    而 /apps 说没有。上下文要求: app, apps_clickable, apps_base。 #}
-{% if app.live and apps_clickable %}
+{% if app.live and apps_clickable and app.locked %}
+{# 上锁的格子: 卡片指向解锁, 不指向工作台 —— 让人点进去才发现进不去, 是把
+   "要买"藏起来, 不是把它说清楚。原地打开: 那是本站页面。 #}
+<a class="card feature app-card is-live is-locked"
+   href="{{ apps_base }}/pricing?reason=locked&product_id={{ app.id }}#unlock">
+{% elif app.live and apps_clickable %}
 {# 云空间在新标签打开: 那是长驻的工作界面, 点进去不该把用户从目录页顶掉 ——
    他常要在几个产品之间来回。noopener 是安全默认 (被打开页拿不到 window.opener)。
    app.href 那类 (数字人) 是**本站页面**, 原地打开 —— 顶层导航还在, 新标签只是
@@ -15,7 +20,9 @@
     <span class="feature-icon app-icon">
       <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{{ app.icon | safe }}</svg>
     </span>
-    {% if app.live %}
+    {% if app.locked %}
+    <span class="app-badge locked">{{ t("apps.badge.locked") }}</span>
+    {% elif app.live %}
     <span class="app-badge live"><i></i>{{ t("apps.badge.live") }}</span>
     {% else %}
     <span class="app-badge soon">{{ t("apps.badge.soon") }}</span>
@@ -24,7 +31,11 @@
   <h3>{{ app.name }}</h3>
   <span class="app-cat">{{ t("apps.tag." + app.tag) }}</span>
   <p>{{ t("apps.d." + app.id) }}</p>
-  {% if app.live and apps_clickable %}
+  {% if app.live and apps_clickable and app.locked %}
+  <span class="app-enter">{{ t("apps.unlock") }}
+    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+  </span>
+  {% elif app.live and apps_clickable %}
   <span class="app-enter">{{ t("apps.enter") }}
     <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
   </span>

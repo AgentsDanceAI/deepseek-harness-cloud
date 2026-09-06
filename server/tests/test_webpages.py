@@ -632,3 +632,38 @@ def test_admin_page_has_per_product_usage(client):
     # 非管理员看不到这页
     signup(client, "pleb@t.local")
     assert client.get("/console/admin", follow_redirects=False).status_code == 303
+
+
+def test_locked_apps_point_at_the_unlock_flow(client, monkeypatch):
+    """上锁的格子: 卡片指向解锁, 不指向工作台 —— 让人点进去才发现进不去, 是把
+    "要买"藏起来, 不是把它说清楚 (老板 2026-09-06)。"""
+    from app import config, products
+
+    monkeypatch.setattr(config, "WORK_ENABLED", True)
+    # 卡片要"已上线"才有链接 —— 目录是愿景, registry 才是事实 (见 apps_catalog)
+    monkeypatch.setattr(config, "DIFY_DOMAIN", "dify.test.local")
+    monkeypatch.setattr(config, "COMFY_IMAGE", "comfy:test")
+    monkeypatch.setattr(config, "COMFY_DOMAIN", "comfy.test.local")
+    monkeypatch.setattr(config, "WORK_LOCKED_PRODUCTS", "dify")
+    live = {p.id for p in products.enabled()}
+    assert {"dify", "comfyui"} <= live, live
+    assert products.is_locked("dify") and not products.is_locked("comfyui")
+    body = client.get("/apps?lang=zh").text
+    assert "reason=locked&amp;product_id=dify" in body or "reason=locked&product_id=dify" in body
+    assert "需开通" in body and "开通试用" in body
+    # 没上锁的格子照旧直接进工作台
+    assert "/work?product_id=comfyui" in body
+
+
+def test_unlock_banner_shows_the_price_with_decimals(client, monkeypatch):
+    """9.9 写成 9 就不是那个东西了 —— 套餐卡片是整数单位, 这个横幅按两位小数渲染。"""
+    from app import config
+
+    monkeypatch.setattr(config, "WORK_LOCKED_PRODUCTS", "dify")
+    body = client.get("/pricing?reason=locked&product_id=dify&cur=CNY&lang=zh").text
+    assert 'id="unlock"' in body and 'data-item="pass:dify"' in body
+    assert "9.90" in body, "冲动价要显示到分"
+    assert "Dify" in body
+    # 没上锁的产品不给横幅 —— 否则等于卖一个不用买的东西
+    monkeypatch.setattr(config, "WORK_LOCKED_PRODUCTS", "")
+    assert 'id="unlock"' not in client.get("/pricing?reason=locked&product_id=dify&lang=zh").text

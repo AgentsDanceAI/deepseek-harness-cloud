@@ -1250,6 +1250,8 @@ td.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size
 .app-badge.live { color: var(--ok); background: var(--ok-weak); }
 .app-badge.live i { width: 6px; height: 6px; border-radius: 50%; background: var(--ok); }
 .app-badge.soon { color: var(--muted); border: 1px solid var(--border); }
+/* 上锁的格子: 已上线但要先开通。用品牌色而不是灰 —— 它是可以买的, 不是没做完。 */
+.app-badge.locked { color: var(--brand); background: var(--brand-weak); }
 .app-enter { display: inline-flex; align-items: center; gap: 6px; margin-top: 12px; color: var(--brand); font-size: 13.5px; font-weight: 600; }
 .app-card.is-live:hover .app-enter svg { transform: translateX(3px); }
 .app-enter svg { transition: transform .15s; }

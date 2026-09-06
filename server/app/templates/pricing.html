@@ -13,6 +13,20 @@
       <p class="gate-notice">{{ t("pricing.gate." ~ reason) }}</p>
     {% endif %}
 
+    {# 从上锁的格子跳过来: 直接给"这一格多少钱、买"。金额按两位小数渲染 ——
+       套餐卡片是整数单位 (见 gen_pricing 顶部那条规矩), 而这个是冲动价, 9.9
+       写成 9 就不是那个东西了。 #}
+    {% if unlock %}
+    <div class="card block unlock-card" id="unlock" style="max-width:560px;margin:18px auto 0;text-align:center">
+      <h2 style="margin:0 0 6px">{{ _t("pricing.unlock.h", name=unlock.name) }}</h2>
+      <p class="muted small" style="margin:0 0 14px">{{ _t("pricing.unlock.lede", days=unlock.days) }}</p>
+      <p style="margin:0 0 14px"><span class="price-now">{{ currency_symbol }}{{ "%.2f"|format(unlock.cents / 100) }}</span>
+        <span class="muted small">/ {{ _t("pricing.unlock.days", days=unlock.days) }}</span></p>
+      <button class="btn btn-primary buy-btn" data-item="pass:{{ unlock.id }}" type="button">{{ _t("pricing.unlock.buy") }}</button>
+      <p class="muted small" style="margin:12px 0 0">{{ _t("pricing.unlock.note") }}</p>
+    </div>
+    {% endif %}
+
     {# Billing period and currency are the two knobs on this page's prices, so
        they sit together. The picker is a link list, not a form: an explicit
        ?cur= is what persists the choice, and it has to work without JS. #}

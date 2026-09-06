@@ -110,20 +110,54 @@ def test_plan_tier_sets_the_allowance():
     assert st["plan_tier"] == "pro" and st["minutes_left"] == 3600
 
 
-def test_machine_hours_are_the_only_gate():
-    """The 7-day pass was a second way to buy workspace access, parallel to the
-    monthly hours. Two meters that can disagree is one more than the product
-    needs, so access is now decided by hours alone."""
-    import inspect
+def test_machine_hours_are_still_the_only_meter():
+    """机时是**唯一的计量表**。
 
-    from app import work_access
+    老的"七天通行证"是买工作台使用权的第二条路, 与每月机时并行 —— 两个能互相矛盾的
+    计量表比产品需要的多一个, 所以当时删掉了, 使用权只由机时决定。
 
-    src = inspect.getsource(work_access)
-    for gone in ("active_pass", "grant_pass", "next_price", "PASS_INTRO"):
-        assert gone not in src, f"{gone} survived the pass removal"
-    st = work_access.state("u_nobody")
+    2026-09-06 通行证以**另一种东西**回来了 (老板: "16 个是否可以配置化加锁, 比如
+    9.9 才给开通试用"): 它回答的是"这一格你能不能开", 不是"你还剩多少时间"。开了之后
+    照样按机时计量、照样受机时闸限制。这个测试钉住的就是这条界线 —— 通行证一分钟机时
+    都不给, 也绕不过机时耗尽的闸。
+    """
+    from app import products, work_access
+
+    uid = _user("u_pass_meter")
+    _burn(uid, 120)  # 机时耗尽
+    assert work_access.blocked_reason(uid) == "work_quota"
+    work_access.grant_pass(uid, "coze", 7)
+    assert work_access.pass_active(uid, "coze"), "证发下去了"
+    assert work_access.blocked_reason(uid) == "work_quota", "**有证也不能绕过机时闸**"
+    assert work_access.state(uid)["minutes_left"] == 0, "证不带机时"
+    assert work_access.minute_packs_left(uid) == 0
+    # 状态里不冒出第二个"能不能用"的判据
+    st = work_access.state(uid)
     assert "pass_active" not in st and "next_price" not in st
     assert st["allowed"] == (st["minutes_left"] > 0)
+    # 只对买的那一格有效
+    assert not work_access.pass_active(uid, "dify")
+    assert products.is_locked("coze") is ("coze" in products.locked_ids())
+
+
+def test_pass_extends_from_the_existing_expiry(monkeypatch):
+    """连买两张不该白白损失第一张的剩余时间。"""
+    uid = _user("u_pass_ext")
+    work_access.grant_pass(uid, "coze", 7)
+    first = work_access.pass_expires(uid, "coze")
+    work_access.grant_pass(uid, "coze", 7)
+    assert work_access.pass_expires(uid, "coze") > first + 6 * 86400
+
+
+def test_locked_products_come_from_config(monkeypatch):
+    """锁哪几格是运营决定 —— 改 env 部署一次就生效, 不用改代码。"""
+    from app import products
+
+    monkeypatch.setattr(config, "WORK_LOCKED_PRODUCTS", "")
+    assert products.locked_ids() == set() and not products.is_locked("coze")
+    monkeypatch.setattr(config, "WORK_LOCKED_PRODUCTS", " coze , dify ")
+    assert products.locked_ids() == {"coze", "dify"}
+    assert products.is_locked("coze") and not products.is_locked("pi")
 
 
 def test_purchased_minutes_extend_beyond_the_plan():

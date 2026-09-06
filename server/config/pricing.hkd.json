@@ -73,6 +73,68 @@
       "name_key": "pricing.pack.pack10000"
     }
   },
+  "passes": {
+    "coze": {
+      "days": 7,
+      "cents": 1190
+    },
+    "comfyui": {
+      "days": 7,
+      "cents": 1190
+    },
+    "dify": {
+      "days": 7,
+      "cents": 1190
+    },
+    "openmausbot": {
+      "days": 7,
+      "cents": 1190
+    },
+    "claude-code": {
+      "days": 7,
+      "cents": 1190
+    },
+    "codex": {
+      "days": 7,
+      "cents": 1190
+    },
+    "hermes": {
+      "days": 7,
+      "cents": 1190
+    },
+    "openclaw": {
+      "days": 7,
+      "cents": 1190
+    },
+    "agents-team": {
+      "days": 7,
+      "cents": 1190
+    },
+    "open-design": {
+      "days": 7,
+      "cents": 1190
+    },
+    "pi": {
+      "days": 7,
+      "cents": 1190
+    },
+    "autogen": {
+      "days": 7,
+      "cents": 1190
+    },
+    "langchain": {
+      "days": 7,
+      "cents": 1190
+    },
+    "openmanus": {
+      "days": 7,
+      "cents": 1190
+    },
+    "dsh": {
+      "days": 7,
+      "cents": 1190
+    }
+  },
   "team": {
     "seat_cents": 19500,
     "min_seats": 3,

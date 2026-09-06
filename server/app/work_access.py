@@ -136,6 +136,56 @@ def minute_packs_left(user_id: str) -> int:
     return int((row["n"] if row is not None else 0) or 0)
 
 
+# 通行证的 kind 前缀: work_passes.kind 存的是 "pass:<产品 id>"。
+PASS_KIND = "pass"
+
+
+def pass_active(user_id: str, product_id: str) -> bool:
+    """这个人现在有没有这一格的有效通行证。
+
+    **认不出来就当没有** —— 数据库抖一下应该表现为"要买", 不是"白送"。
+    """
+    try:
+        row = db.query_one(
+            "SELECT 1 AS ok FROM work_passes WHERE user_id=? AND kind=? AND expires>? LIMIT 1",
+            (user_id, f"{PASS_KIND}:{product_id}", time.time()),
+        )
+    except Exception:  # noqa: BLE001
+        log.warning("查通行证失败 (%s / %s)", user_id, product_id, exc_info=True)
+        return False
+    return row is not None
+
+
+def pass_expires(user_id: str, product_id: str) -> float:
+    row = db.query_one(
+        "SELECT MAX(expires) AS e FROM work_passes WHERE user_id=? AND kind=? AND expires>?",
+        (user_id, f"{PASS_KIND}:{product_id}", time.time()),
+    )
+    return float((row["e"] if row is not None else 0) or 0)
+
+
+def grant_pass(
+    user_id: str, product_id: str, days: int, *, price: int = 0, currency: str = "", ref: str = ""
+) -> str:
+    """发一张通行证。已有未过期的就**从它到期那刻往后续**, 不是从现在起算 ——
+    否则连买两张的人白白损失第一张的剩余时间。"""
+    if days <= 0:
+        raise ValueError("days must be positive")
+    now = time.time()
+    base = max(now, pass_expires(user_id, product_id))
+    pid = security.new_id("wpass_")
+    with db.tx() as conn:
+        conn.execute(
+            "INSERT INTO work_passes (id,user_id,kind,started,expires,price,currency,ref,created) "
+            "VALUES (?,?,?,?,?,?,?,?,?)",
+            (pid, user_id, f"{PASS_KIND}:{product_id}", now, base + days * 86400, price, currency, ref, now),
+        )
+    log.info(
+        "[work] 发通行证 %s 给 %s (%s, %d 天, 到 %.0f)", pid, user_id, product_id, days, base + days * 86400
+    )
+    return pid
+
+
 def grant_minutes(user_id: str, minutes: int, ttl_s: float, kind: str, ref: str = "") -> str:
     if minutes <= 0:
         raise ValueError("minutes must be positive")

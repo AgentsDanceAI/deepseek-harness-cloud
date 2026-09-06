@@ -560,6 +560,11 @@ WORK_FREE_MINUTES = _env_int("WORK_FREE_MINUTES", 180)
 # 为什么按内存而不是 CPU: 节点上先撑爆的是内存 (可分配 58G 对 10 核, 而 CPU 请求只
 # 按上限的四分之一算), 内存才是真正的稀缺资源。
 WORK_MINUTE_BASE_MB = _env_int("WORK_MINUTE_BASE_MB", 2048)
+# **要买通行证才能开的格子** (逗号分隔的产品 id, 空 = 都不锁)。老板 2026-09-06:
+# "16 个是否可以配置化加锁, 比如 9.9 才给开通试用"。价与时长在价目表的 passes 里,
+# 一格一张证、按天到期 (work_passes 表)。锁哪几格是运营决定, 所以放在 env 里, 改完
+# 部署一次就生效, 不用改代码。
+WORK_LOCKED_PRODUCTS = _env("WORK_LOCKED_PRODUCTS", "")
 
 # --- teams ------------------------------------------------------------------
 # Seats bound how many people may share an organisation's credit pool. Price is

@@ -18,7 +18,7 @@ import time
 
 from fastapi import HTTPException
 
-from .. import config, credits, db, plans, teams
+from .. import config, credits, db, plans, teams, work_access
 
 ORDER_PREFIX = {"stripe": "DHS", "alipay": "DHA", "wechat": "DHW", "waffo": "DHF"}
 
@@ -65,6 +65,24 @@ def resolve_item(item: str, cur: str | None = None) -> dict:
     """
     p = plans.pricing(cur)
     parts = item.split(":")
+    if parts[0] == "pass" and len(parts) == 2:
+        # 一格一张的通行证 (老板 2026-09-06: "9.9 才给开通试用")。价与天数在价目表的
+        # passes 里, 一格一个键; 表里没有这一格就不是可买的东西。
+        from .. import products as _products
+
+        pid = parts[1]
+        pdef = (p.get("passes") or {}).get(pid)
+        if not pdef or not _products.is_locked(pid):
+            raise HTTPException(400, "unknown_item")
+        prod = _products.get(pid)
+        return {
+            "kind": "pass",
+            "product_id": pid,
+            "days": int(pdef["days"]),
+            "amount_cents": int(pdef["cents"]),
+            "currency": p["currency"],
+            "description": f"{prod.name if prod else pid} 试用 {int(pdef['days'])} 天",
+        }
     if parts[0] == "plan" and len(parts) == 3:
         tier, cycle = parts[1], parts[2]
         tdef = p["tiers"].get(tier)
@@ -231,6 +249,15 @@ def fulfil(order_id: str) -> None:
     info = resolve_item(order["item"], order["currency"])
     if info["kind"] == "plan":
         plans.apply_plan(order["user_id"], info["tier"], info["cycle"], order_id=order_id)
+    elif info["kind"] == "pass":
+        work_access.grant_pass(
+            order["user_id"],
+            info["product_id"],
+            info["days"],
+            price=int(order["amount_cents"]),
+            currency=order["currency"],
+            ref=order_id,
+        )
     elif info["kind"] == "seats":
         # Seats are org-scoped: create the org on first purchase so the buyer
         # never lands on "you bought seats but have nowhere to put them".

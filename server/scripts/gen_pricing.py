@@ -64,6 +64,32 @@ TIERS = [
 ]
 FREE = {"work_minutes": 180, "signup_credits": 500, "concurrency": 1}
 
+# 单格通行证 (老板 2026-09-06: "16 个是否可以配置化加锁, 比如 9.9 才给开通试用")。
+# 锁哪几格由 WORK_LOCKED_PRODUCTS 决定, 这里只定"多少钱、几天"。
+#
+# **金额是逐币种写死的, 不从美元换算**: 这是个冲动价, 数字本身就是卖点 (9.9),
+# 换算出来的 9.83 或 10.5 就不是那个东西了。也因此它不走上面那条"整数单位"的规矩 ——
+# 定价页的卡片仍是整数, 而解锁那个横幅自己按两位小数渲染。
+PASS_DAYS = 7
+PASS_CENTS = {"USD": 149, "CNY": 990, "EUR": 139, "GBP": 119, "HKD": 1190, "JPY": 20000}
+PASS_PRODUCTS = [
+    "coze",
+    "comfyui",
+    "dify",
+    "openmausbot",
+    "claude-code",
+    "codex",
+    "hermes",
+    "openclaw",
+    "agents-team",
+    "open-design",
+    "pi",
+    "autogen",
+    "langchain",
+    "openmanus",
+    "dsh",
+]
+
 # id,        $,  base credits, bonus %
 #
 # No volume bonus any more. "100 credits per US dollar" is a promise made on the
@@ -190,6 +216,9 @@ def table(cur: str) -> dict:
         "currency": cur,
         "tiers": tiers,
         "packs": packs,
+        # 一格一张的通行证。表里**每一格都有价**, 真正锁哪几格由 WORK_LOCKED_PRODUCTS
+        # 决定 —— 运营改锁不该动价目表, 更不该重新发一次版。
+        "passes": {pid: {"days": PASS_DAYS, "cents": PASS_CENTS[cur]} for pid in PASS_PRODUCTS},
         "team": {
             "seat_cents": units(TEAM["seat_usd"], cur) * 100,
             "min_seats": TEAM["min_seats"],

@@ -166,7 +166,9 @@ def site_apps() -> set[str]:
     return {"avatar"} if live else set()
 
 
-def entries_with_status(enabled_ids: set[str], minutes: dict[str, int] | None = None) -> list[dict]:
+def entries_with_status(
+    enabled_ids: set[str], minutes: dict[str, int] | None = None, locked_ids: set[str] | None = None
+) -> list[dict]:
     """给模板用: 目录 + 实时上线状态。live 的判据只有一个 —— registry 里启用了。
 
     `minutes` 给了就**按使用时长从多到少排** (老板 2026-09-06: 让用得多的排前面)。
@@ -185,6 +187,8 @@ def entries_with_status(enabled_ids: set[str], minutes: dict[str, int] | None = 
             "href": a.href,
             "live": a.id in enabled_ids,
             "minutes": int((minutes or {}).get(a.id, 0)),
+            # 这一格对**这个访客**要不要先买 (已买的人看到的是普通的卡)。
+            "locked": a.id in (locked_ids or set()),
         }
         for a in CATALOG
     ]

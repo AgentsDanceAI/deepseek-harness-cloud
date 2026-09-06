@@ -993,6 +993,13 @@ async def work_route(request: Request):
 
     if not product.image:
         return JSONResponse(status_code=404, content={"detail": "product_disabled"})
+    # 上锁的格子: 没有有效通行证就别起容器 —— 起了再拦等于白烧一次冷启动, 而这条
+    # 路每个静态资源都会走一遍。放在快速通道**之前**, 否则通行证过期后还能靠三十秒
+    # 内的缓存继续用。
+    if products.is_locked(product.id) and not work_access.pass_active(user["id"], product.id):
+        return RedirectResponse(
+            f"{site}/pricing?reason=locked&product_id={product.id}#unlock", status_code=302
+        )
     # 计时/在场状态按**工作台**计, 额度按**用户**计 —— 两者不是一个键: 同一个人
     # 的 dsh 与 ComfyUI 各自空闲、各自回收, 但花的是同一份机时。
     key = products.wskey(user["id"], product.id)
