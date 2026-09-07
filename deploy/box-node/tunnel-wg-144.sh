@@ -2,7 +2,9 @@
 # 备用节点隧道 —— **应用机**这一侧 (WireGuard)。以 root 跑。
 #
 #   bash tunnel-wg-144.sh init            # 生成密钥 + 写配置, 打印本机公钥 (给 provision.sh 用)
-#   bash tunnel-wg-144.sh peer <盒子公钥>  # 把盒子登记成对端 (provision.sh 会打印它的公钥)
+#   bash tunnel-wg-144.sh peer <盒子公钥>                    # 备用节点 (= peer-add standby ...)
+#   bash tunnel-wg-144.sh peer-add <名字> <公钥> <隧道地址>  # 多对端: 每人一台的用户盒子
+#   bash tunnel-wg-144.sh peer-rm <名字> | peer-ls
 #   bash tunnel-wg-144.sh up | down | status
 #   bash tunnel-wg-144.sh remove
 #
@@ -53,6 +55,7 @@ EOF
     printf 'PrivateKey = %s\n' "$(cat /etc/wireguard/$IF.key)" >> "$CONF"
     chmod 0600 "$CONF"
   fi
+  install -m 0755 "$(dirname "$0")/wg-peer.py" /usr/local/sbin/dsh-wg-peer.py
   install -m 0755 /dev/stdin /usr/local/sbin/dsh-box-wg-fence <<'EOF'
 #!/bin/bash
 # 隧道这一侧的围栏: 只放行应用机主动发起之后的回程包, 盒子主动打过来的一律丢。
@@ -85,29 +88,44 @@ EOF
   echo "安全组要放行: 入站 UDP $PORT (来源可以只写盒子的出口地址, 但它每次 resume 都变, 建议 0.0.0.0/0)"
   ;;
 peer)
+  # 备用节点那一个对端 (兼容原有用法)。等价于 peer-add standby <公钥> <节点隧道地址>。
   need_wg
-  PUB="${2:?要盒子的公钥}"
-  [ -s "$CONF" ] || { echo "先跑 init" >&2; exit 2; }
-  # 换对端 = 删掉旧的 [Peer] 段再写新的, 不是往后追加 —— 追加会留下一个永远不握手的
-  # 幽灵对端, 而 wg 不会告诉你哪个才是活的。
-  python3 - "$CONF" <<'PY'
-import re, sys
-p = sys.argv[1]; s = open(p).read()
-open(p, "w").write(re.sub(r"\n\[Peer\][\s\S]*$", "\n", s).rstrip("\n") + "\n")
-PY
-  cat >> "$CONF" <<EOF
+  bash "$0" peer-add standby "${2:?要盒子的公钥}" "$NODE_IP"
+  ;;
 
-[Peer]
-# 备用工作台节点 (Box)。**没有 Endpoint**: 盒子每次 resume 换地址, 由它出站拨过来,
-# WireGuard 记住最近一次握手的来源即可。AllowedIPs 同时是"只接受这个对端发来的这些
-# 源地址"的白名单。
-PublicKey = $PUB
-AllowedIPs = $NODE_IP/32, $CLUSTER_CIDR, $SERVICE_CIDR
-EOF
+peer-add)
+  # peer-add <名字> <公钥> <隧道地址>  —— 幂等: 同名的被替换而不是追加。
+  #
+  # 一个接口挂多个对端: 备用节点 (standby) 与将来每人一台的用户盒子共用 dshbox0 和同一
+  # 个 UDP 端口 —— 阿里云安全组每开一个端口都要人去控制台点一次, 能不加就不加。每个
+  # 对端的 AllowedIPs 是自己的 /32, 互不重叠。
+  need_wg
+  NAME="${2:?要名字}"; PUB="${3:?要公钥}"; IP="${4:?要隧道地址}"
+  [ -s "$CONF" ] || { echo "先跑 init" >&2; exit 2; }
+  case "$NAME" in *[!a-zA-Z0-9._-]*) echo "名字只能是字母数字点横线下划线" >&2; exit 2;; esac
+  # standby 还要能路由到集群网段; 其余对端只有自己那一个地址。
+  ALLOWED="$IP/32"
+  [ "$NAME" = standby ] && ALLOWED="$IP/32, $CLUSTER_CIDR, $SERVICE_CIDR"
+  python3 /usr/local/sbin/dsh-wg-peer.py "$CONF" set "$NAME" "$PUB" "$ALLOWED"
   chmod 0600 "$CONF"
-  echo "对端已登记: ${PUB:0:16}…"
+  echo "对端 $NAME 已登记: ${PUB:0:16}… → $ALLOWED"
   systemctl is-active --quiet "wg-quick@$IF" && { wg syncconf "$IF" <(wg-quick strip "$IF"); echo "已热加载"; }
   ;;
+
+peer-rm)
+  NAME="${2:?要名字}"
+  python3 /usr/local/sbin/dsh-wg-peer.py "$CONF" rm "$NAME"
+  systemctl is-active --quiet "wg-quick@$IF" && wg syncconf "$IF" <(wg-quick strip "$IF")
+  ;;
+
+peer-ls)
+  python3 /usr/local/sbin/dsh-wg-peer.py "$CONF" ls
+  echo "  --- 握手 ---"
+  wg show "$IF" latest-handshakes 2>/dev/null | while read -r k t; do
+    if [ "${t:-0}" -gt 0 ] 2>/dev/null; then echo "  ${k:0:16}…  $(( $(date +%s) - t ))s 前"; else echo "  ${k:0:16}…  从未"; fi
+  done
+  ;;
+
 up)
   need_wg; systemctl enable --now "wg-quick@$IF"; sleep 1; wg show "$IF" ;;
 down)
