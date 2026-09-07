@@ -186,10 +186,13 @@ class BoxBackend(Backend):
                 (user_id, box_id, ip, config.BOX_TYPE or "default", "creating", now, now),
             )
         log.info("[box] 给 %s 开了 %s, 隧道地址 %s", user_id, box_id, ip)
-        await self._provision_tunnel(box_id, ip, user_id)
+        # fresh=True: 这台是刚开出来的。底片 (BOX_TEMPLATE) 里**可能**留着上一台的
+        # wg 私钥, 沿用它就等于所有用户共用同一个对端身份 —— 谁都能冒充谁, 而且不会
+        # 有任何报错。所以新盒子一律重新生成, 不依赖底片干净。
+        await self._provision_tunnel(box_id, ip, user_id, fresh=True)
         return _row(user_id) or {}
 
-    async def _provision_tunnel(self, box_id: str, ip: str, user_id: str) -> None:
+    async def _provision_tunnel(self, box_id: str, ip: str, user_id: str, *, fresh: bool = False) -> None:
         """给新盒子装上回拨应用机的 WireGuard, 并把它的公钥投出去等宿主登记。
 
         私钥在盒子里生成, **从不离开盒子** —— 应用手上只有公钥。登记这一步应用自己做不了
@@ -231,6 +234,9 @@ class BoxBackend(Backend):
                 "set -e",
                 "command -v wg >/dev/null || { sudo apt-get update -qq && sudo apt-get install -y -qq wireguard-tools; }",
                 "sudo install -d -m 0700 /opt/dsh-wg",
+                # 新盒子强制换一把新私钥 (底片里可能留着别人的); 老盒子沿用, 否则 resume 之后
+                # 公钥变了, 宿主那边登记过的对端当场失效。
+                ("sudo rm -f /opt/dsh-wg/dsh0.key" if fresh else "true"),
                 "sudo test -s /opt/dsh-wg/dsh0.key || sudo sh -c 'umask 077; wg genkey > /opt/dsh-wg/dsh0.key'",
                 "sudo sh -c 'wg pubkey < /opt/dsh-wg/dsh0.key > /opt/dsh-wg/dsh0.pub'",
                 f"printf %s {shlex.quote(b64_peer)} | base64 -d | sudo tee /tmp/dsh-peer >/dev/null",

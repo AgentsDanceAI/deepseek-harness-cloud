@@ -190,3 +190,29 @@ def test_provision_tunnel_refuses_empty_pubkey(monkeypatch, tmp_path):
     with pytest.raises(boxbackend.BoxError):
         asyncio.run(b._provision_tunnel("bx_1", "10.99.1.10", "u1"))
     assert not list(tmp_path.glob("*.peer")), "拿到空公钥还投了登记"
+
+
+def test_fresh_box_always_regenerates_its_key(monkeypatch, tmp_path):
+    """底片里可能留着上一台的 wg 私钥 —— 沿用它等于所有用户共用一个对端身份, 谁都能
+    冒充谁, 而且不会有任何报错。新盒子必须强制换一把。"""
+    import asyncio
+
+    monkeypatch.setattr(config, "BOX_WG_SERVER_PUBKEY", "SERVERPUB=")
+    monkeypatch.setattr(config, "BOX_WG_ENDPOINT", "1.2.3.4:51820")
+    monkeypatch.setattr(config, "BOX_WG_DROP_DIR", str(tmp_path))
+    b = boxbackend.BoxBackend()
+    seen = {}
+
+    async def fake_run(box_id, command, timeout=180.0):
+        seen["cmd"] = command
+        return 0, "PUB0000000000000000000000000000000000000000="
+
+    monkeypatch.setattr(b, "_run", fake_run)
+
+    asyncio.run(b._provision_tunnel("bx_1", "10.99.1.10", "u1", fresh=True))
+    assert "rm -f /opt/dsh-wg/dsh0.key" in seen["cmd"], "新盒子没换私钥, 会和底片里的那台撞身份"
+
+    asyncio.run(b._provision_tunnel("bx_1", "10.99.1.10", "u1"))
+    assert "rm -f /opt/dsh-wg/dsh0.key" not in seen["cmd"], (
+        "老盒子换了私钥, resume 之后公钥就变了, 宿主那边登记过的对端当场失效"
+    )
