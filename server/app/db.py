@@ -192,6 +192,20 @@ SCHEMA = [
         ref TEXT NOT NULL DEFAULT '',
         created REAL NOT NULL
     )""",
+    # 每人一台云电脑 (boxbackend.py)。一个用户一台机器, 所以主键是 user_id 而不是
+    # 工作台键 —— 同一个人的几格产品共用这一台。
+    #
+    # tunnel_ip 是 Caddy 反代的目标, **一台一个且不能复用**: 两台盒子拿到同一个地址时
+    # WireGuard 会把两者的 AllowedIPs 都指过去, 结果是随机有一台收不到包, 两边都不报错。
+    """CREATE TABLE IF NOT EXISTS user_boxes (
+        user_id TEXT PRIMARY KEY,
+        box_id TEXT NOT NULL,
+        tunnel_ip TEXT NOT NULL UNIQUE,
+        box_type TEXT NOT NULL DEFAULT 'default',
+        state TEXT NOT NULL DEFAULT '',
+        created REAL NOT NULL,
+        updated REAL NOT NULL
+    )""",
     # 视频生成作业。聊天是一个请求打完就结束, 视频要几十秒到几分钟 —— 用户会
     # 关掉页面、会换设备, 所以作业状态必须落库, 不能只活在一次请求的生命周期里。
     #

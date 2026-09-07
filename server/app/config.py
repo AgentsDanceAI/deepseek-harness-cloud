@@ -567,6 +567,25 @@ WORK_LOCKED_PRODUCTS = _env("WORK_LOCKED_PRODUCTS", "")
 # 但三个月后没人知道那是故意的还是配漏了。
 WORK_DISABLED_PRODUCTS = _env("WORK_DISABLED_PRODUCTS", "")
 
+# --- 每人一台云电脑 (WORK_BACKEND=box, 见 docs/design/personal-box.md) ----------
+# 一个用户一台 ascii.dev Box, 产品是那台机器里的容器。Caddy 反代的是盒子的**隧道地址**
+# (盒子经 WireGuard 出站拨到应用机), 所以上游契约与 k8s 后端完全一样。
+BOX_API_KEY = _env("BOX_API_KEY", "")
+# ⚠️ 付费记在哪个钱包上。不带 = 记在**个人钱包**, 而订阅多半买在组织上 —— 症状是
+# "明明付过钱却只能开 2 台", 没有一处会说破 (2026-09-06 栽过一次)。
+BOX_ORG = _env("BOX_ORG", "")
+BOX_API_BASE = _env("BOX_API_BASE", "https://ascii.dev/api/box/v1")
+# small 2C4G(0.5x) / default 4C8G(1x) / large 8C16G(2x, 要 $100 档)。Coze 下架后最重的
+# 产品是 4G, default 够同时跑两格。
+BOX_TYPE = _env("BOX_TYPE", "default")
+# 盒子自己的自动停机时限 (秒)。0/空 = 不限时; 试用档强制 ≤7200。停机不是终结, 下次
+# 派活会 resume 接着用 (盘还在)。
+BOX_TTL_SECONDS = _env_int("BOX_TTL_SECONDS", 0)
+# 从哪张底片开新盒子 (命名快照名)。空 = 开一台干净的, 第一次用每格都要现拉镜像。
+BOX_TEMPLATE = _env("BOX_TEMPLATE", "")
+# 隧道地址池的前三段。.1 是应用机, .2 是备用节点, 用户从 .10 起。
+BOX_TUNNEL_NET = _env("BOX_TUNNEL_NET", "10.99.1")
+
 # --- teams ------------------------------------------------------------------
 # Seats bound how many people may share an organisation's credit pool. Price is
 # minor units per seat per month, in PRICING_CURRENCY.

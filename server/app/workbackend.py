@@ -1657,7 +1657,12 @@ def backend_named(name: str) -> Backend:
         return EciBackend()
     if n == "k8s":
         return K8sBackend()
-    raise ValueError(f"未知的工作台后端 {name!r} (可选 docker / eci / k8s)")
+    if n == "box":
+        # 延迟导入: boxbackend 反过来要 import 这里的 Backend/WorkInfo。
+        from .boxbackend import BoxBackend
+
+        return BoxBackend()
+    raise ValueError(f"未知的工作台后端 {name!r} (可选 docker / eci / k8s / box)")
 
 
 def make_backend() -> Backend:
