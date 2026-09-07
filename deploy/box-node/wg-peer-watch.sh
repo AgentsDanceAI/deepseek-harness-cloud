@@ -19,6 +19,11 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 case "${1:-}" in
 install)
   install -d -m 0733 "$DROP"      # 应用只需要能写进去, 不需要能列目录
+  # ⚠️ 投递目录在 /run 上 —— tmpfs, 一重启就没。而 docker 会把缺失的挂载源当目录创建,
+  # 用 root 0755 —— 于是应用 (uid 10001) 写不进去, 表现是"开了盒子但永远连不上"。
+  # 用 tmpfiles.d 让 systemd 每次开机按正确权限重建。
+  printf 'd %s 0733 root root -\n' "$DROP" > /etc/tmpfiles.d/dsh-wg-pending.conf
+  systemd-tmpfiles --create /etc/tmpfiles.d/dsh-wg-pending.conf >/dev/null 2>&1 || true
   install -m 0755 /dev/stdin /usr/local/sbin/dsh-wg-peer-drain <<'EOF'
 #!/bin/bash
 # 把投递目录里的登记请求过一遍。每个文件处理完就删 —— 失败的也删, 并留一条日志:
@@ -72,7 +77,8 @@ EOF
   ;;
 remove)
   systemctl disable --now dsh-wg-drain.timer 2>/dev/null || true
-  rm -f /etc/systemd/system/dsh-wg-drain.{timer,service} /usr/local/sbin/dsh-wg-peer-{drain,add}
+  rm -f /etc/systemd/system/dsh-wg-drain.{timer,service} /usr/local/sbin/dsh-wg-peer-{drain,add} \
+    /etc/tmpfiles.d/dsh-wg-pending.conf
   systemctl daemon-reload
   echo "已退场 (已登记的对端不动)"
   ;;
