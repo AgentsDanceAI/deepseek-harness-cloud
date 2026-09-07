@@ -14,12 +14,6 @@ FROM --platform=linux/amd64 python:3.12-slim-bookworm
 # 钉死版本: master 每次构建拿到的都不一样, 而"镜像变了就重建工作台"这套机制
 # 依赖镜像身份稳定 —— 浮动 ref 会让每次构建都把所有人的工作台判成过期。
 ARG COMFY_REF=v0.34.1
-ARG REVISION=unknown
-
-LABEL org.opencontainers.image.source="https://github.com/AgentsDanceAI/deepseek-harness-cloud" \
-      org.opencontainers.image.title="DSH Cloud ComfyUI workspace" \
-      org.opencontainers.image.version="${COMFY_REF}" \
-      org.opencontainers.image.revision="${REVISION}"
 
 RUN apt-get update -qq \
  && apt-get install -y -qq --no-install-recommends git curl ca-certificates \
@@ -54,3 +48,17 @@ COPY api_shim.py /opt/dsh-api-shim.py
 EXPOSE 8188
 # 不写 CMD: 应用创建实例时自己下发启动命令 (products.py 的 _comfyui_boot),
 # 那里会把 output/input 指到持久卷上。烤进 CMD 的话改一次要重发镜像。
+
+# ── 构建元数据放最后 ──────────────────────────────────────────────────────────
+# **别把这两行挪回文件开头。** REVISION 的值是 git sha, 每次构建都变; BuildKit 会把
+# 作用域内的 ARG 带进后面每一条 RUN 的缓存键 (层历史里能看到 `RUN |1 REVISION=...`),
+# 于是 ARG 之后的所有层每次构建全部失效 —— apt、npm i -g、venv 这些几百 MB 的重活
+# 层一个都复用不上。实测 (2026-09-07, 比对 registry 里相邻两版的层摘要):
+# agentui 连续三版每次重下 326 MB (81%), 而真正变的只有 COPY 进去的 0.1 MB;
+# comfy-local 95.8% 等于整包重拉。放到末尾之后, 前面的层跨版本全部复用。
+# LABEL 不产生文件系统层, 放最后零成本。
+ARG REVISION=unknown
+LABEL org.opencontainers.image.source="https://github.com/AgentsDanceAI/deepseek-harness-cloud" \
+      org.opencontainers.image.title="DSH Cloud ComfyUI workspace" \
+      org.opencontainers.image.version="${COMFY_REF}" \
+      org.opencontainers.image.revision="${REVISION}"

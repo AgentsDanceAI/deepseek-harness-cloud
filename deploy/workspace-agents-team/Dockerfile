@@ -14,11 +14,6 @@
 ARG PYTHON_VERSION=3.12-slim-bookworm
 FROM python:${PYTHON_VERSION}
 
-ARG REVISION=unknown
-LABEL org.opencontainers.image.source="https://github.com/AgentsDanceAI/deepseek-harness-cloud" \
-      org.opencontainers.image.title="DSH Cloud Operator workspace" \
-      org.opencontainers.image.revision="${REVISION}"
-
 # 智能体自己会去装它需要的东西, 这里只铺**它没法自举的那几样**:
 # 没有 ca-certificates 装不了任何东西; 没有 curl/git 连第一步都迈不出去;
 # procps 是为了让它能 ps 查自己起的后台进程 (slim 里连 ps 都没有)。
@@ -68,3 +63,16 @@ ENV AGENTS_TEAM_WORKDIR=/workspace \
 
 EXPOSE 8710
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8710"]
+
+# ── 构建元数据放最后 ──────────────────────────────────────────────────────────
+# **别把这两行挪回文件开头。** REVISION 的值是 git sha, 每次构建都变; BuildKit 会把
+# 作用域内的 ARG 带进后面每一条 RUN 的缓存键 (层历史里能看到 `RUN |1 REVISION=...`),
+# 于是 ARG 之后的所有层每次构建全部失效 —— apt、npm i -g、venv 这些几百 MB 的重活
+# 层一个都复用不上。实测 (2026-09-07, 比对 registry 里相邻两版的层摘要):
+# agentui 连续三版每次重下 326 MB (81%), 而真正变的只有 COPY 进去的 0.1 MB;
+# comfy-local 95.8% 等于整包重拉。放到末尾之后, 前面的层跨版本全部复用。
+# LABEL 不产生文件系统层, 放最后零成本。
+ARG REVISION=unknown
+LABEL org.opencontainers.image.source="https://github.com/AgentsDanceAI/deepseek-harness-cloud" \
+      org.opencontainers.image.title="DSH Cloud Operator workspace" \
+      org.opencontainers.image.revision="${REVISION}"
