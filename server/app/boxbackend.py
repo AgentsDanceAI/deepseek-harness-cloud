@@ -353,8 +353,7 @@ class BoxBackend(Backend):
                 f"sudo install -d {shlex.quote(home)} {shlex.quote(ws)} {shlex.quote(DATA_ROOT + '/shared')}",
                 # 镜像不在就拉。分层修好之后换版只拉增量 (见 docs/design/personal-box.md),
                 # 所以这一步平时是毫秒级, 只有真换了版才花时间。
-                f"sudo docker image inspect {shlex.quote(ref)} >/dev/null 2>&1 "
-                f"|| sudo docker pull -q {shlex.quote(ref)}",
+                f"sudo docker image inspect {shlex.quote(ref)} >/dev/null 2>&1 || {{ {self._pull(ref)} }}",
                 # 端口只绑在隧道地址上 —— 绑 0.0.0.0 等于把用户的工作台开到公网, 而产品
                 # 里一律没有第二道登录墙。
                 f"sudo docker run -d --name {shlex.quote(name)} --restart=always "
@@ -373,6 +372,35 @@ class BoxBackend(Backend):
             raise BoxError(f"起 {pid} 失败: {out[-300:]}")
         self._touch(uid, state="running")
         log.info("[box] %s 在 %s 上起了 %s", uid, row["box_id"], pid)
+
+    @staticmethod
+    def _pull(ref: str) -> str:
+        """拉镜像的那一小段 shell。私有仓库要先登录 —— 登录、拉、**立刻登出**。
+
+        ⚠️ 凭据会经 ascii.dev 的命令通道到达盒子, 这条路避不开 (盒子上唯一的执行入口
+        就是它)。所以:
+          · 用**只读的拉取凭据** (WORK_REGISTRY_*, 与 k8s 后端的 pull secret 同一份),
+            不要用能写的令牌
+          · 拉完立刻 docker logout 并删掉 config.json —— 不让它进盒子的快照, 而快照
+            是可以被导出的
+        供应商理论上能看到这条命令。要更严的话得改成经隧道取凭据 (隧道确实在拉镜像之前
+        就起好了), 留作以后收紧的口子。
+        """
+        srv = (config.WORK_REGISTRY_SERVER or "ghcr.io").strip()
+        user = (config.WORK_REGISTRY_USERNAME or "").strip()
+        pw = (config.WORK_REGISTRY_PASSWORD or "").strip()
+        pull = f"sudo docker pull -q {shlex.quote(ref)}"
+        if not (user and pw):
+            return pull
+        login = (
+            f"printf %s {shlex.quote(pw)} | sudo docker login {shlex.quote(srv)} "
+            f"-u {shlex.quote(user)} --password-stdin >/dev/null"
+        )
+        # 用 ; 不是 && —— 拉失败也要登出。少了它, 一次失败的拉取就把凭据留在盒子里了。
+        return (
+            f"{login}; {pull}; rc=$?; sudo docker logout {shlex.quote(srv)} >/dev/null 2>&1; "
+            "sudo rm -f /root/.docker/config.json; exit $rc"
+        )
 
     async def start(self, user_id: str) -> None:
         """没有单独的 start —— create 里已经把容器起起来了 (与 eci/k8s 同)。"""

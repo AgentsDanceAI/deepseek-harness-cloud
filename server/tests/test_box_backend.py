@@ -216,3 +216,23 @@ def test_fresh_box_always_regenerates_its_key(monkeypatch, tmp_path):
     assert "rm -f /opt/dsh-wg/dsh0.key" not in seen["cmd"], (
         "老盒子换了私钥, resume 之后公钥就变了, 宿主那边登记过的对端当场失效"
     )
+
+
+def test_pull_logs_out_even_when_the_pull_fails(monkeypatch):
+    """拉失败也必须登出 —— 少了这一步, 一次失败的拉取就把凭据留在盒子的快照里,
+    而快照是可以被导出的。"""
+    monkeypatch.setattr(config, "WORK_REGISTRY_USERNAME", "u")
+    monkeypatch.setattr(config, "WORK_REGISTRY_PASSWORD", "p")
+    cmd = boxbackend.BoxBackend._pull("ghcr.io/x/y:1")
+    assert "docker login" in cmd and "docker pull" in cmd
+    # 登出与删 config.json 都在 pull 之后、且不受 pull 结果影响 (中间用 ; 不是 &&)
+    after = cmd.split("docker pull", 1)[1]
+    assert "docker logout" in after and "rm -f /root/.docker/config.json" in after
+    assert "&& sudo docker logout" not in cmd, "用 && 的话拉失败就不登出了"
+
+
+def test_pull_without_credentials_is_a_plain_pull(monkeypatch):
+    monkeypatch.setattr(config, "WORK_REGISTRY_USERNAME", "")
+    monkeypatch.setattr(config, "WORK_REGISTRY_PASSWORD", "")
+    cmd = boxbackend.BoxBackend._pull("nginx:1.27-alpine")
+    assert "docker login" not in cmd and "docker pull" in cmd
