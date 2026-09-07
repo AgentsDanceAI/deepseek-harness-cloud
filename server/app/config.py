@@ -561,6 +561,11 @@ WORK_MINUTE_BASE_MB = _env_int("WORK_MINUTE_BASE_MB", 2048)
 # 一格一张证、按天到期 (work_passes 表)。锁哪几格是运营决定, 所以放在 env 里, 改完
 # 部署一次就生效, 不用改代码。
 WORK_LOCKED_PRODUCTS = _env("WORK_LOCKED_PRODUCTS", "")
+# **整格下架** (逗号分隔的产品 id, 空 = 都不下)。与上面的"加锁"是两回事: 加锁的格子
+# 买了通行证就能开, 下架的格子谁都开不了、目录里连卡都不出现。
+# 用显式开关而不是"把 <PRODUCT>_DOMAIN 清空": 后者一样能让它从 enabled() 里掉出去,
+# 但三个月后没人知道那是故意的还是配漏了。
+WORK_DISABLED_PRODUCTS = _env("WORK_DISABLED_PRODUCTS", "")
 
 # --- teams ------------------------------------------------------------------
 # Seats bound how many people may share an organisation's credit pool. Price is

@@ -2355,16 +2355,26 @@ def get(product_id: str) -> Product | None:
     return registry().get(product_id)
 
 
+def disabled_ids() -> set[str]:
+    """整格下架的产品 id (config.WORK_DISABLED_PRODUCTS)。
+
+    与 locked_ids 的区别: 锁着的格子买了通行证就能开, 下架的格子谁都开不了,
+    目录里连卡都不出现。运营决定, 所以在 env 里, 不用改代码。
+    """
+    return {p.strip() for p in (config.WORK_DISABLED_PRODUCTS or "").split(",") if p.strip()}
+
+
 def enabled() -> list[Product]:
-    """配了域名且配了镜像的才算启用 —— 少任何一样都进不去。
+    """配了域名且配了镜像、且没被下架的才算启用 —— 少任何一样都进不去。
 
     初始化容器的镜像也算"镜像": 它空着的话容器组会被阿里云拒掉, 而用户看到的
     是一直转圈。宁可这个产品干脆不出现在目录里。
     """
+    off = disabled_ids()
     return [
         p
         for p in registry().values()
-        if p.domain and p.image and all(ic.image_ref for ic in p.init_containers)
+        if p.id not in off and p.domain and p.image and all(ic.image_ref for ic in p.init_containers)
     ]
 
 

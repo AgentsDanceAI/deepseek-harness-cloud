@@ -186,7 +186,12 @@ def entries_with_status(
     没上线的卡一律沉底: 一张点不进去的卡排在第一屏, 比排序本身更碍事。时长相同
     (比如都是 0) 时按目录原序, 这样没有用量的新站看到的还是手工编排的那个顺序。
     """
-    order = {a.id: i for i, a in enumerate(CATALOG)}
+    from . import products as _p
+
+    # 下架的格子直接不出卡 —— "没上线"的灰卡还占一个位置, 而下架的意思是它不该在
+    # 目录里 (products.disabled_ids / WORK_DISABLED_PRODUCTS)。
+    off = _p.disabled_ids()
+    order = {a.id: i for i, a in enumerate(CATALOG) if a.id not in off}
     out = [
         {
             "id": a.id,
@@ -200,6 +205,7 @@ def entries_with_status(
             "locked": a.id in (locked_ids or set()),
         }
         for a in CATALOG
+        if a.id not in off
     ]
     if minutes:
         out.sort(key=lambda a: (not a["live"], -a["minutes"], order[a["id"]]))
