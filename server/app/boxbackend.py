@@ -100,8 +100,12 @@ class BoxBackend(Backend):
         if self._org:
             headers["X-Box-Org"] = self._org
         async with httpx.AsyncClient(timeout=timeout) as c:
-            r = await c.request(method, _api_base() + path, headers=headers,
-                                content=json.dumps(body) if body is not None else None)
+            r = await c.request(
+                method,
+                _api_base() + path,
+                headers=headers,
+                content=json.dumps(body) if body is not None else None,
+            )
         try:
             return r.status_code, r.json()
         except Exception:
@@ -158,9 +162,13 @@ class BoxBackend(Backend):
         taken = {str(r["tunnel_ip"]) for r in db.query("SELECT tunnel_ip FROM user_boxes")}
         ip = _next_tunnel_ip(taken)
         st, body = await self._api(
-            "POST", "/boxes",
-            {"type": config.BOX_TYPE or "default", "ttlSeconds": config.BOX_TTL_SECONDS or None,
-             **({"from": config.BOX_TEMPLATE} if config.BOX_TEMPLATE else {})},
+            "POST",
+            "/boxes",
+            {
+                "type": config.BOX_TYPE or "default",
+                "ttlSeconds": config.BOX_TTL_SECONDS or None,
+                **({"from": config.BOX_TEMPLATE} if config.BOX_TEMPLATE else {}),
+            },
             timeout=180,
         )
         if st >= 300:
@@ -220,10 +228,23 @@ class BoxBackend(Backend):
         # 就判过期 —— 与 k8s 后端按 digest 比不同, 但对"换版要重建"这个判定够用。
         return image or ""
 
-    async def create(self, user_id: str, *, boot: str, env: dict, boot_fp: str, image: str,
-                     image_ref: str = "", mem_mb: int = 0, cpus: float = 0.0, sidecars: tuple = (),
-                     host_aliases: tuple = (), init_containers: tuple = (), seeds: tuple = (),
-                     run_as_user: int | None = None) -> None:
+    async def create(
+        self,
+        user_id: str,
+        *,
+        boot: str,
+        env: dict,
+        boot_fp: str,
+        image: str,
+        image_ref: str = "",
+        mem_mb: int = 0,
+        cpus: float = 0.0,
+        sidecars: tuple = (),
+        host_aliases: tuple = (),
+        init_containers: tuple = (),
+        seeds: tuple = (),
+        run_as_user: int | None = None,
+    ) -> None:
         from .products import split_key
 
         uid, pid = split_key(user_id)
@@ -241,23 +262,25 @@ class BoxBackend(Backend):
         home = f"{DATA_ROOT}/{pid}/home"
         ws = f"{DATA_ROOT}/{pid}/workspace"
         envs = " ".join("-e " + shlex.quote(f"{k}={v}") for k, v in (env or {}).items())
-        script = "\n".join([
-            "set -e",
-            f"sudo docker rm -f {shlex.quote(name)} >/dev/null 2>&1 || true",
-            f"sudo install -d {shlex.quote(home)} {shlex.quote(ws)} {shlex.quote(DATA_ROOT + '/shared')}",
-            # 镜像不在就拉。分层修好之后换版只拉增量 (见 docs/design/personal-box.md),
-            # 所以这一步平时是毫秒级, 只有真换了版才花时间。
-            f"sudo docker image inspect {shlex.quote(ref)} >/dev/null 2>&1 "
-            f"|| sudo docker pull -q {shlex.quote(ref)}",
-            # 端口只绑在隧道地址上 —— 绑 0.0.0.0 等于把用户的工作台开到公网, 而产品
-            # 里一律没有第二道登录墙。
-            f"sudo docker run -d --name {shlex.quote(name)} --restart=always "
-            f"-p {row['tunnel_ip']}:{{port}}:{{port}} {envs} "
-            f"--label dsh.bootfp={shlex.quote(boot_fp)} "
-            f"-v {shlex.quote(home)}:/root -v {shlex.quote(ws)}:/workspace "
-            f"-v {shlex.quote(DATA_ROOT + '/shared')}:/shared "
-            f"{shlex.quote(ref)} sh -c {shlex.quote(boot)}",
-        ])
+        script = "\n".join(
+            [
+                "set -e",
+                f"sudo docker rm -f {shlex.quote(name)} >/dev/null 2>&1 || true",
+                f"sudo install -d {shlex.quote(home)} {shlex.quote(ws)} {shlex.quote(DATA_ROOT + '/shared')}",
+                # 镜像不在就拉。分层修好之后换版只拉增量 (见 docs/design/personal-box.md),
+                # 所以这一步平时是毫秒级, 只有真换了版才花时间。
+                f"sudo docker image inspect {shlex.quote(ref)} >/dev/null 2>&1 "
+                f"|| sudo docker pull -q {shlex.quote(ref)}",
+                # 端口只绑在隧道地址上 —— 绑 0.0.0.0 等于把用户的工作台开到公网, 而产品
+                # 里一律没有第二道登录墙。
+                f"sudo docker run -d --name {shlex.quote(name)} --restart=always "
+                f"-p {row['tunnel_ip']}:{{port}}:{{port}} {envs} "
+                f"--label dsh.bootfp={shlex.quote(boot_fp)} "
+                f"-v {shlex.quote(home)}:/root -v {shlex.quote(ws)}:/workspace "
+                f"-v {shlex.quote(DATA_ROOT + '/shared')}:/shared "
+                f"{shlex.quote(ref)} sh -c {shlex.quote(boot)}",
+            ]
+        )
         from .products import registry
 
         port = registry()[pid].port
@@ -324,7 +347,7 @@ class BoxBackend(Backend):
             for line in txt.splitlines():
                 n = line.strip()
                 if n.startswith(CONTAINER_PREFIX):
-                    out.append(wskey(uid, n[len(CONTAINER_PREFIX):]))
+                    out.append(wskey(uid, n[len(CONTAINER_PREFIX) :]))
         return out
 
     def capacity_reason(self) -> str:

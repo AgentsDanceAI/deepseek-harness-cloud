@@ -96,8 +96,9 @@ def test_stack_products_are_refused_not_half_started(monkeypatch):
 
     b = boxbackend.BoxBackend()
     with pytest.raises(boxbackend.BoxError) as e:
-        asyncio.run(b.create("u1~dify", boot="x", env={}, boot_fp="fp", image="img",
-                             sidecars=({"name": "db"},)))
+        asyncio.run(
+            b.create("u1~dify", boot="x", env={}, boot_fp="fp", image="img", sidecars=({"name": "db"},))
+        )
     assert "栈产品" in str(e.value)
 
 
@@ -111,15 +112,27 @@ def test_user_boxes_table_exists_and_ip_is_unique():
     now = db.now()
     with db.tx() as conn:
         conn.execute("DELETE FROM user_boxes")
-        conn.execute("INSERT INTO user_boxes (user_id,box_id,tunnel_ip,box_type,state,created,updated) "
-                     "VALUES (?,?,?,?,?,?,?)", ("u1", "bx_1", "10.99.1.10", "default", "", now, now))
+        conn.execute(
+            "INSERT INTO user_boxes (user_id,box_id,tunnel_ip,box_type,state,created,updated) "
+            "VALUES (?,?,?,?,?,?,?)",
+            ("u1", "bx_1", "10.99.1.10", "default", "", now, now),
+        )
     rows = db.query("SELECT * FROM user_boxes WHERE user_id=?", ("u1",))
     assert rows and rows[0]["tunnel_ip"] == "10.99.1.10"
-    # 同一个地址不能发给第二个人 —— 撞了之后 WireGuard 是随机丢包, 查起来极难
-    with pytest.raises(Exception):
+    # 同一个地址不能发给第二个人 —— 撞了之后 WireGuard 是随机丢一台的包, 两边都不报错,
+    # 所以这道 UNIQUE 是唯一能在事前拦住它的东西。异常类型按后端不同 (sqlite 与 pg 各
+    # 一种), 所以只判"插不进去", 不判具体异常。
+    dup_rejected = False
+    try:
         with db.tx() as conn:
-            conn.execute("INSERT INTO user_boxes (user_id,box_id,tunnel_ip,box_type,state,created,updated) "
-                         "VALUES (?,?,?,?,?,?,?)", ("u2", "bx_2", "10.99.1.10", "default", "", now, now))
+            conn.execute(
+                "INSERT INTO user_boxes (user_id,box_id,tunnel_ip,box_type,state,created,updated) "
+                "VALUES (?,?,?,?,?,?,?)",
+                ("u2", "bx_2", "10.99.1.10", "default", "", now, now),
+            )
+    except Exception:
+        dup_rejected = True
+    assert dup_rejected, "隧道地址撞了却插进去了 —— 这台和那台会随机收不到包"
     with db.tx() as conn:
         conn.execute("DELETE FROM user_boxes")
 
