@@ -142,3 +142,51 @@ def test_split_key_roundtrip_is_what_backend_relies_on():
     但一格一个容器。这个契约变了整个后端都要跟着改。"""
     key = products.wskey("u1", "claude-code")
     assert products.split_key(key) == ("u1", "claude-code")
+
+
+def test_provision_tunnel_drops_a_wellformed_registration(monkeypatch, tmp_path):
+    """投出去的那一行会被宿主原样读进 wg 配置 —— 格式错了是"隧道就是不通", 不报错。"""
+    import asyncio
+
+    monkeypatch.setattr(config, "BOX_WG_SERVER_PUBKEY", "SERVERPUB=")
+    monkeypatch.setattr(config, "BOX_WG_ENDPOINT", "1.2.3.4:51820")
+    monkeypatch.setattr(config, "BOX_WG_DROP_DIR", str(tmp_path))
+    b = boxbackend.BoxBackend()
+
+    async def fake_run(box_id, command, timeout=180.0):
+        # 装机脚本的最后一行是 sudo cat 公钥 —— 这里模拟它的输出
+        assert "wg genkey" in command and "/opt/dsh-wg" in command
+        assert "/etc/wireguard" not in command, "配置放 /etc/wireguard 会被盒子开机时抹掉"
+        assert "sudo cat /opt/dsh-wg/dsh0.pub" in command, "不加 sudo 会拿到空串而不是报错"
+        return 0, "BOXPUBKEY0000000000000000000000000000000000="
+
+    monkeypatch.setattr(b, "_run", fake_run)
+    asyncio.run(b._provision_tunnel("bx_1", "10.99.1.10", "user-Ab_1"))
+
+    files = list(tmp_path.glob("*.peer"))
+    assert len(files) == 1, files
+    parts = files[0].read_text().split()
+    assert len(parts) == 3, parts
+    name, pub, ip = parts
+    assert name.startswith("u") and all(c.isalnum() or c in "._-" for c in name)
+    assert pub.endswith("=")
+    assert ip == "10.99.1.10"
+    assert not list(tmp_path.glob(".*.tmp")), "临时文件没清干净, 监听器会读到半个文件"
+
+
+def test_provision_tunnel_refuses_empty_pubkey(monkeypatch, tmp_path):
+    """读公钥拿到空串是最典型的静默失败 (命令通道以 user 身份跑)。必须炸, 不能投空。"""
+    import asyncio
+
+    monkeypatch.setattr(config, "BOX_WG_SERVER_PUBKEY", "SERVERPUB=")
+    monkeypatch.setattr(config, "BOX_WG_ENDPOINT", "1.2.3.4:51820")
+    monkeypatch.setattr(config, "BOX_WG_DROP_DIR", str(tmp_path))
+    b = boxbackend.BoxBackend()
+
+    async def fake_run(box_id, command, timeout=180.0):
+        return 0, ""
+
+    monkeypatch.setattr(b, "_run", fake_run)
+    with pytest.raises(boxbackend.BoxError):
+        asyncio.run(b._provision_tunnel("bx_1", "10.99.1.10", "u1"))
+    assert not list(tmp_path.glob("*.peer")), "拿到空公钥还投了登记"

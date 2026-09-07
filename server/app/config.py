@@ -585,6 +585,14 @@ BOX_TTL_SECONDS = _env_int("BOX_TTL_SECONDS", 0)
 BOX_TEMPLATE = _env("BOX_TEMPLATE", "")
 # 隧道地址池的前三段。.1 是应用机, .2 是备用节点, 用户从 .10 起。
 BOX_TUNNEL_NET = _env("BOX_TUNNEL_NET", "10.99.1")
+# 新盒子要自己拉一条 WireGuard 回来, 这两个是它拨号要的。空 = 不给新盒子装隧道
+# (于是它开出来也没人能连上 —— 只在本地开发时才这么用)。
+BOX_WG_SERVER_PUBKEY = _env("BOX_WG_SERVER_PUBKEY", "")
+BOX_WG_ENDPOINT = _env("BOX_WG_ENDPOINT", "")
+# 对端登记的投递目录 (见 deploy/box-node/wg-peer-watch.sh)。dhc-server 在容器里改不了
+# 宿主的 wg 配置, 所以只往这里投一个「公钥 + 地址」, 宿主上的监听器去登记。
+# 私钥在盒子里生成、从不离开盒子; 应用手上只有公钥, 泄了也没用。
+BOX_WG_DROP_DIR = _env("BOX_WG_DROP_DIR", "/run/dsh-wg-pending")
 
 # --- teams ------------------------------------------------------------------
 # Seats bound how many people may share an organisation's credit pool. Price is

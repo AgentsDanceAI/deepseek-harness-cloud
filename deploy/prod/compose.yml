@@ -74,6 +74,10 @@ services:
       - dhc-data:/app/data
       - ../../legal:/srv/operator-legal:ro
       - ${K8S_CRED_DIR:-/root/dsh-k8s}:/run/dsh-k8s:ro
+      # 每人一台云电脑 (WORK_BACKEND=box): 应用往这里投「公钥 + 隧道地址」, 宿主上的
+      # 监听器去登记对端 (deploy/box-node/wg-peer-watch.sh)。**可写**, 但目录是 0733 ——
+      # 只能写不能列, 而且里面只有公钥, 私钥永远在盒子里。
+      - ${BOX_WG_DROP_DIR:-/run/dsh-wg-pending}:/run/dsh-wg-pending
       # Read-only, and no new authority: dhc-server already drives container
       # creation through the socket proxy, which can bind-mount anything.
       # The path is the HOST's docker volume root and differs per machine —

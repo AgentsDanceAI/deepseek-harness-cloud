@@ -25,8 +25,10 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import logging
+import os
 import shlex
 import time
 
@@ -184,7 +186,83 @@ class BoxBackend(Backend):
                 (user_id, box_id, ip, config.BOX_TYPE or "default", "creating", now, now),
             )
         log.info("[box] 给 %s 开了 %s, 隧道地址 %s", user_id, box_id, ip)
+        await self._provision_tunnel(box_id, ip, user_id)
         return _row(user_id) or {}
+
+    async def _provision_tunnel(self, box_id: str, ip: str, user_id: str) -> None:
+        """给新盒子装上回拨应用机的 WireGuard, 并把它的公钥投出去等宿主登记。
+
+        私钥在盒子里生成, **从不离开盒子** —— 应用手上只有公钥。登记这一步应用自己做不了
+        (容器里改不了宿主的 wg 配置), 所以只往投递目录写一行, 宿主上的监听器去执行
+        (deploy/box-node/wg-peer-watch.sh)。
+
+        ⚠️ 配置**不能放 /etc/wireguard** —— 那是 ascii.dev 自己的目录, 盒子每次开机会把它
+        重置成只剩它自己的两个文件, 我们的配置和私钥一起消失, 而 systemd 还说 enabled。
+        放 /opt (进快照) + 自己的 unit; 私钥只在没有时才生成, 于是 resume 后公钥不变,
+        宿主那边登记过的对端一直有效。
+
+        配置和 unit 都在这边拼好、base64 送过去再解 —— 不在 shell 里拼字符串。这一层
+        今天已经被引号坑过三次, 而拼错的表现是"命令跑了但内容不对", 不报错。
+        """
+        spub, endpoint = config.BOX_WG_SERVER_PUBKEY.strip(), config.BOX_WG_ENDPOINT.strip()
+        if not (spub and endpoint):
+            log.warning("[box] 没配 BOX_WG_SERVER_PUBKEY/ENDPOINT, %s 开出来会连不上", box_id)
+            return
+        app_ip = f"{config.BOX_TUNNEL_NET}.1"
+        unit = (
+            "[Unit]\nDescription=DSH personal box tunnel\n"
+            "After=network-online.target\nWants=network-online.target\n"
+            "[Service]\nType=oneshot\nRemainAfterExit=yes\n"
+            "ExecStart=/usr/bin/wg-quick up /opt/dsh-wg/dsh0.conf\n"
+            "ExecStop=/usr/bin/wg-quick down /opt/dsh-wg/dsh0.conf\n"
+            "Restart=on-failure\nRestartSec=10s\n"
+            "[Install]\nWantedBy=multi-user.target\n"
+        )
+        # AllowedIPs 只有应用机那一个地址: 这台电脑不需要经隧道去别处, 而 AllowedIPs
+        # 同时是"只接受这个对端发来的这些源地址"的白名单, 写宽了等于把围栏拆了。
+        peer = (
+            f"\n[Peer]\nPublicKey = {spub}\nEndpoint = {endpoint}\n"
+            f"AllowedIPs = {app_ip}/32\nPersistentKeepalive = 25\n"
+        )
+        b64_unit = base64.b64encode(unit.encode()).decode()
+        b64_peer = base64.b64encode(peer.encode()).decode()
+        script = "\n".join(
+            [
+                "set -e",
+                "command -v wg >/dev/null || { sudo apt-get update -qq && sudo apt-get install -y -qq wireguard-tools; }",
+                "sudo install -d -m 0700 /opt/dsh-wg",
+                "sudo test -s /opt/dsh-wg/dsh0.key || sudo sh -c 'umask 077; wg genkey > /opt/dsh-wg/dsh0.key'",
+                "sudo sh -c 'wg pubkey < /opt/dsh-wg/dsh0.key > /opt/dsh-wg/dsh0.pub'",
+                f"printf %s {shlex.quote(b64_peer)} | base64 -d | sudo tee /tmp/dsh-peer >/dev/null",
+                f"printf %s {shlex.quote(b64_unit)} | base64 -d | sudo tee /etc/systemd/system/dsh-wg.service >/dev/null",
+                'sudo sh -c \'umask 077; { echo "[Interface]"; echo "Address = '
+                + ip
+                + '/32"; echo "PrivateKey = $(cat /opt/dsh-wg/dsh0.key)"; cat /tmp/dsh-peer; }'
+                " > /opt/dsh-wg/dsh0.conf'",
+                "sudo rm -f /tmp/dsh-peer",
+                "sudo systemctl daemon-reload && sudo systemctl enable dsh-wg >/dev/null 2>&1",
+                "sudo systemctl restart dsh-wg || sudo systemctl start dsh-wg",
+                # sudo: /opt/dsh-wg 是 root 0700, 而命令通道以 user 身份跑 —— 不加 sudo 这里
+                # 拿到的是**空串而不是报错**, 一路传到登记才炸 (2026-09-07 栽过)。
+                "sudo cat /opt/dsh-wg/dsh0.pub",
+            ]
+        )
+        code, out = await self._run(box_id, script, timeout=300)
+        pub = (out or "").strip().splitlines()[-1].strip() if out.strip() else ""
+        if code != 0 or not pub.endswith("="):
+            raise BoxError(f"给 {box_id} 装隧道失败: {out[-300:]}")
+        drop = config.BOX_WG_DROP_DIR
+        try:
+            os.makedirs(drop, exist_ok=True)
+        except OSError:
+            pass
+        name = "u" + "".join(ch for ch in user_id if ch.isalnum() or ch in "._-")[:40]
+        tmp = os.path.join(drop, f".{name}.tmp")
+        with open(tmp, "w") as f:
+            f.write(f"{name} {pub} {ip}\n")
+        # 先写临时名再改名: 监听器每 5 秒扫一次, 半个文件被读走就是一条格式不对的登记。
+        os.replace(tmp, os.path.join(drop, f"{name}.peer"))
+        log.info("[box] %s 的隧道已装, 公钥已投递等登记 (%s)", user_id, ip)
 
     def _touch(self, user_id: str, **cols) -> None:
         if not cols:
