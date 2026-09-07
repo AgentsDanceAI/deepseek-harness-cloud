@@ -35,12 +35,12 @@ def test_enabled_excludes_disabled(monkeypatch):
     monkeypatch.setattr(config, "WORK_DISABLED_PRODUCTS", "")
     before = {p.id for p in products.enabled()}
     victim = next(iter(before), None)
-    if victim is None:                      # 这个环境一个产品都没配, 没什么可测的
+    if victim is None:  # 这个环境一个产品都没配, 没什么可测的
         return
     monkeypatch.setattr(config, "WORK_DISABLED_PRODUCTS", victim)
     after = {p.id for p in products.enabled()}
     assert victim not in after
-    assert after == before - {victim}       # 只少这一个, 别的一个都没连带掉
+    assert after == before - {victim}  # 只少这一个, 别的一个都没连带掉
 
 
 def test_disabled_still_in_registry(monkeypatch):
