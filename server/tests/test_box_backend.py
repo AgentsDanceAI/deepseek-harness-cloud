@@ -236,3 +236,57 @@ def test_pull_without_credentials_is_a_plain_pull(monkeypatch):
     monkeypatch.setattr(config, "WORK_REGISTRY_PASSWORD", "")
     cmd = boxbackend.BoxBackend._pull("nginx:1.27-alpine")
     assert "docker login" not in cmd and "docker pull" in cmd
+
+
+def test_generated_install_script_is_valid_bash(monkeypatch, tmp_path):
+    """装机脚本是拼出来的 shell —— 拼错的表现是"命令跑了但什么都没发生"。
+    这里真的拿 bash -n 过一遍语法, 不靠肉眼。"""
+    import asyncio
+    import shutil
+    import subprocess
+
+    bash = shutil.which("bash")
+    if not bash:
+        return
+
+    monkeypatch.setattr(config, "WORK_REGISTRY_USERNAME", "u")
+    monkeypatch.setattr(config, "WORK_REGISTRY_PASSWORD", "p'q\"r")  # 带引号, 专挑难的
+    b = boxbackend.BoxBackend()
+    seen = {}
+
+    async def fake_run(box_id, command, timeout=180.0):
+        seen["cmd"] = command
+        return 0, ""
+
+    monkeypatch.setattr(b, "_run", fake_run)
+    db.ensure_schema()
+    now = db.now()
+    with db.tx() as conn:
+        conn.execute("DELETE FROM user_boxes WHERE user_id=?", ("bashcheck",))
+        conn.execute(
+            "INSERT INTO user_boxes (user_id,box_id,tunnel_ip,box_type,state,created,updated) "
+            "VALUES (?,?,?,?,?,?,?)",
+            ("bashcheck", "bx_x", "10.99.1.99", "default", "", now, now),
+        )
+    monkeypatch.setattr(b, "_state", lambda box_id: _ok("idle"))
+    monkeypatch.setattr(b, "_wake", lambda box_id, budget_s=180.0: _ok("idle"))
+    asyncio.run(
+        b.create(
+            "bashcheck~claude-code",
+            boot="echo hi",
+            env={"A": "b'c"},
+            boot_fp="fp",
+            image="img",
+            image_ref="ghcr.io/x/y:1",
+        )
+    )
+    f = tmp_path / "s.sh"
+    f.write_text(seen["cmd"])
+    r = subprocess.run([bash, "-n", str(f)], capture_output=True, text=True)
+    assert r.returncode == 0, f"拼出来的装机脚本语法就不对:\n{r.stderr}\n---\n{seen['cmd']}"
+    with db.tx() as conn:
+        conn.execute("DELETE FROM user_boxes WHERE user_id=?", ("bashcheck",))
+
+
+async def _ok(v):
+    return v

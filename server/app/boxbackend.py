@@ -353,7 +353,7 @@ class BoxBackend(Backend):
                 f"sudo install -d {shlex.quote(home)} {shlex.quote(ws)} {shlex.quote(DATA_ROOT + '/shared')}",
                 # 镜像不在就拉。分层修好之后换版只拉增量 (见 docs/design/personal-box.md),
                 # 所以这一步平时是毫秒级, 只有真换了版才花时间。
-                f"sudo docker image inspect {shlex.quote(ref)} >/dev/null 2>&1 || {{ {self._pull(ref)} }}",
+                f"sudo docker image inspect {shlex.quote(ref)} >/dev/null 2>&1 || ( {self._pull(ref)} )",
                 # 端口只绑在隧道地址上 —— 绑 0.0.0.0 等于把用户的工作台开到公网, 而产品
                 # 里一律没有第二道登录墙。
                 f"sudo docker run -d --name {shlex.quote(name)} --restart=always "
@@ -397,6 +397,9 @@ class BoxBackend(Backend):
             f"-u {shlex.quote(user)} --password-stdin >/dev/null"
         )
         # 用 ; 不是 && —— 拉失败也要登出。少了它, 一次失败的拉取就把凭据留在盒子里了。
+        # 调用处把这一串放进**子 shell** `( ... )`: 里面的 exit 只退子 shell, 退出码照样
+        # 传给外面的 `||`。放进 `{ }` 里有两个问题 —— `}` 前少个分号就是语法错误 (实测
+        # 撞过), 而且 exit 会把整个装机脚本掐掉, 后面的 docker run 根本不会跑。
         return (
             f"{login}; {pull}; rc=$?; sudo docker logout {shlex.quote(srv)} >/dev/null 2>&1; "
             "sudo rm -f /root/.docker/config.json; exit $rc"
