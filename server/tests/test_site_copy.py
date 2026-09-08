@@ -22,7 +22,7 @@ import pytest
 ROOT = Path(__file__).resolve().parent.parent
 TEMPLATES = sorted((ROOT / "app" / "templates").glob("*.html"))
 CATALOGS = {p.stem: json.loads(p.read_text()) for p in (ROOT / "config" / "i18n").glob("*.json")}
-APP_JS = (ROOT / "app" / "static" / "app.js").read_text()
+STATIC_JS = sorted((ROOT / "app" / "static").glob("*.js"))
 
 # t("key") / _t("key") / T("key") — literal keys only. Keys built by
 # concatenation (t("pricing.tagline." ~ tier)) cannot be checked statically.
@@ -30,8 +30,10 @@ KEY_CALL = re.compile(r'\b_?[tT]\(\s*"([a-z0-9_]+(?:\.[a-z0-9_]+)+)"')
 
 
 def literal_keys() -> set[str]:
-    keys = set(KEY_CALL.findall(APP_JS))
-    for p in TEMPLATES:
+    # 全部静态 js, 不只 app.js: 只扫 app.js 的时候, avatar.js 里 7 个键从来没进过
+    # 目录也没人吭声 —— 页面照常, 只是英文界面上弹出的是中文兜底串。
+    keys = set()
+    for p in STATIC_JS + TEMPLATES:
         keys |= set(KEY_CALL.findall(p.read_text()))
     return keys
 

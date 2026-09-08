@@ -69,7 +69,7 @@ function load(dom) {
   // 把 IIFE 尾部改成把内部对象抛出来, 只为测试可观察状态。其余一字不改。
   const patched = src.replace(
     /\}\)\(\);\s*$/,
-    "  window.__test = { st, setDuplex, showVideo, listen, micGate };\n})();\n"
+    "  window.__test = { st, setDuplex, showVideo, listen, micGate, fill, loadBg };\n})();\n"
   );
   assert.notEqual(patched, src, "没能挂上测试钩子 —— IIFE 尾部形状变了");
   const fn = new Function(
@@ -170,4 +170,39 @@ check("轮次提示不覆盖错误消息", () => {
   s.textContent = "麦克风被拒绝了";
   api.showVideo(true);
   assert.equal(s.textContent, "麦克风被拒绝了", "错误被每轮都写的提示盖掉了");
+});
+
+/* --------------------------------------------------- 换人之后别被冲回默认 */
+console.log("\n形象选择:");
+
+check("重建选项时保住已经选好的人", () => {
+  const dom = makeDom();
+  const api = load(dom);
+  const sel = dom.els["#avPerson"];
+  // fill 用的是真 DOM 的 options/value 语义, 桩里补上最小实现
+  sel.options = [];
+  sel.appendChild = function (o) { this.options.push(o); if (this.options.length === 1) this.value = o.value; return o; };
+  Object.defineProperty(sel, "innerHTML", { set() { this.options = []; this.value = ""; }, get() { return ""; } });
+
+  const names = { lin: "林 · 安静", yue: "悦 · 干练" };
+  api.fill(sel, ["lin", "yue"], "source-v3-head", names);
+  sel.value = "lin";                       // 用户选了林
+
+  api.fill(sel, ["lin", "yue"], "source-v3-head", names);   // 挂断后 boot() 又跑一次
+  assert.equal(sel.value, "lin",
+    "选好的人被冲回默认了 —— 下一通电话又是初雪, 也就是用户说的\"脸还是之前的\"");
+});
+
+check("选过的人被下架了就落回默认, 不留一个选不中的值", () => {
+  const dom = makeDom();
+  const api = load(dom);
+  const sel = dom.els["#avPerson"];
+  sel.options = [];
+  sel.appendChild = function (o) { this.options.push(o); if (this.options.length === 1) this.value = o.value; return o; };
+  Object.defineProperty(sel, "innerHTML", { set() { this.options = []; this.value = ""; }, get() { return ""; } });
+
+  api.fill(sel, ["lin", "yue"], "d", {});
+  sel.value = "lin";
+  api.fill(sel, ["yue"], "d", {});          // 林没了
+  assert.equal(sel.value, "", "留了一个清单里没有的值, value 与显示的项对不上");
 });

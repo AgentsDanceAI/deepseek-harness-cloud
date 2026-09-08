@@ -22,11 +22,11 @@
      键是形象库里的文件名; 名字与嗓音是我们这边的事 (上游只知道 id)。加人要在
      这里加一行, 这是故意的: 选单里只放校对过的。 */
   const PRESETS = {
-    "source-v3-head": { name: t("avatar.p.default", "初雪 · 温柔"), voice: "xiaoya" },
-    "lin": { name: t("avatar.p.lin", "林 · 安静"), voice: "xiaoxiao" },
-    "yue": { name: t("avatar.p.yue", "悦 · 干练"), voice: "hsiaochen" },
-    "chen": { name: t("avatar.p.chen", "晨 · 沉稳"), voice: "yunjian" },
-    "hao": { name: t("avatar.p.hao", "皓 · 阳光"), voice: "yunxi" },
+    "source-v3-head": { name: t("js.avatar.p.default", "初雪 · 温柔"), voice: "xiaoya" },
+    "lin": { name: t("js.avatar.p.lin", "林 · 安静"), voice: "xiaoxiao" },
+    "yue": { name: t("js.avatar.p.yue", "悦 · 干练"), voice: "hsiaochen" },
+    "chen": { name: t("js.avatar.p.chen", "晨 · 沉稳"), voice: "yunjian" },
+    "hao": { name: t("js.avatar.p.hao", "皓 · 阳光"), voice: "yunxi" },
   };
   /* 半双工 / 全双工。
      全双工 = 她说话时麦克风照开, 你一出声就把她打断。安静环境里这是最像打电话
@@ -84,19 +84,20 @@
   async function boot() {
     const s = await api("/api/avatar/session");
     if (s.status === 402) {
-      status(t("avatar.no_credits", `积分不足，通话需要 ${s.d.credits_per_min} 积分/分钟`), true);
+      status(t("js.avatar.no_credits", "积分不足，通话需要 {n} 积分/分钟")
+               .replace("{n}", s.d.credits_per_min), true);
       $("#avCall").disabled = true;
       return;
     }
-    if (!s.ok) { status(t("avatar.unavailable", "数字人暂时不可用"), true); return; }
+    if (!s.ok) { status(t("js.avatar.unavailable", "数字人暂时不可用"), true); return; }
     st.sess = s.d;
     st.rate = s.d.credits_per_min;
     $("#avBalance").textContent = s.d.balance;
-    $("#avRate").textContent = `${s.d.credits_per_min} ${t("avatar.per_min", "积分/分钟")}`;
+    $("#avRate").textContent = `${s.d.credits_per_min} ${t("js.avatar.per_min", "积分/分钟")}`;
 
     // 形象与音色清单由 GPU 侧给, 且**已按租户过滤** — 别人上传的脸不会在这里。
     const c = await api(`/api/avatar/config`);
-    if (!c.ok) { status(t("avatar.unavailable", "数字人暂时不可用"), true); return; }
+    if (!c.ok) { status(t("js.avatar.unavailable", "数字人暂时不可用"), true); return; }
     st.cfg = c.d;
     // 只列我们做好的那几套。上游库里可能还留着别的 (口袋专家那条线在用), 但
     // 没配成套的不该出现在这里。
@@ -118,16 +119,24 @@
     $("#avBg").src = `/api/avatar/bg.png?person=${encodeURIComponent(p)}&v=${v}`;
   }
 
+  /* 重建选项时**保住已经选好的那个人**。
+     boot() 不只在开页时跑 —— 挂断电话后也会跑一次 (刷新余额), 而 innerHTML=""
+     会把选择冲回第一项"默认"。表现是: 换成林、打一通、挂断, 下一通又变回初雪,
+     而侧栏里那行小字变了没人会注意 —— 看到的就是"我明明换了人, 脸还是之前的"。 */
   function fill(sel, ids, def, names) {
+    const keep = sel.value;
     sel.innerHTML = "";
     const o0 = document.createElement("option");
-    o0.value = ""; o0.textContent = t("avatar.default", "默认") + (def ? `（${def}）` : "");
+    o0.value = ""; o0.textContent = t("js.avatar.default", "默认") + (def ? `（${def}）` : "");
     sel.appendChild(o0);
     for (const id of ids) {
       const o = document.createElement("option");
       o.value = id; o.textContent = (names && names[id]) || id;
       sel.appendChild(o);
     }
+    // 选过的人还在清单里就选回去; 不在了 (上游下架) 就落回默认, 而不是留一个
+    // 选不中的值 —— 那会让 value 与显示出来的项对不上。
+    if (keep && Array.prototype.some.call(sel.options, (o) => o.value === keep)) sel.value = keep;
   }
 
   /* 视频层要按 crop 贴回背景 —— 每个形象的 crop 不同, 用错了就是错位。 */
@@ -154,7 +163,7 @@
   /* ---------- 播放 ---------- */
   function openMedia() {
     const MS = mediaSource();
-    if (!MS) { status(t("avatar.no_mse", "这个浏览器不支持实时视频，换 Chrome 或新版 Safari"), true); return false; }
+    if (!MS) { status(t("js.avatar.no_mse", "这个浏览器不支持实时视频，换 Chrome 或新版 Safari"), true); return false; }
     const v = $("#avVideo");
     // ManagedMediaSource (Safari) 硬性要求关掉远程投播, 否则 addSourceBuffer 直接抛。
     if (!window.MediaSource?.isTypeSupported?.(RT_CODEC)) v.disableRemotePlayback = true;
@@ -261,7 +270,7 @@
       // 出画 —— 而两者从外面看一模一样, 都是"画面不动"。
       if (e.name === "QuotaExceededError") return;
       console.error("[avatar] appendBuffer 失败:", e.name, e.message);
-      status(t("avatar.play_failed", "画面播不出来"), true);
+      status(t("js.avatar.play_failed", "画面播不出来"), true);
     }
     // 缓冲无限长会吃内存; 播过 30s 就裁掉前面的。
     const v = $("#avVideo");
@@ -281,7 +290,7 @@
     if (st.ws) return stopCall();
     if (!openMedia()) return;
     $("#avHint").style.display = "none";
-    $("#avCall").textContent = t("avatar.hangup", "挂断");
+    $("#avCall").textContent = t("js.avatar.hangup", "挂断");
 
     const person = $("#avPerson").value;
     const voice = (PRESETS[person] || {}).voice || "";   // 嗓音跟着人走, 不单选
@@ -308,25 +317,25 @@
       // 而每次重连都要重新排。
       if (m.type === "queued") {
         status(m.ahead > 0
-          ? t("avatar.queued_n", `排队中，前面还有 ${m.ahead} 位…`)
-          : t("avatar.queued_next", "排队中，马上轮到你…"));
+          ? t("js.avatar.queued_n", "排队中，前面还有 {n} 位…").replace("{n}", m.ahead)
+          : t("js.avatar.queued_next", "排队中，马上轮到你…"));
       } else if (m.type === "busy") {
-        status(t("avatar.busy", "通道占线，稍后再试"), true); stopCall();
+        status(t("js.avatar.busy", "通道占线，稍后再试"), true); stopCall();
       } else if (m.type === "error") {
-        status(m.message || t("avatar.error", "出错了"), true);
+        status(m.message || t("js.avatar.error", "出错了"), true);
       } else if (m.type === "ready") {
         // 上游接通了才开始听 —— 早于这一刻识别出来的话没地方发。
         status(t("js.avatar.listening", "说话吧，她在听"));
         listen();
         // **她先开口**。固定一句, 不走模型: 立刻就能说 (模型要好几秒), 而接通后
         // 双方干等的那几秒, 用户只会以为点了没反应。
-        const hi = t("avatar.hello", "喂，我在呢，你说。");
+        const hi = t("js.avatar.hello", "喂，我在呢，你说。");
         say2log("her", hi);
         ws.send(JSON.stringify({ type: "say", sid: ++st.sid, text: hi }));
       }
     };
     ws.onclose = () => stopCall();
-    ws.onerror = () => status(t("avatar.error", "连接失败"), true);
+    ws.onerror = () => status(t("js.avatar.connect_failed", "连接失败"), true);
   }
 
   /* ---------- 听 ---------- */
@@ -337,7 +346,7 @@
     $("#avSay").hidden = false;              // 打字这条路通话期间一直开着
     lockPicker(true);
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SR) { status(t("avatar.no_asr", "这个浏览器没有语音识别 — 打字也可以"), true); return; }
+    if (!SR) { status(t("js.avatar.no_asr", "这个浏览器没有语音识别 — 打字也可以"), true); return; }
     const ear = new SR();
     ear.lang = document.documentElement.lang === "en" ? "en-US" : "zh-CN";
     ear.continuous = true;
@@ -356,7 +365,7 @@
     ear.onend = () => {
       if (st.ws && st.ear === ear && !st.micOff) { try { ear.start(); } catch { /* 已在跑 */ } }
     };
-    ear.onerror = (e) => { if (e.error === "not-allowed") status(t("avatar.no_mic", "麦克风被拒绝了"), true); };
+    ear.onerror = (e) => { if (e.error === "not-allowed") status(t("js.avatar.no_mic", "麦克风被拒绝了"), true); };
     st.ear = ear;
     try { ear.start(); } catch { /* 已在跑 */ }
   }
@@ -379,7 +388,7 @@
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ text: said, history: st.history.slice(0, -1) }),
     });
-    if (!r.ok || !r.body) { status(t("avatar.think_failed", "她没想出该说什么"), true); return; }
+    if (!r.ok || !r.body) { status(t("js.avatar.think_failed", "她没想出该说什么"), true); return; }
     const reader = r.body.getReader(), dec = new TextDecoder();
     let tail = "", whole = "";
     for (;;) {
@@ -393,7 +402,7 @@
         const raw = ln.slice(6).trim();
         if (raw === "[DONE]") continue;
         let d; try { d = JSON.parse(raw); } catch { continue; }
-        if (d.error) { status(t("avatar.think_failed", "她没想出该说什么"), true); continue; }
+        if (d.error) { status(t("js.avatar.think_failed", "她没想出该说什么"), true); continue; }
         if (!d.text) continue;
         whole += d.text;
         if (!st.ws) return;                   // 说到一半挂断了
@@ -401,7 +410,7 @@
         st.ws.send(JSON.stringify({ type: "say", sid: ++st.sid, text: d.text }));
       }
     }
-    if (!whole) { status(t("avatar.think_failed", "她没想出该说什么"), true); return; }
+    if (!whole) { status(t("js.avatar.think_failed", "她没想出该说什么"), true); return; }
     st.history.push({ role: "assistant", content: whole });
     if (st.history.length > 16) st.history.splice(0, st.history.length - 16);
   }
@@ -431,7 +440,7 @@
     st.history = [];
     if (st.timer) { clearInterval(st.timer); st.timer = null; }
     st.t0 = null; st.queue = [];
-    $("#avCall").textContent = t("avatar.start", "开始通话");
+    $("#avCall").textContent = t("js.avatar.start", "开始通话");
     $("#avHint").style.display = "";
     boot();                              // 刷新余额
   }
