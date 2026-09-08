@@ -151,7 +151,16 @@ BOX_ORG=<id> bash deploy/box-node/box.sh limits     # 哪个是 standard 用哪�
 `deploy/prod/.env`**: 那份被 compose 以 `env_file` 注进 dhc-server, 而它根本不用 Box。⚠️ 口袋专家那条线的
 `backend/dataset/agent_box.py` **没有**带 org, 所以云电脑现在是花在个人的试用额度上。
 
-**8. 试用档 = 2 台并发 / 25 小时 / 只有 small 与 default / ttl 必须 ≤ 7200s。**
+**8. 删盒子会把它的普通快照一起带走, 不可逆。** 只有**命名快照**能活下来。
+2026-09-07 我用 `for b in $(box.sh ls | awk '{print $1}')` 全量删了一遍清理测试残留 ——
+这个账号是**两条产品线共用**的, 于是把口袋专家两台用户机器连同数据一起删了, `GET
+/snapshots` 事后返回 0 份。备用节点能救回来只是因为它有命名快照 `dsh-node`。
+
+已经做成结构而不是靠记性: `box.sh` 现在维护一份归属清单 (`/root/dsh-k8s-box/owned.txt`),
+`new` / `from` 建出来的 id 自动记进去, **`rm` 只肯删清单里的**, 别的要显式
+`--force-foreign`。日常清理一律用 `stop` —— 停机免费而且盘还在。
+
+**9. 试用档 = 2 台并发 / 25 小时 / 只有 small 与 default / ttl 必须 ≤ 7200s。**
 `box.sh limits` 随时可查。并发池是**和口袋专家的云电脑共用的**(同一把 `BOX_API_KEY`),
 建节点前先 `box.sh ls` 看看那边有没有人在用。真要上生产, DSH 应该单开一把 key ——
 否则两条产品线抢并发, 账单也分不开谁花的。

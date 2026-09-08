@@ -17,7 +17,8 @@
 #   resume <box>                开机
 #   snap <box> <名字>           存一份命名快照 (无过期, 最多 10 份) —— 备用节点的"底片"
 #   snaps                       列出命名快照
-#   rm <box>                    删除 (要带确认头, 值就是 box id)
+#   rm <box> [--force-foreign]  删除 (**连快照一起没, 不可逆**; 只肯删自己建的)
+#   owned                       列出这个脚本建过的 id (归属清单)
 #
 # 密钥: BOX_API_KEY。优先取环境变量, 否则从 BOX_ENVFILE 里读那一行。**不打印、不进日志。**
 #
@@ -70,6 +71,15 @@ json.dump(d, sys.stdout)
 
 jq_py() { python3 -c "import json,sys;d=json.load(sys.stdin);$1"; }
 
+# --- 归属清单 -----------------------------------------------------------------
+# 这个账号是**两条产品线共用**的: 口袋专家的云电脑也在里面。2026-09-07 我用
+# `for b in $(box.sh ls | awk "{print \$1}")` 全量删了一遍, 把别人两台用户机器连同
+# 数据一起删掉了 (删盒子会把它的普通快照一起带走, 不可逆)。
+# 所以: 凡是这个脚本建出来的 id 都记进清单, `rm` 只肯删清单里的。
+OWNED="${BOX_OWNED_FILE:-/root/dsh-k8s-box/owned.txt}"
+own_add() { local id; read -r id || return 0; [ -n "$id" ] && { mkdir -p "$(dirname "$OWNED")"; grep -qxF "$id" "$OWNED" 2>/dev/null || echo "$id" >> "$OWNED"; }; echo "$id"; }
+own_has() { grep -qxF "$1" "$OWNED" 2>/dev/null; }
+
 cmd="${1:-}"; shift || true
 case "$cmd" in
 ls)
@@ -83,11 +93,11 @@ limits)
 new)
   t="${1:-default}"; ttl="${2:-7200}"
   req POST /boxes "{\"type\":\"$t\",\"ttlSeconds\":$ttl,\"noEnv\":true}" "Idempotency-Key: $(date +%s)-$RANDOM" \
-    | check | jq_py 'print(d["box"]["id"])' ;;
+    | check | jq_py 'print(d["box"]["id"])' | tee -a /dev/stderr | own_add ;;
 from)
   name="${1:?要命名快照的名字}"; t="${2:-default}"
-  req POST /boxes "{\"type\":\"$t\",\"ttlSeconds\":${BOX_TTL:-7200},\"noEnv\":true,\"fromSnapshot\":\"$name\"}" "Idempotency-Key: $(date +%s)-$RANDOM" \
-    | check | jq_py 'print(d["box"]["id"])' ;;
+  req POST /boxes "{\"type\":\"$t\",\"ttlSeconds\":${BOX_TTL:-7200},\"noEnv\":true,\"from\":\"$name\"}" "Idempotency-Key: $(date +%s)-$RANDOM" \
+    | check | jq_py 'print(d["box"]["id"])' | own_add ;;
 get)
   req GET "/boxes/${1:?要 box id}" | check | python3 -m json.tool ;;
 ip)
@@ -122,12 +132,24 @@ snap)
   # (文档正文里那句 `box snapshot <id> <name>` 是 CLI 的写法, REST 不长这样)。
   b="${1:?要 box id}"; n="${2:?要快照名字}"
   req POST /named-snapshots "{\"boxId\":\"$b\",\"name\":\"$n\"}" | check >/dev/null && echo "已存命名快照: $n" ;;
+owned)
+  [ -s "$OWNED" ] && cat "$OWNED" || echo "(清单是空的 —— 这个脚本还没建过盒子)" ;;
 snaps)
   req GET /named-snapshots | check | jq_py 'ss=d.get("snapshots") or d.get("namedSnapshots") or [];print("\n".join("%-24s %s" % (s.get("name"),s.get("createdAt","")) for s in ss)) if ss else print("(没有命名快照)")' ;;
 rm)
   # 是 DELETE /boxes/{id}, 不是文档正文写的 POST /boxes/{id}/delete (后者 404)。
   # 确认头的值必须**就是**那台的 id, 否则 409。
-  b="${1:?}"; req DELETE "/boxes/$b" "" "X-Ascii-Confirm-Delete: $b" | check >/dev/null && echo "已删除 $b" ;;
+  #
+  # ⚠️ **删除会连它的普通快照一起带走, 不可逆** (2026-09-07 实测: 删完 GET /snapshots
+  # 返回 0 份)。日常清理请用 stop —— 停机免费而且盘还在。
+  b="${1:?}"
+  if ! own_has "$b" && [ "${2:-}" != "--force-foreign" ]; then
+    echo "拒绝: $b 不在归属清单 ($OWNED) 里 —— 这个账号两条产品线共用, 别人的机器删了" >&2
+    echo "      数据不可恢复。确认是自己的再加 --force-foreign。" >&2
+    exit 3
+  fi
+  req DELETE "/boxes/$b" "" "X-Ascii-Confirm-Delete: $b" | check >/dev/null \
+    && { sed -i "/^$b\$/d" "$OWNED" 2>/dev/null; echo "已删除 $b"; } ;;
 *)
   sed -n '2,25p' "$0" >&2; exit 2 ;;
 esac

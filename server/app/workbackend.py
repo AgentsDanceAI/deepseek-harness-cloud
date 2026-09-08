@@ -1238,6 +1238,7 @@ class K8sBackend(Backend):
             # lifecycle.stopSignal 要求声明 os (k8s 1.33+ ContainerStopSignals)
             "os": {"name": "linux"},
             "securityContext": {"seccompProfile": {"type": "RuntimeDefault"}},
+            **self._node_preference(),
             "resources": {
                 "requests": {"cpu": _millicores(cpu / 4), "memory": f"{mem}Mi"},
                 "limits": {"cpu": _millicores(cpu), "memory": f"{mem}Mi"},
@@ -1275,6 +1276,36 @@ class K8sBackend(Backend):
                 "annotations": {K8S_ANN_USER: user_id, K8S_ANN_BOOTCFG: boot_fp},
             },
             "spec": spec,
+        }
+
+    @staticmethod
+    def _node_preference() -> dict:
+        """优先落在 K8S_PREFERRED_NODES 上 (软偏好, 装不下照样溢出)。
+
+        默认调度是 LeastAllocated —— 谁空谁得, 也就是**摊开**。而节点成本不对等:
+        白借的机器和按量付费的溢出节点摊开, 等于一半的工作台白花钱。
+
+        用 preferred 而不是 nodeSelector/required: 硬约束在首选节点装满时会让 Pod 一直
+        Pending —— 而 Pending 不抛异常, 表现是用户对着启动等待页转圈, 比多花点钱糟得多。
+        """
+        names = [n.strip() for n in (config.K8S_PREFERRED_NODES or "").split(",") if n.strip()]
+        if not names:
+            return {}
+        return {
+            "affinity": {
+                "nodeAffinity": {
+                    "preferredDuringSchedulingIgnoredDuringExecution": [
+                        {
+                            "weight": 100,
+                            "preference": {
+                                "matchExpressions": [
+                                    {"key": "kubernetes.io/hostname", "operator": "In", "values": names}
+                                ]
+                            },
+                        }
+                    ]
+                }
+            }
         }
 
     def _report_stuck(self, user_id: str, pod: dict) -> None:

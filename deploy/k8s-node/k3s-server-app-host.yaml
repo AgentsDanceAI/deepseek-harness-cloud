@@ -1,0 +1,55 @@
+# /etc/rancher/k3s/config.yaml —— **控制面装在应用机上**的 k3s server。
+#
+# 为什么装这儿: 248 是公司的机器, 安全组我们改不了, 而 k3s 是 **agent 主动拨向
+# server** —— 只要 server 在有公网的机器上, 248 和将来的溢出节点都只需要出站
+# (248 出站是通的), 一个入站端口都不用向公司申请。应用机本来就有公网。
+#
+# 代价写在前面: 这台是对外的 web 服务器, 而 k3s 会往 iptables 里加一批 KUBE-* 链、
+# 改 FORWARD。它和 docker 共存是常见做法, 但也是常见事故点, 而出问题的表现往往是
+# **网站的某类流量被静默丢掉**。所以上线分两步: 先装着不接管任何流量、盯一段时间,
+# 确认干净了再把 248 迁过来。退场: /usr/local/bin/k3s-uninstall.sh
+#
+# ⚠️ **网段必须错开。** 应用机上现在有 10.42/16 与 10.43/16 两条路由指向 248 的隧道
+# (那是 248 集群的 pod/service 网段)。k3s 默认恰好就用这两段 —— 照默认装下去会和线上
+# 正在用的路由打架, 把工作台的反代当场弄断。10.44/10.45 是 Box 备用节点的, 10.99.x
+# 是隧道的, 所以这里用 10.46/10.47。
+cluster-cidr: 10.46.0.0/16
+service-cidr: 10.47.0.0/16
+cluster-dns: 10.47.0.10
+
+# 跨网节点之间自动建 WireGuard —— 248 在公司网里, 溢出节点在我们 VPC, 两边不同网。
+# 这是 k3s 内置的, 不用自己搭隧道。设定了就别改: 换 flannel 后端要重启并重建 Pod 网络。
+#
+# ⚠️ **必须换端口。** wireguard-native 默认用 UDP 51820, 而这台机器上 Box 隧道的
+# dshbox0 已经占着 51820 (那个端口还在安全组里放行着)。撞了之后 flannel 报
+# "failed to set interface flannel-wg to UP state: address already in use", k3s **干净
+# 退出**、systemd 每 11 秒拉一次 —— 2026-09-08 实测八小时空转 2582 次重启, 而
+# `systemctl is-active` 显示 activating、日志顶层只有一堆 subnet.env 找不到的噪音,
+# 真正那一行要往前翻几百行才看得见。
+flannel-backend: wireguard-native
+flannel-conf: /etc/rancher/k3s/flannel-wg.json
+
+node-name: dsh-cp-1
+write-kubeconfig-mode: "0600"
+disable:
+  - traefik        # 80/443 是 Caddy 的, 让 traefik 上来会抢端口
+  - servicelb
+  - metrics-server
+disable-helm-controller: true
+
+# 证书要覆盖 agent 会用的那个地址。少了它 agent 连过来是证书不匹配, 而报错在 agent
+# 那边、server 日志里什么都没有。__PUBLIC_IP__ 由安装脚本填, 不写进 git。
+tls-san:
+  - __PUBLIC_IP__
+
+kubelet-arg:
+  # **这台是网站服务器, 先把资源留给它。** 4 核 14G 里给系统留 2 核 8G ——
+  # kubelet 把 Pod 总量卡在 capacity 减去这个数, 比命名空间配额更硬。
+  - "system-reserved=cpu=2,memory=8Gi"
+  - "eviction-hard=memory.available<1Gi,nodefs.available<15%"
+  - "max-pods=20"
+
+# 控制面节点不跑工作台。k3s 自己的关键组件 (coredns 等) 带着 CriticalAddonsOnly 的
+# 容忍, 所以它们照常起; 用户的工作台不会落到这台机器上。
+node-taint:
+  - "CriticalAddonsOnly=true:NoExecute"
