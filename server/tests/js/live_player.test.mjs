@@ -18,7 +18,7 @@ import test from "node:test";
 const here = dirname(fileURLToPath(import.meta.url));
 const SRC = join(here, "..", "..", "app", "static", "live.js");
 
-function makeEnv(hlsUrl = "/api/live/hls/official/index.m3u8") {
+function makeEnv(hlsUrl = "/api/live/hls/official/index.m3u8", { safari = false } = {}) {
   const made = [];              // 建过几个 Hls 实例
   const destroyed = [];         // 销毁过几个
   const video = {
@@ -27,7 +27,11 @@ function makeEnv(hlsUrl = "/api/live/hls/official/index.m3u8") {
     plays: 0,
     addEventListener(t, fn) { (this.listeners[t] ||= []).push(fn); },
     play() { this.plays++; this.paused = false; return Promise.resolve(); },
-    canPlayType() { return ""; },       // 非 Safari: 走 hls.js 那条路
+    // Safari 原生放 HLS, 走 v.src 那条路; 别的浏览器走 hls.js。
+    canPlayType() { return safari ? "maybe" : ""; },
+    srcSets: 0,
+    set src(u) { this.srcSets++; this._src = u; },
+    get src() { return this._src || ""; },
   };
   const nodes = {
     lvVideo: video,
@@ -107,4 +111,23 @@ test("播放器按普通 HLS 配, 落后了加速追而不是跳", async () => {
   assert.equal(cfg.lowLatencyMode, false, "我们发的不是 LL-HLS, 开着它同步策略会更激进");
   assert.ok(cfg.maxLiveSyncPlaybackRate > 1, "落后了要能加速追, 否则只能跳");
   assert.ok(cfg.liveSyncDurationCount >= 4, "缓冲太薄, 一抖动就掉队");
+});
+
+
+test("Safari 上也不能每次刷新都重设 v.src (老板录屏: 每 15 秒黑 2-3 秒, 声音一起断)", async () => {
+  // Safari 原生放 HLS —— 走的不是 hls.js 那条路, 所以守卫**不能**拿 hls 实例当判据。
+  // 给 video 重新赋同一个 src 会让它整个重新加载: 黑 2-3 秒, 音频也断。
+  const ctx = makeEnv("/api/live/hls/official/index.m3u8", { safari: true });
+  const player = load(ctx);
+  await player.refresh();
+  assert.equal(ctx.video.srcSets, 1, "第一次该设一次 src");
+  assert.equal(ctx.made.length, 0, "Safari 不该建 hls.js 实例");
+
+  await player.refresh();            // 第 15 秒
+  await player.refresh();            // 第 30 秒
+  ctx.video.paused = true;
+  await player.refresh();            // 暂停时也不该重设
+
+  assert.equal(ctx.video.srcSets, 1, "地址没变却又设了一次 src —— Safari 上会黑 2-3 秒");
+  assert.ok(ctx.video.plays >= 1, "暂停了该让它继续播");
 });
