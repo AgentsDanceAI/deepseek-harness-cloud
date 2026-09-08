@@ -74,7 +74,11 @@
 3. **ECI 虚拟节点 (virtual-kubelet)** 作为第二阶段: Pod 直接落 ECI、按 Pod 计费、闲时
    零成本, 最接近"容量不足自动扩"。但它主要是给托管 ACK 用的, 自建 k3s 上少有人走,
    而且**前提也是先有一个 agent 连得上的 server** —— 所以它排在控制面搬家之后。
-4. **ECS 的实际牌价没有。** ECI 的有 (`docs/workspace-scaling.md`), 但那份文档自己写着
+4. **调度偏好已就绪但还没配。** `K8S_PREFERRED_NODES` (提交 32bf386): 不配就是默认的
+   摊开, 配了才会优先落在白借的那台上。加节点的同时要把它设成 248 的节点名, 否则新
+   工作台会一半落到花钱那台上 —— **而这件事不会有任何报错, 只体现在账单上**。
+
+5. **ECS 的实际牌价没有。** ECI 的有 (`docs/workspace-scaling.md`), 但那份文档自己写着
    "别按比例外推没在创建页上见过的规格" —— 上次外推低估了 56%。控制面和溢出节点的
    规格价要去控制台读一次。
 
@@ -84,7 +88,28 @@
    站点 200、CF-ONLY 仍生效、容器互通、248 隧道与 API 正常、`10.42/43` 路由没被抢、
    应用容器经隧道打 248 的 Pod 仍是 200。唯一的退步是 FORWARD 默认策略被 kubelet 改成
    ACCEPT, 已在链尾补兜底 DROP 并重验全绿。
-2. **盯一段时间** —— iptables 冲突常常不当场爆, 而是某类流量在特定条件下才被丢。
-3. **248 以 agent 身份加入**, `K8S_API_URL` 指到本地, 隧道退场。
-4. **抬配额**, 加"撞到容量"的日志。
-5. 真撞到容量时再买溢出节点。
+2. ✅ **flannel 的 WireGuard 端口撞车已修** (2026-09-08)。`wireguard-native` 默认用
+   UDP **51820**, 而这台机器上 Box 隧道的 `dshbox0` 正占着它 (那个端口还在安全组里
+   放行着)。撞了之后 flannel 报 `failed to set interface flannel-wg to UP state:
+   address already in use`, **k3s 干净退出**、systemd 每 11 秒拉一次 —— 八小时空转
+   2582 次重启。
+
+   两个让它难查的地方, 记下来:
+   - `systemctl is-active` 显示 `activating`, `journalctl` 顶层只有一堆
+     `subnet.env: no such file` 的噪音 (那是**后果**不是原因), 真正那一行
+     `address already in use` 要往前翻几百行。
+   - 站点、248 隧道、老网段路由**全程正常** —— 所以只看"线上有没有事"发现不了它。
+
+   修法是给 flannel 换端口 (51821), 不动 `dshbox0`。⚠️ **配置键叫 `ListenPort` 不是
+   `Port`** —— 我第一次写成 `Port`, 被**静默忽略**, `wg show` 里端口还是 51820 而
+   日志一个字都不提。
+
+   ```
+   /etc/rancher/k3s/flannel-wg.json   {"Network":..., "Backend":{"Type":"wireguard","ListenPort":51821,...}}
+   config.yaml                        flannel-conf: /etc/rancher/k3s/flannel-wg.json
+   ```
+
+3. **盯一段时间** —— iptables 冲突常常不当场爆, 而是某类流量在特定条件下才被丢。
+4. **248 以 agent 身份加入**, `K8S_API_URL` 指到本地, 隧道退场。
+5. ✅ **配额已按两台抬到 18C/84Gi/90 pods** (2026-09-08, 新集群里)。加"撞到容量"的日志还没做。
+6. 真撞到容量时再买溢出节点。
