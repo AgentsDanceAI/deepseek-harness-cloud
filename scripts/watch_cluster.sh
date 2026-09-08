@@ -53,7 +53,7 @@ else
   # 能收工作台的节点 = Ready 且未封锁且不是控制面(控制面带 NoExecute 污点)
   workers="$(awk '$2 == "Ready" && $3 !~ /control-plane/ {print $1}' <<<"$nodes" | wc -l)"
   [ "$workers" -eq 0 ] && PROBLEMS+=("**没有一个可调度的工作节点** —— 新工作台一个都开不出来")
-  note "节点: $(tr '\n' ';' <<<"$nodes" | sed 's/  */ /g')"
+  NODE_SUMMARY="$(awk '{printf "%s(%s) ", $1, $2}' <<<"$nodes")"
 fi
 
 # ── 3. 容量: 有没有 Pod 卡着排不上 ─────────────────────────────────────
@@ -79,10 +79,15 @@ if [ -n "$pending" ]; then
     应用侧不用改任何东西 (K8sBackend 不知道集群有几个节点)。")
   fi
 fi
-# 容量水位每次都记一笔, 攒出趋势 (不告警)
-$KUBECTL describe nodes 2>/dev/null \
-  | awk '/^Name:/{n=$2} /Allocated resources/{f=1} f&&/memory/{print "    水位 "n": memory "$2" "$3; f=0}' \
-  | sed "s/^/$TS/"
+# 容量水位。每 5 分钟全量打一遍会把日志刷成噪音, 所以: 平时只把最高水位并进
+# 末尾那一行"全绿", 到 50% 以上(该开始考虑加节点了)才逐节点展开。
+WATER="$($KUBECTL describe nodes 2>/dev/null \
+  | awk '/^Name:/{n=$2} /Allocated resources/{f=1} f&&/^  memory/{print n" "$2" "$3; f=0}')"
+WATER_MAX="$(awk '{gsub(/[()%]/,"",$3); if ($3+0 > m) m=$3+0} END {print m+0}' <<<"$WATER")"
+if [ "${WATER_MAX:-0}" -ge 50 ]; then
+  note "内存水位 ${WATER_MAX}% —— 逐节点:"
+  sed "s/^/$TS    /" <<<"$WATER"
+fi
 
 # ── 4. 应用真走的那条路: 容器里 → k8s API ──────────────────────────────
 if docker inspect "$APP_CONTAINER" >/dev/null 2>&1; then
@@ -122,11 +127,13 @@ fi
 
 # ── 收尾 ───────────────────────────────────────────────────────────────
 if [ ${#PROBLEMS[@]} -eq 0 ]; then
-  note "全绿"
+  note "全绿 | 节点: ${NODE_SUMMARY:-?}| 内存水位最高 ${WATER_MAX:-?}%"
   rm -f "$STATE/alerted"
   exit 0
 fi
 body="工作台集群巡检发现问题 @ $TS
+
+现场: 节点 ${NODE_SUMMARY:-?}| 内存水位最高 ${WATER_MAX:-?}%
 
 $(printf '%s\n\n' "${PROBLEMS[@]}")
 巡检脚本: deploy 机 /data/workspace/deepseek-harness-cloud/scripts/watch_cluster.sh"
