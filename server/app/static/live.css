@@ -1,7 +1,7 @@
-/* 数字人直播间。舞台是 16:9, 与 GPU 侧的出流一致 (1280×720)。 */
+/* 数字人直播间: 左控制台 + 右预览。舞台 16:9, 与 GPU 侧出流一致 (1280×720)。 */
 .lv-head { display: flex; align-items: center; gap: .75rem; flex-wrap: wrap; }
 .lv-title { margin: 0; }
-.lv-sub { margin: .35rem 0 1rem; opacity: .7; }
+.lv-sub { margin: .35rem 0 1.2rem; opacity: .7; }
 
 .lv-badge { font-size: .8rem; padding: .15rem .6rem; border-radius: 999px; border: 1px solid; }
 .lv-badge--on { color: #e33; border-color: #e33; }
@@ -9,22 +9,51 @@
 .lv-badge--off { opacity: .55; }
 @keyframes lvpulse { 50% { opacity: .25; } }
 
-.lv-stage {
-  position: relative; width: 100%; max-width: 960px;
-  aspect-ratio: 16 / 9; background: #000; border-radius: 12px; overflow: hidden;
+/* 预览在右、控制台在左。窄屏一列 —— 手机上先看画面再看控制台, 所以预览排在前面。 */
+.lv-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr); gap: 1.5rem; align-items: start; }
+@media (max-width: 900px) {
+  .lv-grid { grid-template-columns: 1fr; }
+  .lv-preview { order: -1; }
 }
-.lv-video { width: 100%; height: 100%; object-fit: contain; display: block; }
 
+.lv-h2 { margin: 0 0 .8rem; font-size: 1.05rem; }
+.lv-field { display: block; margin-bottom: .8rem; }
+.lv-field > span { display: block; font-size: .85rem; opacity: .75; margin-bottom: .3rem; }
+.lv-field input, .lv-field select, .lv-field textarea {
+  width: 100%; padding: .5rem .6rem; border-radius: 8px;
+  border: 1px solid rgba(128,128,128,.35); background: transparent; color: inherit;
+  font: inherit; box-sizing: border-box;
+}
+.lv-field textarea { resize: vertical; line-height: 1.7; min-height: 12rem; }
+.lv-hint { font-style: normal; opacity: .6; font-size: .8em; }
+.lv-two { display: grid; grid-template-columns: 1fr 1fr; gap: .8rem; }
+.lv-warn { font-size: .82rem; color: #c80; margin: -.3rem 0 .8rem; }
+.lv-counts { font-size: .82rem; opacity: .7; margin-bottom: .8rem; min-height: 1.2em; }
+
+.lv-actions { display: flex; gap: .5rem; flex-wrap: wrap; }
+.lv-btn {
+  padding: .45rem .9rem; border-radius: 8px; cursor: pointer; font: inherit;
+  border: 1px solid rgba(128,128,128,.4); background: transparent; color: inherit;
+}
+.lv-btn:disabled { opacity: .45; cursor: default; }
+.lv-btn--go { border-color: #e33; color: #e33; }
+
+.lv-progress { height: 4px; border-radius: 2px; background: rgba(128,128,128,.25); margin-top: .8rem; overflow: hidden; }
+.lv-progress > div { height: 100%; width: 0; background: #e33; transition: width .4s; }
+.lv-status { font-size: .82rem; opacity: .75; margin-top: .6rem; min-height: 1.2em; }
+
+.lv-stage { position: relative; width: 100%; aspect-ratio: 16 / 9; background: #000; border-radius: 12px; overflow: hidden; }
+.lv-video { width: 100%; height: 100%; object-fit: contain; display: block; }
 /* 提示压在画面中间 —— 缓冲/未开播时舞台是纯黑, 字必须在黑上看得见。 */
 .lv-msg {
   position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
   color: #fff; opacity: .8; font-size: .95rem; pointer-events: none; text-align: center; padding: 1rem;
 }
 .lv-msg[hidden] { display: none; }
-
 .lv-unmute {
   position: absolute; right: 12px; bottom: 12px; z-index: 2;
   padding: .45rem .9rem; border-radius: 999px; border: 0; cursor: pointer;
   background: rgba(255,255,255,.92); color: #111; font-size: .85rem;
 }
-.lv-note { margin-top: .9rem; font-size: .85rem; opacity: .6; max-width: 960px; }
+.lv-watching { margin-top: .6rem; font-size: .85rem; opacity: .75; }
+.lv-note { margin-top: .5rem; font-size: .8rem; opacity: .55; }

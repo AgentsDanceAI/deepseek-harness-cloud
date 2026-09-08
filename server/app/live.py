@@ -24,10 +24,11 @@ from __future__ import annotations
 import logging
 
 import httpx
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
 
 from . import config
+from .accounts import resolve_user, try_resolve_user
 
 router = APIRouter(prefix="/api/live", tags=["live"])
 log = logging.getLogger("dhc.live")
@@ -40,6 +41,27 @@ _M3U8 = "application/vnd.apple.mpegurl"
 
 def _enabled() -> bool:
     return bool(config.LIVE_GPU_URL)
+
+
+def _my_room(user: dict) -> str:
+    """每个用户一个直播间。前缀与数字人通话的租户一致 —— 那张卡上同时住着口袋专家
+    和 DSH Cloud 两条线, 不加前缀两边的用户 id 可能撞上, 而撞了就是**看到/改到
+    别人的直播间**。"""
+    return "d-" + str(user["id"])
+
+
+async def _gpu(method: str, path: str, room: str, **kw):
+    """带着这个房间自己的令牌调 GPU 侧。
+
+    令牌的租户 == 房间名, 而房间名由**服务端**从登录态算出来 —— 所以浏览器无论
+    传什么都只能操作自己那间。房间隔离全靠这一条, 别让房间名从请求体里进来。
+    """
+    async with httpx.AsyncClient(timeout=20) as c:
+        r = await c.request(method, f"{config.LIVE_GPU_URL}{path}", params={"token": _sign(room)}, **kw)
+    if r.status_code != 200:
+        log.warning("[live] 上游 %s %s -> %s", method, path, r.status_code)
+        raise HTTPException(502, "upstream")
+    return r.json()
 
 
 @router.get("/status")
@@ -81,7 +103,7 @@ def _sign(room: str) -> str:
 
 
 @router.get("/hls/{room}/{name}")
-async def hls(room: str, name: str):
+async def hls(room: str, name: str, request: Request):
     """代转 HLS 播放列表与切片。
 
     只放行 .m3u8 / .ts 两种名字 —— 这是一条把浏览器给的字符串直接拼进上游 URL 的
@@ -95,6 +117,13 @@ async def hls(room: str, name: str):
         raise HTTPException(400, "bad_name")
     if not room.replace("-", "").replace("_", "").isalnum():
         raise HTTPException(400, "bad_room")
+    # 归属: 官方间人人可看 (它就是拿来展示的), 别人的间只有本人能看。
+    # 房间名是 d-<用户id> —— 不是秘密, 猜得到; 所以隔离必须落在这里, 不能指望
+    # "别人不知道房间名"。
+    if room != config.LIVE_ROOM:
+        me = try_resolve_user(request)
+        if me is None or _my_room(me) != room:
+            raise HTTPException(403, "not_your_room")
     url = f"{config.LIVE_GPU_URL}/hls/{room}/{name}"
     try:
         async with httpx.AsyncClient(timeout=20) as c:
@@ -110,3 +139,45 @@ async def hls(room: str, name: str):
         media_type=_M3U8 if is_list else "video/mp2t",
         headers={"Cache-Control": "no-store" if is_list else "public, max-age=60"},
     )
+
+
+# ── 控制台: 只能操作自己那一间 ────────────────────────────────────────────
+@router.get("/room")
+async def my_room(user: dict = Depends(resolve_user)):
+    """我的直播间: 话术、形象、音色、逐句渲染状态、在播与否。"""
+    if not _enabled():
+        raise HTTPException(404, "live_disabled")
+    room = _my_room(user)
+    d = await _gpu("GET", f"/rooms/{room}/status", room)
+    d["room"] = room
+    d["hls"] = f"/api/live/hls/{room}/index.m3u8"
+    return JSONResponse(d)
+
+
+@router.put("/room")
+async def put_my_room(body: dict, user: dict = Depends(resolve_user)):
+    """存话术/形象/音色。**存完不会自动渲染** —— 渲染要占 GPU 几分钟, 用户改个
+    错别字就整场重渲说不过去; 由他自己按"渲染"。"""
+    if not _enabled():
+        raise HTTPException(404, "live_disabled")
+    room = _my_room(user)
+    payload = {}
+    for k in ("person", "voice", "title"):
+        if k in body:
+            payload[k] = str(body[k])[:120]
+    if "lines" in body:
+        if not isinstance(body["lines"], list):
+            raise HTTPException(400, "lines_must_be_list")
+        payload["lines"] = [str(x)[:600] for x in body["lines"] if str(x).strip()][:200]
+    return JSONResponse(await _gpu("PUT", f"/rooms/{room}", room, json=payload))
+
+
+@router.post("/room/{action}")
+async def act(action: str, user: dict = Depends(resolve_user)):
+    """render / start / stop。"""
+    if action not in ("render", "start", "stop"):
+        raise HTTPException(404, "unknown_action")
+    if not _enabled():
+        raise HTTPException(404, "live_disabled")
+    room = _my_room(user)
+    return JSONResponse(await _gpu("POST", f"/rooms/{room}/{action}", room))

@@ -96,3 +96,39 @@ def test_the_live_page_may_load_blob_media_but_gets_no_extra_openings():
     assert "connect-src" not in csp, "直播页不该有跨源出口 —— HLS 是同源代转的"
     assert "microphone=()" in lv.headers.get("permissions-policy", "")
     assert "blob:" not in home.headers.get("content-security-policy", "")
+
+
+def test_a_live_room_belongs_to_exactly_one_person(monkeypatch):
+    """直播间的隔离必须落在**归属校验**上, 不能指望"别人不知道房间名"。
+
+    房间名就是 `d-<用户id>` —— 用户 id 在站内到处都是, 猜得到。所以:
+    · 别人的房间: 403 (且在打上游之前就拒, 不能让人拿我们当探测器);
+    · 官方间: 人人可看 (它就是拿来展示的);
+    · 没登录: 拿不到控制台的任何一个接口。
+    """
+    from fastapi.testclient import TestClient
+
+    from app import config as cfg
+    from app.main import app
+    from tests._signup import signup
+
+    monkeypatch.setattr(cfg, "LIVE_GPU_URL", "http://live.invalid/live")
+    monkeypatch.setattr(cfg, "LIVE_ROOM", "official")
+    monkeypatch.setattr(cfg, "AVATAR_TOKEN_SECRET", "t" * 32)
+
+    with TestClient(app) as anon:
+        # 未登录: 控制台一个都进不去
+        assert anon.get("/api/live/room").status_code in (401, 403)
+        assert anon.put("/api/live/room", json={"lines": ["x"]}).status_code in (401, 403)
+        assert anon.post("/api/live/room/start").status_code in (401, 403)
+        # 官方间的切片是公开的
+        assert anon.get("/api/live/hls/official/index.m3u8").status_code != 403
+
+    with TestClient(app) as c:
+        signup(c, "live-owner@example.com")
+        me = c.get("/api/live/room")
+        # 上游是假地址, 打不通 —— 502 说明**归属这一关放行了**, 才轮到网络出错。
+        assert me.status_code == 502, me.status_code
+        # 别人的房间: 在打上游之前就该被拒
+        assert c.get("/api/live/hls/d-somebodyelse/index.m3u8").status_code == 403
+        assert c.get("/api/live/hls/official/index.m3u8").status_code != 403
