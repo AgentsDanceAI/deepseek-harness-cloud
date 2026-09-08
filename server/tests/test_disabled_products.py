@@ -52,18 +52,20 @@ def test_disabled_still_in_registry(monkeypatch):
 def test_catalog_drops_the_card_entirely(monkeypatch):
     monkeypatch.setattr(config, "WORK_DISABLED_PRODUCTS", "")
     all_ids = {e["id"] for e in apps_catalog.entries_with_status(set())}
-    assert "coze" in all_ids, "目录里本来该有 coze, 不然这条测试什么也没验到"
+    # 样本从 coze 换成 dify (2026-09-08): coze 的目录位已被数字人直播顶掉, 拿一个
+    # 不在目录里的 id 当样本, 这条用例就永远是绿的而什么也没验到。
+    assert "dify" in all_ids, "目录里本来该有 dify, 不然这条测试什么也没验到"
 
-    monkeypatch.setattr(config, "WORK_DISABLED_PRODUCTS", "coze")
+    monkeypatch.setattr(config, "WORK_DISABLED_PRODUCTS", "dify")
     entries = apps_catalog.entries_with_status(set())
     ids = {e["id"] for e in entries}
     # 不是"live=False 的灰卡", 是根本没有这一项
-    assert "coze" not in ids
-    assert ids == all_ids - {"coze"}
+    assert "dify" not in ids
+    assert ids == all_ids - {"dify"}
 
 
 def test_catalog_sorting_survives_a_disabled_card(monkeypatch):
     """排序用的 order 表也要跟着去掉那一项, 否则按时长排序时 KeyError。"""
-    monkeypatch.setattr(config, "WORK_DISABLED_PRODUCTS", "coze")
-    entries = apps_catalog.entries_with_status(set(), minutes={"dify": 10})
-    assert "coze" not in {e["id"] for e in entries}
+    monkeypatch.setattr(config, "WORK_DISABLED_PRODUCTS", "dify")
+    entries = apps_catalog.entries_with_status(set(), minutes={"comfyui": 10})
+    assert "dify" not in {e["id"] for e in entries}

@@ -520,6 +520,14 @@ AVATAR_TOKEN_SECRET = _env("AVATAR_TOKEN_SECRET", "")
 # 一分钟通话多少积分。一路通话独占 1/3 张 L20, 成本远高于普通对话 —— 定价要
 # 反映这一点, 否则每一分钟都是我们在补贴。
 AVATAR_CREDITS_PER_MIN = _env_int("AVATAR_CREDITS_PER_MIN", 10)
+
+# ── 数字人直播间 (2026-09-08) ────────────────────────────────────────────
+# 与数字人通话共用 AVATAR_TOKEN_SECRET (GPU 侧是同一把)。**留空 = 这一格不上线**
+# —— 目录里的卡直接不出现。这既是开关也是防呆: 配不全就点不进去, 而不是让人点
+# 进一个空页面。
+LIVE_GPU_URL = _env("LIVE_GPU_URL", "")
+# 官方演示直播间。用户自己的直播间以后按租户开, 这个是常驻的那个。
+LIVE_ROOM = _env("LIVE_ROOM", "official")
 CLAUDE_CODE_DOMAIN = _env("CLAUDE_CODE_DOMAIN", "")
 CODEX_DOMAIN = _env("CODEX_DOMAIN", "")
 

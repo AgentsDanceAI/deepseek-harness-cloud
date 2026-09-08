@@ -1,0 +1,30 @@
+/* 数字人直播间。舞台是 16:9, 与 GPU 侧的出流一致 (1280×720)。 */
+.lv-head { display: flex; align-items: center; gap: .75rem; flex-wrap: wrap; }
+.lv-title { margin: 0; }
+.lv-sub { margin: .35rem 0 1rem; opacity: .7; }
+
+.lv-badge { font-size: .8rem; padding: .15rem .6rem; border-radius: 999px; border: 1px solid; }
+.lv-badge--on { color: #e33; border-color: #e33; }
+.lv-badge--on::before { content: "●"; margin-right: .35rem; animation: lvpulse 1.6s infinite; }
+.lv-badge--off { opacity: .55; }
+@keyframes lvpulse { 50% { opacity: .25; } }
+
+.lv-stage {
+  position: relative; width: 100%; max-width: 960px;
+  aspect-ratio: 16 / 9; background: #000; border-radius: 12px; overflow: hidden;
+}
+.lv-video { width: 100%; height: 100%; object-fit: contain; display: block; }
+
+/* 提示压在画面中间 —— 缓冲/未开播时舞台是纯黑, 字必须在黑上看得见。 */
+.lv-msg {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  color: #fff; opacity: .8; font-size: .95rem; pointer-events: none; text-align: center; padding: 1rem;
+}
+.lv-msg[hidden] { display: none; }
+
+.lv-unmute {
+  position: absolute; right: 12px; bottom: 12px; z-index: 2;
+  padding: .45rem .9rem; border-radius: 999px; border: 0; cursor: pointer;
+  background: rgba(255,255,255,.92); color: #111; font-size: .85rem;
+}
+.lv-note { margin-top: .9rem; font-size: .85rem; opacity: .6; max-width: 960px; }

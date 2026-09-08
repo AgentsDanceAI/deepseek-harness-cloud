@@ -705,5 +705,17 @@
   "works.ports.note": "智能体自己起的开发服务器。容器停止后这些链接会失效，文件成品不受影响。",
   "works.ports.port": "端口 {port}",
   "works.ports.title": "正在运行的服务",
-  "works.title": "个人成品 — deepseek-harness-cloud"
+  "works.title": "个人成品 — deepseek-harness-cloud",
+  "live.title": "数字人直播",
+  "live.sub": "由我们自己的模型实时生成：形象、声音、口型全部自有，没有第三方水印。",
+  "live.online": "直播中",
+  "live.offline": "未开播",
+  "live.not_live": "主播暂时不在，稍后自动重连",
+  "live.connecting": "正在接入直播…",
+  "live.reconnecting": "连接断开，正在重连…",
+  "live.disabled": "本站尚未开通直播间",
+  "live.unsupported": "当前浏览器不支持播放此直播流",
+  "live.unmute": "开声音",
+  "live.note": "观看不消耗机时与积分。用自己的形象和话术开直播间的功能正在开放中。",
+  "apps.tag.live": "数字人 7×24 直播"
 }

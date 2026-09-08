@@ -137,6 +137,10 @@
     "avatar": {
       "days": 7,
       "cents": 20000
+    },
+    "live": {
+      "days": 7,
+      "cents": 20000
     }
   },
   "team": {

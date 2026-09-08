@@ -88,12 +88,19 @@ CATALOG: tuple[AppEntry, ...] = (
         '<rect x="3" y="3" width="8" height="8" rx="2"/><rect x="13" y="13" width="8" height="8" rx="2"/>'
         '<path d="M11 17H8a3 3 0 0 1-3-3v-3M13 7h3a3 3 0 0 1 3 3v3"/>',
     ),
-    # Coze Studio 顶替了 Langflow: 同为 LLM 流程编排, Coze 的覆盖面 (Agent/知识库/
-    # 工作流/发布渠道) 是它的超集, 老板 2026-08-28 点名要接。
+    # 数字人直播顶掉了 Coze Studio (老板 2026-09-08: "第16个格我要放一个 AI
+    # 虚拟数字人直播")。Coze 是 2026-09-07 老板让先下架的那一格 (镜像太大, 一格
+    # 顶别人八份内存), 已经不出卡了 —— 所以这里是**换**, 不是加第 17 个。
+    # Coze 的产品定义 (products.py) 与通行证价都留着, 要回来只是改回这一条。
+    #
+    # 它和上面那格数字人是同一套零件的两种用法: 通话是人对着它说、它答; 直播是
+    # 把写好的话术循环播出去。所以没有重新选型 —— 渲染/音色/形象全是现成的,
+    # 新写的只有"编排 + 推流"(GPU 侧 docker/live/)。
     AppEntry(
-        "coze", "Coze Studio", "coze",
-        '<circle cx="12" cy="11" r="7.5"/><path d="M9 10h.01M15 10h.01M9.5 13.5a3.5 3.5 0 0 0 5 0"/>'
-        '<path d="M12 18.5V21M8 20l1-1.8M16 20l-1-1.8"/>',
+        "live", "数字人直播", "live",
+        '<rect x="2" y="6" width="14" height="12" rx="2"/><path d="M16 11l6-3.5v9L16 13z"/>'
+        '<circle cx="8" cy="11" r="2"/><path d="M5.5 15.5a3.5 3.5 0 0 1 5 0"/>',
+        href="/live",
     ),
     # 数字人顶掉了 n8n: 后者的 Sustainable Use 许可证**明确禁止把它作为服务
     # 转售**, 而我们正是这个模式 —— 那一格本来就接不了, 一直空占着。
@@ -171,8 +178,14 @@ def site_apps() -> set[str]:
     """
     from . import config
 
-    live = bool(config.AVATAR_GPU_URL and config.AVATAR_TOKEN_SECRET)
-    return {"avatar"} if live else set()
+    out = set()
+    if config.AVATAR_GPU_URL and config.AVATAR_TOKEN_SECRET:
+        out.add("avatar")
+    # 直播间同理, 而且理由更硬: 没配 LIVE_GPU_URL 就连播放地址都拼不出来,
+    # 点进去是一个永远转圈的播放器。
+    if config.LIVE_GPU_URL and config.AVATAR_TOKEN_SECRET:
+        out.add("live")
+    return out
 
 
 def entries_with_status(

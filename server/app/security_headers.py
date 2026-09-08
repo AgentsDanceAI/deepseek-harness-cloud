@@ -8,6 +8,7 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 #: 数字人通话页。它是全站唯一要开麦、并且用 MediaSource (blob:) 放视频的页面,
 #: 下面两处安全头为它开了口子。改路由记得同步这里 —— 不同步的表现是通话静默失灵。
 AVATAR_PATH = "/avatar"
+LIVE_PATH = "/live"
 
 
 class SecurityHeaders:
@@ -54,7 +55,10 @@ class SecurityHeaders:
                         # default-src 'self' 会把它挡掉 —— 而表现是"画面一帧不动":
                         # WebSocket 照常收字节、计时照走、积分照扣, 只有浏览器控制台
                         # 里有一行 CSP 违规。查了很久才落到这里。
-                        + ("; media-src 'self' blob:" if path == AVATAR_PATH else ""),
+                        # 直播页同理: hls.js 也是 MediaSource → blob: URL。
+                        # (HLS 的 m3u8/ts 走 /api/live/hls/* 同源代转, 所以**不需要**
+                        #  为它放开 connect-src —— 那是刻意的, 见 live.py 头注释。)
+                        + ("; media-src 'self' blob:" if path in (AVATAR_PATH, LIVE_PATH) else ""),
                     )
                 if self.https:
                     headers.setdefault(

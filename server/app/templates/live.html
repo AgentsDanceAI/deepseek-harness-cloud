@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}{{ t('live.title') }} · DSH Cloud{% endblock %}
+{% block head %}
+<link rel="stylesheet" href="/static/live.css?v={{ asset_v }}">
+{% endblock %}
+{% block content %}
+<section class="section">
+  <div class="container">
+    <div class="lv-head">
+      <h1 class="lv-title">{{ t('live.title') }}</h1>
+      {# 状态点是这一页最要紧的一个元素: 播放器在缓冲、在等切片、还是根本没开播,
+         三种情况画面上都是一片黑。不给状态就是让人对着黑屏猜。 #}
+      {# 文案全部经 data-* 传给 live.js —— 不把中文写死在 JS 里, 否则这一页
+         永远只有一种语言, 而且翻译的人找不到它。 #}
+      <span id="lvBadge" class="lv-badge lv-badge--off"
+            data-on="{{ t('live.online') }}"
+            data-off="{{ t('live.offline') }}"
+            data-notlive="{{ t('live.not_live') }}"
+            data-disabled="{{ t('live.disabled') }}"
+            data-reconnect="{{ t('live.reconnecting') }}"
+            data-unsupported="{{ t('live.unsupported') }}">{{ t('live.offline') }}</span>
+    </div>
+    <p class="lv-sub">{{ t('live.sub') }}</p>
+
+    <div class="lv-stage">
+      {# muted + playsinline: 浏览器的自动播放策略只放行静音起播。起播后由
+         "开声音"按钮解除静音 —— 那一下有用户手势, 才允许出声。
+         不这么做的表现是**整页安静地什么都不发生**, 控制台里一行 NotAllowedError。#}
+      <video id="lvVideo" class="lv-video" playsinline muted autoplay></video>
+      <button id="lvUnmute" class="lv-unmute" hidden>{{ t('live.unmute') }}</button>
+      <div id="lvMsg" class="lv-msg">{{ t('live.connecting') }}</div>
+    </div>
+
+    <div class="lv-note">{{ t('live.note') }}</div>
+  </div>
+</section>
+<script src="/static/hls.min.js?v={{ asset_v }}"></script>
+<script src="/static/live.js?v={{ asset_v }}" defer></script>
+{% endblock %}

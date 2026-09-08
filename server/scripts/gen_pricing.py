@@ -92,6 +92,7 @@ PASS_PRODUCTS = [
     "openmanus",
     "openmausbot",
     "avatar",
+    "live",
 ]
 
 # id,        $,  base credits, bonus %

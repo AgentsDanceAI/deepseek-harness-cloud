@@ -449,6 +449,28 @@ def avatar_page(request: Request):
     return _render(request, "avatar.html", "avatar")
 
 
+@router.get("/live")
+def live_page(request: Request):
+    """数字人直播间。
+
+    与数字人通话一样**不是云工作台** —— 没有每用户容器, 画面来自我们自己的 GPU
+    节点。区别是它不烧 GPU: 话术是离线预渲染好的片段, 播出只是循环拼接 (所以
+    看直播不计费, 也不占通话的并发槽位)。
+
+    先登录再进: 与其余十五格一致, 而且这一页以后要接"用自己的形象开自己的直播间",
+    那些都要账号。
+    """
+    user = try_resolve_user(request)
+    if user is None:
+        return RedirectResponse("/login?next=/live", status_code=303)
+    from . import products as _products
+    from . import work_access as _wa
+
+    if _products.is_locked("live") and not _wa.can_open_locked(user, "live"):
+        return RedirectResponse("/pricing?reason=locked&product_id=live#unlock", status_code=303)
+    return _render(request, "live.html", "live")
+
+
 @router.get("/apps")
 def apps_page(request: Request):
     """云空间: 16 个开源 AI 产品的 4x4 卡片网格。
