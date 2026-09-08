@@ -31,6 +31,17 @@
       <span>{{ t('avatar.who') }}</span>
       <select id="avPerson"></select>
     </label>
+    {# 半双工 / 全双工。嘈杂环境里全双工会乱成一团: 音箱里她自己的声音被麦克风
+       听回去, 她就把自己打断, 一轮接一轮; 旁边有人说话同理。半双工的做法是
+       "她说话时闭麦", 代价是插不了嘴。默认半双工 —— 插不了嘴只是不够灵活,
+       自己打断自己看起来是坏了。 #}
+    <label class="av-field">
+      <span>{{ t('avatar.duplex') }}</span>
+      <select id="avDuplex">
+        <option value="half">{{ t('avatar.duplex_half') }}</option>
+        <option value="full">{{ t('avatar.duplex_full') }}</option>
+      </select>
+    </label>
     <button id="avCall" class="av-call">{{ t('avatar.start') }}</button>
     {# 打字也能说。不只是给没有语音识别的浏览器 (Firefox) 兜底 —— 安静的场合
        本来就不该逼人出声。 #}

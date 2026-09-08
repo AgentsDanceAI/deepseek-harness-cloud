@@ -28,10 +28,22 @@
     "chen": { name: t("avatar.p.chen", "晨 · 沉稳"), voice: "yunjian" },
     "hao": { name: t("avatar.p.hao", "皓 · 阳光"), voice: "yunxi" },
   };
+  /* 半双工 / 全双工。
+     全双工 = 她说话时麦克风照开, 你一出声就把她打断。安静环境里这是最像打电话
+     的那种体验, 但**嘈杂环境里会乱成一团**: 音箱里她自己的声音被麦克风听回去,
+     于是她把自己打断, 一轮接一轮; 旁边有人聊天同理。
+     半双工 = 她说话时闭麦, 说完再听。插不了嘴, 但不会自己打断自己。
+     默认半双工: 插不了嘴只是不够灵活, 自己打断自己看起来是产品坏了。 */
+  const DUPLEX_KEY = "dhc.avatar.duplex";
+  function loadDuplex() {
+    try { return localStorage.getItem(DUPLEX_KEY) === "full" ? "full" : "half"; }
+    catch { return "half"; }             // 无痕窗口里读 localStorage 会抛
+  }
   const st = {
     sess: null, cfg: null, ws: null, ear: null, history: [], sid: 0,
     ms: null, sb: null, url: null, queue: [], speaking: false, watch: null,
     t0: null, timer: null, rate: 0,
+    duplex: loadDuplex(), micOff: false,
   };
 
   /* iPhone 没有标准 MediaSource — iOS 17.1+ 给的是同形的 ManagedMediaSource。
@@ -196,11 +208,47 @@
     return openMedia();
   }
 
-  /* 她不说话时露静止背景, 说话时才盖上视频层。不切的话最后一帧会僵在那儿。 */
+  /* 她不说话时露静止背景, 说话时才盖上视频层。不切的话最后一帧会僵在那儿。
+     这里也是 speaking 翻转的**唯一**入口, 所以半双工的闸就挂在这条路上 ——
+     挂在别处早晚会漏掉一条翻转路径。 */
   function showVideo(on) {
     if (on === st.speaking) return;
     $("#avVideo").style.opacity = on ? "1" : "0";
     st.speaking = on;
+    if (st.duplex === "half") micGate(!on);
+  }
+
+  /* 半双工的闸: 她说话时把识别器停掉, 说完再开。
+     只靠 onresult 里判断是不够的 —— 识别器照样在听, 而 stop() 时会把这期间听
+     到的东西定稿吐出来, 那正是从音箱里绕回来的她自己。所以要真的停。 */
+  function micGate(on) {
+    const ear = st.ear;
+    st.micOff = !on;
+    if (!ear || !st.ws) return;
+    if (on) {
+      try { ear.start(); } catch { /* 已在跑 */ }
+      turnHint(t("js.avatar.listening", "说话吧，她在听"));
+    } else {
+      try { ear.stop(); } catch { /* 已停 */ }
+      turnHint(t("js.avatar.her_turn", "她在说…（说完再开口）"));
+    }
+  }
+
+  /* 轮到谁说话的提示。**不覆盖错误**: 这条每轮都写一次, 而"麦克风被拒绝了"
+     那类消息只写一次 —— 不挡住的话, 用户看到的是一句每轮都在变的正常提示,
+     而真正要看的那句一闪就没了。 */
+  function turnHint(msg) {
+    if ($("#avStatus").classList.contains("av-bad")) return;
+    status(msg);
+  }
+
+  /* 切换双工方式。通话中也能切 —— 走进嘈杂的地方正是要切的时候。 */
+  function setDuplex(mode) {
+    st.duplex = mode === "full" ? "full" : "half";
+    try { localStorage.setItem(DUPLEX_KEY, st.duplex); } catch { /* 无痕窗口 */ }
+    if (!st.ws) return;
+    if (st.duplex === "full") micGate(true);   // 全双工: 无论她说不说, 一直听
+    else micGate(!st.speaking);
   }
 
   function pump() {
@@ -268,7 +316,7 @@
         status(m.message || t("avatar.error", "出错了"), true);
       } else if (m.type === "ready") {
         // 上游接通了才开始听 —— 早于这一刻识别出来的话没地方发。
-        status(t("avatar.listening", "说话吧，她在听"));
+        status(t("js.avatar.listening", "说话吧，她在听"));
         listen();
         // **她先开口**。固定一句, 不走模型: 立刻就能说 (模型要好几秒), 而接通后
         // 双方干等的那几秒, 用户只会以为点了没反应。
@@ -296,11 +344,18 @@
     ear.interimResults = false;
     ear.onresult = (e) => {
       const said = e.results[e.results.length - 1][0].transcript.trim();
-      if (said) reply(said);
+      if (!said) return;
+      // 半双工里她还在说 = 这句多半是从音箱绕回来的她自己 (stop() 会把停之前
+      // 听到的定稿吐出来)。丢掉, 别让她跟自己对话。
+      if (st.duplex === "half" && st.speaking) return;
+      reply(said);
     };
     // 识别器会自己停 (静默久了、或一次会话到点)。通话还在就重开 —— 不重开的
     // 表现是"聊着聊着她突然不理人了", 而页面上什么都没变。
-    ear.onend = () => { if (st.ws && st.ear === ear) { try { ear.start(); } catch { /* 已在跑 */ } } };
+    // **但半双工闭麦期间不能重开**, 否则闸刚关上就被这里顶开了。
+    ear.onend = () => {
+      if (st.ws && st.ear === ear && !st.micOff) { try { ear.start(); } catch { /* 已在跑 */ } }
+    };
     ear.onerror = (e) => { if (e.error === "not-allowed") status(t("avatar.no_mic", "麦克风被拒绝了"), true); };
     st.ear = ear;
     try { ear.start(); } catch { /* 已在跑 */ }
@@ -372,6 +427,7 @@
     clearInterval(st.watch); st.watch = null;
     showVideo(false);
     if (st.ear) { const e = st.ear; st.ear = null; e.onend = null; try { e.stop(); } catch { /* 已停 */ } }
+    st.micOff = false;
     st.history = [];
     if (st.timer) { clearInterval(st.timer); st.timer = null; }
     st.t0 = null; st.queue = [];
@@ -380,6 +436,11 @@
     boot();                              // 刷新余额
   }
 
+  const dup = $("#avDuplex");
+  if (dup) {
+    dup.value = st.duplex;
+    dup.addEventListener("change", () => setDuplex(dup.value));
+  }
   $("#avCall").addEventListener("click", startCall);
   boot();
 })();
