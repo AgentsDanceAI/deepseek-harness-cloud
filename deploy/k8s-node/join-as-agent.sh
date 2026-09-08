@@ -31,7 +31,9 @@ fi
 
 echo "=== 2/4 拆掉这台上原有的 k3s (如果它自己是个 server) ==="
 if [ -x /usr/local/bin/k3s-uninstall.sh ]; then
-  echo "  发现 server 版, 卸载 (镜像缓存会一起没, 之后要预热)"
+  # 实测 (2026-09-08 的 248): containerd 的镜像库**没有**跟着没, 40 个镜像全在,
+  # 所以没有冷启动惩罚。但别当成保证 —— 换机器前先 crictl images 看一眼。
+  echo "  发现 server 版, 卸载"
   /usr/local/bin/k3s-uninstall.sh >/dev/null 2>&1
   pass "旧 server 已卸"
 elif [ -x /usr/local/bin/k3s-agent-uninstall.sh ]; then

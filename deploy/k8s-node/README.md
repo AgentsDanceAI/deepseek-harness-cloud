@@ -1,5 +1,27 @@
 # k8s 工作台节点 (WORK_BACKEND=k8s)
 
+> ## ⚠️ 2026-09-08 起, 架构变了 —— 这份文档有一半是考古
+>
+> **现在**: 控制面 (k3s server) 在**应用机**上, 别的机器以 **agent** 身份**只出站**
+> 拨过去, Pod 网络由 flannel 的 `wireguard-native` 铺。加一台机器 = 跑一次
+> `join-as-agent.sh`, 应用侧零改动 (`K8sBackend` 不知道集群有几个节点)。
+>
+> | 要做什么 | 看哪儿 |
+> |---|---|
+> | 新加一个工作节点 | `join-as-agent.sh` (在**那台机器**上跑) |
+> | 控制面的配置 | `k3s-server-app-host.yaml` |
+> | 为什么是这个形状 | `docs/design/cluster-topology.md` |
+> | 集群巡检/告警 | `scripts/watch_cluster.sh` + `netcanary.yaml` |
+>
+> **已经退役的**: 第 3 节的 ssh `-w` 隧道 (`tunnel-*.sh`、`dsh-tunnel`、节点上
+> 50005 端口那个独立 sshd)、第 7 节的 `DSH-TUN-*` 防火墙链 —— 2026-09-08 全部停用
+> 并删除。**别照着重建**。它们留在这里是因为里面几条坑还有价值 (systemd 的 `%%T`
+> 展开、安全组只放 TCP 时为什么不能用 WireGuard)。
+>
+> 第 1 节那段"装 server"是**节点自己当 server** 的老装法, 现在只有应用机需要装
+> server。但里面 `INSTALL_K3S_SKIP_SELINUX_RPM=true` 这一条对 RPM 系机器仍然是
+> 救命的 —— 少了它安装会失败, **而卸载已经做完了**, 机器落在"两边都没有"的状态。
+
 一台**常驻**机器上的单节点 k3s, 给按秒计费的 ECI 补一条"热节点"路: 镜像已经在
 本地, 没有机房调度那 25 秒, Pod 起来就是应用自己的启动时间 (nginx 实测 1.7 秒,
 ECI 同样的东西 34 秒)。后端实现见 `server/app/workbackend.py` 的 `K8sBackend`,
