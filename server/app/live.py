@@ -56,8 +56,15 @@ async def _gpu(method: str, path: str, room: str, **kw):
     令牌的租户 == 房间名, 而房间名由**服务端**从登录态算出来 —— 所以浏览器无论
     传什么都只能操作自己那间。房间隔离全靠这一条, 别让房间名从请求体里进来。
     """
-    async with httpx.AsyncClient(timeout=20) as c:
-        r = await c.request(method, f"{config.LIVE_GPU_URL}{path}", params={"token": _sign(room)}, **kw)
+    try:
+        async with httpx.AsyncClient(timeout=20) as c:
+            r = await c.request(method, f"{config.LIVE_GPU_URL}{path}", params={"token": _sign(room)}, **kw)
+    except httpx.HTTPError as e:
+        # GPU 节点够不着是**常态之一** (它是别人的共享机, 还跟同事的排序管线挤一张卡)。
+        # 不接的话异常一路冒到框架外, 用户看到 500 加一页栈 —— 而这只是"算力那头
+        # 暂时不在"。/api/live/status 一开始就接了, 这条路当初漏了。
+        log.warning("[live] 上游够不着 %s %s: %s", method, path, type(e).__name__)
+        raise HTTPException(502, "upstream_unreachable") from None
     if r.status_code != 200:
         log.warning("[live] 上游 %s %s -> %s", method, path, r.status_code)
         raise HTTPException(502, "upstream")

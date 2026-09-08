@@ -126,8 +126,18 @@ def test_a_live_room_belongs_to_exactly_one_person(monkeypatch):
 
     with TestClient(app) as c:
         signup(c, "live-owner@example.com")
+        # 上游必定打不通 —— **显式让它抛**, 不靠"假域名解析不了": 这台开发机的
+        # 系统代理会把任何域名都解析掉(连得上), CI 里 DNS 直接失败, 同一条断言在
+        # 两边走的是完全不同的分支。第一版就是这么红的 CI, 而且顺带逼出了一个真
+        # bug: _gpu 当时没接 httpx 异常, GPU 节点一够不着用户就吃 500 带栈。
+        import httpx as _httpx
+
+        async def _boom(*a, **k):
+            raise _httpx.ConnectError("upstream down")
+
+        monkeypatch.setattr(_httpx.AsyncClient, "request", _boom)
         me = c.get("/api/live/room")
-        # 上游是假地址, 打不通 —— 502 说明**归属这一关放行了**, 才轮到网络出错。
+        # 502 说明**归属这一关放行了**, 才轮到网络出错 (403 会在打上游之前就返回)。
         assert me.status_code == 502, me.status_code
         # 别人的房间: 在打上游之前就该被拒
         assert c.get("/api/live/hls/d-somebodyelse/index.m3u8").status_code == 403
