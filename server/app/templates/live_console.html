@@ -51,18 +51,16 @@
         </label>
         <div class="lv-counts" id="lvCounts"
              data-fmt="{{ t('live.counts_fmt') }}"
-             data-dirty="{{ t('live.counts_dirty') }}"></div>
+             data-dirty="{{ t('live.counts_dirty') }}"
+             data-said="{{ t('live.counts_said') }}"></div>
 
         <div class="lv-actions">
           <button id="lvSave" class="lv-btn">{{ t('live.save') }}</button>
-          <button id="lvRender" class="lv-btn">{{ t('live.render') }}</button>
           <button id="lvStart" class="lv-btn lv-btn--go">{{ t('live.start') }}</button>
           <button id="lvStop" class="lv-btn" hidden>{{ t('live.stop') }}</button>
         </div>
-        <div id="lvProgress" class="lv-progress" hidden><div id="lvBar"></div></div>
         <div id="lvSay" class="lv-status"
              data-saved="{{ t('live.saved') }}"
-             data-rendering="{{ t('live.rendering') }}"
              data-generating="{{ t('live.generating') }}"
              data-generated="{{ t('live.generated') }}"
              data-need_title="{{ t('live.need_title') }}"

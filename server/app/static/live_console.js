@@ -1,16 +1,14 @@
 /* 直播间控制台 (管理员)。播放器在 live.js 里, 这里只管配置。
  *
- * 保存 ≠ 生成 ≠ 渲染 ≠ 开播, 四步刻意分开:
- *  · 生成只填进输入框, **不保存** —— 生成的话术会被数字人当众念出去, 得有人过眼;
- *  · 渲染要占 GPU 好几分钟, 不能因为改了个错别字就自动整场重来;
- *  · 开播前会先保存, 否则播的是上一版, 而画面一切正常只是说的还是旧词。
+ * 数字人是**实时**说的 —— 没有"渲染"这一步: 保存下去, 下一轮当场就换了词。
+ * 生成话术仍然只填进输入框、**不保存**: 它会被数字人当众念出去, 得有人过一眼。
  */
 (function () {
   var $ = function (id) { return document.getElementById(id); };
   var name = $('lvName'), person = $('lvPerson'), voice = $('lvVoice');
   var script = $('lvScript'), counts = $('lvCounts'), say = $('lvSay');
-  var bar = $('lvBar'), progress = $('lvProgress'), recast = $('lvRecast');
-  var poll = null, loaded = { person: '', voice: '' }, optionsFilled = false;
+  var recast = $('lvRecast');
+  var loaded = { person: '', voice: '' }, optionsFilled = false;
 
   function t(el, k) { return (el.dataset || {})[k] || ''; }
   function lines() {
@@ -18,7 +16,7 @@
       .filter(function (x) { return x.length; });
   }
   function busy(on) {
-    ['lvSave', 'lvRender', 'lvStart', 'lvStop', 'lvGen'].forEach(function (id) {
+    ['lvSave', 'lvStart', 'lvStop', 'lvGen'].forEach(function (id) {
       var el = $(id); if (el) el.disabled = on;
     });
   }
@@ -32,21 +30,17 @@
     fillOptions(d);
     loaded = { person: d.person || '', voice: d.voice || '' };
     var n = (d.lines || []).length;
-    var done = (d.rendered || []).filter(Boolean).length;
-    counts.textContent = n === 0 ? '' :
-      t(counts, 'fmt').replace('{n}', n).replace('{done}', done).replace('{todo}', n - done);
+    counts.textContent = n === 0 ? '' : t(counts, 'fmt').replace('{n}', n);
     $('lvStop').hidden = !d.live;
     $('lvStart').hidden = !!d.live;
-    var r = d.render || {};
-    if (r.total && r.done < r.total) {
-      progress.hidden = false;
-      bar.style.width = Math.round(100 * r.done / r.total) + '%';
-      say.textContent = t(say, 'rendering') + ' ' + r.done + '/' + r.total;
-      if (!poll) poll = setInterval(refresh, 4000);
-    } else {
-      progress.hidden = true;
-      if (poll) { clearInterval(poll); poll = null; }
-      if (r.err) say.textContent = t(say, 'failed') + ' ' + r.err;
+    if (d.live) {
+      // starved = 队列被抽空的次数。不为零就是生成跟不上播出, 观众那边会卡 ——
+      // 这个数必须露在页面上, 否则只有观众知道, 我们这边一切正常。
+      var msg = t(counts, 'said').replace('{n}', d.said || 0);
+      if (d.starved) msg += ' · ' + t(say, 'starved').replace('{n}', d.starved);
+      say.textContent = msg;
+    } else if (d.err) {
+      say.textContent = t(say, 'failed') + ' ' + d.err;
     }
     markRecast();
   }
@@ -132,9 +126,7 @@
 
   $('lvGen').addEventListener('click', generate);
   $('lvSave').addEventListener('click', function () { save(); });
-  // 渲染/开播前**先存** —— 否则改完直接点, 渲的/播的还是上一版, 而画面看起来
-  // 一切正常, 只是说的还是旧词。
-  $('lvRender').addEventListener('click', function () { save().then(function () { act('render', 'rendering'); }); });
+  // 开播前**先存** —— 否则播的是上一版, 而画面看起来一切正常, 只是说的还是旧词。
   $('lvStart').addEventListener('click', function () { save().then(function () { act('start', 'starting'); }); });
   $('lvStop').addEventListener('click', function () { act('stop', 'stopped'); });
   [person, voice].forEach(function (el) { el.addEventListener('change', markRecast); });

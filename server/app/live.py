@@ -185,8 +185,9 @@ async def put_room(body: dict, user: dict = Depends(resolve_user)):
 
 @router.post("/room/{action}")
 async def act(action: str, user: dict = Depends(resolve_user)):
-    """render / start / stop。"""
-    if action not in ("render", "start", "stop"):
+    """start / stop。"""
+    # 实时形态下没有"渲染"这一步了 —— 话术存下去下一轮就当场生成。
+    if action not in ("start", "stop"):
         raise HTTPException(404, "unknown_action")
     if not _enabled():
         raise HTTPException(404, "live_disabled")
