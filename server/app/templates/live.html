@@ -17,75 +17,23 @@
             data-disabled="{{ t('live.disabled') }}"
             data-reconnect="{{ t('live.reconnecting') }}"
             data-unsupported="{{ t('live.unsupported') }}">{{ t('live.offline') }}</span>
+      {# 控制台入口只对管理员出现。非管理员看到一个点进去被弹回来的链接, 比看不到
+         更糟 —— 那是在告诉他"这里有东西但不给你"。 #}
+      {% if user and user.is_admin %}
+      <a class="lv-adminlink" href="/live/console">{{ t('live.console') }} →</a>
+      {% endif %}
     </div>
     <p class="lv-sub">{{ t('live.sub') }}</p>
 
-    <div class="lv-grid">
-      {# ── 左: 控制台 ─────────────────────────────────────────────── #}
-      <div class="lv-console" id="lvConsole" hidden>
-        <h2 class="lv-h2">{{ t('live.console') }}</h2>
-
-        <label class="lv-field">
-          <span>{{ t('live.room_title') }}</span>
-          <input id="lvName" type="text" maxlength="60" placeholder="{{ t('live.room_title_ph') }}">
-        </label>
-
-        <div class="lv-two">
-          <label class="lv-field">
-            <span>{{ t('live.person') }}</span>
-            <select id="lvPerson"></select>
-          </label>
-          <label class="lv-field">
-            <span>{{ t('live.voice') }}</span>
-            <select id="lvVoice"></select>
-          </label>
-        </div>
-        {# 换形象或音色 = 整场重渲。片段是按 (文字, 形象, 音色) 三元组缓存的,
-           不说破的话用户点一下就等二十分钟, 而且不知道为什么。 #}
-        <p class="lv-warn" id="lvRecast" hidden>{{ t('live.recast_warn') }}</p>
-
-        <label class="lv-field">
-          <span>{{ t('live.script') }} <em class="lv-hint">{{ t('live.script_hint') }}</em></span>
-          <textarea id="lvScript" rows="12" spellcheck="false"
-                    placeholder="{{ t('live.script_ph') }}"></textarea>
-        </label>
-        <div class="lv-counts" id="lvCounts"
-             data-fmt="{{ t('live.counts_fmt') }}"
-             data-dirty="{{ t('live.counts_dirty') }}"></div>
-
-        <div class="lv-actions">
-          <button id="lvSave" class="lv-btn">{{ t('live.save') }}</button>
-          <button id="lvRender" class="lv-btn">{{ t('live.render') }}</button>
-          <button id="lvStart" class="lv-btn lv-btn--go">{{ t('live.start') }}</button>
-          <button id="lvStop" class="lv-btn" hidden>{{ t('live.stop') }}</button>
-        </div>
-        <div id="lvProgress" class="lv-progress" hidden><div id="lvBar"></div></div>
-        <div id="lvSay" class="lv-status"
-             data-saved="{{ t('live.saved') }}"
-             data-rendering="{{ t('live.rendering') }}"
-             data-render_done="{{ t('live.render_done') }}"
-             data-need_render="{{ t('live.need_render') }}"
-             data-starting="{{ t('live.starting') }}"
-             data-stopped="{{ t('live.stopped') }}"
-             data-failed="{{ t('live.failed') }}"></div>
-      </div>
-
-      {# ── 右: 预览 ───────────────────────────────────────────────── #}
-      <div class="lv-preview">
-        <div class="lv-stage">
-          {# muted + playsinline: 浏览器的自动播放策略只放行静音起播。出声由按钮
-             解除 —— 那一下有用户手势才允许。不这么做的表现是**整页安静地什么都
-             没发生**, 只有控制台里一行 NotAllowedError。 #}
-          <video id="lvVideo" class="lv-video" playsinline muted autoplay></video>
-          <button id="lvUnmute" class="lv-unmute" hidden>{{ t('live.unmute') }}</button>
-          <div id="lvMsg" class="lv-msg">{{ t('live.connecting') }}</div>
-        </div>
-        <div class="lv-watching" id="lvWatching"
-             data-mine="{{ t('live.watching_mine') }}"
-             data-official="{{ t('live.watching_official') }}"></div>
-        <div class="lv-note">{{ t('live.note') }}</div>
-      </div>
+    <div class="lv-stage lv-stage--wide">
+      {# muted + playsinline: 浏览器的自动播放策略只放行静音起播。出声由按钮解除
+         —— 那一下有用户手势才允许。不这么做的表现是**整页安静地什么都没发生**,
+         只有浏览器控制台里一行 NotAllowedError。 #}
+      <video id="lvVideo" class="lv-video" playsinline muted autoplay></video>
+      <button id="lvUnmute" class="lv-unmute" hidden>{{ t('live.unmute') }}</button>
+      <div id="lvMsg" class="lv-msg">{{ t('live.connecting') }}</div>
     </div>
+    <div class="lv-note">{{ t('live.note') }}</div>
   </div>
 </section>
 <script src="/static/hls.min.js?v={{ asset_v }}"></script>

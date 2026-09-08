@@ -735,11 +735,12 @@
   "live.stop": "停播",
   "live.saved": "已保存。改过的句子需要重新渲染。",
   "live.rendering": "渲染中",
-  "live.render_done": "渲染完成",
-  "live.need_render": "待渲染",
   "live.starting": "正在开播…",
   "live.stopped": "已停播",
   "live.failed": "操作失败",
-  "live.watching_mine": "正在看：我的直播间",
-  "live.watching_official": "正在看：官方直播间（你的还没开播）"
+  "live.console_sub": "全站共用这一套配置。改完保存，再渲染，最后开播。",
+  "live.generate": "生成话术",
+  "live.generating": "正在按直播间名称生成话术…",
+  "live.generated": "已生成，请过目后再保存。生成的内容不会自动上线。",
+  "live.need_title": "先填直播间名称，它就是生成话术的题目。"
 }

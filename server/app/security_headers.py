@@ -9,6 +9,7 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 #: 下面两处安全头为它开了口子。改路由记得同步这里 —— 不同步的表现是通话静默失灵。
 AVATAR_PATH = "/avatar"
 LIVE_PATH = "/live"
+LIVE_CONSOLE_PATH = "/live/console"
 
 
 class SecurityHeaders:
@@ -58,7 +59,11 @@ class SecurityHeaders:
                         # 直播页同理: hls.js 也是 MediaSource → blob: URL。
                         # (HLS 的 m3u8/ts 走 /api/live/hls/* 同源代转, 所以**不需要**
                         #  为它放开 connect-src —— 那是刻意的, 见 live.py 头注释。)
-                        + ("; media-src 'self' blob:" if path in (AVATAR_PATH, LIVE_PATH) else ""),
+                        + (
+                            "; media-src 'self' blob:"
+                            if path in (AVATAR_PATH, LIVE_PATH, LIVE_CONSOLE_PATH)
+                            else ""
+                        ),
                     )
                 if self.https:
                     headers.setdefault(

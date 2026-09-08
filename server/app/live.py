@@ -22,13 +22,15 @@
 from __future__ import annotations
 
 import logging
+import re
+import uuid
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse, Response
 
-from . import config
-from .accounts import resolve_user, try_resolve_user
+from . import config, credits, model_catalog
+from .accounts import resolve_user
 
 router = APIRouter(prefix="/api/live", tags=["live"])
 log = logging.getLogger("dhc.live")
@@ -43,11 +45,14 @@ def _enabled() -> bool:
     return bool(config.LIVE_GPU_URL)
 
 
-def _my_room(user: dict) -> str:
-    """每个用户一个直播间。前缀与数字人通话的租户一致 —— 那张卡上同时住着口袋专家
-    和 DSH Cloud 两条线, 不加前缀两边的用户 id 可能撞上, 而撞了就是**看到/改到
-    别人的直播间**。"""
-    return "d-" + str(user["id"])
+def _require_admin(user: dict) -> None:
+    """控制台是管理员专用 (老板 2026-09-08 定)。
+
+    只有**一套配置**: 全站共用官方直播间那一间。所以这里不需要"谁的房间"这个概念,
+    只需要"你能不能改这一间" —— 而能改的只有管理员。
+    """
+    if not user.get("is_admin"):
+        raise HTTPException(403, "admin_only")
 
 
 async def _gpu(method: str, path: str, room: str, **kw):
@@ -110,7 +115,7 @@ def _sign(room: str) -> str:
 
 
 @router.get("/hls/{room}/{name}")
-async def hls(room: str, name: str, request: Request):
+async def hls(room: str, name: str):
     """代转 HLS 播放列表与切片。
 
     只放行 .m3u8 / .ts 两种名字 —— 这是一条把浏览器给的字符串直接拼进上游 URL 的
@@ -124,13 +129,10 @@ async def hls(room: str, name: str, request: Request):
         raise HTTPException(400, "bad_name")
     if not room.replace("-", "").replace("_", "").isalnum():
         raise HTTPException(400, "bad_room")
-    # 归属: 官方间人人可看 (它就是拿来展示的), 别人的间只有本人能看。
-    # 房间名是 d-<用户id> —— 不是秘密, 猜得到; 所以隔离必须落在这里, 不能指望
-    # "别人不知道房间名"。
+    # 全站只有官方间这一间, 别的名字一律不给 —— 这是一条把浏览器给的字符串拼进
+    # 上游路径的路, 不钉死就是任人拿我们当探测器去摸 GPU 节点上有什么。
     if room != config.LIVE_ROOM:
-        me = try_resolve_user(request)
-        if me is None or _my_room(me) != room:
-            raise HTTPException(403, "not_your_room")
+        raise HTTPException(404, "no_such_room")
     url = f"{config.LIVE_GPU_URL}/hls/{room}/{name}"
     try:
         async with httpx.AsyncClient(timeout=20) as c:
@@ -150,11 +152,12 @@ async def hls(room: str, name: str, request: Request):
 
 # ── 控制台: 只能操作自己那一间 ────────────────────────────────────────────
 @router.get("/room")
-async def my_room(user: dict = Depends(resolve_user)):
-    """我的直播间: 话术、形象、音色、逐句渲染状态、在播与否。"""
+async def get_room(user: dict = Depends(resolve_user)):
+    """直播间配置: 话术、形象、音色、逐句渲染状态、在播与否。"""
     if not _enabled():
         raise HTTPException(404, "live_disabled")
-    room = _my_room(user)
+    _require_admin(user)
+    room = config.LIVE_ROOM
     d = await _gpu("GET", f"/rooms/{room}/status", room)
     d["room"] = room
     d["hls"] = f"/api/live/hls/{room}/index.m3u8"
@@ -162,12 +165,13 @@ async def my_room(user: dict = Depends(resolve_user)):
 
 
 @router.put("/room")
-async def put_my_room(body: dict, user: dict = Depends(resolve_user)):
-    """存话术/形象/音色。**存完不会自动渲染** —— 渲染要占 GPU 几分钟, 用户改个
-    错别字就整场重渲说不过去; 由他自己按"渲染"。"""
+async def put_room(body: dict, user: dict = Depends(resolve_user)):
+    """存话术/形象/音色。**存完不会自动渲染** —— 渲染要占 GPU 几分钟, 改个错别字
+    就整场重渲说不过去; 由人自己按"渲染"。"""
     if not _enabled():
         raise HTTPException(404, "live_disabled")
-    room = _my_room(user)
+    _require_admin(user)
+    room = config.LIVE_ROOM
     payload = {}
     for k in ("person", "voice", "title"):
         if k in body:
@@ -186,5 +190,101 @@ async def act(action: str, user: dict = Depends(resolve_user)):
         raise HTTPException(404, "unknown_action")
     if not _enabled():
         raise HTTPException(404, "live_disabled")
-    room = _my_room(user)
+    _require_admin(user)
+    room = config.LIVE_ROOM
     return JSONResponse(await _gpu("POST", f"/rooms/{room}/{action}", room))
+
+
+#: 生成话术的系统提示。**每一句都会被读出来** —— 所以任何书面格式(编号、列表、
+#: 星号、表情)都是噪音: 它们要么被念出来, 要么让断句变怪。长度也有讲究: TTS 每句
+#: 有约 2 秒固定开销, 太短的句子极不划算 (一句 8 个字要等 2 秒), 太长又不好改。
+_WRITER = (
+    "你在给一场数字人直播写循环播放的口播话术。要求：\n"
+    "1. 只输出话术本身，一行一句，不要编号、不要列表符号、不要星号、不要表情、不要标题。\n"
+    "2. 每句 25 到 60 个字，是能一口气念完的完整句子。\n"
+    "3. 口语，像真人在直播间说话，不要书面语，不要排比堆砌。\n"
+    "4. 全篇会循环播放，所以最后一句之后要能自然接回第一句。\n"
+    "5. 不要编造具体的价格、优惠、库存、销量、功效或资质承诺——"
+    "这些说错了是事故，宁可不说。\n"
+    "6. 8 到 12 句。"
+)
+
+#: 模型有时仍会带上"1." "- " "**" 之类。**在服务端剥掉**, 别指望提示词能 100% 管住:
+#: 漏一个的代价是数字人当众念出"星号星号"。
+_JUNK = re.compile(r"^\s*(?:[-*•·]|\d+[.、)]|第[一二三四五六七八九十]+[句段])\s*")
+
+
+@router.post("/generate")
+async def generate(body: dict, user: dict = Depends(resolve_user)):
+    """按直播间名称生成一版话术。**只返回，不保存** —— 生成的话术会被数字人当众
+    念出去，得有人过一眼再存。"""
+    if not _enabled():
+        raise HTTPException(404, "live_disabled")
+    _require_admin(user)
+    if not config.UPSTREAM_BASE_URL or not config.UPSTREAM_API_KEY:
+        raise HTTPException(503, "upstream_not_configured")
+    topic = str(body.get("title", "")).strip()[:120]
+    if not topic:
+        raise HTTPException(400, "empty_title")
+
+    model_id = model_catalog.default_model()
+    entry = model_catalog.resolve(model_id) or {}
+    payload = {
+        "model": entry.get("upstream_model", model_id),
+        "messages": [
+            {"role": "system", "content": _WRITER},
+            {"role": "user", "content": f"直播间名称：{topic}"},
+        ],
+        "max_tokens": 1200,
+        "temperature": 0.8,
+    }
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(90.0, connect=10.0)) as c:
+            r = await c.post(
+                config.UPSTREAM_BASE_URL.rstrip("/") + "/chat/completions",
+                json=payload,
+                headers={
+                    "authorization": f"Bearer {config.UPSTREAM_API_KEY}",
+                    "content-type": "application/json",
+                },
+            )
+    except httpx.HTTPError as e:
+        log.warning("[live] 生成话术: 上游够不着 %s", type(e).__name__)
+        raise HTTPException(502, "upstream_unreachable") from None
+    if r.status_code != 200:
+        log.warning("[live] 生成话术: 上游 %s", r.status_code)
+        raise HTTPException(502, "upstream")
+    d = r.json()
+    text = (((d.get("choices") or [{}])[0].get("message") or {}).get("content") or "").strip()
+
+    lines = []
+    for raw in text.splitlines():
+        line = _JUNK.sub("", raw).strip().strip('“”"')
+        # 太短的丢掉: 多半是模型自己加的小标题或者"好的，以下是话术："这类开场白。
+        if len(line) >= 12:
+            lines.append(line[:600])
+    if not lines:
+        raise HTTPException(502, "empty_generation")
+
+    # 照常计费 —— 这条路和别处一样在烧模型, 白送的话账就对不上。
+    usage = d.get("usage") or {}
+    cache_read = int(
+        usage.get("prompt_cache_hit_tokens")
+        or (usage.get("prompt_tokens_details") or {}).get("cached_tokens")
+        or 0
+    )
+    uncached = max(0, int(usage.get("prompt_tokens") or 0) - cache_read)
+    output = int(usage.get("completion_tokens") or 0)
+    if uncached or output:
+        credits.spend(
+            user["id"],
+            model_catalog.charge_credits(model_id, uncached, cache_read, output),
+            kind="llm",
+            model=model_id,
+            device_id=user.get("device_id", ""),
+            uncached_input=uncached,
+            cache_read=cache_read,
+            output=output,
+            request_id=f"live-gen-{uuid.uuid4().hex[:16]}",
+        )
+    return JSONResponse({"lines": lines[:20]})

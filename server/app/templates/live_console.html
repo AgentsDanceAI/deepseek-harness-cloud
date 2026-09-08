@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% block title %}{{ t('live.console') }} · DSH Cloud{% endblock %}
+{% block head %}
+<link rel="stylesheet" href="/static/live.css?v={{ asset_v }}">
+{% endblock %}
+{% block content %}
+<section class="section">
+  <div class="container">
+    <div class="lv-head">
+      <h1 class="lv-title">{{ t('live.console') }}</h1>
+      <span id="lvBadge" class="lv-badge lv-badge--off"
+            data-on="{{ t('live.online') }}"
+            data-off="{{ t('live.offline') }}"
+            data-notlive="{{ t('live.not_live') }}"
+            data-disabled="{{ t('live.disabled') }}"
+            data-reconnect="{{ t('live.reconnecting') }}"
+            data-unsupported="{{ t('live.unsupported') }}">{{ t('live.offline') }}</span>
+      <a class="lv-adminlink" href="/live">← {{ t('live.title') }}</a>
+    </div>
+    <p class="lv-sub">{{ t('live.console_sub') }}</p>
+
+    <div class="lv-grid">
+      <div class="lv-console" id="lvConsole">
+        <label class="lv-field">
+          <span>{{ t('live.room_title') }}</span>
+          {# 名称既是直播间的名字, 也是生成话术的题目 —— 所以生成按钮就贴在它旁边。 #}
+          <span class="lv-inline">
+            <input id="lvName" type="text" maxlength="60" placeholder="{{ t('live.room_title_ph') }}">
+            <button id="lvGen" class="lv-btn" type="button">{{ t('live.generate') }}</button>
+          </span>
+        </label>
+
+        <div class="lv-two">
+          <label class="lv-field">
+            <span>{{ t('live.person') }}</span>
+            <select id="lvPerson"></select>
+          </label>
+          <label class="lv-field">
+            <span>{{ t('live.voice') }}</span>
+            <select id="lvVoice"></select>
+          </label>
+        </div>
+        {# 换形象或音色 = 整场重渲。片段是按 (文字, 形象, 音色) 三元组缓存的,
+           不说破的话点一下就等二十分钟, 而且不知道为什么。 #}
+        <p class="lv-warn" id="lvRecast" hidden>{{ t('live.recast_warn') }}</p>
+
+        <label class="lv-field">
+          <span>{{ t('live.script') }} <em class="lv-hint">{{ t('live.script_hint') }}</em></span>
+          <textarea id="lvScript" rows="14" spellcheck="false"
+                    placeholder="{{ t('live.script_ph') }}"></textarea>
+        </label>
+        <div class="lv-counts" id="lvCounts"
+             data-fmt="{{ t('live.counts_fmt') }}"
+             data-dirty="{{ t('live.counts_dirty') }}"></div>
+
+        <div class="lv-actions">
+          <button id="lvSave" class="lv-btn">{{ t('live.save') }}</button>
+          <button id="lvRender" class="lv-btn">{{ t('live.render') }}</button>
+          <button id="lvStart" class="lv-btn lv-btn--go">{{ t('live.start') }}</button>
+          <button id="lvStop" class="lv-btn" hidden>{{ t('live.stop') }}</button>
+        </div>
+        <div id="lvProgress" class="lv-progress" hidden><div id="lvBar"></div></div>
+        <div id="lvSay" class="lv-status"
+             data-saved="{{ t('live.saved') }}"
+             data-rendering="{{ t('live.rendering') }}"
+             data-generating="{{ t('live.generating') }}"
+             data-generated="{{ t('live.generated') }}"
+             data-need_title="{{ t('live.need_title') }}"
+             data-starting="{{ t('live.starting') }}"
+             data-stopped="{{ t('live.stopped') }}"
+             data-failed="{{ t('live.failed') }}"></div>
+      </div>
+
+      <div class="lv-preview">
+        <div class="lv-stage">
+          <video id="lvVideo" class="lv-video" playsinline muted autoplay></video>
+          <button id="lvUnmute" class="lv-unmute" hidden>{{ t('live.unmute') }}</button>
+          <div id="lvMsg" class="lv-msg">{{ t('live.connecting') }}</div>
+        </div>
+        <div class="lv-note">{{ t('live.note') }}</div>
+      </div>
+    </div>
+  </div>
+</section>
+<script src="/static/hls.min.js?v={{ asset_v }}"></script>
+<script src="/static/live.js?v={{ asset_v }}"></script>
+<script src="/static/live_console.js?v={{ asset_v }}" defer></script>
+{% endblock %}

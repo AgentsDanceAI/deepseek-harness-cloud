@@ -57,3 +57,11 @@
 }
 .lv-watching { margin-top: .6rem; font-size: .85rem; opacity: .75; }
 .lv-note { margin-top: .5rem; font-size: .8rem; opacity: .55; }
+
+/* 控制台入口 / 生成按钮 / 观看页的宽舞台 (2026-09-08) */
+.lv-adminlink { font-size: .85rem; opacity: .8; text-decoration: none; border-bottom: 1px dotted; }
+.lv-inline { display: flex; gap: .5rem; align-items: stretch; }
+.lv-inline input { flex: 1; }
+.lv-inline .lv-btn { white-space: nowrap; }
+/* 观看页只有播放器, 让它占满一行而不是挤在半边。 */
+.lv-stage--wide { max-width: 960px; }

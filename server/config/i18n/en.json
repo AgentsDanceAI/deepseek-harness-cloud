@@ -735,11 +735,12 @@
   "live.stop": "Stop",
   "live.saved": "Saved. Changed lines need re-rendering.",
   "live.rendering": "Rendering",
-  "live.render_done": "Rendering done",
-  "live.need_render": "pending render",
   "live.starting": "Going live…",
   "live.stopped": "Stopped",
   "live.failed": "Action failed",
-  "live.watching_mine": "Watching: my room",
-  "live.watching_official": "Watching: the official room (yours is off air)"
+  "live.console_sub": "One shared configuration for the whole site. Save, then render, then go live.",
+  "live.generate": "Write script",
+  "live.generating": "Writing a script from the room name…",
+  "live.generated": "Draft ready — review it before saving. Nothing goes live automatically.",
+  "live.need_title": "Enter the room name first; it is the prompt for the script."
 }

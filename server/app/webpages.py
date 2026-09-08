@@ -471,6 +471,21 @@ def live_page(request: Request):
     return _render(request, "live.html", "live")
 
 
+@router.get("/live/console")
+def live_console_page(request: Request):
+    """直播间控制台 —— **管理员专用** (老板 2026-09-08 定)。
+
+    全站只有一套直播配置 (官方直播间), 所以这里不是"我的直播间", 而是"那一间"。
+    接口那边也各自拦了一道; 这里提前拦是不想让非管理员看到一个自己用不了的壳。
+    """
+    user = try_resolve_user(request)
+    if user is None:
+        return RedirectResponse("/login?next=/live/console", status_code=303)
+    if not user.get("is_admin"):
+        return RedirectResponse("/live", status_code=303)
+    return _render(request, "live_console.html", "live")
+
+
 @router.get("/apps")
 def apps_page(request: Request):
     """云空间: 16 个开源 AI 产品的 4x4 卡片网格。

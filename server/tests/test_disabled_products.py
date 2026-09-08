@@ -98,13 +98,12 @@ def test_the_live_page_may_load_blob_media_but_gets_no_extra_openings():
     assert "blob:" not in home.headers.get("content-security-policy", "")
 
 
-def test_a_live_room_belongs_to_exactly_one_person(monkeypatch):
-    """直播间的隔离必须落在**归属校验**上, 不能指望"别人不知道房间名"。
+def test_the_console_is_admin_only_and_there_is_exactly_one_room(monkeypatch):
+    """控制台是管理员专用, 而且全站只有一间 (老板 2026-09-08 定)。
 
-    房间名就是 `d-<用户id>` —— 用户 id 在站内到处都是, 猜得到。所以:
-    · 别人的房间: 403 (且在打上游之前就拒, 不能让人拿我们当探测器);
-    · 官方间: 人人可看 (它就是拿来展示的);
-    · 没登录: 拿不到控制台的任何一个接口。
+    三道都要在: 没登录进不去; 普通用户 403 (页面也会被弹回观看页); 只有官方间的
+    切片给发 —— 别的房间名一律 404, 不然这条把浏览器给的字符串拼进上游路径的路
+    就成了摸 GPU 节点的探测器。
     """
     from fastapi.testclient import TestClient
 
@@ -117,61 +116,97 @@ def test_a_live_room_belongs_to_exactly_one_person(monkeypatch):
     monkeypatch.setattr(cfg, "AVATAR_TOKEN_SECRET", "t" * 32)
 
     with TestClient(app) as anon:
-        # 未登录: 控制台一个都进不去
-        assert anon.get("/api/live/room").status_code in (401, 403)
-        assert anon.put("/api/live/room", json={"lines": ["x"]}).status_code in (401, 403)
-        assert anon.post("/api/live/room/start").status_code in (401, 403)
-        # 官方间的切片是公开的
+        for call in (
+            lambda c: c.get("/api/live/room"),
+            lambda c: c.put("/api/live/room", json={"lines": ["x"]}),
+            lambda c: c.post("/api/live/room/start"),
+            lambda c: c.post("/api/live/generate", json={"title": "x"}),
+        ):
+            assert call(anon).status_code in (401, 403)
         assert anon.get("/api/live/hls/official/index.m3u8").status_code != 403
 
     with TestClient(app) as c:
-        signup(c, "live-owner@example.com")
-        # 上游必定打不通 —— **显式让它抛**, 不靠"假域名解析不了": 这台开发机的
-        # 系统代理会把任何域名都解析掉(连得上), CI 里 DNS 直接失败, 同一条断言在
-        # 两边走的是完全不同的分支。第一版就是这么红的 CI, 而且顺带逼出了一个真
-        # bug: _gpu 当时没接 httpx 异常, GPU 节点一够不着用户就吃 500 带栈。
-        import httpx as _httpx
+        signup(c, "live-plain@example.com")  # 普通用户
+        assert c.get("/api/live/room").status_code == 403
+        assert c.put("/api/live/room", json={"lines": ["x"]}).status_code == 403
+        assert c.post("/api/live/room/start").status_code == 403
+        assert c.post("/api/live/generate", json={"title": "x"}).status_code == 403
+        # 页面也拦一道: 非管理员被弹回观看页, 不给看一个自己用不了的壳
+        r = c.get("/live/console", follow_redirects=False)
+        assert r.status_code == 303 and r.headers["location"] == "/live"
+        # 别的房间名: 404 (不是 403 —— 不告诉外面"这个名字存在但你没权限")
+        assert c.get("/api/live/hls/d-someoneelse/index.m3u8").status_code == 404
 
-        async def _boom(*a, **k):
-            raise _httpx.ConnectError("upstream down")
+    admin_mail = "live-admin@example.com"
+    old = list(cfg.ADMIN_EMAILS)
+    cfg.ADMIN_EMAILS.append(admin_mail)
+    try:
+        with TestClient(app) as c:
+            signup(c, admin_mail)
+            assert c.get("/live/console", follow_redirects=False).status_code == 200
 
-        monkeypatch.setattr(_httpx.AsyncClient, "request", _boom)
-        me = c.get("/api/live/room")
-        # 502 说明**归属这一关放行了**, 才轮到网络出错 (403 会在打上游之前就返回)。
-        assert me.status_code == 502, me.status_code
-        # 别人的房间: 在打上游之前就该被拒
-        assert c.get("/api/live/hls/d-somebodyelse/index.m3u8").status_code == 403
-        assert c.get("/api/live/hls/official/index.m3u8").status_code != 403
+            # 上游必定打不通 —— **显式让它抛**, 不靠"假域名解析不了": 这台开发机的
+            # 系统代理会把任何域名都解析掉(连得上), CI 里 DNS 直接失败, 同一条断言
+            # 在两边走的是完全不同的分支。第一版就是这么红的 CI, 而且顺带逼出一个
+            # 真 bug: _gpu 当时没接 httpx 异常, GPU 节点一够不着用户就吃 500 带栈。
+            import httpx as _httpx
+
+            async def _boom(*a, **k):
+                raise _httpx.ConnectError("upstream down")
+
+            monkeypatch.setattr(_httpx.AsyncClient, "request", _boom)
+            # 502 说明**管理员这一关放行了**, 才轮到网络出错 (403 会更早返回)。
+            assert c.get("/api/live/room").status_code == 502
+    finally:
+        cfg.ADMIN_EMAILS[:] = old
 
 
-def test_the_console_markup_matches_what_its_javascript_reaches_for():
-    """live.js 里每一个 getElementById 的 id, 模板里都得真有。
+def test_each_page_has_every_element_its_javascript_reaches_for():
+    """每个页面的 JS 里 getElementById 的 id, 那个页面的模板里都得真有。
 
-    这两个文件是**靠约定连着的**, 没有任何编译期检查。漂了的表现最难查: 页面照常
-    渲染、控制台不报错 (querySelector 返回 null 而多数调用在事件回调里才炸), 用户
-    看到的是"按钮点了没反应"。改模板改 id 时这条会先红。
+    这两边是**靠约定连着的**, 没有任何编译期检查。漂了的表现最难查: 页面照常渲染、
+    浏览器控制台不报错 (多数调用在事件回调里才炸), 用户看到的只是"按钮点了没反应"。
 
-    顺带钉住播放器的两个脚本 —— 少了 hls.min.js, Chrome 上就是"画面永远转圈",
-    而 Safari 因为原生放 HLS 反而正常, 于是这种事最容易在只用 Mac 时漏掉。
+    顺带钉住 hls.min.js 的引用 —— 少了它 Chrome 上是"画面永远转圈", 而 Safari 因为
+    原生放 HLS 反而正常。只用 Mac 开发时这种事最容易漏。
     """
     import re
     from pathlib import Path
 
     from fastapi.testclient import TestClient
 
+    from app import config as cfg
     from app.main import app
     from tests._signup import signup
 
-    root = Path(__file__).resolve().parents[1] / "app"
-    js = (root / "static" / "live.js").read_text(encoding="utf-8")
-    ids = set(re.findall(r"\$\('([A-Za-z0-9_-]+)'\)", js))
-    ids |= set(re.findall(r"getElementById\('([A-Za-z0-9_-]+)'\)", js))
-    assert len(ids) >= 12, f"没解析到几个 id, 正则大概过时了: {sorted(ids)}"
+    static = Path(__file__).resolve().parents[1] / "app" / "static"
 
-    with TestClient(app) as c:
-        signup(c, "live-markup@example.com")
-        html = c.get("/live").text
-    missing = [i for i in sorted(ids) if f'id="{i}"' not in html]
-    assert not missing, f"live.js 找这些 id, 模板里没有: {missing}"
-    assert "/static/hls.min.js" in html, "少了 hls.js, 非 Safari 浏览器放不了 HLS"
-    assert "/static/live.js" in html
+    def ids_in(js_name):
+        js = (static / js_name).read_text(encoding="utf-8")
+        got = set(re.findall(r"\$\('([A-Za-z0-9_-]+)'\)", js))
+        got |= set(re.findall(r"getElementById\('([A-Za-z0-9_-]+)'\)", js))
+        return got
+
+    # 正则健全性只对**并集**判一次: 观看页的播放器统共就用四个 id, 按页卡阈值会
+    # 把"这一页本来就简单"误判成"正则失效"。
+    assert len(ids_in("live.js") | ids_in("live_console.js")) >= 15, "正则大概过时了"
+
+    admin_mail = "live-ids@example.com"
+    old = list(cfg.ADMIN_EMAILS)
+    cfg.ADMIN_EMAILS.append(admin_mail)
+    try:
+        with TestClient(app) as c:
+            signup(c, admin_mail)
+            pages = {"/live": ["live.js"], "/live/console": ["live.js", "live_console.js"]}
+            for url, scripts in pages.items():
+                html = c.get(url).text
+                want = set()
+                for js in scripts:
+                    want |= ids_in(js)
+                missing = [i for i in sorted(want) if f'id="{i}"' not in html]
+                assert not missing, f"{url} 的 JS 找这些 id, 模板里没有: {missing}"
+                assert "/static/hls.min.js" in html, f"{url} 少了 hls.js"
+                for js in scripts:
+                    assert f"/static/{js}" in html, f"{url} 少了 {js}"
+    finally:
+        cfg.ADMIN_EMAILS[:] = old
