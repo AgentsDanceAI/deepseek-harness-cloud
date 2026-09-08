@@ -55,9 +55,22 @@ def test_manifest_carries_the_preference(monkeypatch):
     """光有函数不算 —— 要真出现在发给 API 的清单里。"""
     monkeypatch.setattr(config, "K8S_PREFERRED_NODES", "dsh-node-1")
     b = K8sBackend()
-    m = b._manifest("u1~pi", boot="echo hi", env={}, boot_fp="fp", image="img", mem_mb=2048, cpus=1.0)
+    kw = dict(
+        boot="echo hi",
+        env={},
+        boot_fp="fp",
+        image="img",
+        image_ref="",
+        mem_mb=2048,
+        cpus=1.0,
+        sidecars=(),
+        host_aliases=(),
+        init_containers=(),
+        seeds=(),
+        run_as_user=None,
+    )
+    m = b._manifest("u1~pi", **kw)
     assert m["spec"]["affinity"]["nodeAffinity"]["preferredDuringSchedulingIgnoredDuringExecution"]
 
     monkeypatch.setattr(config, "K8S_PREFERRED_NODES", "")
-    m2 = b._manifest("u1~pi", boot="echo hi", env={}, boot_fp="fp", image="img", mem_mb=2048, cpus=1.0)
-    assert "affinity" not in m2["spec"]
+    assert "affinity" not in b._manifest("u1~pi", **kw)["spec"]
