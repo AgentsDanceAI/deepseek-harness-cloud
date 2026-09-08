@@ -75,6 +75,25 @@
           <button id="lvUnmute" class="lv-unmute" hidden>{{ t('live.unmute') }}</button>
           <div id="lvMsg" class="lv-msg">{{ t('live.connecting') }}</div>
         </div>
+        {# 互动面板贴在画面下面 —— 看着她说话的同时敲评论, 眼睛不用两头跑。
+           形状参考 LiveTalking 的"文本驱动": 一个输入框 + 复读/问答两种模式。 #}
+        <div class="lv-inter">
+          <h2 class="lv-h2">{{ t('live.interact') }}</h2>
+          <textarea id="lvComment" rows="2" placeholder="{{ t('live.comment_ph') }}"></textarea>
+          <div class="lv-inline">
+            <select id="lvMode">
+              <option value="chat">{{ t('live.mode_chat') }}</option>
+              <option value="echo">{{ t('live.mode_echo') }}</option>
+            </select>
+            <button id="lvSend" class="lv-btn lv-btn--go">{{ t('live.send') }}</button>
+          </div>
+          <p class="lv-hint lv-delay">{{ t('live.interject_delay') }}</p>
+          {# 她刚才说了什么 —— 话术还是回评论, 一眼分得出。没有这个就只能盯着
+             画面猜她念到哪儿了。 #}
+          <div class="lv-log" id="lvLog"
+               data-script="{{ t('live.kind_script') }}"
+               data-interject="{{ t('live.kind_interject') }}"></div>
+        </div>
         <div class="lv-note">{{ t('live.note') }}</div>
       </div>
     </div>

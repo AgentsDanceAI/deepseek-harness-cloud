@@ -290,3 +290,95 @@ async def generate(body: dict, user: dict = Depends(resolve_user)):
             request_id=f"live-gen-{uuid.uuid4().hex[:16]}",
         )
     return JSONResponse({"lines": lines[:20]})
+
+
+#: 回评论时的口径。与写话术那份共享同一条底线 —— **不编造事实**。
+#: 直播间里回评论比写话术更容易翻车: 观众问的往往就是价格、库存、效果这些具体的东西,
+#: 而模型天生倾向于"给个答案"。所以这里把"不知道就说去问客服"写成明确指令。
+_REPLY = (
+    "你是直播间的主播，正在回观众的一条评论。要求：\n"
+    "1. 一到两句话，口语，像真的在直播间开口回应，不要书面语。\n"
+    "2. 只输出要说的话，不要引号、不要旁白、不要emoji、不要任何格式符号。\n"
+    "3. **绝对不要编造事实**：价格、优惠、库存、发货时间、销量、排名、功效、"
+    "资质，以及别人怎么说。不知道就大方说这个稍后请客服回复你，别猜。\n"
+    "4. 先回应他这句话本身，再自然接回直播的节奏。"
+)
+
+
+@router.post("/say")
+async def say(body: dict, user: dict = Depends(resolve_user)):
+    """把一条评论送进直播间。
+
+    两种模式, 与 LiveTalking 的文本驱动同形:
+      · echo —— 原样念出去 (主播自己想插一句话时用);
+      · chat —— 先让模型答, 再把答案念出去 (回观众评论)。
+
+    **插播是排在当前句之后播的, 不打断当前句** —— 打断会把正在生成的那句撕成半截,
+    整条流会断。所以从点发送到听见, 约十秒。
+    """
+    if not _enabled():
+        raise HTTPException(404, "live_disabled")
+    _require_admin(user)
+    text = str(body.get("text", "")).strip()[:600]
+    if not text:
+        raise HTTPException(400, "empty_text")
+    mode = "chat" if str(body.get("mode", "chat")) == "chat" else "echo"
+
+    spoken = text
+    if mode == "chat":
+        if not config.UPSTREAM_BASE_URL or not config.UPSTREAM_API_KEY:
+            raise HTTPException(503, "upstream_not_configured")
+        model_id = model_catalog.default_model()
+        entry = model_catalog.resolve(model_id) or {}
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(45.0, connect=10.0)) as c:
+                r = await c.post(
+                    config.UPSTREAM_BASE_URL.rstrip("/") + "/chat/completions",
+                    json={
+                        "model": entry.get("upstream_model", model_id),
+                        "messages": [
+                            {"role": "system", "content": _REPLY},
+                            {"role": "user", "content": f"观众评论：{text}"},
+                        ],
+                        # 一句话。放开了她会说成一段稿子, 而那要念上一分钟, 后面的
+                        # 评论全堵住。
+                        "max_tokens": 160,
+                        "temperature": 0.7,
+                    },
+                    headers={
+                        "authorization": f"Bearer {config.UPSTREAM_API_KEY}",
+                        "content-type": "application/json",
+                    },
+                )
+        except httpx.HTTPError:
+            raise HTTPException(502, "upstream_unreachable") from None
+        if r.status_code != 200:
+            raise HTTPException(502, "upstream")
+        d = r.json()
+        spoken = (((d.get("choices") or [{}])[0].get("message") or {}).get("content") or "").strip()
+        spoken = _JUNK.sub("", spoken).strip().strip('“”"')
+        if not spoken:
+            raise HTTPException(502, "empty_generation")
+        usage = d.get("usage") or {}
+        cache_read = int(
+            usage.get("prompt_cache_hit_tokens")
+            or (usage.get("prompt_tokens_details") or {}).get("cached_tokens")
+            or 0
+        )
+        uncached = max(0, int(usage.get("prompt_tokens") or 0) - cache_read)
+        output = int(usage.get("completion_tokens") or 0)
+        if uncached or output:
+            credits.spend(
+                user["id"],
+                model_catalog.charge_credits(model_id, uncached, cache_read, output),
+                kind="llm",
+                model=model_id,
+                device_id=user.get("device_id", ""),
+                uncached_input=uncached,
+                cache_read=cache_read,
+                output=output,
+                request_id=f"live-reply-{uuid.uuid4().hex[:16]}",
+            )
+
+    await _gpu("POST", f"/rooms/{config.LIVE_ROOM}/interject", config.LIVE_ROOM, json={"text": spoken[:600]})
+    return JSONResponse({"ok": True, "comment": text, "spoken": spoken[:600], "mode": mode})

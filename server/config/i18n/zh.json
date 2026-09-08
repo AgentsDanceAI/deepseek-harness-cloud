@@ -742,5 +742,15 @@
   "live.generated": "已生成，请过目后再保存。生成的内容不会自动上线。",
   "live.need_title": "先填直播间名称，它就是生成话术的题目。",
   "live.counts_said": "已实时说出 {n} 句",
-  "live.starved": "生成跟不上播出 {n} 次"
+  "live.starved": "生成跟不上播出 {n} 次",
+  "live.interact": "互动",
+  "live.comment_ph": "把观众的评论贴进来，或者直接写一句想让她说的话",
+  "live.mode_chat": "让她回答",
+  "live.mode_echo": "原样念出来",
+  "live.send": "发送",
+  "live.interject_delay": "插播排在当前这句之后播，约十秒后能听见（打断当前句会把流弄断，所以不打断）。Ctrl/⌘+Enter 发送。",
+  "live.kind_script": "话术",
+  "live.kind_interject": "回评论",
+  "live.sending": "正在让她组织语言…",
+  "live.queued": "已排上，她接下来会说："
 }

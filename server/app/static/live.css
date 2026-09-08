@@ -65,3 +65,27 @@
 .lv-inline .lv-btn { white-space: nowrap; }
 /* 观看页只有播放器, 让它占满一行而不是挤在半边。 */
 .lv-stage--wide { max-width: 960px; }
+
+/* 互动面板 (2026-09-08): 贴在画面下面 —— 看着她说话的同时敲评论。 */
+.lv-inter { margin-top: 1rem; }
+.lv-inter textarea {
+  width: 100%; padding: .5rem .6rem; border-radius: 8px; font: inherit;
+  border: 1px solid rgba(128,128,128,.35); background: transparent; color: inherit;
+  box-sizing: border-box; resize: vertical;
+}
+.lv-inter .lv-inline { margin-top: .5rem; }
+.lv-inter select {
+  padding: .45rem .6rem; border-radius: 8px; font: inherit;
+  border: 1px solid rgba(128,128,128,.4); background: transparent; color: inherit;
+}
+.lv-delay { margin: .45rem 0 0; opacity: .6; font-size: .8rem; }
+
+.lv-log { margin-top: .8rem; max-height: 16rem; overflow-y: auto; font-size: .84rem; }
+.lv-logrow { padding: .3rem 0; border-bottom: 1px solid rgba(128,128,128,.15); line-height: 1.5; }
+.lv-logrow--in { opacity: 1; }
+.lv-logrow { opacity: .7; }
+.lv-tag {
+  display: inline-block; margin-right: .5rem; padding: 0 .4rem; border-radius: 4px;
+  font-size: .74rem; border: 1px solid rgba(128,128,128,.4); opacity: .8;
+}
+.lv-logrow--in .lv-tag { border-color: #e33; color: #e33; }

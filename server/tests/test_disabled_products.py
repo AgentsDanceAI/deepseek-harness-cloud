@@ -121,6 +121,7 @@ def test_the_console_is_admin_only_and_there_is_exactly_one_room(monkeypatch):
             lambda c: c.put("/api/live/room", json={"lines": ["x"]}),
             lambda c: c.post("/api/live/room/start"),
             lambda c: c.post("/api/live/generate", json={"title": "x"}),
+            lambda c: c.post("/api/live/say", json={"text": "x", "mode": "echo"}),
         ):
             assert call(anon).status_code in (401, 403)
         assert anon.get("/api/live/hls/official/index.m3u8").status_code != 403
@@ -131,6 +132,8 @@ def test_the_console_is_admin_only_and_there_is_exactly_one_room(monkeypatch):
         assert c.put("/api/live/room", json={"lines": ["x"]}).status_code == 403
         assert c.post("/api/live/room/start").status_code == 403
         assert c.post("/api/live/generate", json={"title": "x"}).status_code == 403
+        # 让数字人当众说一句话, 显然只能管理员来
+        assert c.post("/api/live/say", json={"text": "x", "mode": "echo"}).status_code == 403
         # 页面也拦一道: 非管理员被弹回观看页, 不给看一个自己用不了的壳
         r = c.get("/live/console", follow_redirects=False)
         assert r.status_code == 303 and r.headers["location"] == "/live"

@@ -9,6 +9,7 @@
   var script = $('lvScript'), counts = $('lvCounts'), say = $('lvSay');
   var recast = $('lvRecast');
   var loaded = { person: '', voice: '' }, optionsFilled = false;
+  var comment = $('lvComment'), mode = $('lvMode'), log = $('lvLog');
 
   function t(el, k) { return (el.dataset || {})[k] || ''; }
   function lines() {
@@ -16,7 +17,7 @@
       .filter(function (x) { return x.length; });
   }
   function busy(on) {
-    ['lvSave', 'lvStart', 'lvStop', 'lvGen'].forEach(function (id) {
+    ['lvSave', 'lvStart', 'lvStop', 'lvGen', 'lvSend'].forEach(function (id) {
       var el = $(id); if (el) el.disabled = on;
     });
   }
@@ -43,6 +44,22 @@
       say.textContent = t(say, 'failed') + ' ' + d.err;
     }
     markRecast();
+    paintLog(d.recent || []);
+  }
+
+  function paintLog(items) {
+    if (!log) return;
+    log.textContent = '';
+    items.slice().reverse().forEach(function (x) {
+      var row = document.createElement('div');
+      row.className = 'lv-logrow' + (x.kind === 'interject' ? ' lv-logrow--in' : '');
+      var tag = document.createElement('span');
+      tag.className = 'lv-tag';
+      tag.textContent = t(log, x.kind === 'interject' ? 'interject' : 'script');
+      row.appendChild(tag);
+      row.appendChild(document.createTextNode(x.text || ''));
+      log.appendChild(row);
+    });
   }
 
   function fillOptions(d) {
@@ -124,6 +141,30 @@
       .then(function () { busy(false); });
   }
 
+  function send() {
+    var text = comment.value.trim();
+    if (!text) { comment.focus(); return; }
+    busy(true);
+    say.textContent = t(say, 'sending');
+    fetch('/api/live/say', {
+      method: 'POST', credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: text, mode: mode.value }),
+    }).then(function (r) { if (!r.ok) throw new Error('say'); return r.json(); })
+      .then(function (d) {
+        comment.value = '';
+        // 把她将要说的原话回显出来 —— 模式是"让她回答"时, 说出去的和你敲进去的
+        // 不是一回事, 不回显就只能等十秒听见了才知道她答了什么。
+        say.textContent = t(say, 'queued') + ' ' + (d.spoken || '');
+      })
+      .catch(function () { say.textContent = t(say, 'failed'); })
+      .then(function () { busy(false); });
+  }
+  $('lvSend').addEventListener('click', send);
+  // Ctrl/Cmd+Enter 发送 —— 回评论是要抢时间的, 手别离开键盘。
+  comment.addEventListener('keydown', function (e) {
+    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); send(); }
+  });
   $('lvGen').addEventListener('click', generate);
   $('lvSave').addEventListener('click', function () { save(); });
   // 开播前**先存** —— 否则播的是上一版, 而画面看起来一切正常, 只是说的还是旧词。

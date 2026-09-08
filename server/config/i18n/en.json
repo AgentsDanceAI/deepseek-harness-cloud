@@ -742,5 +742,15 @@
   "live.generated": "Draft ready — review it before saving. Nothing goes live automatically.",
   "live.need_title": "Enter the room name first; it is the prompt for the script.",
   "live.counts_said": "{n} lines spoken live",
-  "live.starved": "generation fell behind {n} times"
+  "live.starved": "generation fell behind {n} times",
+  "live.interact": "Interact",
+  "live.comment_ph": "Paste a viewer comment, or type a line for her to say",
+  "live.mode_chat": "Let her answer",
+  "live.mode_echo": "Read it out as-is",
+  "live.send": "Send",
+  "live.interject_delay": "Queued after the line she is on — about ten seconds. (Cutting her off mid-sentence would break the stream, so we don't.) Ctrl/⌘+Enter to send.",
+  "live.kind_script": "script",
+  "live.kind_interject": "reply",
+  "live.sending": "Working out what to say…",
+  "live.queued": "Queued. She will say:"
 }
