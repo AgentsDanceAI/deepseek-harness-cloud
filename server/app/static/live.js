@@ -25,14 +25,31 @@ window.LivePlayer = (function () {
 
   function play(url) {
     if (!v) return;
-    if (url === playingUrl && hls && !v.paused) return;
+    // ⚠️ 地址没变就**什么都别做**。这里原先还判了 `!v.paused` —— 于是只要视频那
+    // 一刻是暂停的 (切到后台、刚起播、浏览器自己按下的暂停), 每 15 秒一次的状态
+    // 刷新就会走下去把整个 hls 实例销毁重建。MediaSource 一拆一建, 画面就黑一下,
+    // 而日志里什么都不会有。("断的时候会黑一下" —— 老板 2026-09-08)
+    // 暂停了该做的是让它继续播, 不是重建播放器。
+    if (url === playingUrl && hls) {
+      if (v.paused) v.play().catch(function () {});
+      return;
+    }
     playingUrl = url;
     if (hls) { hls.destroy(); hls = null; }
     if (v.canPlayType('application/vnd.apple.mpegurl')) {   // Safari 原生放 HLS
       v.src = url; v.play().catch(function () {}); return;
     }
     if (!window.Hls || !window.Hls.isSupported()) { note(t('unsupported')); return; }
-    hls = new window.Hls({ lowLatencyMode: true, liveSyncDurationCount: 3 });
+    hls = new window.Hls({
+      // 我们发的是**普通** HLS (2 秒整片, 没有 EXT-X-PART)。开 lowLatencyMode 只会
+      // 让它按低延迟那套去贴直播边缘, 落后一点就纠正 —— 而纠正的方式是**跳**。
+      lowLatencyMode: false,
+      liveSyncDurationCount: 4,          // 8 秒缓冲, 够扛一次网络抖动
+      liveMaxLatencyDurationCount: 12,   // 落后 24 秒才算真掉队
+      // 关键的一条: 落后了**加速追**(最多 1.1 倍), 而不是跳过去。
+      // 跳 = 缓冲被清 = 黑一下; 加速 10% 听感上几乎察觉不到。
+      maxLiveSyncPlaybackRate: 1.1,
+    });
     hls.loadSource(url);
     hls.attachMedia(v);
     hls.on(window.Hls.Events.MANIFEST_PARSED, function () { v.play().catch(function () {}); });
