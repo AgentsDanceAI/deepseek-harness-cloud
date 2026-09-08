@@ -20,6 +20,7 @@ function makeDom({ stored = null } = {}) {
              if (this.onend) this.onend(); },
     lang: "", continuous: false, interimResults: false };
 
+  const rafq = [];
   const els = {};
   const mk = (id) => {
     const cls = new Set(["av-status"]);
@@ -54,11 +55,17 @@ function makeDom({ stored = null } = {}) {
     // .catch 链会炸, 而那与被测的双工逻辑毫无关系。
     fetch: () => Promise.resolve({ ok: true, json: () => Promise.resolve({}) }),
     setInterval: () => 0, clearInterval() {}, setTimeout: () => 0,
+    // 手动驱动的动画帧队列 —— 露出视频层要等它, 测试里得能一帧一帧推
+    requestAnimationFrame: (fn) => { rafq.push(fn); return rafq.length; },
     URL: { createObjectURL: () => "blob:x", revokeObjectURL() {} },
     WebSocket: function () { return { close() {}, send() {} }; },
     location: { protocol: "https:", host: "x", search: "" },
   };
-  return { document, window, els, ear, store };
+  // 推进 n 个动画帧
+  const pump = (n = 1) => {
+    for (let i = 0; i < n; i++) { const q = rafq.splice(0); q.forEach((f) => f()); }
+  };
+  return { document, window, els, ear, store, rafq, pump };
 }
 
 /* avatar.js 是 IIFE, 内部函数不外露。把它跑起来之后, 用它自己暴露给 DOM 的
@@ -69,15 +76,17 @@ function load(dom) {
   // 把 IIFE 尾部改成把内部对象抛出来, 只为测试可观察状态。其余一字不改。
   const patched = src.replace(
     /\}\)\(\);\s*$/,
-    "  window.__test = { st, setDuplex, showVideo, listen, micGate, fill, loadBg };\n})();\n"
+    "  window.__test = { st, setDuplex, showVideo, listen, micGate, fill, loadBg, layout };\n})();\n"
   );
   assert.notEqual(patched, src, "没能挂上测试钩子 —— IIFE 尾部形状变了");
   const fn = new Function(
     "document", "window", "localStorage", "fetch", "setInterval", "clearInterval",
-    "setTimeout", "URL", "WebSocket", "location", "console", patched);
+    "setTimeout", "URL", "WebSocket", "location", "console",
+    "requestAnimationFrame", patched);
   fn(dom.document, dom.window, dom.window.localStorage, dom.window.fetch,
      dom.window.setInterval, dom.window.clearInterval, dom.window.setTimeout,
-     dom.window.URL, dom.window.WebSocket, dom.window.location, console);
+     dom.window.URL, dom.window.WebSocket, dom.window.location, console,
+     dom.window.requestAnimationFrame);
   return dom.window.__test;
 }
 
@@ -205,4 +214,54 @@ check("选过的人被下架了就落回默认, 不留一个选不中的值", ()
   sel.value = "lin";
   api.fill(sel, ["yue"], "d", {});          // 林没了
   assert.equal(sel.value, "", "留了一个清单里没有的值, value 与显示的项对不上");
+});
+
+/* ------------------------------------------- 露出视频层不能抢在排版之前 */
+console.log("\n视频层露出时机:");
+
+function talkingDom() {
+  const dom = makeDom();
+  const api = load(dom);
+  api.st.ws = {};
+  api.st.cfg = { crop: { x: 0.1, y: 0.1, w: 0.2, h: 0.4 }, person_crops: {} };
+  const v = dom.els["#avVideo"];
+  v.videoWidth = 0; v.readyState = 0; v.style.opacity = "0"; v.style.width = "";
+  return { dom, api, v };
+}
+
+check("还没解出第一帧 → 不露出 (那一帧会以原始尺寸糊满画面)", () => {
+  const { dom, api, v } = talkingDom();
+  api.showVideo(true);
+  dom.pump(3);
+  assert.equal(v.style.opacity, "0",
+    "视频元素还没套上盒子就显出来了 —— 就是录屏第 82 帧那个放大两倍的方块");
+});
+
+check("有了第一帧 → 先重算盒子, 再等一个动画帧才露出", () => {
+  const { dom, api, v } = talkingDom();
+  api.showVideo(true);
+  dom.pump(1);
+  v.videoWidth = 512; v.readyState = 2;      // 第一帧到了
+  dom.pump(1);                                // 这一帧发现就绪并重排
+  assert.equal(v.style.width, "20%", "露出前没有按当前形象重算盒子");
+  assert.equal(v.style.opacity, "0", "没等排版落地就露出来了");
+  dom.pump(1);
+  assert.equal(v.style.opacity, "1", "排完版还是不出画");
+});
+
+check("等的过程中她说完了 → 不要再露出来", () => {
+  const { dom, api, v } = talkingDom();
+  api.showVideo(true);
+  dom.pump(1);
+  v.videoWidth = 512; v.readyState = 2;
+  api.showVideo(false);                       // 话说完了
+  dom.pump(3);
+  assert.equal(v.style.opacity, "0", "她已经不说了, 画面还是亮了出来");
+});
+
+check("一直等不到第一帧也要兜底显出来, 不能永远黑着", () => {
+  const { dom, api, v } = talkingDom();
+  api.showVideo(true);
+  dom.pump(40);                               // 超过 30 帧的上限
+  assert.equal(v.style.opacity, "1", "视频永远不出画 —— 比闪一下糟得多");
 });

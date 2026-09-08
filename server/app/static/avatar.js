@@ -222,9 +222,41 @@
      挂在别处早晚会漏掉一条翻转路径。 */
   function showVideo(on) {
     if (on === st.speaking) return;
-    $("#avVideo").style.opacity = on ? "1" : "0";
     st.speaking = on;
+    if (on) paintVideo(); else $("#avVideo").style.opacity = "0";
     if (st.duplex === "half") micGate(!on);
+  }
+
+  /* 露出视频层, 但**必须等它真的解出了一帧、且盒子已经按当前形象排好**。
+   *
+   * 之前是 currentTime 一动就把 opacity 拉到 1。iOS 上抓到过后果 (录屏第 82 帧):
+   * 那一瞬视频元素还没套上 CSS 的百分比盒子, 整张脸以原始尺寸糊在画面上 ——
+   * 一个放大两倍多、右边和上边都是硬边的方块。只闪一帧, 所以平均值、场景检测
+   * 都看不出来, 得逐帧翻才找得到。
+   *
+   * 三道: 等 videoWidth (有第一帧了) + readyState≥2 (能画了), 重算一次盒子,
+   * 再等一个动画帧让排版落地, 才把它显出来。
+   * 兜底 30 帧 (~0.5s) 后无论如何显出来 —— 宁可闪一下, 也不能永远不出画。
+   */
+  function paintVideo() {
+    const v = $("#avVideo");
+    let tries = 0;
+    (function tick() {
+      if (!st.speaking) return;               // 等的这会儿她说完了
+      if (v.videoWidth && v.readyState >= 2) {
+        layout();                             // 盒子按当前形象重算 (幂等, 便宜)
+        raf(() => { if (st.speaking) v.style.opacity = "1"; });
+        return;
+      }
+      if (++tries > 30) { v.style.opacity = "1"; return; }
+      raf(tick);
+    })();
+  }
+
+  /* 没有 rAF 的环境 (测试桩、老浏览器) 退回定时器 —— 少一帧延迟, 不影响判定。 */
+  function raf(fn) {
+    if (typeof requestAnimationFrame === "function") requestAnimationFrame(fn);
+    else setTimeout(fn, 16);
   }
 
   /* 半双工的闸: 她说话时把识别器停掉, 说完再开。
