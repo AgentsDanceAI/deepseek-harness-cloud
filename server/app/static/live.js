@@ -49,8 +49,11 @@ window.LivePlayer = (function () {
       // 我们发的是**普通** HLS (2 秒整片, 没有 EXT-X-PART)。开 lowLatencyMode 只会
       // 让它按低延迟那套去贴直播边缘, 落后一点就纠正 —— 而纠正的方式是**跳**。
       lowLatencyMode: false,
-      liveSyncDurationCount: 4,          // 8 秒缓冲, 够扛一次网络抖动
-      liveMaxLatencyDurationCount: 12,   // 落后 24 秒才算真掉队
+      // 切片是 1 秒一片, 所以这里的数字就是缓冲的秒数。
+      // 6 而不是 4: 生成侧每句之间有约 4 秒的空档 (TTS 预热那段不出帧), 缓冲少于
+      // 它就会反复见底 —— 而见底的表现正是卡顿和黑屏。用 2 秒延迟换不卡。
+      liveSyncDurationCount: 6,
+      liveMaxLatencyDurationCount: 20,   // 落后 20 秒才算真掉队
       // 关键的一条: 落后了**加速追**(最多 1.1 倍), 而不是跳过去。
       // 跳 = 缓冲被清 = 黑一下; 加速 10% 听感上几乎察觉不到。
       maxLiveSyncPlaybackRate: 1.1,
