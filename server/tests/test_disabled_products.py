@@ -69,3 +69,30 @@ def test_catalog_sorting_survives_a_disabled_card(monkeypatch):
     monkeypatch.setattr(config, "WORK_DISABLED_PRODUCTS", "dify")
     entries = apps_catalog.entries_with_status(set(), minutes={"comfyui": 10})
     assert "dify" not in {e["id"] for e in entries}
+
+
+def test_the_live_page_may_load_blob_media_but_gets_no_extra_openings():
+    """直播页要能放 blob: 媒体, 但**只**多这一条。
+
+    · `media-src blob:` —— hls.js 走 MediaSource, 视频源是 blob: URL。少了它
+      `default-src 'self'` 会挡掉, 而表现是"画面一帧不动": 切片照常下载、状态照常
+      显示直播中, 只有浏览器控制台里一行 CSP 违规。数字人当年就栽在这, 查了很久。
+    · **不给 connect-src 开跨源口子** —— m3u8/ts 走 /api/live/hls/* 同源代转,
+      正是为了不开这个口子 (见 app/live.py 头注释)。哪天有人图省事改成直连 GPU
+      域名, 这条断言会拦下来。
+    · 直播页不需要麦克风 (那是通话页的事), 保持全关。
+    """
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+    from tests._signup import signup
+
+    with TestClient(app) as c:
+        signup(c, "live-csp@example.com")  # 未登录会 303 走掉, 那是张没有 CSP 的空响应
+        lv = c.get("/live")
+        home = c.get("/")
+    csp = lv.headers.get("content-security-policy", "")
+    assert "media-src 'self' blob:" in csp
+    assert "connect-src" not in csp, "直播页不该有跨源出口 —— HLS 是同源代转的"
+    assert "microphone=()" in lv.headers.get("permissions-policy", "")
+    assert "blob:" not in home.headers.get("content-security-policy", "")
