@@ -567,6 +567,17 @@ WORK_LOCKED_PRODUCTS = _env("WORK_LOCKED_PRODUCTS", "")
 # 但三个月后没人知道那是故意的还是配漏了。
 WORK_DISABLED_PRODUCTS = _env("WORK_DISABLED_PRODUCTS", "")
 
+# **优先落在这些节点上** (逗号分隔的节点名, 空 = 不管, 由调度器自己摊)。
+#
+# 为什么需要: k8s 默认打分是 LeastAllocated —— 谁空谁得, 也就是**摊开**。而我们的节点
+# 成本不对等: 248 是公司白借的, 溢出节点是我们按量买的。摊开等于新工作台一半落到花钱
+# 那台上, 哪怕白借的那台还很空。
+#
+# 这里加的是**偏好**不是硬约束 (preferredDuringScheduling): 白借的装不下时照样溢出到
+# 付费节点, 不会让人开不出工作台。硬约束 (nodeSelector) 会在装满时直接 Pending, 那正是
+# 我们要避免的。
+K8S_PREFERRED_NODES = _env("K8S_PREFERRED_NODES", "")
+
 # --- 每人一台云电脑 (WORK_BACKEND=box, 见 docs/design/personal-box.md) ----------
 # 一个用户一台 ascii.dev Box, 产品是那台机器里的容器。Caddy 反代的是盒子的**隧道地址**
 # (盒子经 WireGuard 出站拨到应用机), 所以上游契约与 k8s 后端完全一样。
