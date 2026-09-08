@@ -1,0 +1,34 @@
+# 跨节点网络探针 —— 一个常驻的最小 Pod, 只为让巡检**永远有东西可探**。
+#
+# 要它的原因: flannel 少配 node-external-ip 时, 节点显示 Ready、kubectl 全绿, 但
+# **跨节点的 Pod 网络是死的**。这种坏只有真去连一个远端 Pod 才看得见 —— 而工作台
+# 是按需开的, 半夜一个都没有, 检查就静默跳过, 恰好错过没人盯着的那几个小时。
+#
+# 用 Deployment 而不是裸 Pod: 承载节点没了要能自己挪到新节点上去; 挪不动(没容量)
+# 就会卡 Pending, 而巡检的第 3 项正好盯这个。
+# 资源写足: 命名空间有 ResourceQuota, 缺 requests/limits 会被直接拒绝。
+#   k3s kubectl -n dsh apply -f deploy/k8s-node/netcanary.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: netcanary
+  namespace: dsh
+  labels: {app: netcanary}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: netcanary}}
+  template:
+    metadata:
+      labels: {app: netcanary}
+    spec:
+      # 准入策略要求工作负载都跑在沙箱里, 探针也不例外。
+      runtimeClassName: gvisor
+      # 控制面带 CriticalAddonsOnly=true:NoExecute, 没有 toleration 就落不上去 ——
+      # 所以它必然落在某个工作节点上, 正是我们要探的那一侧。
+      containers:
+        - name: c
+          image: busybox:1.36
+          command: ["sleep", "infinity"]
+          resources:
+            requests: {cpu: 10m, memory: 16Mi}
+            limits: {cpu: 50m, memory: 32Mi}
