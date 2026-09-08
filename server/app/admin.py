@@ -293,9 +293,7 @@ def set_lock_exempt(body: dict, user: dict = Depends(require_admin)):
         days = int(body.get("days") or 36500)
         if days <= 0:
             raise HTTPException(400, "days_must_be_positive")
-        work_access.grant_pass(
-            target_id, work_access.PASS_ANY, days, ref=f"admin:{user['id']}"
-        )
+        work_access.grant_pass(target_id, work_access.PASS_ANY, days, ref=f"admin:{user['id']}")
     else:
         work_access.revoke_lock_exemption(target_id)
     return {"ok": True, "user_id": target_id, "exempt": exempt}

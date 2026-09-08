@@ -160,8 +160,7 @@ def test_admins_are_never_walled_by_the_trial_gate():
     uid = _user("u_admin_gate")
     assert not work_access.pass_active(uid, "coze"), "前提: 没买证"
     assert not work_access.can_open_locked({"id": uid}, "coze"), "普通人没证就该被拦"
-    assert work_access.can_open_locked({"id": uid, "is_admin": True}, "coze"), \
-        "管理员被自己配的试用墙拦住了"
+    assert work_access.can_open_locked({"id": uid, "is_admin": True}, "coze"), "管理员被自己配的试用墙拦住了"
 
 
 def test_admin_can_exempt_one_user_from_the_whole_wall():

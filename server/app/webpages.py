@@ -375,9 +375,7 @@ def _apps_ctx(user: dict | None = None) -> dict:
     # 查证失败当作没买 (work_access.pass_active 自己兜底), 宁可多问一次也不白送。
     # 免墙的人 (管理员、拿了通配证的) 这里也不该看到锁: 卡上挂着锁却点得进去,
     # 比拦住还让人糊涂。
-    locked = {
-        pid for pid in products.locked_ids() if not (user and work_access.can_open_locked(user, pid))
-    }
+    locked = {pid for pid in products.locked_ids() if not (user and work_access.can_open_locked(user, pid))}
     apps = apps_catalog.entries_with_status(enabled, work_access.minutes_by_product(), locked)
     if config.WORK_ENABLED:
         target = ""
