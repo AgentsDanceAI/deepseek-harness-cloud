@@ -142,3 +142,36 @@ def test_a_live_room_belongs_to_exactly_one_person(monkeypatch):
         # 别人的房间: 在打上游之前就该被拒
         assert c.get("/api/live/hls/d-somebodyelse/index.m3u8").status_code == 403
         assert c.get("/api/live/hls/official/index.m3u8").status_code != 403
+
+
+def test_the_console_markup_matches_what_its_javascript_reaches_for():
+    """live.js 里每一个 getElementById 的 id, 模板里都得真有。
+
+    这两个文件是**靠约定连着的**, 没有任何编译期检查。漂了的表现最难查: 页面照常
+    渲染、控制台不报错 (querySelector 返回 null 而多数调用在事件回调里才炸), 用户
+    看到的是"按钮点了没反应"。改模板改 id 时这条会先红。
+
+    顺带钉住播放器的两个脚本 —— 少了 hls.min.js, Chrome 上就是"画面永远转圈",
+    而 Safari 因为原生放 HLS 反而正常, 于是这种事最容易在只用 Mac 时漏掉。
+    """
+    import re
+    from pathlib import Path
+
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+    from tests._signup import signup
+
+    root = Path(__file__).resolve().parents[1] / "app"
+    js = (root / "static" / "live.js").read_text(encoding="utf-8")
+    ids = set(re.findall(r"\$\('([A-Za-z0-9_-]+)'\)", js))
+    ids |= set(re.findall(r"getElementById\('([A-Za-z0-9_-]+)'\)", js))
+    assert len(ids) >= 12, f"没解析到几个 id, 正则大概过时了: {sorted(ids)}"
+
+    with TestClient(app) as c:
+        signup(c, "live-markup@example.com")
+        html = c.get("/live").text
+    missing = [i for i in sorted(ids) if f'id="{i}"' not in html]
+    assert not missing, f"live.js 找这些 id, 模板里没有: {missing}"
+    assert "/static/hls.min.js" in html, "少了 hls.js, 非 Safari 浏览器放不了 HLS"
+    assert "/static/live.js" in html
