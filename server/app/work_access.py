@@ -138,22 +138,66 @@ def minute_packs_left(user_id: str) -> int:
 
 # 通行证的 kind 前缀: work_passes.kind 存的是 "pass:<产品 id>"。
 PASS_KIND = "pass"
+#: 通配产品 id: 一张 "pass:*" 免掉**整面**试用墙, 不是某一格。管理员在后台发,
+#: 走的是和买来的证完全同一条路 —— 于是拦截点一处都不用多判一个分支, 到期、
+#: 撤销、审计也都沿用现成的那套。
+PASS_ANY = "*"
 
 
 def pass_active(user_id: str, product_id: str) -> bool:
-    """这个人现在有没有这一格的有效通行证。
+    """这个人现在有没有这一格的有效通行证 (通配证也算)。
 
     **认不出来就当没有** —— 数据库抖一下应该表现为"要买", 不是"白送"。
     """
     try:
         row = db.query_one(
-            "SELECT 1 AS ok FROM work_passes WHERE user_id=? AND kind=? AND expires>? LIMIT 1",
-            (user_id, f"{PASS_KIND}:{product_id}", time.time()),
+            "SELECT 1 AS ok FROM work_passes WHERE user_id=? AND kind IN (?,?) AND expires>? LIMIT 1",
+            (user_id, f"{PASS_KIND}:{product_id}", f"{PASS_KIND}:{PASS_ANY}", time.time()),
         )
     except Exception:  # noqa: BLE001
         log.warning("查通行证失败 (%s / %s)", user_id, product_id, exc_info=True)
         return False
     return row is not None
+
+
+def can_open_locked(user: dict, product_id: str) -> bool:
+    """上锁的格子, 这个人现在能不能开。**所有拦截点都该问这一个函数。**
+
+    管理员天然免: 服务是他们在运营, 把自己挡在门外没有意义 —— 出事的时候第一
+    个要能进去看的就是他们。这里读的是 accounts 已经算好的 is_admin (role 或
+    ADMIN_EMAILS), 不再查库, 因为这条路每个静态资源都会走一遍。
+
+    其余人靠通行证: 自己买的单格证, 或管理员发的通配证 (见 PASS_ANY)。
+    """
+    if user.get("is_admin"):
+        return True
+    return pass_active(user["id"], product_id)
+
+
+def lock_exempt(user_id: str) -> bool:
+    """有没有"免整面墙"的通配证。给后台展示按钮状态用。"""
+    return pass_active(user_id, PASS_ANY)
+
+
+def revoke_lock_exemption(user_id: str) -> int:
+    """撤掉通配证。返回撤了几张。
+
+    直接删而不是把 expires 改成过去: 这张证没有收过钱 (price=0, 管理员发的),
+    留着只会让对账时多一行看不懂的记录。买来的单格证不受影响。
+    """
+    rows = db.query(
+        "SELECT id FROM work_passes WHERE user_id=? AND kind=?",
+        (user_id, f"{PASS_KIND}:{PASS_ANY}"),
+    )
+    if not rows:
+        return 0
+    with db.tx() as conn:
+        conn.execute(
+            "DELETE FROM work_passes WHERE user_id=? AND kind=?",
+            (user_id, f"{PASS_KIND}:{PASS_ANY}"),
+        )
+    log.info("[work] 撤销通配通行证 %d 张 (%s)", len(rows), user_id)
+    return len(rows)
 
 
 def pass_expires(user_id: str, product_id: str) -> float:

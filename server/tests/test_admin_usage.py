@@ -184,3 +184,81 @@ def test_per_user_listing_respects_window():
     ua = next(u for u in d["users"] if u["id"] == "u_a")
     assert ua["credits"] == 152 and ua["minutes"] == 6
     assert admin.usage_users(days=99999, _={})["days"] == 3650
+
+
+# --- 免试用墙开关 (/api/admin/set-lock-exempt) -------------------------------
+#
+# 起因: 9.9 的试用墙把管理员自己也拦在了外面, 而且没有任何办法给个别用户放行。
+
+
+def _person(uid, *, role="user"):
+    with db.tx() as c:
+        c.execute("DELETE FROM users WHERE id=?", (uid,))
+        c.execute("DELETE FROM work_passes WHERE user_id=?", (uid,))
+        c.execute(
+            "INSERT INTO users (id,email,role,session_epoch,created) VALUES (?,?,?,0,0)",
+            (uid, uid + "@t.local", role),
+        )
+    return uid
+
+
+def test_set_lock_exempt_grants_and_revokes():
+    boss = _person("u_boss", role="admin")
+    target = _person("u_target")
+
+    admin.set_lock_exempt({"user_id": target, "exempt": True}, user={"id": boss})
+    assert work_access.lock_exempt(target)
+    assert work_access.can_open_locked({"id": target}, "coze")
+
+    admin.set_lock_exempt({"user_id": target, "exempt": False}, user={"id": boss})
+    assert not work_access.lock_exempt(target)
+
+
+def test_set_lock_exempt_records_who_granted_it():
+    """免墙是白送的资源, 得能查出是谁放的行。"""
+    boss = _person("u_boss2", role="admin")
+    target = _person("u_target2")
+    admin.set_lock_exempt({"user_id": target, "exempt": True}, user={"id": boss})
+    row = db.query_one(
+        "SELECT ref, price FROM work_passes WHERE user_id=? AND kind=?",
+        (target, f"{work_access.PASS_KIND}:{work_access.PASS_ANY}"),
+    )
+    assert row["ref"] == f"admin:{boss}", "查不出是谁发的"
+    assert int(row["price"]) == 0, "白送的记成了收过钱"
+
+
+def test_set_lock_exempt_refuses_on_an_admin_instead_of_lying():
+    """管理员本来就免墙。默默"成功"会让后台显示"已收回"而人家照样进得去。"""
+    from fastapi import HTTPException
+
+    boss = _person("u_boss3", role="admin")
+    other = _person("u_admin_target", role="admin")
+    for exempt in (True, False):
+        with pytest.raises(HTTPException) as e:
+            admin.set_lock_exempt({"user_id": other, "exempt": exempt}, user={"id": boss})
+        assert e.value.status_code == 400
+        assert e.value.detail == "admin_always_exempt"
+
+
+def test_set_lock_exempt_rejects_unknown_user():
+    from fastapi import HTTPException
+
+    boss = _person("u_boss4", role="admin")
+    with pytest.raises(HTTPException) as e:
+        admin.set_lock_exempt({"user_id": "u_nobody", "exempt": True}, user={"id": boss})
+    assert e.value.status_code == 404
+
+
+def test_user_list_shows_the_effective_waiver_not_the_stored_row():
+    """按钮要照实际生效的权限画: 管理员没有那一行, 但照样免墙。"""
+    boss = _person("u_boss5", role="admin")
+    plain = _person("u_plain5")
+    admin.set_lock_exempt({"user_id": plain, "exempt": True}, user={"id": boss})
+
+    rows = {u["id"]: u for u in admin.list_users(q="u_boss5", _={"id": boss})["users"]}
+    assert rows[boss]["lock_exempt"] is True
+    assert rows[boss]["lock_exempt_from_role"] is True
+
+    rows = {u["id"]: u for u in admin.list_users(q="u_plain5", _={"id": boss})["users"]}
+    assert rows[plain]["lock_exempt"] is True
+    assert rows[plain]["lock_exempt_from_role"] is False, "普通人被标成了靠身份免墙"

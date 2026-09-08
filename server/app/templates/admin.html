@@ -100,6 +100,11 @@
     role_revoke: {{ t("admin.js.role_revoke") | tojson }},
     role_grant_confirm: {{ t("admin.js.role_grant_confirm") | tojson }},
     role_revoke_confirm: {{ t("admin.js.role_revoke_confirm") | tojson }},
+    exempt_grant: {{ t("admin.js.exempt_grant") | tojson }},
+    exempt_revoke: {{ t("admin.js.exempt_revoke") | tojson }},
+    exempt_grant_confirm: {{ t("admin.js.exempt_grant_confirm") | tojson }},
+    exempt_revoke_confirm: {{ t("admin.js.exempt_revoke_confirm") | tojson }},
+    exempt_by_role: {{ t("admin.js.exempt_by_role") | tojson }},
     usage_btn: {{ t("admin.js.usage_btn") | tojson }},
     usage_empty: {{ t("admin.usage.empty") | tojson }},
     usage_desktop: {{ t("admin.usage.desktop") | tojson }},
@@ -317,6 +322,26 @@
               .then(loadUsers).catch(function (e) { alert(e.message); });
           };
           act.appendChild(role);
+
+          // 免试用墙。管理员本来就免, 那时显示成不可点的说明 —— 画一个点了会
+          // 报错的按钮, 比不画更糟。
+          var exempt = document.createElement("button");
+          exempt.className = "link-btn"; exempt.style.marginLeft = "10px";
+          if (u.lock_exempt_from_role) {
+            exempt.textContent = T.exempt_by_role;
+            exempt.disabled = true;
+            exempt.style.opacity = "0.5";
+          } else {
+            exempt.textContent = u.lock_exempt ? T.exempt_revoke : T.exempt_grant;
+            exempt.onclick = function () {
+              var next = !u.lock_exempt;
+              var msg = next ? T.exempt_grant_confirm : T.exempt_revoke_confirm;
+              if (!confirm(msg.replace("{email}", u.email))) return;
+              post("/api/admin/set-lock-exempt", { user_id: u.id, exempt: next })
+                .then(loadUsers).catch(function (e) { alert(e.message); });
+            };
+          }
+          act.appendChild(exempt);
 
           // 用量: 点一下在这一行下面展开该用户按产品的消耗 (机时 / 积分 / 调用), 再点收起。
           var usageBtn = document.createElement("button");

@@ -67,7 +67,7 @@ def avatar_session(user: dict = Depends(resolve_user)):
     from . import products as _products
     from . import work_access as _wa
 
-    if _products.is_locked("avatar") and not _wa.pass_active(user["id"], "avatar"):
+    if _products.is_locked("avatar") and not _wa.can_open_locked(user, "avatar"):
         raise HTTPException(402, "locked")
     bal = credits.balance(user["id"])
     if bal < config.AVATAR_CREDITS_PER_MIN:

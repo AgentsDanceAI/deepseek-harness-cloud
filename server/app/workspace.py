@@ -996,7 +996,7 @@ async def work_route(request: Request):
     # 上锁的格子: 没有有效通行证就别起容器 —— 起了再拦等于白烧一次冷启动, 而这条
     # 路每个静态资源都会走一遍。放在快速通道**之前**, 否则通行证过期后还能靠三十秒
     # 内的缓存继续用。
-    if products.is_locked(product.id) and not work_access.pass_active(user["id"], product.id):
+    if products.is_locked(product.id) and not work_access.can_open_locked(user, product.id):
         return RedirectResponse(
             f"{site}/pricing?reason=locked&product_id={product.id}#unlock", status_code=302
         )

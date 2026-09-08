@@ -149,6 +149,81 @@ def test_pass_extends_from_the_existing_expiry(monkeypatch):
     assert work_access.pass_expires(uid, "coze") > first + 6 * 86400
 
 
+def test_admins_are_never_walled_by_the_trial_gate():
+    """**这条是用户报的毛病。** 9.9 的试用墙把管理员自己也拦在了外面。
+
+    服务是他们在运营 —— 出事时第一个要能进去看的就是他们, 而且后台里那些"上锁"
+    的格子本来就是他们配的。
+    """
+    from app import work_access
+
+    uid = _user("u_admin_gate")
+    assert not work_access.pass_active(uid, "coze"), "前提: 没买证"
+    assert not work_access.can_open_locked({"id": uid}, "coze"), "普通人没证就该被拦"
+    assert work_access.can_open_locked({"id": uid, "is_admin": True}, "coze"), \
+        "管理员被自己配的试用墙拦住了"
+
+
+def test_admin_can_exempt_one_user_from_the_whole_wall():
+    """管理员能指定哪个用户免墙 —— 发一张通配证, 与买来的证走同一条路。"""
+    from app import work_access
+
+    uid = _user("u_exempt")
+    assert not work_access.can_open_locked({"id": uid}, "coze")
+    assert not work_access.lock_exempt(uid)
+
+    work_access.grant_pass(uid, work_access.PASS_ANY, 30, ref="admin:test")
+    assert work_access.lock_exempt(uid)
+    # 免的是**整面墙**, 不是某一格
+    for pid in ("coze", "dify", "avatar", "随便一个还没上线的"):
+        assert work_access.can_open_locked({"id": uid}, pid), f"{pid} 仍被拦"
+
+    n = work_access.revoke_lock_exemption(uid)
+    assert n == 1
+    assert not work_access.lock_exempt(uid)
+    assert not work_access.can_open_locked({"id": uid}, "coze"), "收回之后还免着"
+
+
+def test_revoking_the_waiver_leaves_bought_passes_alone():
+    """收回免墙不该顺手把人家花钱买的那一格也撤了。"""
+    from app import work_access
+
+    uid = _user("u_exempt_mix")
+    work_access.grant_pass(uid, "coze", 7, price=990, currency="CNY", ref="order_x")
+    work_access.grant_pass(uid, work_access.PASS_ANY, 30, ref="admin:test")
+
+    work_access.revoke_lock_exemption(uid)
+    assert work_access.pass_active(uid, "coze"), "把买来的证一起删了"
+    assert not work_access.pass_active(uid, "dify")
+
+
+def test_the_waiver_expires_like_any_other_pass():
+    """给"先用一个月"的时候, 到期必须真的失效。"""
+    from app import work_access
+
+    uid = _user("u_exempt_exp")
+    work_access.grant_pass(uid, work_access.PASS_ANY, 1, ref="admin:test")
+    assert work_access.can_open_locked({"id": uid}, "coze")
+    with db.tx() as c:  # 把到期时间拨到过去
+        c.execute(
+            "UPDATE work_passes SET expires=? WHERE user_id=? AND kind=?",
+            (time.time() - 1, uid, f"{work_access.PASS_KIND}:{work_access.PASS_ANY}"),
+        )
+    assert not work_access.can_open_locked({"id": uid}, "coze"), "过期的免墙还在生效"
+
+
+def test_a_waiver_does_not_hand_out_machine_time():
+    """免墙只回答"这一格能不能开", 不发机时 —— 与买来的证一个规矩。"""
+    from app import work_access
+
+    uid = _user("u_exempt_meter")
+    _burn(uid, 120)
+    work_access.grant_pass(uid, work_access.PASS_ANY, 30, ref="admin:test")
+    assert work_access.can_open_locked({"id": uid}, "coze")
+    assert work_access.blocked_reason(uid) == "work_quota", "**免墙绕过了机时闸**"
+    assert work_access.state(uid)["minutes_left"] == 0
+
+
 def test_locked_products_come_from_config(monkeypatch):
     """锁哪几格是运营决定 —— 改 env 部署一次就生效, 不用改代码。"""
     from app import products

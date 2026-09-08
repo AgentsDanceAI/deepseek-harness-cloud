@@ -38,6 +38,10 @@ def list_users(q: str = "", limit: int = 50, _: dict = Depends(require_admin)):
         # rights the user actually has rather than only the stored role.
         d["is_admin"] = (r["email"] or "").lower() in config.ADMIN_EMAILS or r["role"] == "admin"
         d["admin_from_env"] = (r["email"] or "").lower() in config.ADMIN_EMAILS
+        # 免试用墙: 管理员天然免 (与 work_access.can_open_locked 同一条规则), 其余
+        # 人看有没有通配证。按钮要照着**实际生效的权限**画, 不是照着存的那一行。
+        d["lock_exempt"] = d["is_admin"] or work_access.lock_exempt(r["id"])
+        d["lock_exempt_from_role"] = d["is_admin"]
         out.append(d)
     return {"users": out}
 
@@ -260,3 +264,38 @@ def set_role(body: dict, user: dict = Depends(require_admin)):
 
     db.query("UPDATE users SET role=? WHERE id=?", ("admin" if make_admin else "user", target_id))
     return {"ok": True, "user_id": target_id, "admin": make_admin}
+
+
+@router.post("/set-lock-exempt")
+def set_lock_exempt(body: dict, user: dict = Depends(require_admin)):
+    """让某个用户绕过试用墙 (上锁的格子不用买通行证就能开), 或收回。
+
+    实现是发一张**通配通行证** (work_access.PASS_ANY), 与买来的证走同一条路 ——
+    于是拦截点不用多认一种身份, 而且发放、到期、撤销都在 work_passes 里留痕。
+
+    days 不传就是长期 (100 年)。想给"先用一个月再说"就传 days。
+
+    管理员本来就免墙, 对他们这个开关是空操作 —— 与其默默成功不如说清楚, 否则
+    后台会显示"已收回"而人家照样进得去。
+    """
+    target_id = str(body.get("user_id", "")).strip()
+    exempt = bool(body.get("exempt"))
+    if not target_id:
+        raise HTTPException(400, "user_id_required")
+
+    row = db.query_one("SELECT id, email, role FROM users WHERE id=?", (target_id,))
+    if row is None:
+        raise HTTPException(404, "user_not_found")
+    if (row["email"] or "").lower() in config.ADMIN_EMAILS or row["role"] == "admin":
+        raise HTTPException(400, "admin_always_exempt")
+
+    if exempt:
+        days = int(body.get("days") or 36500)
+        if days <= 0:
+            raise HTTPException(400, "days_must_be_positive")
+        work_access.grant_pass(
+            target_id, work_access.PASS_ANY, days, ref=f"admin:{user['id']}"
+        )
+    else:
+        work_access.revoke_lock_exemption(target_id)
+    return {"ok": True, "user_id": target_id, "exempt": exempt}
