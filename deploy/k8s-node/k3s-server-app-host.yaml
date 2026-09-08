@@ -28,6 +28,11 @@ cluster-dns: 10.47.0.10
 # 真正那一行要往前翻几百行才看得见。
 flannel-backend: wireguard-native
 flannel-conf: /etc/rancher/k3s/flannel-wg.json
+# 跨网节点必须用**公网 IP** 做 flannel 对等。默认它拿节点的 InternalIP (这台是
+# 172.29.181.212, 阿里云内网), 而外面的节点根本够不着 —— 表现是节点 Join 成功、
+# 状态 Ready, 但**跨节点的 Pod 网络不通**, 而且没有任何一处会说破。
+flannel-external-ip: true
+node-external-ip: __PUBLIC_IP__
 
 node-name: dsh-cp-1
 write-kubeconfig-mode: "0600"
