@@ -267,9 +267,14 @@ def test_captions_are_public_and_cached(monkeypatch):
     而它同时还在生成画面。
     """
     calls = {"n": 0}
-    state = {"live": True, "queued": 0,
-             "recent": [{"t": 1.0, "kind": "script", "text": "第一句"},
-                        {"t": 2.0, "kind": "interject", "text": "回你这条"}]}
+    state = {
+        "live": True,
+        "queued": 0,
+        "recent": [
+            {"t": 1.0, "kind": "script", "text": "第一句"},
+            {"t": 2.0, "kind": "interject", "text": "回你这条"},
+        ],
+    }
 
     async def fake_gpu(method, path, room, **kw):
         calls["n"] += 1
@@ -279,7 +284,7 @@ def test_captions_are_public_and_cached(monkeypatch):
     monkeypatch.setattr(live, "_CAP_CACHE", {"at": 0.0, "data": None})
 
     c = TestClient(app)
-    r = c.get("/api/live/captions")          # 未登录也要能拿到
+    r = c.get("/api/live/captions")  # 未登录也要能拿到
     assert r.status_code == 200
     d = r.json()
     assert [x["text"] for x in d["lines"]] == ["第一句", "回你这条"]
@@ -292,11 +297,17 @@ def test_captions_are_public_and_cached(monkeypatch):
 
 def test_captions_do_not_leak_upstream_state(monkeypatch):
     """这条路没有鉴权 —— 别把队列深度、错误、话术全文顺手带出去。"""
+
     async def fake_gpu(method, path, room, **kw):
-        return {"live": True, "queued": 7, "err": "内部错误细节",
-                "lines": ["完整话术第一句", "完整话术第二句"],
-                "person": "source-v3-head", "voice": "xiaoxiao",
-                "recent": [{"t": 1.0, "kind": "script", "text": "只该露这个"}]}
+        return {
+            "live": True,
+            "queued": 7,
+            "err": "内部错误细节",
+            "lines": ["完整话术第一句", "完整话术第二句"],
+            "person": "source-v3-head",
+            "voice": "xiaoxiao",
+            "recent": [{"t": 1.0, "kind": "script", "text": "只该露这个"}],
+        }
 
     monkeypatch.setattr(live, "_gpu", fake_gpu)
     monkeypatch.setattr(live, "_CAP_CACHE", {"at": 0.0, "data": None})

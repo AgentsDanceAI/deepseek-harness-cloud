@@ -486,7 +486,11 @@ async def captions():
         # 整块红字好。
         return JSONResponse({"live": False, "lines": []})
     lines = [
-        {"t": float(x.get("t") or 0), "kind": str(x.get("kind") or "script"), "text": str(x.get("text") or "")}
+        {
+            "t": float(x.get("t") or 0),
+            "kind": str(x.get("kind") or "script"),
+            "text": str(x.get("text") or ""),
+        }
         for x in (st.get("recent") or [])
         if str(x.get("text") or "").strip()
     ]
