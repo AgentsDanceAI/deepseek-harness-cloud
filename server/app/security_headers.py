@@ -72,7 +72,19 @@ class SecurityHeaders:
                         # 直播页同理: hls.js 也是 MediaSource → blob: URL。
                         # (HLS 的 m3u8/ts 走 /api/live/hls/* 同源代转, 所以**不需要**
                         #  为它放开 connect-src —— 那是刻意的, 见 live.py 头注释。)
-                        + ("; media-src 'self' blob:" if _needs_blob_media(path) else ""),
+                        # hls.js 要两样 blob: 口子, **少一样都是画面一帧不动**:
+                        #   media-src  —— MediaSource 的 blob: URL 是 <video> 的源;
+                        #   worker-src —— 它另起一个 blob: worker 做解复用。没有这条
+                        #     时浏览器回退到 script-src, 那里没有 blob:, worker 建不
+                        #     出来, 于是流一帧都不解。
+                        # 2026-09-09 只补了 media-src, Chrome 上照样黑屏、连声音按钮
+                        # 都不出现 (它等 playing 事件, 而 playing 永不触发); 而 Safari
+                        # 原生放 HLS 不用 hls.js, 所以 Mac 上完全看不出来。
+                        + (
+                            "; media-src 'self' blob:; worker-src 'self' blob:"
+                            if _needs_blob_media(path)
+                            else ""
+                        ),
                     )
                 if self.https:
                     headers.setdefault(

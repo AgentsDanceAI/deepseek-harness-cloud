@@ -100,7 +100,10 @@ def test_the_live_page_may_load_blob_media_but_gets_no_extra_openings():
 
     for url, resp in pages.items():
         csp = resp.headers.get("content-security-policy", "")
+        # hls.js 要两样, 少一样都是"画面不动 + 声音按钮不出现"。2026-09-09 只补了
+        # 前者, Chrome 照样黑屏 —— Safari 原生放 HLS 不用 hls.js, Mac 上看不出来。
         assert "media-src 'self' blob:" in csp, f"{url} 少了 media-src blob: —— Chrome 上是黑屏"
+        assert "worker-src 'self' blob:" in csp, f"{url} 少了 worker-src blob: —— hls.js 起不了 worker"
         assert "connect-src" not in csp, f"{url} 有跨源出口 —— HLS 是同源代转的"
         assert "microphone=()" in resp.headers.get("permissions-policy", "")
     assert "blob:" not in home.headers.get("content-security-policy", ""), "口子漏到首页了"
