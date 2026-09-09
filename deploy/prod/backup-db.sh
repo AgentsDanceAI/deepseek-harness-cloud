@@ -10,7 +10,7 @@
 # free and the dumps are small, so keeping 30 days costs cents.
 #
 # ENCRYPTED, always. The only R2 bucket this deployment has a token for is
-# dsh-releases, which is PUBLISHED at https://dl.dshcloud.online — so an object
+# dsh-releases, which is PUBLISHED at https://dl.aistore.best — so an object
 # written here is served to anyone who asks for its path. Plaintext dumps went
 # there for two days: accounts, emails, password hashes, orders and balances,
 # under a name derived from a fixed cron time. The dump is now encrypted before

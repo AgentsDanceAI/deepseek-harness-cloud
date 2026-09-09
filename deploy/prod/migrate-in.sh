@@ -100,7 +100,7 @@ Restored. What is left is off this machine:
   1. DNS — point aistore.best, work.aistore.best and (if PREVIEW_DOMAIN
      is set) preview.aistore.best at this host's IP (Cloudflare,
      proxied/orange). Everything else keyed to the domain — the Waffo webhook,
-     the Google and GitHub redirect URIs, dl.dshcloud.online — needs no change
+     the Google and GitHub redirect URIs, dl.aistore.best — needs no change
      precisely because the domain did not.
   2. Caddy — 80/443 here must terminate TLS and route those hostnames to
      dhc-server:8100. On the old host that was a shared caddy container; see

@@ -22,7 +22,7 @@
 #                 from this one
 #
 # Transport is R2 because the two hosts have no direct link. That bucket is
-# PUBLIC (it fronts dl.dshcloud.online), so the bundle — which contains every
+# PUBLIC (it fronts dl.aistore.best), so the bundle — which contains every
 # secret this service has — is encrypted before it leaves the host and marked
 # uncacheable so deleting it takes effect immediately.
 set -euo pipefail

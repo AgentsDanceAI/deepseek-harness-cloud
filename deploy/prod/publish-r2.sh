@@ -20,7 +20,7 @@
 #   export R2_ACCESS_KEY_ID=...
 #   export R2_SECRET_ACCESS_KEY=...
 #   export R2_BUCKET=dsh-releases
-#   export R2_PUBLIC_BASE=https://dl.dshcloud.online   # the bucket's custom domain
+#   export R2_PUBLIC_BASE=https://dl.aistore.best   # the bucket's custom domain
 #   ./publish-r2.sh
 #
 set -euo pipefail
