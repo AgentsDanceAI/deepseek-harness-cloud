@@ -66,7 +66,7 @@ async function check(name, fn) {
 
 console.log("直播字幕:");
 
-await check("只留正在说的那一句, 不堆叠", async () => {
+await check("只留一句, 而且是**正在播**的那一句 (不是最新那一句)", async () => {
   const dom = makeDom();
   const api = load(dom);
   await tick();
@@ -77,7 +77,20 @@ await check("只留正在说的那一句, 不堆叠", async () => {
   await api.pull();
   const box = dom.ids.lvCaps;
   assert.equal(box.children.length, 1, `堆了 ${box.children.length} 句 —— 会占满右侧并盖住声音按钮`);
-  assert.equal(box.children[0].textContent, "第三句", "留的不是最新那句");
+  // 上游是在句子"发出去"时记账的, 而队列里始终压着两句 —— 最新那条还没播。
+  // 取最新的表现是字幕比声音早两句, 观众看到的字和听到的话对不上。
+  assert.equal(box.children[0].textContent, "第二句",
+    "取了最新那一句 —— 那条还在队列里没播, 字幕会比声音早两句");
+});
+
+await check("只有一句时也要显示 —— 刚开播就是这种情况", async () => {
+  const dom = makeDom();
+  const api = load(dom);
+  await tick();
+  dom.set({ live: true, lines: [{ t: 1, kind: "script", text: "开播第一句" }] });
+  await api.pull();
+  assert.equal(dom.ids.lvCaps.children.length, 1, "只有一句时字幕是空的");
+  assert.equal(dom.ids.lvCaps.children[0].textContent, "开播第一句");
 });
 
 await check("下一句到了要换掉上一句", async () => {
