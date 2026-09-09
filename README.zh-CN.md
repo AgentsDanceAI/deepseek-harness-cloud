@@ -8,7 +8,7 @@
 无需把模型上游密钥分发给每个客户端。
 
 [![CI](https://github.com/AgentsDanceAI/deepseek-harness-cloud/actions/workflows/ci.yml/badge.svg)](https://github.com/AgentsDanceAI/deepseek-harness-cloud/actions/workflows/ci.yml)
-[![License: AI Store Community 1.0](https://img.shields.io/badge/license-DSH%20Cloud%20Community%201.0-4c6ef5.svg)](LICENSE)
+[![License: DSH Cloud Community 1.0](https://img.shields.io/badge/license-DSH%20Cloud%20Community%201.0-4c6ef5.svg)](LICENSE)
 [![Security policy](https://img.shields.io/badge/security-private%20reporting-2f9e44.svg)](SECURITY.zh-CN.md)
 
 发行版本：[`0.3.0`](release/release.json)

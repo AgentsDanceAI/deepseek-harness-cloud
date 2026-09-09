@@ -4,11 +4,11 @@ contact_links:
     url: https://github.com/AgentsDanceAI/deepseek-harness-cloud/security/advisories/new
     about: Report vulnerabilities privately; do not open a public issue.
   - name: Hosted account or billing support
-    url: mailto:support@agentsdance.ai?subject=DSH%20Cloud%20Hosted%20support
+    url: mailto:support@agentsdance.ai?subject=AI%20Store%20Hosted%20support
     about: Contact support without sending passwords, session tokens, or payment credentials.
   - name: Security policy
     url: https://github.com/AgentsDanceAI/deepseek-harness-cloud/blob/main/SECURITY.md
     about: Read the supported-version and coordinated-disclosure policy.
   - name: Security email fallback
-    url: mailto:security@agentsdance.ai?subject=Private%20DSH%20Cloud%20security%20report
+    url: mailto:security@agentsdance.ai?subject=Private%20AI%20Store%20security%20report
     about: Use this private fallback if GitHub private vulnerability reporting is unavailable.
