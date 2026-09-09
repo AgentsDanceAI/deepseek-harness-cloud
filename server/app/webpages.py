@@ -384,6 +384,9 @@ def _apps_ctx(user: dict | None = None) -> dict:
         target = hosted.rstrip("/") if hosted else None
     return {
         "apps": apps,
+        # h1 上那个数字**必须**由货架算出来。写死的话, 加一个产品或下架一个,
+        # 首页最大那行字就当场变成假话, 而没有任何测试会红。
+        "app_count": len(apps),
         "live_count": sum(1 for a in apps if a["live"]),
         "apps_clickable": target is not None,
         "apps_base": target or "",

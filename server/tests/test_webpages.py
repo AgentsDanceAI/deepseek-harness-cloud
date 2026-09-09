@@ -53,10 +53,28 @@ def test_landing_renders(client):
     assert "AI Store" in body
     # 主张本身, 不是某个角落里的徽章 —— 2026-09-09 品牌从"云空间"改成 AI Store,
     # 而首页 h1 与 meta 曾经一个说"云"一个说"Store", 两边不一致了好几天没人发现。
-    assert "全世界最好的 AI 产品" in body
+    assert "全世界最好的" in body and "个 AI 产品" in body
     assert "/static/app.css" in body
     assert "/download" in body
     assert "/legal/terms" in body
+
+
+def test_the_headline_count_comes_from_the_shelf(client):
+    """首页最大那行字里的数字**必须**等于货架上真有几个。
+
+    写死的话, 加一个产品或下架一个, 它当场变成假话 —— 而这是整个站上最显眼、
+    最像承诺的一句 (2026-09-09 换成"16 个"时差点就写死了)。
+    这里不去问代码要数字, 直接**数页面上的瓦片**再和标题比: 两个都出自同一次
+    渲染, 对不上就是真的对不上。
+    """
+    import re as _re
+
+    body = client.get("/").text
+    tiles = len(_re.findall(r'class="hero-app[ "]', body))
+    assert tiles > 0, "首屏一个产品瓦片都没有, 这条断言失去意义"
+    m = _re.search(r"最好的\s*(\d+)\s*个 AI 产品", body)
+    assert m, "标题里没有数字 —— 文案换了就把这条一起更新"
+    assert int(m.group(1)) == tiles, f"标题说 {m.group(1)} 个, 首屏实际摆了 {tiles} 个"
 
 
 def test_apps_page_shows_all_16_with_live_status(client, monkeypatch):
