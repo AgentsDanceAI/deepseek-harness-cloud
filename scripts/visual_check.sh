@@ -40,6 +40,11 @@ docker run --rm -v "$WORK:/work" "$IMAGE" bash -c \
   "pip install -q playwright==1.49.0 >/dev/null 2>&1 && python /work/driver.py"
 
 echo "==> 判读"
+# 目录先建回来: 规格是在**浏览器跑之前**写进容器 /tmp 的, 而这中间任何一次
+# 部署都会把容器连同 /tmp 一起重建 —— 那时截图其实已经拍完了, 却因为
+# `docker cp` 找不到目标目录而整轮作废 (2026-09-09 一天内撞了三次, 每次都是
+# 别条线在这几十分钟里发了个版)。判读本身只需要 results.json, 建个目录就够。
+docker exec "$CONTAINER" mkdir -p /tmp/visual >/dev/null
 docker cp "$WORK/results.json" "$CONTAINER:/tmp/visual/results.json" >/dev/null
 mkdir -p "$OUT"
 cp -r "$WORK/out/." "$OUT/" 2>/dev/null || true
