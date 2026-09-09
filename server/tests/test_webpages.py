@@ -51,7 +51,9 @@ def test_landing_renders(client):
     assert r.status_code == 200
     body = r.text
     assert "AI Store" in body
-    assert "AI 原生云空间" in body
+    # 主张本身, 不是某个角落里的徽章 —— 2026-09-09 品牌从"云空间"改成 AI Store,
+    # 而首页 h1 与 meta 曾经一个说"云"一个说"Store", 两边不一致了好几天没人发现。
+    assert "全世界最好的 AI 产品" in body
     assert "/static/app.css" in body
     assert "/download" in body
     assert "/legal/terms" in body
