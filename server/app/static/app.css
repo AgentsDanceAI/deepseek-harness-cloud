@@ -191,10 +191,17 @@ h1, h2, h3, h4 { line-height: 1.3; text-wrap: balance; font-weight: 600; }
 }
 .hero-sub-dark { color: rgba(226, 235, 249, .78); font-size: clamp(15px, 1.5vw, 17px); max-width: 480px; margin-bottom: 14px; }
 /* 对句: 免费那层和付费那层, 两行结构对称, 所以是两行不是一段。
-   max-width 放宽到 560 —— 480 会把"一份订阅 · 全品类 AI 畅玩"折成两行, 对称就没了。 */
-.hero-couplet { display: flex; flex-direction: column; gap: 4px; max-width: 560px; }
+   它夹在标题和那段干货中间 —— 比正文亮一点、比标题小一截, 三层才有层次;
+   与正文同色同号的话, 读者会把五行字读成一坨。
+   不折行: "一份订阅 · 全品类 AI 畅玩" 一折, 对称就没了 (窄屏放开)。 */
+.hero-couplet {
+  display: flex; flex-direction: column; gap: 3px;
+  max-width: 560px; margin-bottom: 12px;
+  color: rgba(226, 235, 249, .95); font-size: clamp(16px, 1.7vw, 19px); font-weight: 500;
+}
 .hero-couplet span { white-space: nowrap; }
 @media (max-width: 520px) { .hero-couplet span { white-space: normal; } }
+@media (max-width: 900px) { .hero-couplet { margin-inline: auto; } }
 .hero-note-dark {
   display: flex; align-items: center; gap: 7px;
   color: rgba(196, 210, 233, .55); font-size: 13px; margin-bottom: 26px;

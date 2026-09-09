@@ -13,11 +13,14 @@
       {{ t("home.badge", n=app_count) }}
     </div>
     <h1>{{ t("home.h1", n=app_count) }}</h1>
-    {# 两行是一副对句 —— 免费那层和付费那层, 结构对称。拆到 h1 上下两边就散了,
-       所以并排放在一起。 #}
-    <p class="hero-sub-dark hero-couplet">
-      <span>{{ t("home.sub") }}</span>
-      <span>{{ t("home.sub2") }}</span>
+    {# 三层, 从口号到干货: 标题给主张, 对句给"这事对我意味着什么", 段落给证据
+       (具体是哪些产品、怎么计费、要不要自己搞 Key)。少了最后一段就只剩口号了。 #}
+    <p class="hero-couplet">
+      <span>{{ t("home.tagline1") }}</span>
+      <span>{{ t("home.tagline2") }}</span>
+    </p>
+    <p class="hero-sub-dark">
+      {{ t("home.sub", n=app_count) }}
     </p>
 
     {# 首屏即货架: 16 个产品一屏装完。瓦片是紧凑版 (名字 + 类目 + 状态灯),
