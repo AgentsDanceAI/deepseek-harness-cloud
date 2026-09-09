@@ -452,50 +452,33 @@ def avatar_page(request: Request):
     return _render(request, "avatar.html", "avatar")
 
 
-def _live_gate(request: Request):
-    """进直播页前的两道闸。过了返回 None, 没过返回要跳去哪。
+@router.get("/live")
+def live_page(request: Request):
+    """数字人直播间。
 
-    先登录再进: 与其余十五格一致, 而且公屏发言本来就要账号。
+    与数字人通话一样**不是云工作台** —— 没有每用户容器, 画面来自我们自己的 GPU
+    节点。区别是它不烧 GPU: 话术是离线预渲染好的片段, 播出只是循环拼接 (所以
+    看直播不计费, 也不占通话的并发槽位)。
+
+    先登录再进: 与其余十五格一致, 而且这一页以后要接"用自己的形象开自己的直播间",
+    那些都要账号。
     """
     user = try_resolve_user(request)
     if user is None:
-        return RedirectResponse(f"/login?next={request.url.path}", status_code=303)
+        return RedirectResponse("/login?next=/live", status_code=303)
     from . import products as _products
     from . import work_access as _wa
 
     if _products.is_locked("live") and not _wa.can_open_locked(user, "live"):
         return RedirectResponse("/pricing?reason=locked&product_id=live#unlock", status_code=303)
-    return None
-
-
-@router.get("/live")
-def live_rooms_page(request: Request):
-    """直播间列表。
-
-    ⚠️ 这里**不取每间的状态** —— 那要挨个问 GPU 节点, 而页面渲染不该等在上游身上
-    (它是别人的共享机, 够不着是常态)。状态由前端拿 /api/live/rooms 填, 那条路带
-    两秒缓存, 一百个观众也只打上游一次。
-    """
-    from . import live as _live
-
-    names = _live.rooms()
-    # 只有一间时不要列表页 —— 一张卡片的"列表"是纯粹的多一次点击。
-    # 这也是回滚成单间的方式: LIVE_ROOMS 只留一个 id, 这一页就消失, 站点行为
-    # 与做多间之前一模一样。多间要回来, 改一个环境变量。
-    if len(names) == 1:
-        return RedirectResponse(f"/live/{names[0]}", status_code=303)
-    gate = _live_gate(request)
-    if gate is not None:
-        return gate
-    return _render(request, "live_rooms.html", "live", rooms=names)
+    return _render(request, "live.html", "live")
 
 
 @router.get("/live/console")
 def live_console_page(request: Request):
     """直播间控制台 —— **管理员专用** (老板 2026-09-08 定)。
 
-    多间之后这里是"选一间来改" —— 房间清单由 LIVE_ROOMS 定, 每间的名称/形象/
-    音色/话术都存在上游, 由这一页配。
+    全站只有一套直播配置 (官方直播间), 所以这里不是"我的直播间", 而是"那一间"。
     接口那边也各自拦了一道; 这里提前拦是不想让非管理员看到一个自己用不了的壳。
     """
     user = try_resolve_user(request)
@@ -503,34 +486,7 @@ def live_console_page(request: Request):
         return RedirectResponse("/login?next=/live/console", status_code=303)
     if not user.get("is_admin"):
         return RedirectResponse("/live", status_code=303)
-    from . import live as _live
-
-    names = _live.rooms()
-    room = request.query_params.get("room") or ""
-    if room not in names:
-        room = names[0]
-    return _render(request, "live_console.html", "live", rooms=names, room=room)
-
-
-@router.get("/live/{room}")
-def live_page(request: Request, room: str):
-    """某一间的播放页。
-
-    与数字人通话一样**不是云工作台** —— 没有每用户容器, 画面来自我们自己的 GPU
-    节点。**而且它烧 GPU**: 每一句都是当场生成的, 一路实时流占掉那张卡串行吞吐的
-    约三分之一。(这段以前写着"离线预渲染、不占并发槽位", 那是第一版, 早就反了。)
-    """
-    # ⚠️ 这条**必须**注册在 /live/console 之后 —— 路由按注册顺序匹配, 排在前面
-    # 就会把 console 当成一个叫 "console" 的房间吃掉 (然后跳回 /live, 而控制台
-    # 从此打不开, 且没有任何报错)。
-    from . import live as _live
-
-    if room not in _live.rooms():
-        return RedirectResponse("/live", status_code=303)
-    gate = _live_gate(request)
-    if gate is not None:
-        return gate
-    return _render(request, "live.html", "live", room=room, rooms_count=len(_live.rooms()))
+    return _render(request, "live_console.html", "live")
 
 
 @router.get("/apps")

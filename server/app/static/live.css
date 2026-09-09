@@ -161,21 +161,3 @@
     background: linear-gradient(to top, rgba(0,0,0,.55), rgba(0,0,0,0));
   }
 }
-
-/* ── 直播间列表 (2026-09-09) ──────────────────────────────────────────── */
-.lv-roomgrid { display: grid; gap: 12px; margin-top: 1rem;
-               grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
-.lv-roomcard {
-  display: flex; align-items: center; justify-content: space-between; gap: 10px;
-  padding: 14px 16px; border-radius: 12px; text-decoration: none; color: inherit;
-  border: 1px solid rgba(128,128,128,.25); background: rgba(128,128,128,.05);
-  transition: border-color .15s, transform .15s;
-}
-.lv-roomcard:hover { border-color: rgba(128,128,128,.5); transform: translateY(-1px); }
-/* 在播的那几间挑出来 —— 列表的第一用途就是"现在能看哪个" */
-.lv-roomcard.is-live { border-color: rgba(52,199,89,.55); background: rgba(52,199,89,.07); }
-.lv-roomname { font-weight: 600; }
-.lv-roomstate { font-size: .8rem; opacity: .7; white-space: nowrap; }
-.lv-roomstate.is-live { color: #34c759; opacity: 1; }
-/* 状态没到之前别显示"未开播" —— 那是在说一件还不知道的事 */
-.lv-roomcard.is-loading .lv-roomstate { visibility: hidden; }

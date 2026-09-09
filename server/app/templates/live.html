@@ -17,16 +17,12 @@
             data-disabled="{{ t('live.disabled') }}"
             data-reconnect="{{ t('live.reconnecting') }}"
             data-unsupported="{{ t('live.unsupported') }}"
-            data-room="{{ room }}"
             data-mute="{{ t('live.mute') }}"
             data-tapplay="{{ t('live.tap_play') }}">{{ t('live.offline') }}</span>
       {# 控制台入口只对管理员出现。非管理员看到一个点进去被弹回来的链接, 比看不到
          更糟 —— 那是在告诉他"这里有东西但不给你"。 #}
-      {% if rooms_count and rooms_count > 1 %}
-      <a class="lv-adminlink" href="/live">← {{ t('live.all_rooms') }}</a>
-      {% endif %}
       {% if user and user.is_admin %}
-      <a class="lv-adminlink" href="/live/console?room={{ room }}">{{ t('live.console') }} →</a>
+      <a class="lv-adminlink" href="/live/console">{{ t('live.console') }} →</a>
       {% endif %}
     </div>
     <p class="lv-sub">{{ t('live.sub') }}</p>

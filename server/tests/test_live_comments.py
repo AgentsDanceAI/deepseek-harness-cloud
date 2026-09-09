@@ -34,12 +34,8 @@ db.ensure_schema()
 def room(monkeypatch):
     monkeypatch.setattr(config, "LIVE_GPU_URL", "http://gpu.test/live")
     monkeypatch.setattr(config, "LIVE_ROOM", "official")
-    monkeypatch.setattr(config, "LIVE_ROOMS", "official,teacher")
-    monkeypatch.setattr(config, "LIVE_MAX_CONCURRENT", 3)
     monkeypatch.setattr(config, "AVATAR_TOKEN_SECRET", "s3cret")
-    monkeypatch.setattr(live, "_LAST_REPLY_AT", {})
-    monkeypatch.setattr(live, "_CAP_CACHE", {})
-    monkeypatch.setattr(live, "_LIVE_CACHE", {"at": 0.0, "data": None})
+    monkeypatch.setattr(live, "_LAST_REPLY_AT", 0.0)
     rate_limit._windows.clear()
     with db.tx() as c:
         c.execute("DELETE FROM live_comments")
@@ -169,7 +165,7 @@ def test_a_failed_reply_never_eats_the_comment(monkeypatch):
     assert r.status_code == 200 and r.json()["replied"] is False
     assert TestClient(app).get("/api/live/comments").json()["items"][0]["text"] == "还在吗"
     # 没说成就要把冷却位子让出来, 否则一次失败会让她哑掉 12 秒
-    assert live._LAST_REPLY_AT.get("official") == 0.0
+    assert live._LAST_REPLY_AT == 0.0
     assert up.said == []
 
 
@@ -271,23 +267,19 @@ def test_captions_are_public_and_cached(monkeypatch):
     而它同时还在生成画面。
     """
     calls = {"n": 0}
-    state = {
-        "live": True,
-        "queued": 0,
-        "recent": [
-            {"t": 1.0, "kind": "script", "text": "第一句"},
-            {"t": 2.0, "kind": "interject", "text": "回你这条"},
-        ],
-    }
+    state = {"live": True, "queued": 0,
+             "recent": [{"t": 1.0, "kind": "script", "text": "第一句"},
+                        {"t": 2.0, "kind": "interject", "text": "回你这条"}]}
 
     async def fake_gpu(method, path, room, **kw):
         calls["n"] += 1
         return dict(state)
 
     monkeypatch.setattr(live, "_gpu", fake_gpu)
+    monkeypatch.setattr(live, "_CAP_CACHE", {"at": 0.0, "data": None})
 
     c = TestClient(app)
-    r = c.get("/api/live/captions")  # 未登录也要能拿到
+    r = c.get("/api/live/captions")          # 未登录也要能拿到
     assert r.status_code == 200
     d = r.json()
     assert [x["text"] for x in d["lines"]] == ["第一句", "回你这条"]
@@ -300,19 +292,14 @@ def test_captions_are_public_and_cached(monkeypatch):
 
 def test_captions_do_not_leak_upstream_state(monkeypatch):
     """这条路没有鉴权 —— 别把队列深度、错误、话术全文顺手带出去。"""
-
     async def fake_gpu(method, path, room, **kw):
-        return {
-            "live": True,
-            "queued": 7,
-            "err": "内部错误细节",
-            "lines": ["完整话术第一句", "完整话术第二句"],
-            "person": "source-v3-head",
-            "voice": "xiaoxiao",
-            "recent": [{"t": 1.0, "kind": "script", "text": "只该露这个"}],
-        }
+        return {"live": True, "queued": 7, "err": "内部错误细节",
+                "lines": ["完整话术第一句", "完整话术第二句"],
+                "person": "source-v3-head", "voice": "xiaoxiao",
+                "recent": [{"t": 1.0, "kind": "script", "text": "只该露这个"}]}
 
     monkeypatch.setattr(live, "_gpu", fake_gpu)
+    monkeypatch.setattr(live, "_CAP_CACHE", {"at": 0.0, "data": None})
     d = TestClient(app).get("/api/live/captions").json()
     assert set(d) == {"live", "lines"}, f"多回了字段: {set(d) - {'live', 'lines'}}"
     assert set(d["lines"][0]) == {"t", "kind", "text"}
@@ -326,190 +313,6 @@ def test_captions_survive_an_unreachable_gpu(monkeypatch):
         raise HTTPException(502, "upstream_unreachable")
 
     monkeypatch.setattr(live, "_gpu", boom)
+    monkeypatch.setattr(live, "_CAP_CACHE", {"at": 0.0, "data": None})
     r = TestClient(app).get("/api/live/captions")
     assert r.status_code == 200 and r.json() == {"live": False, "lines": []}
-
-
-# ── 多直播间 (2026-09-09) ────────────────────────────────────────────────
-# 老板: "只有管理员可以点开播, 开播就别人都能看; 开播超过 3 个的时候提示排队,
-# 需要先关播其他直播间。"
-#
-# 上限 3 不是产品策略, 是算力: 一路实时流占那张卡串行吞吐的约三分之一
-# (实测单块 0.31s 算 / 出 0.96s 视频), 三路就是 97%。硬开的后果不是这一间卡,
-# 是**所有房间一起掉帧**。
-
-
-def _rooms_state(monkeypatch, live_rooms=(), extra=None):
-    """假上游: 指定哪几间在播。"""
-
-    def status_for(r):
-        d = {
-            "live": r in live_rooms,
-            "queued": 0,
-            "title": f"{r} 间",
-            "person": "source-v3-head",
-            "recent": [],
-        }
-        d.update((extra or {}).get(r, {}))
-        return d
-
-    started = []
-
-    async def fake_gpu(method, path, room, **kw):
-        if path.endswith("/start"):
-            started.append(room)
-            return {"ok": True}
-        if path.endswith("/stop"):
-            return {"ok": True}
-        if path.endswith("/interject"):
-            return {"ok": True}
-        return status_for(room)
-
-    monkeypatch.setattr(live, "_gpu", fake_gpu)
-    return started
-
-
-def _admin(monkeypatch, email="boss.live@t.local"):
-    monkeypatch.setattr(config, "ADMIN_EMAILS", [email])
-    c = TestClient(app)
-    signup(c, email)
-    return c
-
-
-def test_room_list_is_public(monkeypatch):
-    """开播了谁都能看 —— 那列表当然也谁都能看。"""
-    monkeypatch.setattr(config, "LIVE_ROOMS", "official,teacher,culture")
-    _rooms_state(monkeypatch, live_rooms=("teacher",))
-    d = TestClient(app).get("/api/live/rooms").json()
-    assert [r["id"] for r in d["rooms"]] == ["official", "teacher", "culture"], "顺序要跟配置一致"
-    assert {r["id"]: r["live"] for r in d["rooms"]} == {"official": False, "teacher": True, "culture": False}
-    assert d["max"] == config.LIVE_MAX_CONCURRENT
-
-
-def test_room_list_does_not_leak_scripts(monkeypatch):
-    """这条路没有鉴权 —— 话术全文、队列深度不能跟着出去。"""
-    monkeypatch.setattr(config, "LIVE_ROOMS", "official")
-    _rooms_state(
-        monkeypatch,
-        live_rooms=(),
-        extra={"official": {"lines": ["还没上线的话术"], "queued": 9, "err": "内部细节"}},
-    )
-    r = TestClient(app).get("/api/live/rooms").json()["rooms"][0]
-    assert set(r) == {"id", "title", "person", "live", "hls"}
-
-
-def test_only_admins_can_start(monkeypatch):
-    monkeypatch.setattr(config, "LIVE_ROOMS", "official,teacher")
-    _rooms_state(monkeypatch)
-    c = TestClient(app)
-    signup(c, "viewer.live@t.local")
-    assert c.post("/api/live/room/start?room=teacher").status_code == 403
-
-
-def test_a_fourth_room_is_refused_with_the_names_of_the_live_ones(monkeypatch):
-    """**先关一间再来。** 排队在这儿没有意义 —— 在播的那几间不会自己结束。
-
-    而且要把在播的房间名回给前端, 否则管理员不知道该去关哪一间。
-    """
-    monkeypatch.setattr(config, "LIVE_ROOMS", "a,b,c,d,e")
-    monkeypatch.setattr(config, "LIVE_MAX_CONCURRENT", 3)
-    started = _rooms_state(monkeypatch, live_rooms=("a", "b", "c"))
-    c = _admin(monkeypatch)
-    r = c.post("/api/live/room/start?room=d")
-    assert r.status_code == 409, "第四间硬开了 —— 所有房间会一起掉帧"
-    detail = r.json()["detail"]
-    assert detail["error"] == "too_many_live" and detail["max"] == 3
-    assert sorted(detail["live"]) == ["a", "b", "c"], "没告诉管理员该关哪一间"
-    assert started == [], "被拦了却还是把 start 发给了上游"
-
-
-def test_restarting_an_already_live_room_is_not_blocked(monkeypatch):
-    """自己已经在播, 再点一次开播不该被自己顶掉 —— 那是重启, 不是第四间。"""
-    monkeypatch.setattr(config, "LIVE_ROOMS", "a,b,c,d")
-    monkeypatch.setattr(config, "LIVE_MAX_CONCURRENT", 3)
-    started = _rooms_state(monkeypatch, live_rooms=("a", "b", "c"))
-    r = _admin(monkeypatch).post("/api/live/room/start?room=c")
-    assert r.status_code == 200 and started == ["c"]
-
-
-def test_stopping_is_never_blocked(monkeypatch):
-    """满员时更要能停 —— 停播正是腾位置的那个动作。"""
-    monkeypatch.setattr(config, "LIVE_ROOMS", "a,b,c,d")
-    monkeypatch.setattr(config, "LIVE_MAX_CONCURRENT", 3)
-    _rooms_state(monkeypatch, live_rooms=("a", "b", "c"))
-    assert _admin(monkeypatch).post("/api/live/room/stop?room=a").status_code == 200
-
-
-def test_unknown_rooms_never_reach_upstream(monkeypatch):
-    """房间名会被拼进上游 URL —— 名单外的一律 404, 别当探测器用。"""
-    monkeypatch.setattr(config, "LIVE_ROOMS", "official")
-    _rooms_state(monkeypatch)
-    c = _admin(monkeypatch)
-    assert c.post("/api/live/room/start?room=../admin").status_code == 404
-    assert c.get("/api/live/room?room=nope").status_code == 404
-    assert TestClient(app).get("/api/live/captions?room=nope").status_code == 404
-
-
-def test_comments_are_isolated_per_room(monkeypatch):
-    """甲间的公屏不该出现在乙间 —— 两拨观众看的是两场直播。"""
-    monkeypatch.setattr(config, "LIVE_ROOMS", "official,teacher")
-    _rooms_state(monkeypatch, live_rooms=("official", "teacher"))
-    c = _client("iso@t.local")
-    c.post("/api/live/comment", json={"room": "official", "text": "在带货间说的"})
-    c2 = _client("iso2@t.local")
-    c2.post("/api/live/comment", json={"room": "teacher", "text": "在课堂说的"})
-
-    pub = TestClient(app)
-    a = [x["text"] for x in pub.get("/api/live/comments?room=official").json()["items"]]
-    b = [x["text"] for x in pub.get("/api/live/comments?room=teacher").json()["items"]]
-    assert a == ["在带货间说的"] and b == ["在课堂说的"]
-
-
-def test_reply_cooldown_is_per_room(monkeypatch):
-    """甲间刚回过一条, 乙间不该跟着哑 12 秒 —— 两间各有各的观众。"""
-    monkeypatch.setattr(config, "LIVE_ROOMS", "official,teacher")
-    _rooms_state(monkeypatch, live_rooms=("official", "teacher"))
-    said = []
-
-    async def compose(comment, bill_to, device_id=""):
-        return "好的。"
-
-    async def fake_gpu(method, path, room, **kw):
-        if path.endswith("/interject"):
-            said.append(room)
-            return {"ok": True}
-        return {"live": True, "queued": 0, "recent": []}
-
-    monkeypatch.setattr(live, "_compose_reply", compose)
-    monkeypatch.setattr(live, "_gpu", fake_gpu)
-    _client("cd1@t.local").post("/api/live/comment", json={"room": "official", "text": "问一句"})
-    _client("cd2@t.local").post("/api/live/comment", json={"room": "teacher", "text": "也问一句"})
-    assert sorted(said) == ["official", "teacher"], f"冷却串台了: {said}"
-
-
-def test_a_single_room_has_no_list_page(monkeypatch):
-    """回滚成单间的方式: LIVE_ROOMS 只留一个 id。
-
-    那时 /live 必须直接进播放页 —— 一张卡片的"列表"是纯粹的多一次点击, 而且
-    站点行为要和做多间之前一模一样 (2026-09-09 为了给领导演示回滚)。
-    """
-    monkeypatch.setattr(config, "LIVE_ROOMS", "official")
-    monkeypatch.setattr(config, "LIVE_ROOM", "official")
-    c = _client("single@t.local")
-    r = c.get("/live", follow_redirects=False)
-    assert r.status_code == 303
-    assert r.headers["location"] == "/live/official"
-
-
-def test_more_than_one_room_brings_the_list_back(monkeypatch):
-    """多间要回来只改一个环境变量 —— 别让回滚变成"代码删了再写一遍"。"""
-    monkeypatch.setattr(config, "LIVE_ROOMS", "official,teacher")
-    monkeypatch.setattr(config, "LIVE_ROOM", "official")
-
-    async def fake_gpu(method, path, room, **kw):
-        return {"live": False, "title": "", "person": ""}
-
-    monkeypatch.setattr(live, "_gpu", fake_gpu)
-    r = _client("multi@t.local").get("/live", follow_redirects=False)
-    assert r.status_code == 200, "配了两间却还在往播放页跳"
-    assert "lv-roomcard" in r.text
