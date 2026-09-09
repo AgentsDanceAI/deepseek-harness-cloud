@@ -49,12 +49,36 @@ TOKEN_FILE = STATE / "device.json"
 #: 不用子域: 我们线上需要一格一个子域, 是因为**一个 Caddy 前面压着 forward_auth
 #: 要区分 16 个产品**; 你的笔记本上没有这个问题, 而产品前端用绝对路径引资源,
 #: 落在 host:port 上反而最省事。
+_CODEX_BOOT = """set -e
+install -d -o 1000 -g 1000 "$HOME" "$HOME/.codex" "$HOME/.claude" /workspace
+cat > "$HOME/.codex/config.toml" <<EOF
+model = "gpt-5.6-luna"
+model_provider = "aistore"
+
+[model_providers.aistore]
+name = "AI Store"
+base_url = "$OPENAI_BASE_URL"
+env_key = "OPENAI_API_KEY"
+wire_api = "responses"
+
+[projects."/workspace"]
+trust_level = "trusted"
+EOF
+chown -R 1000:1000 "$HOME" /workspace 2>/dev/null || true
+exec uvicorn app.main:app --host 0.0.0.0 --port 8080
+"""
+
+
 PRODUCTS = {
     "codex": {
         "image": "ghcr.io/agentsdancepro/agentui:0.2.5",
         "port": 8080,
         "desc": "Codex 编码智能体 (自研工作台外壳)",
         "agent": "codex",
+        # codex CLI **只认 ~/.codex/config.toml 里的 provider**, 环境变量给了也
+        # 不看。云端是 products.py 的 boot 脚本写这份文件, 本机得自己写一遍 ——
+        # 否则页面一切正常, 一发消息才发现没有 provider。
+        "boot": _CODEX_BOOT,
     },
     "claude-code": {
         "image": "ghcr.io/agentsdancepro/agentui:0.2.5",
@@ -167,10 +191,15 @@ def cmd_run(args) -> int:
     env = {
         # 网关: agent 在容器里调的就是这个地址, 用量记在你账上。
         "DSH_GATEWAY_BASE": BASE,
+        # 工作台**查余额**读的是这一个 —— 和下面给 CLI 的那几个是不同的变量名。
+        # 少了它, 页面一切正常, 只有余额那块显示"未配置令牌" (实测踩到)。
+        "DSH_CLOUD_TOKEN": tok,
         "OPENAI_BASE_URL": BASE + "/llm/v1",
         "OPENAI_API_KEY": tok,
         "ANTHROPIC_BASE_URL": BASE + "/llm/anthropic",
         "ANTHROPIC_AUTH_TOKEN": tok,
+        "ANTHROPIC_MODEL": "claude-sonnet-5",
+        "ANTHROPIC_SMALL_FAST_MODEL": "claude-sonnet-5",
         # 工作台自己的 HOME 与工作目录, 都落在下面那个卷上。
         "HOME": "/home/agent",
     }
@@ -182,6 +211,8 @@ def cmd_run(args) -> int:
     for k, v in env.items():
         cmd += ["-e", "%s=%s" % (k, v)]
     cmd.append(p["image"])
+    if p.get("boot"):
+        cmd += ["sh", "-c", p["boot"]]
 
     print("==> 起容器")
     r = _docker(*cmd, check=False)
