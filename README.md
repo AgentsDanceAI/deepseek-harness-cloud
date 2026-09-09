@@ -49,6 +49,41 @@ paid once for the selected monthly or annual term and **do not renew automatical
 [Individual plans](https://aistore.best/pricing#plans) ·
 [Team plans](https://aistore.best/pricing#team)
 
+<!-- path:local -->
+
+### Run the workspaces on your own machine
+
+Keep the hosted account, gateway and billing—move the *containers* to your own
+5090 box or Mac. A workspace that runs on your hardware costs you no machine
+hours; model calls still go through the hosted gateway and are still billed in
+credits.
+
+```bash
+python3 scripts/local/aistore-local.py login      # authorise this machine once
+python3 scripts/local/aistore-local.py run codex  # pull, start, open localhost:8080
+```
+
+**Our servers never dial into your machine.** No tunnel, no public IP, no
+inbound port. The runner authorises with a revocable device token (the same
+RFC 8628 flow the desktop client uses); the agent inside the container calls
+`aistore.best/llm/*` with it, so usage lands on your account exactly as it does
+in the cloud.
+
+Not every slot runs locally yet: `aistore-local.py list` prints the ones that
+do. Multi-container stacks (Dify, Coze, Hermes) still need the hosted side, and
+the two digital-human slots are hosted-only because they drive our GPU nodes.
+
+Two things worth knowing before you start:
+
+- **The workspace images are `linux/amd64` only.** An x86 box (the 5090 case)
+  runs them natively; Apple Silicon runs them under emulation—it works, it is
+  just noticeably slower. The runner says so rather than letting you guess.
+- **Some images are still private on ghcr.** `agentui`, `comfy-local`,
+  `codecli-local`, `od-local`, `autogen-studio`, `dsh-local`, `coze-assets` and
+  `cloudcli-local` are public; `pi-web-ui`, `langchain-agent`,
+  `agent-frameworks` and `openmausbot` are not, so those slots cannot be pulled
+  from outside the org yet.
+
 <!-- path:selfhost -->
 
 ### Self-host Community Edition
@@ -298,6 +333,7 @@ tests, security routing, and edition-boundary review.
 | `release/` | Canonical release identity and schemas |
 | `desktop/` | Pinned upstream desktop assembly, minimal patches, and cloud integration plugin |
 | `mobile/`, `miniprogram/` | Mobile integration shells |
+| `scripts/local/` | Run product workspaces on your own machine against the hosted gateway |
 | `docs/` | Architecture, deployment, security, edition, compatibility, and maintainer docs |
 | `legal/` | Hosted legal documents and third-party/licensing records |
 
