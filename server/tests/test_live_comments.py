@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import os
 import tempfile
-import time
 
 import pytest
 
@@ -105,7 +104,7 @@ def test_the_bill_never_lands_on_the_viewer(monkeypatch):
     up = Upstream().install(monkeypatch)
     monkeypatch.setattr(config, "ADMIN_EMAILS", ["boss@t.local"])
     monkeypatch.setattr(config, "LIVE_BILL_EMAIL", "")
-    boss = _client("boss@t.local")
+    _client("boss@t.local")  # 建出运营方这个用户; 返回的 client 这条用例不用
     boss_id = db.query_one("SELECT id FROM users WHERE email='boss@t.local'")["id"]
 
     viewer = _client("v2@t.local")

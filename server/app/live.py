@@ -474,8 +474,13 @@ async def comments(since: float = 0.0, limit: int = 40):
         (config.LIVE_ROOM, float(since or 0), max(1, min(int(limit or 40), 100))),
     )
     items = [
-        {"id": r["id"], "nick": r["nick"], "text": r["text"], "t": float(r["created"]),
-         "replied": bool(r["replied"])}
+        {
+            "id": r["id"],
+            "nick": r["nick"],
+            "text": r["text"],
+            "t": float(r["created"]),
+            "replied": bool(r["replied"]),
+        }
         for r in reversed(rows)
     ]
     return JSONResponse({"items": items, "now": time.time()})
@@ -524,10 +529,10 @@ async def _maybe_reply(cid: str, text: str) -> bool:
     except HTTPException:
         return False
     if not st.get("live"):
-        return False          # 没开播就没人听, 别白花钱
+        return False  # 没开播就没人听, 别白花钱
     if int(st.get("queued") or 0) >= config.LIVE_REPLY_MAX_QUEUE:
-        return False          # 她已经排到几十秒开外了
-    _LAST_REPLY_AT = now      # 先占位再去调模型 —— 慢的那几秒里别放第二条进来
+        return False  # 她已经排到几十秒开外了
+    _LAST_REPLY_AT = now  # 先占位再去调模型 —— 慢的那几秒里别放第二条进来
     try:
         spoken = await _compose_reply(text, _bill_account())
         hit = _claims(spoken)
@@ -536,9 +541,7 @@ async def _maybe_reply(cid: str, text: str) -> bool:
             # 在花钱, 观众还在等。直接换成安全的那句。
             log.warning("[live] 自动回评命中禁词 %r, 已换成安全兜底: %s", hit, spoken[:60])
             spoken = _SAFE_FALLBACK
-        await _gpu(
-            "POST", f"/rooms/{config.LIVE_ROOM}/interject", config.LIVE_ROOM, json={"text": spoken}
-        )
+        await _gpu("POST", f"/rooms/{config.LIVE_ROOM}/interject", config.LIVE_ROOM, json={"text": spoken})
     except Exception as e:  # noqa: BLE001
         _LAST_REPLY_AT = 0.0  # 没说成就把位子让出来
         log.warning("[live] 自动回评失败: %s", type(e).__name__)
