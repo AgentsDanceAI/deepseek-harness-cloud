@@ -13,12 +13,9 @@
       {{ t("home.badge", n=app_count) }}
     </div>
     <h1>{{ t("home.h1", n=app_count) }}</h1>
-    {# 三层, 从口号到干货: 标题给主张, 对句给"这事对我意味着什么", 段落给证据
-       (具体是哪些产品、怎么计费、要不要自己搞 Key)。少了最后一段就只剩口号了。 #}
-    <p class="hero-couplet">
-      <span>{{ t("home.tagline1") }}</span>
-      <span>{{ t("home.tagline2") }}</span>
-    </p>
+    {# 一段话走完"承诺 -> 证据": 前半句说这事对你意味着什么, 后半句给具体是哪些
+       产品、怎么计费、要不要自己搞 Key。拆成两块排版上更抓眼, 但读起来是两段
+       各说各的; 揉成一段, 承诺后面紧跟着兑现承诺的东西。 #}
     <p class="hero-sub-dark">
       {{ t("home.sub", n=app_count) }}
     </p>
