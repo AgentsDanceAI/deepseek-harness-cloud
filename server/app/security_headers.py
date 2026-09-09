@@ -12,6 +12,19 @@ LIVE_PATH = "/live"
 LIVE_CONSOLE_PATH = "/live/console"
 
 
+def _needs_blob_media(path: str) -> bool:
+    """这个页面要不要放开 blob: 视频源。
+
+    ⚠️ **必须按前缀判, 不能列举**。2026-09-09 直播拆成多间, 播放页从 /live 变成
+    /live/{room}, 而这里还是 `path in (...)` 的精确匹配 —— 于是新页面拿不到
+    media-src, hls.js 的 MediaSource 被 default-src 挡死。
+    症状极具欺骗性: Safari 原生放 HLS, 不走 MediaSource, **在 Mac 上一切正常**;
+    Chrome / Edge / 安卓是纯黑一帧, 只有控制台里一行 CSP 违规。
+    (数字人通话当年栽过同一个坑, 这次是同一个坑的第二次。)
+    """
+    return path == AVATAR_PATH or path == LIVE_PATH or path.startswith(LIVE_PATH + "/")
+
+
 class SecurityHeaders:
     def __init__(self, app: ASGIApp, https: bool, work_host: str = ""):
         self.app = app
@@ -59,11 +72,7 @@ class SecurityHeaders:
                         # 直播页同理: hls.js 也是 MediaSource → blob: URL。
                         # (HLS 的 m3u8/ts 走 /api/live/hls/* 同源代转, 所以**不需要**
                         #  为它放开 connect-src —— 那是刻意的, 见 live.py 头注释。)
-                        + (
-                            "; media-src 'self' blob:"
-                            if path in (AVATAR_PATH, LIVE_PATH, LIVE_CONSOLE_PATH)
-                            else ""
-                        ),
+                        + ("; media-src 'self' blob:" if _needs_blob_media(path) else ""),
                     )
                 if self.https:
                     headers.setdefault(

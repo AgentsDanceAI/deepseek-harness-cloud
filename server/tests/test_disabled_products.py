@@ -87,15 +87,27 @@ def test_the_live_page_may_load_blob_media_but_gets_no_extra_openings():
     from app.main import app
     from tests._signup import signup
 
+    from app import live as _live
+
     with TestClient(app) as c:
         signup(c, "live-csp@example.com")  # 未登录会 303 走掉, 那是张没有 CSP 的空响应
-        lv = c.get("/live")
+        # **每一个真的放视频的页面都要查**, 不能只查 /live。
+        # 2026-09-09 直播拆成多间, 播放页变成 /live/{room}, 而 CSP 那边还是
+        # `path in (...)` 的精确匹配 —— 新页面当场失去 media-src, 而 Safari 原生
+        # 放 HLS 不走 MediaSource, 所以**在 Mac 上一切正常**, 只有 Chrome 黑屏。
+        # 这条测试当时红了, 那是它唯一一次机会。
+        pages = {"/live": c.get("/live")}
+        for r in _live.rooms():
+            pages[f"/live/{r}"] = c.get(f"/live/{r}")
+        pages["/live/console"] = c.get("/live/console")
         home = c.get("/")
-    csp = lv.headers.get("content-security-policy", "")
-    assert "media-src 'self' blob:" in csp
-    assert "connect-src" not in csp, "直播页不该有跨源出口 —— HLS 是同源代转的"
-    assert "microphone=()" in lv.headers.get("permissions-policy", "")
-    assert "blob:" not in home.headers.get("content-security-policy", "")
+
+    for url, resp in pages.items():
+        csp = resp.headers.get("content-security-policy", "")
+        assert "media-src 'self' blob:" in csp, f"{url} 少了 media-src blob: —— Chrome 上是黑屏"
+        assert "connect-src" not in csp, f"{url} 有跨源出口 —— HLS 是同源代转的"
+        assert "microphone=()" in resp.headers.get("permissions-policy", "")
+    assert "blob:" not in home.headers.get("content-security-policy", ""), "口子漏到首页了"
 
 
 def test_the_console_is_admin_only_and_there_is_exactly_one_room(monkeypatch):
@@ -208,8 +220,9 @@ def test_each_page_has_every_element_its_javascript_reaches_for():
             from app import live as _live
 
             first = _live.rooms()[0]
+            # 单间时 /live 会 303 进播放页 (回滚成单间的方式就是只配一间),
+            # 那时它没有列表, 自然也没有 live_rooms.js。
             pages = {
-                "/live": (["live_rooms.js"], set()),
                 f"/live/{first}": (["live.js", "live_chat.js", "live_captions.js"], set()),
                 # live_chat.js 干两件事: 弹幕渲染 + 观众发言框。控制台只要前者 ——
                 # 管理员那一栏是自己的"互动"面板 (能选复读/问答), 不是观众公屏。
