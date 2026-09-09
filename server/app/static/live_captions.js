@@ -37,6 +37,12 @@ window.LiveCaptions = (function () {
     }
   }
 
+  /* **只显示正在说的那一句。**
+   *
+   * 第一版把最近十几句堆在右边滚动, 结果是: 三分之一的画面被字幕占满、盖住了
+   * 声音按钮, 而观众要读的其实只有当下这一句 —— 上面那些她早就说完了。
+   * 字幕的用途是"听不见时知道她在说什么", 不是聊天记录。
+   */
   function add(line) {
     var id = line.t + '|' + line.text;
     if (seen[id]) return;
@@ -44,10 +50,8 @@ window.LiveCaptions = (function () {
     var el = document.createElement('div');
     el.className = 'lv-cap' + (line.kind === 'interject' ? ' lv-cap--in' : '');
     el.textContent = line.text;
+    box.textContent = '';        // 换掉上一句, 不堆叠
     box.appendChild(el);
-    while (box.children.length > 14) box.removeChild(box.firstChild);
-    // 贴着底部 —— 最新一句永远在视线落点上
-    box.scrollTop = box.scrollHeight;
   }
 
   function pull() {
@@ -59,7 +63,8 @@ window.LiveCaptions = (function () {
           box.textContent = ''; seen = {};
           return;
         }
-        (d.lines || []).forEach(add);
+        var ls = d.lines || [];
+        if (ls.length) add(ls[ls.length - 1]);   // 只要最新那一句
       })
       .catch(function () {});
   }

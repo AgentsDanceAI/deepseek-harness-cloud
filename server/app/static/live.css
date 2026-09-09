@@ -51,7 +51,8 @@
 }
 .lv-msg[hidden] { display: none; }
 .lv-unmute {
-  position: absolute; right: 12px; bottom: 12px; z-index: 2;
+  /* z-index 要在字幕层 (4) 之上 —— 原先是 2, 被字幕盖得死死的。 */
+  position: absolute; left: 12px; bottom: 12px; z-index: 6;
   padding: .45rem .9rem; border-radius: 999px; border: 0; cursor: pointer;
   background: rgba(255,255,255,.92); color: #111; font-size: .85rem;
 }
@@ -127,15 +128,14 @@
    为什么压在画面上而不是排在画面下面: 观众的视线在她脸上, 字幕挪到画面外就要
    来回跑; 而 16:9 的右侧本来就是背景, 盖住不心疼。
    pointer-events:none —— 字幕不能挡住"点一下开始播放"和弹幕以外的任何操作。 */
+/* 只有一句, 所以贴着右下角就够 —— 不再占满整条右侧。
+   ⚠️ 别再让它铺满右边: 那样会盖住右下角的声音按钮 (创始人 2026-09-09 撞到的
+   正是这个, 而且按钮是 hidden 到起播才出现, 更难发现被盖住了)。 */
 .lv-caps {
-  position: absolute; top: 0; right: 0; bottom: 0; width: 34%; min-width: 180px;
-  z-index: 4; pointer-events: none; overflow: hidden;
-  display: flex; flex-direction: column; justify-content: flex-end;
-  gap: 5px; padding: 14px 14px 16px;
-  background: linear-gradient(to left, rgba(0,0,0,.42), rgba(0,0,0,0));
-  /* 上缘化开 —— 硬切一条边, 看起来像贴了张纸 */
-  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 18%, #000 100%);
-  mask-image: linear-gradient(to bottom, transparent 0, #000 18%, #000 100%);
+  position: absolute; right: 0; bottom: 0; width: 38%; min-width: 190px; max-width: 420px;
+  z-index: 4; pointer-events: none;
+  padding: 14px 16px 56px;      /* 底部留出 56px —— 声音按钮站在那儿 */
+  background: linear-gradient(to top left, rgba(0,0,0,.45), rgba(0,0,0,0) 70%);
 }
 .lv-caps[hidden] { display: none; }
 .lv-cap {
@@ -157,10 +157,8 @@
 @media (max-width: 620px) {
   /* 手机上 34% 太窄, 一行放不下几个字 —— 改成横铺在下沿 */
   .lv-caps {
-    width: auto; left: 0; top: auto; height: 42%;
-    background: linear-gradient(to top, rgba(0,0,0,.5), rgba(0,0,0,0));
-    -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 22%, #000 100%);
-    mask-image: linear-gradient(to bottom, transparent 0, #000 22%, #000 100%);
+    width: auto; left: 0; max-width: none; padding-bottom: 52px;
+    background: linear-gradient(to top, rgba(0,0,0,.55), rgba(0,0,0,0));
   }
 }
 
