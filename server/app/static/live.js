@@ -23,6 +23,29 @@ window.LivePlayer = (function () {
     badge.className = 'lv-badge lv-badge--' + (on ? 'on' : 'off');
   }
 
+  /* 自动播放被拒时**必须说话**。静音自动播放大多放行, 但 iOS 低电量模式、部分
+     浏览器的严格设置照样拒 —— 而拒绝是静默的: 画面纯黑, 提示已经被 note('') 清掉,
+     控制台里只有一行 NotAllowedError。这就是"有时候打开黑屏"。
+     接住之后把整块画面变成一个"点一下播放"的按钮 (.lv-msg 是 pointer-events:none,
+     点击会落到舞台上)。 */
+  var tapArmed = false;
+  function tryPlay() {
+    if (!v) return;
+    var pr = v.play();
+    if (pr && pr.catch) pr.catch(function () { note(t('tapplay')); armTap(); });
+  }
+  function armTap() {
+    var stage = v && v.parentNode;
+    if (!stage || tapArmed) return;
+    tapArmed = true;
+    stage.addEventListener('click', function once() {
+      stage.removeEventListener('click', once);
+      tapArmed = false;
+      note('');
+      tryPlay();
+    });
+  }
+
   function play(url) {
     if (!v) return;
     // ⚠️ 地址没变就**什么都别做**。判据只能是 playingUrl, 不能捎带别的条件 ——
@@ -36,13 +59,13 @@ window.LivePlayer = (function () {
     //      (老板的录屏实测: 黑 11.50-13.75s 与 26.75-29.75s, 相隔 15.25 秒。)
     // 暂停了该做的是让它继续播, 不是重来一遍。
     if (url === playingUrl) {
-      if (v.paused) v.play().catch(function () {});
+      if (v.paused) tryPlay();
       return;
     }
     playingUrl = url;
     if (hls) { hls.destroy(); hls = null; }
     if (v.canPlayType('application/vnd.apple.mpegurl')) {   // Safari 原生放 HLS
-      v.src = url; v.play().catch(function () {}); return;
+      v.src = url; tryPlay(); return;
     }
     if (!window.Hls || !window.Hls.isSupported()) { note(t('unsupported')); return; }
     hls = new window.Hls({
@@ -60,7 +83,7 @@ window.LivePlayer = (function () {
     });
     hls.loadSource(url);
     hls.attachMedia(v);
-    hls.on(window.Hls.Events.MANIFEST_PARSED, function () { v.play().catch(function () {}); });
+    hls.on(window.Hls.Events.MANIFEST_PARSED, function () { tryPlay(); });
     hls.on(window.Hls.Events.ERROR, function (_e, d) {
       if (!d.fatal) return;
       if (d.type === window.Hls.ErrorTypes.NETWORK_ERROR) { hls.startLoad(); return; }
@@ -71,13 +94,24 @@ window.LivePlayer = (function () {
     });
   }
 
+  /* 主播停了就把播放器拆掉。
+     不拆的话下一次开播会**静静地什么都不发生**: 地址没变 (永远是同一个
+     index.m3u8), play() 第一行的 `url === playingUrl` 守卫直接返回, 而那个 hls
+     实例还卡在停播时的致命错误里。表现就是"停播之后再开播半天没反应" —— 页面
+     上一切正常, 就是黑着。 */
+  function teardown() {
+    playingUrl = '';
+    if (hls) { hls.destroy(); hls = null; }
+    if (v) { try { v.pause(); v.removeAttribute('src'); v.load(); } catch (e) { /* 忽略 */ } }
+  }
+
   function refresh() {
     return fetch('/api/live/status', { credentials: 'same-origin' })
       .then(function (r) { return r.json(); })
       .then(function (d) {
         online(!!d.live);
-        if (!d.enabled) { note(t('disabled')); return d; }
-        if (!d.live) { note(t('notlive')); return d; }
+        if (!d.enabled) { teardown(); note(t('disabled')); return d; }
+        if (!d.live) { teardown(); note(t('notlive')); return d; }
         note(''); retry = 0; play(d.hls);
         return d;
       })
@@ -87,13 +121,24 @@ window.LivePlayer = (function () {
   if (v) {
     v.addEventListener('playing', function () {
       note('');
-      if (v.muted && unmute) unmute.hidden = false;   // 起播了才提示开声音
+      if (unmute) { unmute.hidden = false; paintSound(); }   // 起播了才给声音开关
     });
+  }
+  /* 声音是**开关**, 不是一次性的。原先点完就 hidden=true, 于是开了再也关不掉
+     —— 而直播是会一直开着的, 想静音只能关掉整个页面。 */
+  function paintSound() {
+    if (!unmute) return;
+    unmute.textContent = t(v.muted ? 'unmute' : 'mute');
+    unmute.setAttribute('aria-pressed', v.muted ? 'false' : 'true');
   }
   if (unmute) {
     unmute.addEventListener('click', function () {
-      v.muted = false; v.volume = 1; unmute.hidden = true; v.play().catch(function () {});
+      v.muted = !v.muted;
+      if (!v.muted) v.volume = 1;
+      paintSound();
+      tryPlay();
     });
+    v.addEventListener('volumechange', paintSound);   // 系统/键盘改的也跟上
   }
 
   refresh();

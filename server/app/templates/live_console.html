@@ -14,7 +14,9 @@
             data-notlive="{{ t('live.not_live') }}"
             data-disabled="{{ t('live.disabled') }}"
             data-reconnect="{{ t('live.reconnecting') }}"
-            data-unsupported="{{ t('live.unsupported') }}">{{ t('live.offline') }}</span>
+            data-unsupported="{{ t('live.unsupported') }}"
+            data-mute="{{ t('live.mute') }}"
+            data-tapplay="{{ t('live.tap_play') }}">{{ t('live.offline') }}</span>
       <a class="lv-adminlink" href="/live">← {{ t('live.title') }}</a>
     </div>
     <p class="lv-sub">{{ t('live.console_sub') }}</p>
@@ -40,8 +42,8 @@
             <select id="lvVoice"></select>
           </label>
         </div>
-        {# 换形象或音色 = 整场重渲。片段是按 (文字, 形象, 音色) 三元组缓存的,
-           不说破的话点一下就等二十分钟, 而且不知道为什么。 #}
+        {# 上一版是预渲染的, 这里写着"换形象要整场重渲、等二十分钟"。改成实时
+           生成之后那句话就不成立了, 但留着会让人不敢改 —— 现在存完下一句就换。 #}
         <p class="lv-warn" id="lvRecast" hidden>{{ t('live.recast_warn') }}</p>
 
         <label class="lv-field">
@@ -65,6 +67,7 @@
              data-generated="{{ t('live.generated') }}"
              data-need_title="{{ t('live.need_title') }}"
              data-starting="{{ t('live.starting') }}"
+             data-start_slow="{{ t('live.start_slow') }}"
              data-stopped="{{ t('live.stopped') }}"
              data-failed="{{ t('live.failed') }}"></div>
       </div>

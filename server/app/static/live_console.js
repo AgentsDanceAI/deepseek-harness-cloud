@@ -9,6 +9,7 @@
   var script = $('lvScript'), counts = $('lvCounts'), say = $('lvSay');
   var recast = $('lvRecast');
   var loaded = { person: '', voice: '' }, optionsFilled = false;
+  var pending = '';   // 'start' = 已经点了开播, 还在等上游真的出流
   var comment = $('lvComment'), mode = $('lvMode'), log = $('lvLog');
 
   function t(el, k) { return (el.dataset || {})[k] || ''; }
@@ -21,6 +22,9 @@
       var el = $(id); if (el) el.disabled = on;
     });
   }
+  /* 换形象/音色的提示。原先写的是"全部话术都要重新渲染" —— 那是**上一版预渲染
+     设计**的说法, 现在数字人是实时说的, 存下去下一句就换了, 没有重渲这回事。
+     留着这条会让人以为改一下要等二十分钟, 于是不敢改。 */
   function markRecast() {
     recast.hidden = !(loaded.person && (person.value !== loaded.person || voice.value !== loaded.voice));
   }
@@ -32,8 +36,14 @@
     loaded = { person: d.person || '', voice: d.voice || '' };
     var n = (d.lines || []).length;
     counts.textContent = n === 0 ? '' : t(counts, 'fmt').replace('{n}', n);
+    // 上游接了 start 就返回, 真正出流要几秒到几十秒 (要先生成第一句)。这中间
+    // 状态还是 live:false —— 原先按钮就此复原, 用户看到的是"点了没反应", 于是
+    // 再点一次, 再点一次。所以自己记一个"正在开播", 直到上游真的 live。
+    if (d.live) pending = '';
     $('lvStop').hidden = !d.live;
     $('lvStart').hidden = !!d.live;
+    $('lvStart').disabled = pending === 'start';
+    if (pending === 'start' && !d.live) say.textContent = t(say, 'starting');
     if (d.live) {
       // starved = 队列被抽空的次数。不为零就是生成跟不上播出, 观众那边会卡 ——
       // 这个数必须露在页面上, 否则只有观众知道, 我们这边一切正常。
@@ -113,11 +123,28 @@
 
   function act(a, word) {
     busy(true);
+    pending = a === 'start' ? 'start' : '';
     say.textContent = t(say, word);
     return fetch('/api/live/room/' + a, { method: 'POST', credentials: 'same-origin' })
       .then(function (r) { if (!r.ok) throw new Error(a); })
-      .catch(function () { say.textContent = t(say, 'failed'); })
-      .then(function () { busy(false); return refresh(); });
+      .catch(function () { pending = ''; say.textContent = t(say, 'failed'); })
+      .then(function () { busy(false); return refresh(); })
+      .then(function () { if (pending === 'start') pollUntilLive(); });
+  }
+
+  /* 开播后盯着上游, 直到真的出流。15 秒一次的常规轮询太慢 —— 第一句生成通常
+     十几秒, 而这段时间页面上什么都不动, 看起来就是没反应。 */
+  function pollUntilLive() {
+    var tries = 0;
+    (function tick() {
+      if (pending !== 'start') return;
+      if (++tries > 40) {                      // 2 分钟还没出流就别装了
+        pending = '';
+        say.textContent = t(say, 'start_slow');
+        return;
+      }
+      setTimeout(function () { refresh().then(tick); }, 3000);
+    })();
   }
 
   function generate() {
@@ -169,7 +196,7 @@
   $('lvSave').addEventListener('click', function () { save(); });
   // 开播前**先存** —— 否则播的是上一版, 而画面看起来一切正常, 只是说的还是旧词。
   $('lvStart').addEventListener('click', function () { save().then(function () { act('start', 'starting'); }); });
-  $('lvStop').addEventListener('click', function () { act('stop', 'stopped'); });
+  $('lvStop').addEventListener('click', function () { pending = ''; act('stop', 'stopped'); });
   [person, voice].forEach(function (el) { el.addEventListener('change', markRecast); });
   script.addEventListener('input', function () {
     var n = lines().length;
