@@ -2201,7 +2201,8 @@ def test_coze_has_no_second_login_wall(monkeypatch):
     assert "/root/.coze-autologin" in sh
     # 账号不能用 admin@: 那个可能已被人工建过而密码不在我们手里, 注册与登录会
     # 双双失败, 而且**不报错**, 只是又看到登录墙
-    assert "owner@aistore.best" in sh
+    # 账号名不跟品牌走 —— 它注册在 Coze 自己的库里, 改地址就是拿不存在的账号敲门。
+    assert "owner@dshcloud.online" in sh
     assert "admin@" not in sh
     # 浏览器自己带了 session_key 就原样透传 (他想切账号也切得了)。
     # 脚本里这些 $ 是给 nginx 的, 对 shell 转义过, 所以认转义后的形态。
@@ -2556,7 +2557,8 @@ def test_dify_autologin_password_is_derived_not_stored(monkeypatch):
         == products.env_for("hermes", "t", "s" * 64)["HERMES_PASS"]
     )
     # 邮箱必须与 setup 建的那个一致 —— 单租户, 没有第二个账号可用
-    assert env["DSH_AUTOLOGIN_EMAIL"] == "admin@aistore.best"
+    # 同上: 这是 Dify 库里那个账号的名字, 不是品牌串。
+    assert env["DSH_AUTOLOGIN_EMAIL"] == "admin@dshcloud.online"
 
 
 def _dify_env(sidecars, name):

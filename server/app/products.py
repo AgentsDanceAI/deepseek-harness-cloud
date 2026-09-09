@@ -399,6 +399,10 @@ def _dify_stack() -> tuple[Sidecar, ...]:
         Sidecar(name="redis", image_ref="redis:6-alpine",
                 cmd=("redis-server", "--requirepass", _DIFY_REDIS_PASSWORD),
                 mounts=(("dify/redis", "/data"),)),
+# ⚠️ 下面这些 @dshcloud.online **不是品牌串, 是账号名**, 换品牌时不能跟着改。
+# 这些账号早就注册在各产品自己的库里 (跟着用户的 NAS 卷走), 换个地址去登
+# 就是拿一个不存在的账号敲门 —— 表现是永远 401、页面永远停在「启动中」,
+# 而且**不报错**。2026-09-09 换域时我把它们一起改了, Dify 整整挂了半天。
         Sidecar(name="weaviate", image_ref="semitechnologies/weaviate:1.27.0", env=(
             ("PERSISTENCE_DATA_PATH", "/var/lib/weaviate"),
             ("QUERY_DEFAULTS_LIMIT", "25"),
@@ -407,9 +411,9 @@ def _dify_stack() -> tuple[Sidecar, ...]:
             ("CLUSTER_HOSTNAME", "node1"),
             ("AUTHENTICATION_APIKEY_ENABLED", "true"),
             ("AUTHENTICATION_APIKEY_ALLOWED_KEYS", _DIFY_WEAVIATE_KEY),
-            ("AUTHENTICATION_APIKEY_USERS", "dsh@aistore.best"),
+            ("AUTHENTICATION_APIKEY_USERS", "dsh@dshcloud.online"),  # 账号名, 见文件内 ⚠️
             ("AUTHORIZATION_ADMINLIST_ENABLED", "true"),
-            ("AUTHORIZATION_ADMINLIST_USERS", "dsh@aistore.best"),
+            ("AUTHORIZATION_ADMINLIST_USERS", "dsh@dshcloud.online"),  # 同上
         ), mounts=(("dify/weaviate", "/var/lib/weaviate"),)),
     )
 # fmt: on
@@ -1160,7 +1164,7 @@ _COZE_APIHOST_ANCHOR = "proxy_set_header Host \\$http_host;"
 _COZE_AUTOLOGIN = r"""#!/bin/sh
 # 由 products.py 下发。工作台自己登一次 Coze, 把会话注入到上游请求里。
 PWF=/root/.coze-autologin
-EM=owner@aistore.best
+EM=owner@dshcloud.online  # 账号名, 不是品牌串 —— 换品牌时别动
 API=http://127.0.0.1:8888/api/passport/web/email
 [ -s "$PWF" ] || {
   printf 'Dsh%s1a\n' "$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 20)" > "$PWF"
@@ -3285,7 +3289,7 @@ def env_for(product_id: str, token: str, secret: str = "") -> dict[str, str]:
         return {
             # 用 admin@ 而不是 Coze 那边的 owner@: Dify 单租户, setup 建的就是这个
             # 账号, 没有第二个可建 —— 所以这里必须与既有账号对齐, 不能另起一个。
-            "DSH_AUTOLOGIN_EMAIL": "admin@aistore.best",
+            "DSH_AUTOLOGIN_EMAIL": "admin@dshcloud.online",  # 账号名, 换品牌时别动
             "DSH_AUTOLOGIN_PASSWORD": autologin_password(secret),
             # 用来清掉 Dify 那把 24 小时的登录锁 (见 _DIFY_AUTOLOGIN 的 unlock)。
             "DSH_REDIS_PASSWORD": _DIFY_REDIS_PASSWORD,
