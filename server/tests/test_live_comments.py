@@ -466,3 +466,31 @@ def test_reply_cooldown_is_per_room(monkeypatch):
     _client("cd1@t.local").post("/api/live/comment", json={"room": "official", "text": "问一句"})
     _client("cd2@t.local").post("/api/live/comment", json={"room": "teacher", "text": "也问一句"})
     assert sorted(said) == ["official", "teacher"], f"冷却串台了: {said}"
+
+
+def test_a_single_room_has_no_list_page(monkeypatch):
+    """回滚成单间的方式: LIVE_ROOMS 只留一个 id。
+
+    那时 /live 必须直接进播放页 —— 一张卡片的"列表"是纯粹的多一次点击, 而且
+    站点行为要和做多间之前一模一样 (2026-09-09 为了给领导演示回滚)。
+    """
+    monkeypatch.setattr(config, "LIVE_ROOMS", "official")
+    monkeypatch.setattr(config, "LIVE_ROOM", "official")
+    c = _client("single@t.local")
+    r = c.get("/live", follow_redirects=False)
+    assert r.status_code == 303
+    assert r.headers["location"] == "/live/official"
+
+
+def test_more_than_one_room_brings_the_list_back(monkeypatch):
+    """多间要回来只改一个环境变量 —— 别让回滚变成"代码删了再写一遍"。"""
+    monkeypatch.setattr(config, "LIVE_ROOMS", "official,teacher")
+    monkeypatch.setattr(config, "LIVE_ROOM", "official")
+
+    async def fake_gpu(method, path, room, **kw):
+        return {"live": False, "title": "", "person": ""}
+
+    monkeypatch.setattr(live, "_gpu", fake_gpu)
+    r = _client("multi@t.local").get("/live", follow_redirects=False)
+    assert r.status_code == 200, "配了两间却还在往播放页跳"
+    assert "lv-roomcard" in r.text

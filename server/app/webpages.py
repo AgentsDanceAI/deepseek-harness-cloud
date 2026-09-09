@@ -476,12 +476,18 @@ def live_rooms_page(request: Request):
     (它是别人的共享机, 够不着是常态)。状态由前端拿 /api/live/rooms 填, 那条路带
     两秒缓存, 一百个观众也只打上游一次。
     """
+    from . import live as _live
+
+    names = _live.rooms()
+    # 只有一间时不要列表页 —— 一张卡片的"列表"是纯粹的多一次点击。
+    # 这也是回滚成单间的方式: LIVE_ROOMS 只留一个 id, 这一页就消失, 站点行为
+    # 与做多间之前一模一样。多间要回来, 改一个环境变量。
+    if len(names) == 1:
+        return RedirectResponse(f"/live/{names[0]}", status_code=303)
     gate = _live_gate(request)
     if gate is not None:
         return gate
-    from . import live as _live
-
-    return _render(request, "live_rooms.html", "live", rooms=_live.rooms())
+    return _render(request, "live_rooms.html", "live", rooms=names)
 
 
 @router.get("/live/console")
@@ -524,7 +530,7 @@ def live_page(request: Request, room: str):
     gate = _live_gate(request)
     if gate is not None:
         return gate
-    return _render(request, "live.html", "live", room=room)
+    return _render(request, "live.html", "live", room=room, rooms_count=len(_live.rooms()))
 
 
 @router.get("/apps")
