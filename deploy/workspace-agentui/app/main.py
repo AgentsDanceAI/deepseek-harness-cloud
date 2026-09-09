@@ -258,14 +258,31 @@ async def ws_chat(ws: WebSocket, sid: str) -> None:
             proc.stdin.close()
 
         collected: list[str] = []
+        alive = True
         assert proc.stdout is not None
+
+        async def push(ev: dict) -> None:
+            """推给浏览器; **推不出去就当没这回事, 继续把 stdout 读完。**
+
+            2026-09-09 老板撞到: 发「在吗」, codex 93 秒后确实答了「在的, 有什么
+            想一起处理的?」—— 但他等不住刷新了页面, 而这一刷新就把答案永久弄丢了。
+            原因就在这里: send 一抛异常, 读取循环当场被带走, 于是既没把话收全,
+            也没走到下面的落库。CLI 那边话说完了, 我们这边什么都没留下。
+            """
+            nonlocal alive
+            if not alive:
+                return
+            try:
+                await ws.send_json(ev)
+            except Exception:  # noqa: BLE001
+                alive = False
 
         async def drain_stderr() -> None:
             assert proc is not None and proc.stderr is not None
             async for raw in proc.stderr:
                 line = raw.decode("utf-8", "replace").rstrip()
                 if line and ("Error" in line or "error:" in line):
-                    await ws.send_json({"t": "raw", "line": line[:400]})
+                    await push({"t": "raw", "line": line[:400]})
 
         stderr_task = asyncio.create_task(drain_stderr())
         try:
@@ -278,18 +295,19 @@ async def ws_chat(ws: WebSocket, sid: str) -> None:
                         sessions.update(sid, cli_session=ev["id"])
                     if ev["t"] in ("delta", "text"):
                         collected.append(ev.get("text", ""))
-                    await ws.send_json(ev)
+                    await push(ev)
         finally:
             stderr_task.cancel()
             await proc.wait()
-
-        text = "".join(collected).strip()
-        if text:
-            sessions.append(sid, {"role": "assistant", "text": text})
-            cur2 = sessions.get(sid) or {}
-            if cur2.get("title") in ("", "新会话"):
-                sessions.update(sid, title=(sessions.messages(sid)[0]["text"][:28] or "新会话"))
-        await ws.send_json({"t": "turn_end"})
+            # **落库放在 finally 里**: 断线也要把这一轮的答案存下来, 用户刷新
+            # 回来还看得见。放在 try 之后的话, 上面任何一个异常都会跳过它。
+            text = "".join(collected).strip()
+            if text:
+                sessions.append(sid, {"role": "assistant", "text": text})
+                cur2 = sessions.get(sid) or {}
+                if cur2.get("title") in ("", "新会话"):
+                    sessions.update(sid, title=(sessions.messages(sid)[0]["text"][:28] or "新会话"))
+        await push({"t": "turn_end"})
         proc = None
 
     try:
@@ -303,8 +321,14 @@ async def ws_chat(ws: WebSocket, sid: str) -> None:
                     except Exception as e:  # noqa: BLE001
                         # 一轮炸了不该把连接也带走 —— 否则用户看到的是"断线",
                         # 而真正的原因 (CLI 启动失败之类) 一个字都看不到。
-                        await ws.send_json({"t": "error", "message": f"{type(e).__name__}: {e}"})
-                        await ws.send_json({"t": "turn_end"})
+                        # 报错本身也可能推不出去 (连接已经没了), 那就别再抛一次:
+                        # 原来这里会冒出 "Cannot call send once a close message
+                        # has been sent", 把真正的原因盖掉。
+                        try:
+                            await ws.send_json({"t": "error", "message": f"{type(e).__name__}: {e}"})
+                            await ws.send_json({"t": "turn_end"})
+                        except Exception:  # noqa: BLE001
+                            break
             elif msg.get("t") == "stop" and proc is not None:
                 proc.terminate()
     except (WebSocketDisconnect, json.JSONDecodeError):
