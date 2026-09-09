@@ -271,9 +271,14 @@ def test_captions_are_public_and_cached(monkeypatch):
     而它同时还在生成画面。
     """
     calls = {"n": 0}
-    state = {"live": True, "queued": 0,
-             "recent": [{"t": 1.0, "kind": "script", "text": "第一句"},
-                        {"t": 2.0, "kind": "interject", "text": "回你这条"}]}
+    state = {
+        "live": True,
+        "queued": 0,
+        "recent": [
+            {"t": 1.0, "kind": "script", "text": "第一句"},
+            {"t": 2.0, "kind": "interject", "text": "回你这条"},
+        ],
+    }
 
     async def fake_gpu(method, path, room, **kw):
         calls["n"] += 1
@@ -282,7 +287,7 @@ def test_captions_are_public_and_cached(monkeypatch):
     monkeypatch.setattr(live, "_gpu", fake_gpu)
 
     c = TestClient(app)
-    r = c.get("/api/live/captions")          # 未登录也要能拿到
+    r = c.get("/api/live/captions")  # 未登录也要能拿到
     assert r.status_code == 200
     d = r.json()
     assert [x["text"] for x in d["lines"]] == ["第一句", "回你这条"]
@@ -295,11 +300,17 @@ def test_captions_are_public_and_cached(monkeypatch):
 
 def test_captions_do_not_leak_upstream_state(monkeypatch):
     """这条路没有鉴权 —— 别把队列深度、错误、话术全文顺手带出去。"""
+
     async def fake_gpu(method, path, room, **kw):
-        return {"live": True, "queued": 7, "err": "内部错误细节",
-                "lines": ["完整话术第一句", "完整话术第二句"],
-                "person": "source-v3-head", "voice": "xiaoxiao",
-                "recent": [{"t": 1.0, "kind": "script", "text": "只该露这个"}]}
+        return {
+            "live": True,
+            "queued": 7,
+            "err": "内部错误细节",
+            "lines": ["完整话术第一句", "完整话术第二句"],
+            "person": "source-v3-head",
+            "voice": "xiaoxiao",
+            "recent": [{"t": 1.0, "kind": "script", "text": "只该露这个"}],
+        }
 
     monkeypatch.setattr(live, "_gpu", fake_gpu)
     d = TestClient(app).get("/api/live/captions").json()
@@ -330,9 +341,15 @@ def test_captions_survive_an_unreachable_gpu(monkeypatch):
 
 def _rooms_state(monkeypatch, live_rooms=(), extra=None):
     """假上游: 指定哪几间在播。"""
+
     def status_for(r):
-        d = {"live": r in live_rooms, "queued": 0, "title": f"{r} 间",
-             "person": "source-v3-head", "recent": []}
+        d = {
+            "live": r in live_rooms,
+            "queued": 0,
+            "title": f"{r} 间",
+            "person": "source-v3-head",
+            "recent": [],
+        }
         d.update((extra or {}).get(r, {}))
         return d
 
@@ -365,16 +382,18 @@ def test_room_list_is_public(monkeypatch):
     _rooms_state(monkeypatch, live_rooms=("teacher",))
     d = TestClient(app).get("/api/live/rooms").json()
     assert [r["id"] for r in d["rooms"]] == ["official", "teacher", "culture"], "顺序要跟配置一致"
-    assert {r["id"]: r["live"] for r in d["rooms"]} == {
-        "official": False, "teacher": True, "culture": False}
+    assert {r["id"]: r["live"] for r in d["rooms"]} == {"official": False, "teacher": True, "culture": False}
     assert d["max"] == config.LIVE_MAX_CONCURRENT
 
 
 def test_room_list_does_not_leak_scripts(monkeypatch):
     """这条路没有鉴权 —— 话术全文、队列深度不能跟着出去。"""
     monkeypatch.setattr(config, "LIVE_ROOMS", "official")
-    _rooms_state(monkeypatch, live_rooms=(), extra={"official": {
-        "lines": ["还没上线的话术"], "queued": 9, "err": "内部细节"}})
+    _rooms_state(
+        monkeypatch,
+        live_rooms=(),
+        extra={"official": {"lines": ["还没上线的话术"], "queued": 9, "err": "内部细节"}},
+    )
     r = TestClient(app).get("/api/live/rooms").json()["rooms"][0]
     assert set(r) == {"id", "title", "person", "live", "hls"}
 

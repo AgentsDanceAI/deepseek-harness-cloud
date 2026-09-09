@@ -258,7 +258,10 @@ async def _all_status() -> dict[str, dict]:
         return cached  # type: ignore[return-value]
     names = rooms()
     got = await asyncio.gather(*(_room_status(r) for r in names))
-    data = dict(zip(names, got))
+    # strict=True 恒成立: gather 对每个输入返回恰好一个结果, 两者长度必然相等。
+    # 写出来是为了把这个不变量钉住 —— 哪天改成别的收集方式而长度对不上, 这里
+    # 会当场抛, 而不是**静默丢掉最后几个房间**。
+    data = dict(zip(names, got, strict=True))
     _LIVE_CACHE["at"], _LIVE_CACHE["data"] = now, data
     return data
 
@@ -594,7 +597,11 @@ async def captions(room: str = ""):
         # 整块红字好。
         return JSONResponse({"live": False, "lines": []})
     lines = [
-        {"t": float(x.get("t") or 0), "kind": str(x.get("kind") or "script"), "text": str(x.get("text") or "")}
+        {
+            "t": float(x.get("t") or 0),
+            "kind": str(x.get("kind") or "script"),
+            "text": str(x.get("text") or ""),
+        }
         for x in (st.get("recent") or [])
         if str(x.get("text") or "").strip()
     ]
@@ -656,8 +663,9 @@ async def comment(body: dict, user: dict = Depends(resolve_user)):
         )
 
     replied = await _maybe_reply(cid, text, room)
-    return JSONResponse({"ok": True, "id": cid, "room": room, "nick": _nick(user),
-                         "t": now, "replied": replied})
+    return JSONResponse(
+        {"ok": True, "id": cid, "room": room, "nick": _nick(user), "t": now, "replied": replied}
+    )
 
 
 async def _maybe_reply(cid: str, text: str, room: str) -> bool:

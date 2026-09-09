@@ -84,10 +84,9 @@ def test_the_live_page_may_load_blob_media_but_gets_no_extra_openings():
     """
     from fastapi.testclient import TestClient
 
+    from app import live as _live
     from app.main import app
     from tests._signup import signup
-
-    from app import live as _live
 
     with TestClient(app) as c:
         signup(c, "live-csp@example.com")  # 未登录会 303 走掉, 那是张没有 CSP 的空响应
@@ -204,8 +203,13 @@ def test_each_page_has_every_element_its_javascript_reaches_for():
 
     # 正则健全性只对**并集**判一次: 观看页的播放器统共就用四个 id, 按页卡阈值会
     # 把"这一页本来就简单"误判成"正则失效"。
-    _all = (ids_in("live.js") | ids_in("live_console.js") | ids_in("live_rooms.js")
-            | ids_in("live_chat.js") | ids_in("live_captions.js"))
+    _all = (
+        ids_in("live.js")
+        | ids_in("live_console.js")
+        | ids_in("live_rooms.js")
+        | ids_in("live_chat.js")
+        | ids_in("live_captions.js")
+    )
     assert len(_all) >= 15, "正则大概过时了"
 
     admin_mail = "live-ids@example.com"
