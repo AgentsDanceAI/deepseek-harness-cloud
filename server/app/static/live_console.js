@@ -11,6 +11,16 @@
   var loaded = { person: '', voice: '' }, optionsFilled = false;
   var pending = '';   // 'start' = 已经点了开播, 还在等上游真的出流
   var comment = $('lvComment'), mode = $('lvMode'), log = $('lvLog');
+  var roomPick = $('lvRoomPick');
+
+  /* 当前在改哪一间。切换 = 整页重载 —— 表单里每一格 (话术、形象、音色、在播
+     状态、公屏) 都是那一间的, 一个个换比重载更容易漏。 */
+  function room() { return (roomPick && roomPick.value) || ''; }
+  if (roomPick) {
+    roomPick.addEventListener('change', function () {
+      location.href = '/live/console?room=' + encodeURIComponent(roomPick.value);
+    });
+  }
 
   function t(el, k) { return (el.dataset || {})[k] || ''; }
   function lines() {
@@ -102,7 +112,7 @@
   }
 
   function refresh() {
-    return fetch('/api/live/room', { credentials: 'same-origin' })
+    return fetch('/api/live/room?room=' + encodeURIComponent(room()), { credentials: 'same-origin' })
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (d) { if (d) paint(d); if (window.LivePlayer) window.LivePlayer.refresh(); })
       .catch(function () {});
@@ -113,7 +123,7 @@
     return fetch('/api/live/room', {
       method: 'PUT', credentials: 'same-origin',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title: name.value, person: person.value, voice: voice.value, lines: lines() }),
+      body: JSON.stringify({ room: room(), title: name.value, person: person.value, voice: voice.value, lines: lines() }),
     }).then(function (r) {
       if (!r.ok) throw new Error('save');
       say.textContent = t(say, 'saved');
@@ -125,9 +135,27 @@
     busy(true);
     pending = a === 'start' ? 'start' : '';
     say.textContent = t(say, word);
-    return fetch('/api/live/room/' + a, { method: 'POST', credentials: 'same-origin' })
-      .then(function (r) { if (!r.ok) throw new Error(a); })
-      .catch(function () { pending = ''; say.textContent = t(say, 'failed'); })
+    return fetch('/api/live/room/' + a + '?room=' + encodeURIComponent(room()),
+                 { method: 'POST', credentials: 'same-origin' })
+      .then(function (r) {
+        // 409 = 已经开满了。**这不是失败, 是"先去关一间"** —— 报"操作失败"会让人
+        // 反复点, 而点多少次都一样。把在播的房间名列出来, 他才知道去关哪一间。
+        if (r.status === 409) {
+          return r.json().then(function (j) {
+            var d = (j && j.detail) || {};
+            var names = (d.live || []).join('、');
+            pending = '';
+            say.textContent = t(say, 'too_many').replace('{max}', d.max).replace('{rooms}', names);
+            throw new Error('too_many');
+          });
+        }
+        if (!r.ok) throw new Error(a);
+      })
+      .catch(function (e) {
+        pending = '';
+        if (e && e.message === 'too_many') return;   // 上面已经写好提示了
+        say.textContent = t(say, 'failed');
+      })
       .then(function () { busy(false); return refresh(); })
       .then(function () { if (pending === 'start') pollUntilLive(); });
   }
@@ -155,7 +183,7 @@
     fetch('/api/live/generate', {
       method: 'POST', credentials: 'same-origin',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title: topic }),
+      body: JSON.stringify({ room: room(), title: topic }),
     }).then(function (r) { if (!r.ok) throw new Error('gen'); return r.json(); })
       .then(function (d) {
         // 只填进框里, **不保存** —— 让人先看一眼。存不存由他按"保存"。
@@ -176,7 +204,7 @@
     fetch('/api/live/say', {
       method: 'POST', credentials: 'same-origin',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: text, mode: mode.value }),
+      body: JSON.stringify({ room: room(), text: text, mode: mode.value }),
     }).then(function (r) { if (!r.ok) throw new Error('say'); return r.json(); })
       .then(function (d) {
         comment.value = '';

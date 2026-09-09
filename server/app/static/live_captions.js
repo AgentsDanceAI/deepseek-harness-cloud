@@ -10,6 +10,13 @@
  *     一百个观众打到 GPU 上的仍然是每两秒一次。
  */
 window.LiveCaptions = (function () {
+
+  /* 当前是哪一间。写在 badge 的 data-room 上 —— 这一页所有传给后端的字符串都
+     从这里取, 不从 URL 现解: URL 是浏览器给的, 而这个是服务端渲染进来的。 */
+  function room() {
+    var b = document.getElementById('lvBadge');
+    return (b && b.dataset.room) || '';
+  }
   var video = document.getElementById('lvVideo');
   var stage = video && video.parentNode;
   var box = document.getElementById('lvCaps');
@@ -44,7 +51,7 @@ window.LiveCaptions = (function () {
   }
 
   function pull() {
-    return fetch('/api/live/captions', { credentials: 'same-origin' })
+    return fetch('/api/live/captions?room=' + encodeURIComponent(room()), { credentials: 'same-origin' })
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (d) {
         if (!d) return;

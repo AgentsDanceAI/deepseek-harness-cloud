@@ -192,7 +192,9 @@ def test_each_page_has_every_element_its_javascript_reaches_for():
 
     # 正则健全性只对**并集**判一次: 观看页的播放器统共就用四个 id, 按页卡阈值会
     # 把"这一页本来就简单"误判成"正则失效"。
-    assert len(ids_in("live.js") | ids_in("live_console.js")) >= 15, "正则大概过时了"
+    _all = (ids_in("live.js") | ids_in("live_console.js") | ids_in("live_rooms.js")
+            | ids_in("live_chat.js") | ids_in("live_captions.js"))
+    assert len(_all) >= 15, "正则大概过时了"
 
     admin_mail = "live-ids@example.com"
     old = list(cfg.ADMIN_EMAILS)
@@ -200,15 +202,37 @@ def test_each_page_has_every_element_its_javascript_reaches_for():
     try:
         with TestClient(app) as c:
             signup(c, admin_mail)
-            pages = {"/live": ["live.js"], "/live/console": ["live.js", "live_console.js"]}
-            for url, scripts in pages.items():
+            # 2026-09-09 拆成多间: /live 变成列表页 (只有 live_rooms.js),
+            # 播放器搬到 /live/{room}。这张表漂了正是这条测试要防的东西 ——
+            # 上一次它就是这么红的。
+            from app import live as _live
+
+            first = _live.rooms()[0]
+            pages = {
+                "/live": (["live_rooms.js"], set()),
+                f"/live/{first}": (["live.js", "live_chat.js", "live_captions.js"], set()),
+                # live_chat.js 干两件事: 弹幕渲染 + 观众发言框。控制台只要前者 ——
+                # 管理员那一栏是自己的"互动"面板 (能选复读/问答), 不是观众公屏。
+                # 这三个 id 在控制台上**故意**没有, 脚本里也各自 if 兜住了。
+                # 列在这里而不是放宽整条规则: 例外要写下来, 否则下次真漂了没人知道。
+                "/live/console": (
+                    ["live.js", "live_chat.js", "live_captions.js", "live_console.js"],
+                    {"lvSayBox", "lvSayBtn", "lvSayHint"},
+                ),
+            }
+            for url, (scripts, optional) in pages.items():
                 html = c.get(url).text
                 want = set()
                 for js in scripts:
                     want |= ids_in(js)
-                missing = [i for i in sorted(want) if f'id="{i}"' not in html]
+                missing = [i for i in sorted(want - optional) if f'id="{i}"' not in html]
                 assert not missing, f"{url} 的 JS 找这些 id, 模板里没有: {missing}"
-                assert "/static/hls.min.js" in html, f"{url} 少了 hls.js"
+                stale = [i for i in sorted(optional) if f'id="{i}"' in html]
+                assert not stale, f"{url} 的例外名单过期了, 这些 id 其实有: {stale}"
+                # hls.js 只有**真的放视频**的页面才需要。列表页没有播放器,
+                # 硬要求它带上等于逼着每个页面都加载一个 400KB 的解码库。
+                if "live.js" in scripts:
+                    assert "/static/hls.min.js" in html, f"{url} 少了 hls.js"
                 for js in scripts:
                     assert f"/static/{js}" in html, f"{url} 少了 {js}"
     finally:
