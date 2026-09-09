@@ -27,13 +27,16 @@
           <linearGradient id="lg" x1="0" y1="0" x2="1" y2="1">
             <stop offset="0" stop-color="#4a8cf0"/><stop offset="1" stop-color="#1d52ad"/>
           </linearGradient>
+          <mask id="lg-bag">
+            <rect width="32" height="32" fill="#000"/>
+            <path d="M12.6 12.2a3.4 3.4 0 0 1 6.8 0" fill="none" stroke="#fff" stroke-width="1.8"/>
+            <rect x="8" y="12.2" width="16" height="12" rx="1.8" fill="#fff"/>
+            <circle cx="12.7" cy="16.6" r="1.25"/><circle cx="19.3" cy="16.6" r="1.25"/>
+            <circle cx="12.7" cy="20.4" r="1.25"/><circle cx="19.3" cy="20.4" r="1.25"/>
+          </mask>
         </defs>
         <rect x="1.5" y="1.5" width="29" height="29" rx="9" fill="url(#lg)"/>
-        <circle cx="16" cy="16" r="3.1" fill="#fff"/>
-        <path d="M22.4 9.6a9 9 0 0 1 0 12.8" fill="none" stroke="#fff" stroke-width="2.1" stroke-linecap="round" opacity=".92"/>
-        <path d="M9.6 22.4a9 9 0 0 1 0-12.8" fill="none" stroke="#fff" stroke-width="2.1" stroke-linecap="round" opacity=".92"/>
-        <path d="M26 6a14 14 0 0 1 0 20" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" opacity=".45"/>
-        <path d="M6 26a14 14 0 0 1 0-20" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" opacity=".45"/>
+        <rect width="32" height="32" fill="#fff" mask="url(#lg-bag)"/>
       </svg>
       <span class="brand-name">AI Store</span>
     </a>

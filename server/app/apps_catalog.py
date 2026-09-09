@@ -39,7 +39,7 @@ class AppEntry:
 # fmt: off
 CATALOG: tuple[AppEntry, ...] = (
     AppEntry(
-        "dsh", "DSH Agent", "deepseek",
+        "dsh", "DeepSeek Harness", "deepseek",
         '<path d="M17.5 19a4.5 4.5 0 1 0-.9-8.9 6 6 0 1 0-11.1 3.4"/><path d="M6 19h11.5"/>',
     ),
     # Agents Team 顶掉了 JupyterLab (老板 2026-08-31 拍板): 这页是 4 列网格,
@@ -107,7 +107,7 @@ CATALOG: tuple[AppEntry, ...] = (
     # 数字人反过来是我们最独特的一块: 实时口型 + 用户自定义形象 + 定制音色,
     # 零件全在自己手上 (SoulX-FlashHead 跑在我们的 GPU 节点上)。
     AppEntry(
-        "avatar", "数字人", "avatar",
+        "avatar", "数字人视频", "avatar",
         '<circle cx="12" cy="8" r="4"/><path d="M4.5 20a7.5 7.5 0 0 1 15 0"/>'
         '<path d="M19 5.5a5 5 0 0 1 0 5M21.5 3.5a8.5 8.5 0 0 1 0 9"/>',
         href="/avatar",
@@ -127,7 +127,7 @@ CATALOG: tuple[AppEntry, ...] = (
     # pi 顶掉了 OpenHands (老板 2026-09-02): 盘点里它是最大的单镜像 (5.81GB)、
     # 第四个写代码的 agent、也是最难部署的一个。pi 的前端用社区的 pi-web-ui。
     AppEntry(
-        "pi", "pi", "coder",
+        "pi", "Pi Agent", "coder",
         '<path d="M4 6h16"/><path d="M8 6v12M16 6v12"/><path d="M5 18h6M13 18h6"/>',
     ),
     AppEntry(
