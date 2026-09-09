@@ -215,3 +215,44 @@ def test_nick_never_leaks_the_email(monkeypatch):
     _client("someone.private@t.local").post("/api/live/comment", json={"text": "嗨"})
     nick = TestClient(app).get("/api/live/comments").json()["items"][0]["nick"]
     assert "@" not in nick and "someone.private" not in nick
+
+
+# ── 禁词闸 ───────────────────────────────────────────────────────────────
+# 2026-09-09 上线第一条实测就翻车: 提示词第 4 条白纸黑字写着"不要编造优惠",
+# 她照样说了"今天直播间有专属优惠"。人已经不在环里了 (自动回每一条), 所以
+# 提示词管不住的东西必须在服务端拦。
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        "今天直播间有专属优惠，想了解的可以关注一下。",
+        "这款现在有现货，下单就给您发货。",
+        "全网最低价，放心拍。",
+        "我保证这个有效果。",
+        "买一送一，还包邮呢。",
+    ],
+)
+def test_fabricated_claims_never_reach_the_stream(monkeypatch, bad):
+    up = Upstream().install(monkeypatch, reply=bad)
+    r = _client(f"c{abs(hash(bad)) % 9999}@t.local").post("/api/live/comment", json={"text": "问一句"})
+    assert r.status_code == 200
+    assert up.said == [live._SAFE_FALLBACK], f"编造的话播出去了: {up.said}"
+
+
+def test_a_clean_reply_passes_through(monkeypatch):
+    """闸不能宽到把正常回答也拦了 —— 那样她永远只会说那一句兜底。"""
+    ok = "我是数字人主播，不是真人。您想了解哪一款，我给您说说它能做什么。"
+    up = Upstream().install(monkeypatch, reply=ok)
+    _client("clean@t.local").post("/api/live/comment", json={"text": "你是真人吗"})
+    assert up.said == [ok]
+
+
+def test_the_admin_path_is_not_gagged(monkeypatch):
+    """管理员自己插播不过这道闸 —— 话是他写的、他负责, 而运营本来就要提活动。"""
+    up = Upstream().install(monkeypatch)
+    monkeypatch.setattr(config, "ADMIN_EMAILS", ["boss3@t.local"])
+    boss = _client("boss3@t.local")
+    r = boss.post("/api/live/say", json={"text": "今天全场八折", "mode": "echo"})
+    assert r.status_code == 200
+    assert up.said == ["今天全场八折"]

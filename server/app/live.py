@@ -309,6 +309,30 @@ _REPLY = (
 )
 
 
+#: 自动回评里**不许出现**的字眼。提示词已经写了"不要编造价格/优惠/库存/功效",
+#: 但 2026-09-09 上线第一条实测就翻车 —— 她自己加了句"今天直播间有专属优惠"。
+#: 提示词管不住的东西, 在服务端拦。
+#:
+#: 这条线只管**自动回评**: 话术是人写完过目再保存的, 里面提活动是运营的决定;
+#: 而自动回评没有人在环里, 说出去就是虚假宣传, 是要担责的那种错。
+_FORBIDDEN = re.compile(
+    r"优惠|折扣|打折|券|红包|秒杀|限时|包邮|买一送|赠品|免费送|中奖|抽奖"
+    r"|库存|现货|发货|包退|假一赔|正品保证|保真"
+    r"|销量第一|全网最低|最便宜|最低价|史低"
+    r"|保证|承诺|包治|疗效|治疗|根治|药效"
+)
+
+#: 拦下来之后说什么。**不能沉默** —— 观众发了条评论, 她一声不吭比说错更像坏了。
+#: 这句话是安全的: 只把问题交给客服, 不给任何承诺。
+_SAFE_FALLBACK = "这个我这儿不敢替您打包票，稍后让客服同学给您准确答复哈。"
+
+
+def _claims(text: str) -> str:
+    """命中的那个词, 没有则空串。给日志用 —— 光知道"被拦了"排不了错。"""
+    m = _FORBIDDEN.search(text or "")
+    return m.group(0) if m else ""
+
+
 async def _compose_reply(comment: str, bill_to: str, device_id: str = "") -> str:
     """让模型按 `_REPLY` 的口径回一句, 并把账记在 bill_to 头上。
 
@@ -506,6 +530,12 @@ async def _maybe_reply(cid: str, text: str) -> bool:
     _LAST_REPLY_AT = now      # 先占位再去调模型 —— 慢的那几秒里别放第二条进来
     try:
         spoken = await _compose_reply(text, _bill_account())
+        hit = _claims(spoken)
+        if hit:
+            # 不重试: 同一个提示词刚说错过一次, 再抽一次多半还是错, 而每抽一次都
+            # 在花钱, 观众还在等。直接换成安全的那句。
+            log.warning("[live] 自动回评命中禁词 %r, 已换成安全兜底: %s", hit, spoken[:60])
+            spoken = _SAFE_FALLBACK
         await _gpu(
             "POST", f"/rooms/{config.LIVE_ROOM}/interject", config.LIVE_ROOM, json={"text": spoken}
         )
