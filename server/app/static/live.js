@@ -65,7 +65,15 @@ window.LivePlayer = (function () {
     playingUrl = url;
     if (hls) { hls.destroy(); hls = null; }
     if (v.canPlayType('application/vnd.apple.mpegurl')) {   // Safari 原生放 HLS
-      v.src = url; tryPlay(); return;
+      // Safari 自己挑直播位置, 通常只留三个目标时长 —— 1 秒一片时就是 3 秒跑道,
+      // 而生成侧是 0.9×, 三秒钟就见底。hls.js 那边靠 liveSyncDurationCount 拉开,
+      // 原生这条没有那个旋钮, 只能起播后自己往回退。
+      v.src = url;
+      v.addEventListener('loadedmetadata', function once() {
+        v.removeEventListener('loadedmetadata', once);
+        seekBehindLive();
+      });
+      tryPlay(); return;
     }
     if (!window.Hls || !window.Hls.isSupported()) { note(t('unsupported')); return; }
     hls = new window.Hls({
@@ -73,9 +81,15 @@ window.LivePlayer = (function () {
       // 让它按低延迟那套去贴直播边缘, 落后一点就纠正 —— 而纠正的方式是**跳**。
       lowLatencyMode: false,
       // 切片是 1 秒一片, 所以这里的数字就是缓冲的秒数。
-      // 6 而不是 4: 生成侧每句之间有约 4 秒的空档 (TTS 预热那段不出帧), 缓冲少于
-      // 它就会反复见底 —— 而见底的表现正是卡顿和黑屏。用 2 秒延迟换不卡。
-      liveSyncDurationCount: 6,
+      //
+      // 6 -> 12 (2026-09-09): 生成侧实测只有 **0.9× 实时** —— 低于 1.0 时缓冲必然
+      // 被慢慢抽干, 缓冲多大只决定"多久见底": 6 秒缓冲约 1 分钟见底, 12 秒约 2 分钟
+      // (见底速率 = 1 - 0.9 = 0.1×)。创始人给领导演示时就是看了一分多钟卡住的。
+      // 代价是观众晚 6 秒看到 —— 这一页本来就不是互动视频 (回一条评论要十几秒),
+      // 6 秒换一倍的续航是划算的。
+      // ⚠️ 治本是让产出 ≥ 1.0×, 那在 avatar 侧 (每句串行付 TTS, QUEUE_AHEAD 没
+      // 实现重叠 —— 实测第 N+1 句的 begin 与第 N 句的 end 同刻)。这里只是拖时间。
+      liveSyncDurationCount: 12,
       liveMaxLatencyDurationCount: 20,   // 落后 20 秒才算真掉队
       // 关键的一条: 落后了**加速追**(最多 1.1 倍), 而不是跳过去。
       // 跳 = 缓冲被清 = 黑一下; 加速 10% 听感上几乎察觉不到。
@@ -151,6 +165,17 @@ window.LivePlayer = (function () {
    * 的代价是画面永远停在那儿。
    */
   var STUCK_TICKS = 6;            // 每秒一拍; 6 秒不动才算卡, 短了会误伤正常抖动
+  //: 恢复时退到直播边缘**之后**这么多秒。贴着边缘恢复的话, 0.9× 的产出几秒钟就
+  //: 又把它抽干, 于是变成每隔几秒跳一次 —— 比一直卡着还难看。
+  var BEHIND_LIVE = 10;
+
+  function seekBehindLive() {
+    if (!v || !v.seekable || !v.seekable.length) return;
+    var edge = v.seekable.end(v.seekable.length - 1);
+    if (!isFinite(edge)) return;
+    var want = Math.max(0, edge - BEHIND_LIVE);
+    if (want > v.currentTime) v.currentTime = want;
+  }
   var lastT = -1, stuckFor = 0;
   setInterval(function () {
     if (!v || v.paused || !playingUrl) { stuckFor = 0; lastT = -1; return; }
@@ -163,10 +188,10 @@ window.LivePlayer = (function () {
         hls.startLoad();
         var p = hls.liveSyncPosition;
         if (p && isFinite(p)) v.currentTime = p;
-      } else if (v.seekable && v.seekable.length) {
+      } else {
         // Safari 原生放 HLS 时 hls 恒为 null —— 以前这条路**完全没有恢复手段**,
         // 而创始人用的就是 Mac。
-        v.currentTime = Math.max(0, v.seekable.end(v.seekable.length - 1) - 1);
+        seekBehindLive();
       }
       tryPlay();
     } catch (e) { /* 跳失败就等下一拍再来 */ }

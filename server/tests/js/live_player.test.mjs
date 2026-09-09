@@ -201,8 +201,20 @@ await check("Safari 原生那条路也要能恢复", async () => {
   dom.video.currentTime = 3;
   dom.video.seekable = { length: 1, end: () => 300 };
   dom.window.__tick(1000, 8);
-  assert.ok(dom.video.currentTime > 290,
-    `Safari 上没恢复 (currentTime=${dom.video.currentTime}) —— 而创始人用的就是 Mac`);
+  // 退到边缘**之后** 10 秒, 不是贴着边缘 —— 贴着边恢复的话 0.9× 的产出几秒钟
+  // 就又抽干, 变成每几秒跳一次, 比一直卡着还难看。
+  assert.ok(dom.video.currentTime > 280 && dom.video.currentTime <= 291,
+    `Safari 恢复位置不对 (currentTime=${dom.video.currentTime}), 应该在 edge-10 附近`);
+});
+
+await check("缓冲配到 12 秒 —— 0.9× 产出下这决定多久见底", () => {
+  const src = readFileSync(SRC, "utf8");
+  const m = /liveSyncDurationCount:\s*(\d+)/.exec(src);
+  assert.ok(m, "找不到 liveSyncDurationCount");
+  const n = +m[1];
+  assert.ok(n >= 12, `缓冲只有 ${n} 秒 —— 0.9× 产出下约 ${(n / 0.1 / 60).toFixed(1)} 分钟就见底`);
+  const mx = /liveMaxLatencyDurationCount:\s*(\d+)/.exec(src);
+  assert.ok(mx && +mx[1] > n, "liveMaxLatencyDurationCount 必须大于 liveSyncDurationCount");
 });
 
 await check("正常播放时绝不乱跳", async () => {
