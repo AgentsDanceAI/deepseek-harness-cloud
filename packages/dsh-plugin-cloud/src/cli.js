@@ -27,11 +27,11 @@ Commands:
   logout   delete the locally stored token
 
 Environment:
-  DSH_CLOUD_BASE   service base URL (default https://dshcloud.online)
+  DSH_CLOUD_BASE   service base URL (default https://aistore.best)
   DSH_HOME         DeepSeek Harness home (default ~/.dsh)
 
 DSH Cloud is a commercial hosted service by AgentsDance AI.
-New accounts include 500 free credits. https://dshcloud.online`
+New accounts include 500 free credits. https://aistore.best`
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
@@ -123,7 +123,7 @@ async function status() {
 
 function logout() {
   console.log(clearAuthSync() ? 'local token deleted' : 'nothing to delete')
-  console.log('to revoke the device server-side too: https://dshcloud.online/ → devices')
+  console.log('to revoke the device server-side too: https://aistore.best/ → devices')
 }
 
 const command = process.argv[2]

@@ -13,7 +13,7 @@ RUN_ID="${1:?usage: publish-installers.sh <desktop-run-id> [android-run-id]}"
 ANDROID_RUN_ID="${2:-}"
 REPO_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 ENVFILE="$REPO_DIR/deploy/prod/.env"
-BASE="https://dshcloud.online"
+BASE="https://aistore.best"
 
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT

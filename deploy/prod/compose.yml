@@ -1,4 +1,4 @@
-# dshcloud.online deployment — DHC server + scoped docker proxy (cloud workspaces).
+# aistore.best deployment — DHC server + scoped docker proxy (cloud workspaces).
 #
 # 项目名与卷名都写死在下面, 不再从目录名派生。以前它们是派生的, 于是"重命名
 # 目录"这件小事会让 compose 去找一个不存在的 <目录名>_dhc-pgdata, 找不到就
@@ -8,7 +8,7 @@
 # The host's 80/443 and the domains' TLS/Cloudflare origin are already owned
 # by the existing the shared Caddy. So we do NOT run our own Caddy here:
 # we run the app on shared docker networks, connect that Caddy to them, and
-# point the dshcloud.online / work.dshcloud.online site blocks at us
+# point the aistore.best / work.aistore.best site blocks at us
 # (上一代品牌旧域名的兼容层已于 2026-08-17 撤除。)
 #
 #   docker network create dhc-net 2>/dev/null || true

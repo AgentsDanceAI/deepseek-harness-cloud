@@ -4,7 +4,7 @@ English | [简体中文](editions.zh-CN.md)
 
 The Community Edition is source-available under the
 [DSH Cloud Community License 1.0](../LICENSE). DSH Cloud Hosted is the operated
-subscription at `dshcloud.online`. Commercial authorization is available for
+subscription at `aistore.best`. Commercial authorization is available for
 uses outside the Community License.
 
 ## Comparison
@@ -12,15 +12,15 @@ uses outside the Community License.
 | Area | Community Edition | DSH Cloud Hosted | Commercial authorization |
 |---|---|---|---|
 | Use | Single-organization internal use, self-hosting, development, evaluation, and API integrations | Managed service for individual and team subscribers | Managed multi-tenant services, rebranding of official frontends, or negotiated rights |
-| Start | Docker/Compose, npm/npx, or uv/uvx | [Open a managed workspace](https://dshcloud.online/login?next=%2Fwork) | Contact `support@agentsdance.ai` |
+| Start | Docker/Compose, npm/npx, or uv/uvx | [Open a managed workspace](https://aistore.best/login?next=%2Fwork) | Contact `support@agentsdance.ai` |
 | License | DSH Cloud Community License 1.0 | Hosted terms govern the service | A signed commercial agreement |
 | Models | Operator chooses and pays the upstream | Managed model access and plan allowances | Provider and governance integrations may be scoped |
 | Operations | Operator owns TLS, identity, email, data, backups, monitoring, and upgrades | Managed capacity, upgrades, backups, monitoring, billing operations, and incident response | Scope and service commitments are contractual |
 | Workspaces | Optional and off by default; operator reviews the trust model | Managed workspace capacity and storage | Private networking, HA, or compliance options may be scoped |
 | Billing | Optional provider integrations controlled by the operator | Monthly or annual prepaid term; no automatic renewal | Contract-specific |
 
-- [Individual Hosted plans](https://dshcloud.online/pricing#plans)
-- [Team Hosted plans](https://dshcloud.online/pricing#team)
+- [Individual Hosted plans](https://aistore.best/pricing#plans)
+- [Team Hosted plans](https://aistore.best/pricing#team)
 - [Support routes](../SUPPORT.md)
 - [License guide](../LICENSING.md)
 

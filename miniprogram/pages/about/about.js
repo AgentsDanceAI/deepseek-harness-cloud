@@ -3,7 +3,7 @@
 Page({
   copySite() {
     wx.setClipboardData({
-      data: 'https://dshcloud.online',
+      data: 'https://aistore.best',
       success() { wx.showToast({ title: '官网地址已复制', icon: 'none' }) },
     })
   },

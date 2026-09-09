@@ -407,9 +407,9 @@ def _dify_stack() -> tuple[Sidecar, ...]:
             ("CLUSTER_HOSTNAME", "node1"),
             ("AUTHENTICATION_APIKEY_ENABLED", "true"),
             ("AUTHENTICATION_APIKEY_ALLOWED_KEYS", _DIFY_WEAVIATE_KEY),
-            ("AUTHENTICATION_APIKEY_USERS", "dsh@dshcloud.online"),
+            ("AUTHENTICATION_APIKEY_USERS", "dsh@aistore.best"),
             ("AUTHORIZATION_ADMINLIST_ENABLED", "true"),
-            ("AUTHORIZATION_ADMINLIST_USERS", "dsh@dshcloud.online"),
+            ("AUTHORIZATION_ADMINLIST_USERS", "dsh@aistore.best"),
         ), mounts=(("dify/weaviate", "/var/lib/weaviate"),)),
     )
 # fmt: on
@@ -1160,7 +1160,7 @@ _COZE_APIHOST_ANCHOR = "proxy_set_header Host \\$http_host;"
 _COZE_AUTOLOGIN = r"""#!/bin/sh
 # 由 products.py 下发。工作台自己登一次 Coze, 把会话注入到上游请求里。
 PWF=/root/.coze-autologin
-EM=owner@dshcloud.online
+EM=owner@aistore.best
 API=http://127.0.0.1:8888/api/passport/web/email
 [ -s "$PWF" ] || {
   printf 'Dsh%s1a\n' "$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 20)" > "$PWF"
@@ -1630,7 +1630,7 @@ while [ "$n" -lt 120 ]; do
     # 向导那一步要的 git 身份。/root 挂的是 NAS, 所以只在缺失时写 —— 用户自己
     # 改过就不该被下次启动覆盖。
     if [ ! -f /root/.gitconfig ]; then
-      printf '[user]\n\tname = DSH Cloud Workspace\n\temail = workspace@dshcloud.online\n' > /root/.gitconfig
+      printf '[user]\n\tname = DSH Cloud Workspace\n\temail = workspace@aistore.best\n' > /root/.gitconfig
     fi
     # 一个项目都没有的话就把 /workspace 建成默认项目。不建的话用户进来看到的是
     # "No projects found — Run Claude CLI in a project directory to get started",
@@ -3285,7 +3285,7 @@ def env_for(product_id: str, token: str, secret: str = "") -> dict[str, str]:
         return {
             # 用 admin@ 而不是 Coze 那边的 owner@: Dify 单租户, setup 建的就是这个
             # 账号, 没有第二个可建 —— 所以这里必须与既有账号对齐, 不能另起一个。
-            "DSH_AUTOLOGIN_EMAIL": "admin@dshcloud.online",
+            "DSH_AUTOLOGIN_EMAIL": "admin@aistore.best",
             "DSH_AUTOLOGIN_PASSWORD": autologin_password(secret),
             # 用来清掉 Dify 那把 24 小时的登录锁 (见 _DIFY_AUTOLOGIN 的 unlock)。
             "DSH_REDIS_PASSWORD": _DIFY_REDIS_PASSWORD,

@@ -4,7 +4,7 @@ import type { CapacitorConfig } from "@capacitor/cli";
 // www/index.html is the local startup fallback; authentication uses the same
 // site-scoped session cookies as the browser client.
 
-const liveUrl = process.env.CAPACITOR_LIVE_URL?.trim() || "https://dshcloud.online";
+const liveUrl = process.env.CAPACITOR_LIVE_URL?.trim() || "https://aistore.best";
 
 const config: CapacitorConfig = {
   appId: "ai.agentsdance.dshcloud.app",
@@ -16,7 +16,7 @@ const config: CapacitorConfig = {
     url: liveUrl,
     cleartext: liveUrl.startsWith("http://"),
     // Keep first-party navigation in-app; external destinations use the system browser.
-    allowNavigation: ["dshcloud.online", "*.dshcloud.online"],
+    allowNavigation: ["aistore.best", "*.aistore.best"],
   },
   ios: {
     preferredContentMode: "mobile",

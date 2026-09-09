@@ -17,14 +17,14 @@ and has no response-time commitment unless a separate agreement says otherwise.
 
 ## DSH Cloud Hosted
 
-[DSH Cloud Hosted](https://dshcloud.online/login?next=%2Fwork) is a managed
+[DSH Cloud Hosted](https://aistore.best/login?next=%2Fwork) is a managed
 subscription service. Individual and team offerings include managed model access,
 workspace capacity, upgrades, monitoring, backups, account support, and plan
 allowances. Current public offers are paid once for the selected monthly or annual
 term and **do not renew automatically**.
 
-- [Individual plans](https://dshcloud.online/pricing#plans)
-- [Team plans](https://dshcloud.online/pricing#team)
+- [Individual plans](https://aistore.best/pricing#plans)
+- [Team plans](https://aistore.best/pricing#team)
 
 The checkout page and Hosted terms control a specific purchase. Do not include
 payment card data or credentials in a support request.

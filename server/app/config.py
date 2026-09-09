@@ -224,7 +224,7 @@ WORK_DOMAIN = _env("WORK_DOMAIN", "")  # dsh UI host; empty = workspace off (sel
 # 本部署缺的能力 (没配桌面安装包 / 没开云工作台), 页面挂出官方托管版作为去处。
 # 这是有意的引流, 也是对访客有用的信息 —— 但必须**明说那是托管版**, 而且自部署
 # 方可以整条关掉 (置空)。绝不做成"点了以为是自己的服务、其实到了别人那里"。
-HOSTED_SITE = _env("HOSTED_SITE", "https://dshcloud.online").rstrip("/")
+HOSTED_SITE = _env("HOSTED_SITE", "https://aistore.best").rstrip("/")
 WORK_IMAGE = _env("WORK_IMAGE", "dsh-local:rc8")
 WORK_NETWORK = _env("WORK_NETWORK", "dshwork-net")
 DOCKER_PROXY_URL = _env("DOCKER_PROXY_URL", "http://dhc-docker-proxy:2375")
@@ -366,7 +366,7 @@ WORK_IDLE_STOP_MIN = _env_int("WORK_IDLE_STOP_MIN", 15)
 WORK_TAB_GONE_MIN = _env_int("WORK_TAB_GONE_MIN", 3)
 # ComfyUI 的冷启动比 dsh 贵得多 (实测 ~26 秒), 所以它的标签页宽限期单列。
 COMFY_TAB_GRACE_MIN = _env_int("COMFY_TAB_GRACE_MIN", 10)
-# Open Design (nexu-io/open-design) —— 云空间的设计坑位 (design.dshcloud.online)。
+# Open Design (nexu-io/open-design) —— 云空间的设计坑位 (design.aistore.best)。
 # Penpot 曾短暂占过这个位, 老板 2026-08-29 拍板下架、域名让给 open-design。
 OPEN_DESIGN_DOMAIN = _env("OPEN_DESIGN_DOMAIN", "")
 OPEN_DESIGN_IMAGE_REF = _env("OPEN_DESIGN_IMAGE_REF", "")
@@ -661,7 +661,7 @@ WORK_OOM_SCORE_ADJ = _env_int("WORK_OOM_SCORE_ADJ", 800)
 WORK_CPUS = _env_float("WORK_CPUS", 1.0)
 WORK_START_TIMEOUT_S = _env_float("WORK_START_TIMEOUT_S", 45.0)
 
-# Session cookie domain: set to ".dshcloud.online" so the browser sends the
+# Session cookie domain: set to ".aistore.best" so the browser sends the
 # session to the work subdomain too. Empty = host-only (single-domain deploys).
 COOKIE_DOMAIN = _env("COOKIE_DOMAIN", "")
 

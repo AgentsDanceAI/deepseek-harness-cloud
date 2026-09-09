@@ -16,7 +16,7 @@ import time
 import urllib.error
 import urllib.request
 
-BASE = os.environ.get("DSH_CLOUD_VIDEO_BASE", "https://dshcloud.online/llm/v1").rstrip("/")
+BASE = os.environ.get("DSH_CLOUD_VIDEO_BASE", "https://aistore.best/llm/v1").rstrip("/")
 TOKEN = os.environ.get("DSH_CLOUD_TOKEN", "")
 POLL_TIMEOUT_S = float(os.environ.get("DSH_CLOUD_VIDEO_TIMEOUT_S", "600"))
 POLL_INTERVAL_S = float(os.environ.get("DSH_CLOUD_VIDEO_POLL_S", "3"))
@@ -26,7 +26,7 @@ POLL_INTERVAL_S = float(os.environ.get("DSH_CLOUD_VIDEO_POLL_S", "3"))
 # "Python-urllib/3.x" 会直接吃 403 `error code: 1010`, 报文里不提 UA, 只说
 # Forbidden。2026-08-27 实测: 默认 UA 403, 换成下面这个就正常走到网关。
 # 这条在桩网关上永远测不出来 (桩前面没有 CDN), 所以桩改成校验 UA 存在。
-_USER_AGENT = "DSHCloud-ComfyUI/1.0 (+https://dshcloud.online)"
+_USER_AGENT = "DSHCloud-ComfyUI/1.0 (+https://aistore.best)"
 
 
 def _request(method: str, url: str, payload: dict | None = None) -> dict:

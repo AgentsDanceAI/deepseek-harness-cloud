@@ -44,14 +44,14 @@ import urllib.request
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-GATEWAY = os.environ.get("DSH_CLOUD_VIDEO_BASE", "https://dshcloud.online/llm/v1").rstrip("/")
+GATEWAY = os.environ.get("DSH_CLOUD_VIDEO_BASE", "https://aistore.best/llm/v1").rstrip("/")
 TOKEN = os.environ.get("DSH_CLOUD_TOKEN", "")
 PORT = int(os.environ.get("DSH_CLOUD_SHIM_PORT", "8199"))
 # 生成的图先落盘再以 URL 交出去 —— 官方节点按 data[0]["url"] 取图, 而我们的网关
 # 返回的是 b64_json。
 BLOBS = pathlib.Path(os.environ.get("DSH_CLOUD_SHIM_BLOBS", "/tmp/dsh-shim-blobs"))
 # 与节点里那份同源: 网关前面有 Cloudflare, 按 UA 拦机器人, urllib 默认 UA 吃 403。
-USER_AGENT = "DSHCloud-ComfyUI/1.0 (+https://dshcloud.online)"
+USER_AGENT = "DSHCloud-ComfyUI/1.0 (+https://aistore.best)"
 
 _lock = threading.Lock()
 

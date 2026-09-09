@@ -157,7 +157,7 @@ def _products(only: list[str]) -> list[dict]:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("products", nargs="*", help="只检查这几个产品 id")
-    ap.add_argument("--email", default="qa-verify@dshcloud.online", help="用哪个账号的会话")
+    ap.add_argument("--email", default="qa-verify@aistore.best", help="用哪个账号的会话")
     ap.add_argument("--out", default="/tmp/dsh-visual", help="截图与报告放哪")
     ap.add_argument("--emit-spec", help="把规格写到这个目录 (在 dhc-server 容器里跑)")
     ap.add_argument("--read-results", help="从这个目录读浏览器结果并判读")

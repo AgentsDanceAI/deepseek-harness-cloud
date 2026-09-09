@@ -239,7 +239,7 @@ PY
 echo "    desktop_version -> $ver"
 
 # 端到端确认: 直接问线上那个端点, 它同时验证了写库、SemVer 格式和路由。
-live="$(curl -fsS --max-time 20 https://dshcloud.online/api/desktop/version || true)"
+live="$(curl -fsS --max-time 20 https://aistore.best/api/desktop/version || true)"
 case "$live" in
   *"\"$ver\""*) echo "    /api/desktop/version 已返回 $ver" ;;
   *) echo "    !! /api/desktop/version 返回的是 '${live:-<空>}', 不是 $ver。" >&2
@@ -250,4 +250,4 @@ esac
 echo
 echo "Done. The site now redirects downloads to R2; /releases stays as a fallback"
 echo "(and remains the only path for self-hosters). Check the counter still moves:"
-echo "  curl -sI https://dshcloud.online/dl/mac-arm64 | grep -i location"
+echo "  curl -sI https://aistore.best/dl/mac-arm64 | grep -i location"

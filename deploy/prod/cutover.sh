@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# dshcloud.online cutover: bring up DHC and (re)write the DHC site blocks in the
-# shared Caddy (dshcloud.online + work.dshcloud.online 的站点块)。
+# aistore.best cutover: bring up DHC and (re)write the DHC site blocks in the
+# shared Caddy (aistore.best + work.aistore.best 的站点块)。
 # Idempotent; safe to re-run. Run from the repo root.
 #
 #   bash deploy/prod/cutover.sh
@@ -47,21 +47,48 @@ done
 echo "==> 5/6 ensure DHC site blocks in the shared Caddyfile (dshcloud-v3, backup kept)"
 # Declarative + idempotent: strip every previously managed block (all
 # generations), then append the current set:
-#   dshcloud.online        -> dhc-server (primary console/site)
-#   www.dshcloud.online    -> 308 to apex
-#   work.dshcloud.online   -> dshwork-v2 routing (PWA shell + forward_auth)
-# (上一代品牌的旧域名及其兼容层已于 2026-08-17 撤除 —— 站主确认前期无用户。
-#  对应的清理分支也随之删掉: 实测本机 Caddyfile 里已无该域的活站点块。)
-PRIMARY_HOST="${PRIMARY_DOMAIN:-dshcloud.online}"
-WORK_HOST="${WORK_DOMAIN:-work.dshcloud.online}"
+#   aistore.best        -> dhc-server (primary console/site)
+#   www.aistore.best    -> 308 to apex
+#   work.aistore.best   -> dshwork-v2 routing (PWA shell + forward_auth)
+#   dshcloud.online     -> 上一个域名的兼容层: 机器面直通, 人看的页面 308 (见下)
+PRIMARY_HOST="${PRIMARY_DOMAIN:-aistore.best}"
+WORK_HOST="${WORK_DOMAIN:-work.aistore.best}"
+# 上一个域名 (2026-09-08 从 dshcloud.online 换到 aistore.best)。留着它是因为已经
+# 分发出去的桌面端和 CLI 把它写死在包里。置空 (OLD_DOMAIN=) 则该域不再由本机提供
+# 任何服务 —— Caddy 没有它的站点块, CF 回源会拿到 SNI 不匹配而握手失败。
+# (上一代品牌那个更早的域名已于 2026-08-17 按站主决定彻底撤除, 不在此列。)
+OLD_HOST="${OLD_DOMAIN-dshcloud.online}"
 # 智能体生成内容的隔离域。留空则不生成对应站点块 (内容仍从主站提供, 靠沙箱兜底)。
 # 开启前 DNS 要先有这条记录, 否则 Caddy 申请证书会一直失败。
 PREVIEW_HOST="${PREVIEW_DOMAIN:-}"
 cp "$CADDYFILE" "$CADDYFILE.bak.$(date +%s 2>/dev/null || echo bak)"
-python3 - "$CADDYFILE" "$PRIMARY_HOST" "$WORK_HOST" "$PREVIEW_HOST" <<'PY'
+python3 - "$CADDYFILE" "$PRIMARY_HOST" "$WORK_HOST" "$PREVIEW_HOST" "$OLD_HOST" <<'PY'
 import re, sys
-p, primary, work, preview = sys.argv[1:5]
+p, primary, work, preview, old = sys.argv[1:6]
 s = open(p, encoding="utf-8").read()
+# 0) 守卫: 这一段里除了本脚本生成的几块, 还手写着**每个云工作台产品一个子域**的
+#    站点块 (comfy / dify / coze / claude / ...), 而下面的剥离是整段剥。没有这道
+#    守卫, 在这台机器上跑一次本脚本 = 那十几个子域当场从 Caddy 里消失, 而且不报
+#    任何错: 主站照旧 200, 只有点进那些格子的人拿到握手失败。
+existing = re.search(
+    r"# ── DHC sites v3 BEGIN ──.*?# ── DHC sites v3 END ──", s, flags=re.DOTALL
+)
+if existing:
+    had = set(re.findall(r"^([a-z0-9][a-z0-9.*-]*)\s*\{", existing.group(0), flags=re.M))
+    will = {primary, f"www.{primary}", work}
+    if preview:
+        will.add(preview)
+    if old:
+        will |= {old, f"www.{old}", f"work.{old}"}
+    lost = sorted(had - will)
+    if lost:
+        sys.exit(
+            "拒绝执行: 下面这些站点块已经在 Caddyfile 里, 但本脚本不生成它们,\n"
+            "而剥离是整段剥 —— 跑下去它们会从 Caddy 里消失:\n  "
+            + "\n  ".join(lost)
+            + "\n它们是手写维护的 (每个云工作台产品一个子域)。要改域名请直接改\n"
+            "Caddyfile, 或先把这些块搬进本脚本, 不要绕过这道守卫。"
+        )
 # 1) strip the marker-wrapped v3 section from previous runs (must run first so
 #    the host-pattern strips below never touch v3-managed content)
 s = re.sub(r"\n?# ── DHC sites v3 BEGIN ──.*?# ── DHC sites v3 END ──\n?", "\n",
@@ -122,19 +149,32 @@ if preview:
 \t}}
 }}
 """
-block += f"""
-# 上一代品牌的旧域名, 其兼容层已于 2026-08-17 按站主决定撤除 (前期无用户,
-# 无已分发的、指向旧域的客户端需要照顾)。撤除后该域不再由本机提供任何服务
-# —— Caddy 没有它的站点块, CF 回源会拿到 SNI 不匹配而握手失败。
-# ⚠️ 若将来发现仍有旧客户端在打它, 恢复方式是把下面这段取消注释、把 {{OLD_DOMAIN}}
-# 换成那个域名后重跑本脚本:
-#   {{OLD_DOMAIN}} {{
-#     @passthrough path /api/* /llm/* /releases/*
-#     handle @passthrough {{ reverse_proxy dhc-server:8100 {{ flush_interval -1 }} }}
-#     handle {{ redir https://{primary}{{uri}} 308 }}
-#   }}
-#   work.{{OLD_DOMAIN}} {{ redir https://{work}{{uri}} 308 }}
-# ── DHC sites v3 END ──
+if old:
+    block += f"""
+# 上一个域名的兼容层 ({old} -> {primary})。
+# **机器面直通, 人看的页面才 308** —— 已分发的桌面端和 CLI 把旧域写死在包里,
+# 而按 fetch 规范, 跨域重定向会丢掉 Authorization 头: 对 /api/ 做 308 等于把那些
+# 客户端静默变成 401 (它们没有任何改法, 包已经在用户机器上了)。所以下面两个
+# handle 的分工不能动。
+{old} {{
+\t@passthrough path /api/* /llm/* /releases/*
+\thandle @passthrough {{
+\t\treverse_proxy dhc-server:8100 {{
+\t\t\tflush_interval -1
+\t\t}}
+\t}}
+\thandle {{
+\t\tredir https://{primary}{{uri}} 308
+\t}}
+}}
+www.{old} {{
+\tredir https://{primary}{{uri}} 308
+}}
+work.{old} {{
+\tredir https://{work}{{uri}} 308
+}}
+"""
+block += """# ── DHC sites v3 END ──
 """
 open(p, "w", encoding="utf-8").write(s + block)
 print("    DHC site blocks (v3) written")
@@ -152,5 +192,5 @@ docker stop dsh 2>/dev/null && echo "    dsh stopped" || echo "    dsh not runni
 
 echo
 echo "cutover done. Verify:"
-echo "  curl -s https://dshcloud.online/api/health"
-echo "  (dshcloud.online / www / work DNS records must point at this origin via Cloudflare)"
+echo "  curl -s https://aistore.best/api/health"
+echo "  (aistore.best / www / work DNS records must point at this origin via Cloudflare)"

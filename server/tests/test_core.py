@@ -904,7 +904,7 @@ def test_cookie_write_from_a_foreign_origin_is_refused():
     base = config.PUBLIC_BASE.rstrip("/")
     assert accounts._cookie_write_allowed(req("POST", base)) is True
     assert accounts._cookie_write_allowed(req("POST", base + "/")) is True  # 尾斜杠
-    assert accounts._cookie_write_allowed(req("POST", "https://preview.dshcloud.online")) is False
+    assert accounts._cookie_write_allowed(req("POST", "https://preview.aistore.best")) is False
     assert accounts._cookie_write_allowed(req("POST", "null")) is False  # 沙箱不透明源
     assert accounts._cookie_write_allowed(req("POST", "https://evil.example")) is False
 
@@ -936,10 +936,10 @@ def test_the_workspace_shell_origin_stays_allowed(monkeypatch):
     白名单漏了它, 用户点"停止"就静默 401。"""
     from app import accounts, config
 
-    monkeypatch.setattr(config, "WORK_DOMAIN", "work.dshcloud.online")
-    monkeypatch.setattr(config, "PUBLIC_BASE", "https://dshcloud.online")
-    assert "https://work.dshcloud.online" in accounts._write_origins()
-    assert "https://preview.dshcloud.online" not in accounts._write_origins()
+    monkeypatch.setattr(config, "WORK_DOMAIN", "work.aistore.best")
+    monkeypatch.setattr(config, "PUBLIC_BASE", "https://aistore.best")
+    assert "https://work.aistore.best" in accounts._write_origins()
+    assert "https://preview.aistore.best" not in accounts._write_origins()
 
 
 def test_the_origin_gate_is_actually_wired_into_auth(monkeypatch):
@@ -966,7 +966,7 @@ def test_the_origin_gate_is_actually_wired_into_auth(monkeypatch):
     assert ok.status_code != 401, "自家 Origin 被误伤了"
 
     # 预览域 / 沙箱不透明源: 必须在认证阶段就被拒
-    for bad in ("https://preview.dshcloud.online", "null", "https://evil.example"):
+    for bad in ("https://preview.aistore.best", "null", "https://evil.example"):
         r = c.post("/api/auth/password", json={"old": "", "new": "whatever-long"}, headers={"origin": bad})
         assert r.status_code == 401, f"来自 {bad} 的带凭据写入没有被拦下"
 

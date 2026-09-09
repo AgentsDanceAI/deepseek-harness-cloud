@@ -3,7 +3,7 @@
 [English](deploy.md) | 简体中文
 
 本指南面向 Community Edition，不描述 DSH Cloud 线上环境。需要免运维服务可使用
-[DSH Cloud Hosted](https://dshcloud.online/login?next=%2Fwork)。
+[DSH Cloud Hosted](https://aistore.best/login?next=%2Fwork)。
 
 ## 安装方式
 

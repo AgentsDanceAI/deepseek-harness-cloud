@@ -299,7 +299,7 @@ def _products(only: list[str]) -> tuple[list[dict], str]:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("products", nargs="*")
-    ap.add_argument("--email", default="qa-verify@dshcloud.online")
+    ap.add_argument("--email", default="qa-verify@aistore.best")
     ap.add_argument("--emit-spec")
     ap.add_argument("--read-results")
     args = ap.parse_args()

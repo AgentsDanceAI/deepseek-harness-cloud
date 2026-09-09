@@ -18,7 +18,7 @@
 (function () {
   'use strict';
 
-  var SITE = 'https://dshcloud.online';
+  var SITE = 'https://aistore.best';
   var TASK_KEY = 'dhc.pending_task';
 
   /* --------------------------------------------------- 手机: 点抽屉外收起它 */

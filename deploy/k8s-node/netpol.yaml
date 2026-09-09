@@ -40,7 +40,7 @@ spec:
         - namespaceSelector: {matchLabels: {"kubernetes.io/metadata.name": kube-system}}
         - ipBlock: {cidr: 10.43.0.10/32}
       ports: [{protocol: UDP, port: 53}, {protocol: TCP, port: 53}]
-    # 公网随便走 —— 智能体要装包、抓网页、调我们的网关 (dshcloud.online 是公网地址),
+    # 公网随便走 —— 智能体要装包、抓网页、调我们的网关 (aistore.best 是公网地址),
     # 这是产品功能, 不能拦。拦的是**内网**:
     #   10.0.0.0/8      节点所在 VPC 的一部分 + 集群 Pod/Service 网段 (邻居工作台)
     #   172.16.0.0/12   生产机 VPC 与各 docker 网桥

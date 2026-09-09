@@ -5,7 +5,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 
 /** Cloud service base URL. DSH_CLOUD_BASE overrides for staging/self-hosted. */
-export const CLOUD_BASE = (process.env.DSH_CLOUD_BASE ?? 'https://dshcloud.online')
+export const CLOUD_BASE = (process.env.DSH_CLOUD_BASE ?? 'https://aistore.best')
   .replace(/\/+$/, '')
 
 /**

@@ -501,7 +501,7 @@ def test_selfhost_without_workspace_has_no_dead_ends(client, monkeypatch):
         body = client.get(path).text
         assert 'href="/work"' not in body, f"{path} 在工作台关闭时仍指向 /work"
         # 但"云端体验"这个入口不能消失 —— 改指官方站点即可
-        assert "dshcloud.online/work" in body, f"{path} 少了云端体验入口"
+        assert "aistore.best/work" in body, f"{path} 少了云端体验入口"
     # 而且不能再谎称"正在重新构建" —— 自部署只是没配下载地址
     download = client.get("/download").text
     assert "本部署未配置桌面安装包" in download
@@ -523,18 +523,18 @@ def test_selfhost_offers_the_hosted_service_as_a_labelled_alternative(client, mo
     monkeypatch.setattr(config, "WORK_ENABLED", False)
     body = client.get("/download").text
     # 三张卡的按钮都得真的指向官方站点, 而不是一个禁用的"重新构建中"
-    assert "https://dshcloud.online/download" in body, "macOS/Windows 按钮该直连官网"
-    assert "https://dshcloud.online/work" in body, "iPhone 卡该给云端体验入口"
-    assert "dshcloud.online" in body and "官方站点" in body, "必须标明去的是官方站点"
+    assert "https://aistore.best/download" in body, "macOS/Windows 按钮该直连官网"
+    assert "https://aistore.best/work" in body, "iPhone 卡该给云端体验入口"
+    assert "aistore.best" in body and "官方站点" in body, "必须标明去的是官方站点"
 
     # 托管版自己: hosted_site 与 PUBLIC_BASE 同源时不挂
-    monkeypatch.setattr(config, "PUBLIC_BASE", "https://dshcloud.online")
-    assert "dshcloud.online/work" not in client.get("/download").text
+    monkeypatch.setattr(config, "PUBLIC_BASE", "https://aistore.best")
+    assert "aistore.best/work" not in client.get("/download").text
 
     # 自部署方想彻底关掉引流: 置空即可
     monkeypatch.setattr(config, "PUBLIC_BASE", "http://localhost:8787")
     monkeypatch.setattr(config, "HOSTED_SITE", "")
-    assert "dshcloud.online" not in client.get("/download").text
+    assert "aistore.best" not in client.get("/download").text
 
 
 def test_hero_composer_never_leads_into_the_dead_end(client, monkeypatch):
@@ -547,7 +547,7 @@ def test_hero_composer_never_leads_into_the_dead_end(client, monkeypatch):
 
     monkeypatch.setattr(config, "WORK_ENABLED", False)
     body = client.get("/").text
-    assert 'data-target="https://dshcloud.online"' in body, "该把任务送去托管版"
+    assert 'data-target="https://aistore.best"' in body, "该把任务送去托管版"
     assert "官方托管版" in body, "必须说清任务会在托管版执行, 不能让人以为跑在本机"
 
     # 没有托管版可去时, 输入框本身就不该出现 —— 没有任何地方能执行任务

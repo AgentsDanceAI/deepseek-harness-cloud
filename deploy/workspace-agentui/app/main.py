@@ -31,7 +31,7 @@ from . import adapters, sessions, workspace_fs
 
 WEB_DIR = pathlib.Path(__file__).resolve().parent.parent / "web"
 WORKSPACE = os.environ.get("DSH_WORKSPACE", "/workspace")
-GATEWAY = os.environ.get("DSH_GATEWAY_BASE", "https://dshcloud.online").rstrip("/")
+GATEWAY = os.environ.get("DSH_GATEWAY_BASE", "https://aistore.best").rstrip("/")
 CLOUD_TOKEN = os.environ.get("DSH_CLOUD_TOKEN", "")
 PRODUCT_ID = os.environ.get("DSH_PRODUCT_ID", "")
 #: 这台工作台默认驱动哪个 CLI。产品坑位不同, 值不同。

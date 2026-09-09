@@ -19,7 +19,7 @@ RUN git clone --depth 1 https://github.com/langchain-ai/agent-chat-ui .
 # 抛 `"/langgraph/threads" cannot be parsed as a URL` —— 页面能开、一发消息就红。
 # (2026-09-01 老板实测撞到。我原以为同源相对路径最省事, 那是想当然。)
 # 域名要跟着部署走, 所以做成构建参数。
-ARG PUBLIC_ORIGIN=https://langchain.dshcloud.online
+ARG PUBLIC_ORIGIN=https://langchain.aistore.best
 ENV NEXT_PUBLIC_API_URL=${PUBLIC_ORIGIN}/langgraph \
     NEXT_PUBLIC_ASSISTANT_ID=agent \
     NEXT_TELEMETRY_DISABLED=1 \

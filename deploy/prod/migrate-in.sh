@@ -97,8 +97,8 @@ cat <<'MSG'
 
 Restored. What is left is off this machine:
 
-  1. DNS — point dshcloud.online, work.dshcloud.online and (if PREVIEW_DOMAIN
-     is set) preview.dshcloud.online at this host's IP (Cloudflare,
+  1. DNS — point aistore.best, work.aistore.best and (if PREVIEW_DOMAIN
+     is set) preview.aistore.best at this host's IP (Cloudflare,
      proxied/orange). Everything else keyed to the domain — the Waffo webhook,
      the Google and GitHub redirect URIs, dl.dshcloud.online — needs no change
      precisely because the domain did not.
@@ -132,5 +132,5 @@ Restored. What is left is off this machine:
   5. Old host — leave it stopped, not deleted, until a real user has signed in
      and paid something here.
 
-Verify before DNS: curl -H 'Host: dshcloud.online' http://127.0.0.1:8100/api/health
+Verify before DNS: curl -H 'Host: aistore.best' http://127.0.0.1:8100/api/health
 MSG

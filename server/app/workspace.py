@@ -115,7 +115,7 @@ def _upstream_host(user_id: str) -> str:
 def _login_next(product: products.Product) -> str:
     """登录后该回到哪个工作台。
 
-    写死 /work 的话, 从 comfy.dshcloud.online 被弹去登录的人, 登完会落进 dsh
+    写死 /work 的话, 从 comfy.aistore.best 被弹去登录的人, 登完会落进 dsh
     工作台 —— 他要的那个从没打开过, 而且没有任何提示说发生了什么。
     """
     if product.id == products.DEFAULT:
@@ -128,7 +128,7 @@ def _product_of(request: Request) -> products.Product:
 
     先看 **?product_id=**, 再看 Host。查询参数优先不是随意选的: 启动等待页
     (/work/starting) 跑在**主站域**上, 它轮询 /api/work/status 时 Host 是
-    dshcloud.online —— 只按 Host 判就会永远在查 dsh 的工作台, 而用户等的是
+    aistore.best —— 只按 Host 判就会永远在查 dsh 的工作台, 而用户等的是
     ComfyUI 的, 于是进度条卡在「正在排队」不动, 且没有任何线索。
 
     每个产品一个域名, 因为 ComfyUI 前端用绝对路径引资源, 塞不进子路径。

@@ -35,15 +35,15 @@ npx --yes @agentsdanceai/dsh-cloud start
 
 ### DSH Cloud 托管版
 
-[DSH Cloud 托管版](https://dshcloud.online/login?next=%2Fwork)是托管订阅服务：
+[DSH Cloud 托管版](https://aistore.best/login?next=%2Fwork)是托管订阅服务：
 无需安装服务器，按月度或年度服务期提供模型访问、工作台容量、升级、监控、
 备份与账号支持。当前方案按所选服务期一次性付费，**到期不自动续费**。
 
 **注册即送 500 积分**；网关内建 **20 个模型**，无需自备任何上游密钥。
 
-[**开始使用 DSH Cloud 托管版**](https://dshcloud.online/login?next=%2Fwork) ·
-[个人套餐](https://dshcloud.online/pricing#plans) ·
-[团队方案](https://dshcloud.online/pricing#team)
+[**开始使用 DSH Cloud 托管版**](https://aistore.best/login?next=%2Fwork) ·
+[个人套餐](https://aistore.best/pricing#plans) ·
+[团队方案](https://aistore.best/pricing#team)
 
 ### 自部署 Community Edition
 
@@ -99,7 +99,7 @@ npm/npx、uv/uvx 遵循同一套版本化安装契约。
 <!-- model-catalog:end -->
 
 **注册即送 500 积分——上面每一个模型开箱直接可用。** 不绑卡、不要任何
-API Key、不用挨家注册。到 [DSH Cloud 托管版](https://dshcloud.online)直接试，
+API Key、不用挨家注册。到 [DSH Cloud 托管版](https://aistore.best)直接试，
 或者一条命令把它们接进你已有的原版 DeepSeek Harness：
 
 ```bash

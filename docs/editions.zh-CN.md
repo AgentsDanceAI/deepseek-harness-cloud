@@ -3,7 +3,7 @@
 [English](editions.md) | 简体中文
 
 Community Edition 以 [DSH Cloud Community License 1.0](../LICENSE) 提供源码。
-DSH Cloud Hosted 是在 `dshcloud.online` 运营的托管订阅服务。超出 Community
+DSH Cloud Hosted 是在 `aistore.best` 运营的托管订阅服务。超出 Community
 License 的使用方式可申请商业授权。
 
 ## 对比
@@ -11,15 +11,15 @@ License 的使用方式可申请商业授权。
 | 范围 | Community Edition | DSH Cloud Hosted | 商业授权 |
 |---|---|---|---|
 | 使用方式 | 单一组织内部使用、自部署、开发、评估和 API 集成 | 面向个人及团队订阅者的托管服务 | 托管多租户服务、官方前端去品牌或协商的其他权利 |
-| 开始使用 | Docker/Compose、npm/npx 或 uv/uvx | [打开托管工作台](https://dshcloud.online/login?next=%2Fwork) | 联系 `support@agentsdance.ai` |
+| 开始使用 | Docker/Compose、npm/npx 或 uv/uvx | [打开托管工作台](https://aistore.best/login?next=%2Fwork) | 联系 `support@agentsdance.ai` |
 | 许可 | DSH Cloud Community License 1.0 | 服务由 Hosted 条款约束 | 已签署的商业协议 |
 | 模型 | 运营方选择并承担上游成本 | 托管模型访问和套餐额度 | 可约定提供方及治理集成 |
 | 运维 | 运营方负责 TLS、身份、邮件、数据、备份、监控和升级 | 托管容量、升级、备份、监控、计费运维和事件响应 | 服务范围与承诺以合同为准 |
 | 工作台 | 可选且默认关闭，运营方需审查信任边界 | 托管工作台容量与存储 | 可约定私有网络、高可用或合规能力 |
 | 计费 | 由运营方控制的可选支付集成 | 月度或年度一次性预付，到期不自动续费 | 以合同为准 |
 
-- [个人托管套餐](https://dshcloud.online/pricing#plans)
-- [团队托管套餐](https://dshcloud.online/pricing#team)
+- [个人托管套餐](https://aistore.best/pricing#plans)
+- [团队托管套餐](https://aistore.best/pricing#team)
 - [支持渠道](../SUPPORT.zh-CN.md)
 - [许可说明](../LICENSING.zh-CN.md)
 

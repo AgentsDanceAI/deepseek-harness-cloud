@@ -53,4 +53,4 @@ docker run --rm -u 0 --entrypoint bash "$REF" -c '
   echo "  · 未设白名单时反代形状的 WS 握手 -> $code (启动脚本会设 PI_WEB_ALLOW_ORIGINS)"
 '
 if [ "${SKIP_PUSH:-0}" = "1" ]; then echo "==> SKIP_PUSH=1, 不推"; else docker push -q "$REF" >/dev/null && echo "==> 已推 $REF"; fi
-echo "下一步: deploy/prod/.env 设 PI_IMAGE_REF=$REF PI_DOMAIN=pi.dshcloud.online, 建 ECI 缓存, Caddy 加域, 再 scripts/safe_deploy.sh"
+echo "下一步: deploy/prod/.env 设 PI_IMAGE_REF=$REF PI_DOMAIN=pi.aistore.best, 建 ECI 缓存, Caddy 加域, 再 scripts/safe_deploy.sh"

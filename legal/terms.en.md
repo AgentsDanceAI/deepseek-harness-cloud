@@ -2,7 +2,7 @@
 
 **Version 1.2 · Effective date: August 19, 2026**
 
-These Terms are the agreement between you and the Operator regarding deepseek-harness-cloud (the "Service", at https://dshcloud.online). By registering an account, downloading a client, or using the Service, you confirm that you have read and agree to these Terms. If you do not agree, please do not use the Service.
+These Terms are the agreement between you and the Operator regarding deepseek-harness-cloud (the "Service", at https://aistore.best). By registering an account, downloading a client, or using the Service, you confirm that you have read and agree to these Terms. If you do not agree, please do not use the Service.
 
 ---
 
@@ -39,7 +39,7 @@ Built on the open-source project DeepSeek Harness (MIT License), the Service pro
 
 4.1 **Two separate quotas.** Credits measure model calls (counted by token), and machine hours measure the **running time** of the cloud workspace — it runs continuously from when you open it until you close it, and every minute counts, whether or not the agent is executing a task. It is reclaimed only when **nobody is using it and no task is running**: about 10 minutes without interaction while the page is open, or about 3 minutes after the page is closed, provided the agent is not executing a task. Your files are kept; the workspace restarts on your next visit. The two are not convertible into each other and do not draw on each other.
 
-4.2 **How credits are deducted.** Each model has a published multiplier, with Claude Sonnet as the 1.00x baseline; 1.00x means a deduction of 1,000 credits per 1 million tokens. The full multiplier table is published in real time at https://dshcloud.online/pricing . When a multiplier changes because of an upstream price adjustment, we will update that page before the change takes effect.
+4.2 **How credits are deducted.** Each model has a published multiplier, with Claude Sonnet as the 1.00x baseline; 1.00x means a deduction of 1,000 credits per 1 million tokens. The full multiplier table is published in real time at https://aistore.best/pricing . When a multiplier changes because of an upstream price adjustment, we will update that page before the change takes effect.
 
 4.3 **Free quota.** Registration includes a one-time grant of credits (currently 500), plus 3 cloud machine hours per month, reset on the first of each calendar month. Free quota cannot be cashed out or transferred.
 
@@ -57,7 +57,7 @@ There is therefore no "subscription cancellation" process for the Service—ther
 
 ### 5.2 Plans and Prices
 
-The prices below are current (in US dollars). RMB prices and the latest price list are as shown at https://dshcloud.online/pricing :
+The prices below are current (in US dollars). RMB prices and the latest price list are as shown at https://aistore.best/pricing :
 
 | Plan | Monthly | Annual | Credits per month | Machine hours per month | Concurrency |
 |---|---|---|---|---|---|
@@ -86,7 +86,7 @@ All payments for the Service are processed by **Waffo Pancake**, which acts as t
 
 ## 6. Refunds
 
-The complete refund policy is available at https://dshcloud.online/legal/refund . It is an integral part of these Terms and is also displayed at checkout. The key points are:
+The complete refund policy is available at https://aistore.best/legal/refund . It is an integral part of these Terms and is also displayed at checkout. The key points are:
 
 6.1 **No-questions-asked refund within 14 calendar days of your first purchase.** Within 14 calendar days of your first payment, you may request a full refund if no more than 20% of the credits included in that purchase have been used.
 
@@ -115,7 +115,7 @@ Send refund requests to support@agentsdance.ai; we will reply within 5 business 
 
 ## 8. Acceptable Use
 
-You agree to comply with the Acceptable Use Policy set out at https://dshcloud.online/legal/aup , which is an integral part of these Terms. Core prohibitions include: generating child sexual exploitation material; planning violence or terrorist activity; developing malware or carrying out cyberattacks; generating disinformation or spam at scale; processing other people's personal information without authorization; circumventing the Service's metering, quota, or security mechanisms; and reselling or redistributing the Service's model access.
+You agree to comply with the Acceptable Use Policy set out at https://aistore.best/legal/aup , which is an integral part of these Terms. Core prohibitions include: generating child sexual exploitation material; planning violence or terrorist activity; developing malware or carrying out cyberattacks; generating disinformation or spam at scale; processing other people's personal information without authorization; circumventing the Service's metering, quota, or security mechanisms; and reselling or redistributing the Service's model access.
 
 ## 9. Service Availability
 
@@ -127,7 +127,7 @@ You agree to comply with the Acceptable Use Policy set out at https://dshcloud.o
 
 ## 10. Open Source and Self-Hosting
 
-The server-side code of the Service is released under an open-source license. You may deploy it yourself, but a self-hosted instance is your own responsibility, and these Terms apply only to https://dshcloud.online as operated by us. The open-source license does not grant you the right to use our brand, account system, or model quota.
+The server-side code of the Service is released under an open-source license. You may deploy it yourself, but a self-hosted instance is your own responsibility, and these Terms apply only to https://aistore.best as operated by us. The open-source license does not grant you the right to use our brand, account system, or model quota.
 
 ## 11. Limitation of Liability
 

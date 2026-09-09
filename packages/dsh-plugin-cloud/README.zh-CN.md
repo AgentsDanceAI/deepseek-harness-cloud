@@ -2,7 +2,7 @@
 
 [English](./README.md)
 
-把**原版 DeepSeek Harness** 接入 [DSH Cloud](https://dshcloud.online)：
+把**原版 DeepSeek Harness** 接入 [DSH Cloud](https://aistore.best)：
 设备授权登录 + 一个网关 provider，**20 个模型**走同一入口——任何客户端都不需要
 你自己的上游 API Key。
 

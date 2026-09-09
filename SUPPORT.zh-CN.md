@@ -16,12 +16,12 @@
 
 ## DSH Cloud Hosted
 
-[DSH Cloud Hosted](https://dshcloud.online/login?next=%2Fwork) 是托管订阅服务，
+[DSH Cloud Hosted](https://aistore.best/login?next=%2Fwork) 是托管订阅服务，
 提供模型访问、工作台容量、升级、监控、备份、账号支持和套餐额度。当前公开方案
 按月度或年度服务期一次性付费，**到期不自动续费**。
 
-- [个人套餐](https://dshcloud.online/pricing#plans)
-- [团队套餐](https://dshcloud.online/pricing#team)
+- [个人套餐](https://aistore.best/pricing#plans)
+- [团队套餐](https://aistore.best/pricing#team)
 
 结账页和 Hosted 条款决定具体购买内容。支持请求中不得包含支付卡数据或凭证。
 

@@ -1063,9 +1063,9 @@ def test_both_listings_hide_the_same_noise(fake, monkeypatch, tmp_path):
 
 @pytest.fixture()
 def isolated(monkeypatch):
-    monkeypatch.setattr(config, "PREVIEW_DOMAIN", "preview.dshcloud.online")
-    monkeypatch.setattr(config, "PUBLIC_BASE", "https://dshcloud.online")
-    return "preview.dshcloud.online"
+    monkeypatch.setattr(config, "PREVIEW_DOMAIN", "preview.aistore.best")
+    monkeypatch.setattr(config, "PUBLIC_BASE", "https://aistore.best")
+    return "preview.aistore.best"
 
 
 def test_agent_content_on_the_main_host_is_sent_to_the_preview_host(fake, isolated):
@@ -1088,7 +1088,7 @@ def test_the_preview_host_serves_no_api(fake, isolated):
     """否则智能体页面对着自己的源就能带凭据调接口, 而**同源请求连 Origin
     白名单那道闸都不会触发**。"""
     c, uid = _user("iso3@test.local")
-    r = c.get("/api/work/status", headers={"host": "preview.dshcloud.online"})
+    r = c.get("/api/work/status", headers={"host": "preview.aistore.best"})
     assert r.status_code == 404
 
 
@@ -1120,7 +1120,7 @@ def test_isolation_on_drops_the_sandbox(fake, container_http, isolated):
     c, uid = _user("iso6@test.local")
     c.get("/api/work/route")
     c.get("/api/work/route")
-    r = c.get("/preview/8080/", headers={"host": "preview.dshcloud.online"})
+    r = c.get("/preview/8080/", headers={"host": "preview.aistore.best"})
     assert "sandbox" not in r.headers.get("content-security-policy", "")
 
 
@@ -1307,17 +1307,17 @@ def test_the_workspace_host_is_exempt_from_our_csp(monkeypatch):
     注意验证方式: curl -I 看不出来 (HEAD 响应无 content-type, CSP 分支不触发),
     这条测试用真实 GET。
     """
-    monkeypatch.setattr(config, "WORK_DOMAIN", "work.dshcloud.online")
+    monkeypatch.setattr(config, "WORK_DOMAIN", "work.aistore.best")
     from fastapi.testclient import TestClient
 
     from app.main import create_app
 
     c = TestClient(create_app())
 
-    main_site = c.get("/", headers={"host": "dshcloud.online"})
+    main_site = c.get("/", headers={"host": "aistore.best"})
     assert "content-security-policy" in main_site.headers, "主站的 CSP 丢了"
 
-    r = c.get("/work/starting", headers={"host": "work.dshcloud.online"})
+    r = c.get("/work/starting", headers={"host": "work.aistore.best"})
     assert r.status_code == 200
     assert "content-security-policy" not in r.headers, "work 域带了 CSP —— dsh 会启动即死, 整页白屏"
 
@@ -1473,8 +1473,8 @@ def test_login_bounces_back_to_the_product_you_came_from(fake, monkeypatch):
 def test_starting_page_can_see_a_non_default_workspace(fake, monkeypatch):
     """启动等待页跑在**主站域**上, 只按 Host 判产品会永远查错工作台。
 
-    2026-08-27 实测故障: 打开 comfy.dshcloud.online -> 实例确实建出来了 ->
-    但页面跳到 dshcloud.online/work/starting, 那里轮询 /api/work/status 时
+    2026-08-27 实测故障: 打开 comfy.aistore.best -> 实例确实建出来了 ->
+    但页面跳到 aistore.best/work/starting, 那里轮询 /api/work/status 时
     Host 是主站域 -> 判成 dsh -> 查一个不存在的 dsh 工作台 -> 进度条永远停在
     「正在排队」。实例在跑、计费在走, 而用户以为坏了。
 
@@ -2158,7 +2158,7 @@ def test_coze_boot_rewrites_object_storage_links_to_https(monkeypatch):
     管不到这里, 它只写进上传令牌的 HostScheme。上游自己的部署是纯 http 的所以
     碰不到; 我们的站点在 https 上, 页面里出现 http:// 的图片就是**混合内容**,
     浏览器直接拦 —— 头像和附件一片空白, 而服务端一切正常、日志里一个错都没有。
-    2026-08-29 上线当天实测到: 头像 URL 是 http://coze.dshcloud.online/...,
+    2026-08-29 上线当天实测到: 头像 URL 是 http://coze.aistore.best/...,
     换成 https 同一个地址就是 200 + 2366 字节。
     """
     _coze_ready(monkeypatch)
@@ -2201,7 +2201,7 @@ def test_coze_has_no_second_login_wall(monkeypatch):
     assert "/root/.coze-autologin" in sh
     # 账号不能用 admin@: 那个可能已被人工建过而密码不在我们手里, 注册与登录会
     # 双双失败, 而且**不报错**, 只是又看到登录墙
-    assert "owner@dshcloud.online" in sh
+    assert "owner@aistore.best" in sh
     assert "admin@" not in sh
     # 浏览器自己带了 session_key 就原样透传 (他想切账号也切得了)。
     # 脚本里这些 $ 是给 nginx 的, 对 shell 转义过, 所以认转义后的形态。
@@ -2556,7 +2556,7 @@ def test_dify_autologin_password_is_derived_not_stored(monkeypatch):
         == products.env_for("hermes", "t", "s" * 64)["HERMES_PASS"]
     )
     # 邮箱必须与 setup 建的那个一致 —— 单租户, 没有第二个账号可用
-    assert env["DSH_AUTOLOGIN_EMAIL"] == "admin@dshcloud.online"
+    assert env["DSH_AUTOLOGIN_EMAIL"] == "admin@aistore.best"
 
 
 def _dify_env(sidecars, name):

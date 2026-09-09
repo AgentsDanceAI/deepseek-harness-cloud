@@ -3,9 +3,9 @@
 English | [简体中文](README.zh-CN.md)
 
 The mobile application is a Capacitor remote shell. Its WebView loads
-`https://dshcloud.online`; session cookies share the site origin. The bundled
+`https://aistore.best`; session cookies share the site origin. The bundled
 `www/index.html` is an offline/first-frame fallback. Navigation is limited to
-`dshcloud.online` and subdomains, and Android cleartext traffic is disabled.
+`aistore.best` and subdomains, and Android cleartext traffic is disabled.
 
 ## Development
 

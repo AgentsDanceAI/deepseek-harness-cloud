@@ -45,7 +45,7 @@ CATALOG: tuple[AppEntry, ...] = (
     # Agents Team 顶掉了 JupyterLab (老板 2026-08-31 拍板): 这页是 4 列网格,
     # 16 个正好铺满四行, 加第 17 个会多出一行只有一张卡的空排 —— 所以是换不是加。
     # 换掉 Jupyter 而不是别的: 它是这 16 个里唯一**既没上线、也不是智能体**的坑位,
-    # 而 Agents Team 是我们自己写的、已经上线的产品 (agentsteam.dshcloud.online)。
+    # 而 Agents Team 是我们自己写的、已经上线的产品 (agentsteam.aistore.best)。
     AppEntry(
         "agents-team", "Agents Team", "team",
         '<circle cx="8" cy="9" r="2.5"/><circle cx="16" cy="9" r="2.5"/>'

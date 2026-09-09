@@ -18,7 +18,7 @@ uvx dsh-cloud==0.3.0 start --mode trial --wait
 怎么取（试用模式没有邮件服务器，验证码打在服务端日志里）、以及重启和停止的命令。
 打开 <http://localhost:8787>。
 
-站点上的桌面端下载与云工作台指向托管版 dshcloud.online——试用部署本机不需要
+站点上的桌面端下载与云工作台指向托管版 aistore.best——试用部署本机不需要
 模型密钥。想在本机跑模型，把 `UPSTREAM_API_KEY` 填进 `./dsh-cloud/.env` 再执行
 一次同样的命令。
 

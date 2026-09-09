@@ -37,7 +37,7 @@ dsh-cloud start` does the same from PyPI. Details: [Quick start](#quick-start).
 
 ### Use DSH Cloud Hosted
 
-[DSH Cloud Hosted](https://dshcloud.online/login?next=%2Fwork) is the managed
+[DSH Cloud Hosted](https://aistore.best/login?next=%2Fwork) is the managed
 subscription service: no server installation, with model access, workspace
 capacity, upgrades, monitoring, backups, and account support. Current plans are
 paid once for the selected monthly or annual term and **do not renew automatically**.
@@ -45,9 +45,9 @@ paid once for the selected monthly or annual term and **do not renew automatical
 **New accounts start with 500 free credits**, and the hosted gateway serves
 **20 models** with no upstream key of your own.
 
-[**Start on DSH Cloud Hosted**](https://dshcloud.online/login?next=%2Fwork) ·
-[Individual plans](https://dshcloud.online/pricing#plans) ·
-[Team plans](https://dshcloud.online/pricing#team)
+[**Start on DSH Cloud Hosted**](https://aistore.best/login?next=%2Fwork) ·
+[Individual plans](https://aistore.best/pricing#plans) ·
+[Team plans](https://aistore.best/pricing#team)
 
 <!-- path:selfhost -->
 
@@ -111,7 +111,7 @@ backups, monitoring, and applicable law.
 
 **New accounts start with 500 free credits — every model above works out of the
 box.** No card, no API keys, no per-provider signups. Try them on
-[DSH Cloud Hosted](https://dshcloud.online), or pipe them into a stock
+[DSH Cloud Hosted](https://aistore.best), or pipe them into a stock
 DeepSeek Harness install with one command:
 
 ```bash

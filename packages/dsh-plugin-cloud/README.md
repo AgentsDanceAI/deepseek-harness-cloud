@@ -2,7 +2,7 @@
 
 [简体中文](./README.zh-CN.md)
 
-Connect a **stock DeepSeek Harness** install to [DSH Cloud](https://dshcloud.online):
+Connect a **stock DeepSeek Harness** install to [DSH Cloud](https://aistore.best):
 device login plus a gateway provider serving **20 models** through one endpoint —
 no upstream API key of your own on any client.
 

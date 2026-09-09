@@ -140,7 +140,7 @@ pathlib.Path("/work/results.json").write_text(json.dumps(res, ensure_ascii=False
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--email", default="qa-verify@dshcloud.online", help="用哪个账号打这通电话")
+    ap.add_argument("--email", default="qa-verify@aistore.best", help="用哪个账号打这通电话")
     ap.add_argument("--emit-spec", help="把规格写到这个目录 (在 dhc-server 容器里跑)")
     ap.add_argument("--read-results", help="从这个目录读结果并判读")
     args = ap.parse_args()
