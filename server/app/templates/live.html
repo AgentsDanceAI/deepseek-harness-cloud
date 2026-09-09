@@ -33,11 +33,30 @@
          只有浏览器控制台里一行 NotAllowedError。 #}
       <video id="lvVideo" class="lv-video" playsinline muted autoplay></video>
       <button id="lvUnmute" class="lv-unmute" hidden>{{ t('live.unmute') }}</button>
+      {# 弹幕层压在画面上, pointer-events:none —— 不能挡住"点一下开始播放"那一下。 #}
+      <div id="lvDanmu" class="lv-danmu"></div>
       <div id="lvMsg" class="lv-msg">{{ t('live.connecting') }}</div>
     </div>
+    {# 公屏。登录才能发 —— 匿名发言追不到人, 出事时没有处置手段。未登录也看得见,
+       否则路人打开直播间是一片死寂。 #}
+    <div class="lv-say">
+      <input id="lvSayBox" type="text" maxlength="100"
+             placeholder="{{ t('live.say_ph') }}"
+             {% if not user %}disabled{% endif %}>
+      <button id="lvSayBtn" class="lv-btn lv-btn--go" type="button"
+              {% if not user %}disabled{% endif %}>{{ t('live.say_btn') }}</button>
+    </div>
+    <div id="lvSayHint" class="lv-sayhint"
+         data-sent="{{ t('live.say_sent') }}"
+         data-replied="{{ t('live.say_replied') }}"
+         data-toofast="{{ t('live.say_toofast') }}"
+         data-needlogin="{{ t('live.say_needlogin') }}"
+         data-failed="{{ t('live.say_failed') }}">{% if not user %}{{ t('live.say_needlogin') }}{% endif %}</div>
+    <div class="lv-note">{{ t('live.danmu_note') }}</div>
     <div class="lv-note">{{ t('live.note') }}</div>
   </div>
 </section>
 <script src="/static/hls.min.js?v={{ asset_v }}"></script>
 <script src="/static/live.js?v={{ asset_v }}" defer></script>
+<script src="/static/live_chat.js?v={{ asset_v }}" defer></script>
 {% endblock %}

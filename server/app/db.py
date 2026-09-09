@@ -228,6 +228,19 @@ SCHEMA = [
         created REAL NOT NULL,
         updated REAL NOT NULL
     )""",
+    # 直播间公屏。**只留登录用户发的** (匿名发言追不到人, 出事时没有处置手段),
+    # 所以 user_id 非空。hidden 是软删: 管理员藏掉一条之后它不再飘屏, 但记录还在
+    # —— UGC 的处置要留痕, 直接 DELETE 等于把证据一起删了。
+    """CREATE TABLE IF NOT EXISTS live_comments (
+        id TEXT PRIMARY KEY,
+        room TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        nick TEXT NOT NULL DEFAULT '',
+        text TEXT NOT NULL,
+        replied INTEGER NOT NULL DEFAULT 0,
+        hidden INTEGER NOT NULL DEFAULT 0,
+        created REAL NOT NULL
+    )""",
     "CREATE INDEX IF NOT EXISTS idx_grants_user ON credit_grants(user_id, expires)",
     "CREATE INDEX IF NOT EXISTS idx_usage_user ON usage_log(user_id, created)",
     "CREATE INDEX IF NOT EXISTS idx_orders_user ON orders(user_id, created)",
@@ -239,6 +252,7 @@ SCHEMA = [
     "CREATE INDEX IF NOT EXISTS idx_vjobs_user ON video_jobs(user_id, created)",
     "CREATE INDEX IF NOT EXISTS idx_org_members_user ON org_members(user_id)",
     "CREATE INDEX IF NOT EXISTS idx_org_invites_org ON org_invites(org_id)",
+    "CREATE INDEX IF NOT EXISTS idx_live_comments ON live_comments(room, created)",
 ]
 
 

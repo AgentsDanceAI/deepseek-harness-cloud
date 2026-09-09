@@ -23,13 +23,14 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 import uuid
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse, Response
 
-from . import config, credits, model_catalog
+from . import config, credits, db, model_catalog, rate_limit, security
 from .accounts import resolve_user
 
 router = APIRouter(prefix="/api/live", tags=["live"])
@@ -107,7 +108,6 @@ def _sign(room: str) -> str:
     """与 GPU 侧同一把密钥、同一种令牌 (avatar 那套 v2 格式)。"""
     import hashlib
     import hmac
-    import time
 
     ts = str(int(time.time()))
     sig = hmac.new(config.AVATAR_TOKEN_SECRET.encode(), f"{ts}|{room}".encode(), hashlib.sha256).hexdigest()
@@ -309,6 +309,68 @@ _REPLY = (
 )
 
 
+async def _compose_reply(comment: str, bill_to: str, device_id: str = "") -> str:
+    """让模型按 `_REPLY` 的口径回一句, 并把账记在 bill_to 头上。
+
+    抽出来是因为**观众公屏和管理员插播走的是同一条路** —— 口径必须完全一致,
+    否则"数字人会不会乱说话"这件事要审两遍。
+    """
+    if not config.UPSTREAM_BASE_URL or not config.UPSTREAM_API_KEY:
+        raise HTTPException(503, "upstream_not_configured")
+    model_id = model_catalog.default_model()
+    entry = model_catalog.resolve(model_id) or {}
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(45.0, connect=10.0)) as c:
+            r = await c.post(
+                config.UPSTREAM_BASE_URL.rstrip("/") + "/chat/completions",
+                json={
+                    "model": entry.get("upstream_model", model_id),
+                    "messages": [
+                        {"role": "system", "content": _REPLY},
+                        {"role": "user", "content": f"观众评论：{comment}"},
+                    ],
+                    # 一句话。放开了她会说成一段稿子, 而那要念上一分钟, 后面的
+                    # 评论全堵住。
+                    "max_tokens": 160,
+                    "temperature": 0.7,
+                },
+                headers={
+                    "authorization": f"Bearer {config.UPSTREAM_API_KEY}",
+                    "content-type": "application/json",
+                },
+            )
+    except httpx.HTTPError:
+        raise HTTPException(502, "upstream_unreachable") from None
+    if r.status_code != 200:
+        raise HTTPException(502, "upstream")
+    d = r.json()
+    spoken = (((d.get("choices") or [{}])[0].get("message") or {}).get("content") or "").strip()
+    spoken = _JUNK.sub("", spoken).strip().strip('“”"')
+    if not spoken:
+        raise HTTPException(502, "empty_generation")
+    usage = d.get("usage") or {}
+    cache_read = int(
+        usage.get("prompt_cache_hit_tokens")
+        or (usage.get("prompt_tokens_details") or {}).get("cached_tokens")
+        or 0
+    )
+    uncached = max(0, int(usage.get("prompt_tokens") or 0) - cache_read)
+    output = int(usage.get("completion_tokens") or 0)
+    if (uncached or output) and bill_to:
+        credits.spend(
+            bill_to,
+            model_catalog.charge_credits(model_id, uncached, cache_read, output),
+            kind="llm",
+            model=model_id,
+            device_id=device_id,
+            uncached_input=uncached,
+            cache_read=cache_read,
+            output=output,
+            request_id=f"live-reply-{uuid.uuid4().hex[:16]}",
+        )
+    return spoken[:600]
+
+
 @router.post("/say")
 async def say(body: dict, user: dict = Depends(resolve_user)):
     """把一条评论送进直播间。
@@ -330,59 +392,138 @@ async def say(body: dict, user: dict = Depends(resolve_user)):
 
     spoken = text
     if mode == "chat":
-        if not config.UPSTREAM_BASE_URL or not config.UPSTREAM_API_KEY:
-            raise HTTPException(503, "upstream_not_configured")
-        model_id = model_catalog.default_model()
-        entry = model_catalog.resolve(model_id) or {}
-        try:
-            async with httpx.AsyncClient(timeout=httpx.Timeout(45.0, connect=10.0)) as c:
-                r = await c.post(
-                    config.UPSTREAM_BASE_URL.rstrip("/") + "/chat/completions",
-                    json={
-                        "model": entry.get("upstream_model", model_id),
-                        "messages": [
-                            {"role": "system", "content": _REPLY},
-                            {"role": "user", "content": f"观众评论：{text}"},
-                        ],
-                        # 一句话。放开了她会说成一段稿子, 而那要念上一分钟, 后面的
-                        # 评论全堵住。
-                        "max_tokens": 160,
-                        "temperature": 0.7,
-                    },
-                    headers={
-                        "authorization": f"Bearer {config.UPSTREAM_API_KEY}",
-                        "content-type": "application/json",
-                    },
-                )
-        except httpx.HTTPError:
-            raise HTTPException(502, "upstream_unreachable") from None
-        if r.status_code != 200:
-            raise HTTPException(502, "upstream")
-        d = r.json()
-        spoken = (((d.get("choices") or [{}])[0].get("message") or {}).get("content") or "").strip()
-        spoken = _JUNK.sub("", spoken).strip().strip('“”"')
-        if not spoken:
-            raise HTTPException(502, "empty_generation")
-        usage = d.get("usage") or {}
-        cache_read = int(
-            usage.get("prompt_cache_hit_tokens")
-            or (usage.get("prompt_tokens_details") or {}).get("cached_tokens")
-            or 0
-        )
-        uncached = max(0, int(usage.get("prompt_tokens") or 0) - cache_read)
-        output = int(usage.get("completion_tokens") or 0)
-        if uncached or output:
-            credits.spend(
-                user["id"],
-                model_catalog.charge_credits(model_id, uncached, cache_read, output),
-                kind="llm",
-                model=model_id,
-                device_id=user.get("device_id", ""),
-                uncached_input=uncached,
-                cache_read=cache_read,
-                output=output,
-                request_id=f"live-reply-{uuid.uuid4().hex[:16]}",
-            )
+        spoken = await _compose_reply(text, user["id"], user.get("device_id", ""))
 
     await _gpu("POST", f"/rooms/{config.LIVE_ROOM}/interject", config.LIVE_ROOM, json={"text": spoken[:600]})
     return JSONResponse({"ok": True, "comment": text, "spoken": spoken[:600], "mode": mode})
+
+
+# ── 公屏 (2026-09-09) ────────────────────────────────────────────────────
+# 老板拍板: 登录才能发, 每一条都自动回。
+#
+# "自动回每一条"在**任何登录用户都能触发**的前提下, 意味着三件事必须先想清楚:
+#   1. 钱记谁头上 —— 观众只是发了句话, 没同意花钱; 记他头上是乱扣。记直播间运营
+#      方 (LIVE_BILL_EMAIL / 第一个管理员) 头上, 一个地方看得见账。
+#   2. 她的嘴是串行的 —— 一句念十来秒。十个人同时发, 话术两分钟一句都播不了。
+#      所以上游队列深了就只飘屏不开口。
+#   3. **观众永远拿不到 echo 模式** —— echo 是把文字原样念出去, 等于任何人都能
+#      让她说任何话。观众只能走 chat, 由 `_REPLY` 那套口径过一道。
+_LAST_REPLY_AT = 0.0
+
+
+def _bill_account() -> str:
+    """自动回评记账的用户 id。取不到就返回空 —— 那时**照样回答, 只是不记账**,
+    因为"没配好计费"不该表现为"直播间不理人"。"""
+    email = (config.LIVE_BILL_EMAIL or (config.ADMIN_EMAILS[0] if config.ADMIN_EMAILS else "")).strip()
+    if not email:
+        return ""
+    row = db.query_one("SELECT id FROM users WHERE lower(email)=?", (email.lower(),))
+    return str(row["id"]) if row else ""
+
+
+def _nick(user: dict) -> str:
+    """公屏上显示的名字。**不能露邮箱** —— 公屏是所有人可见的。
+
+    ⚠️ 注册时 display_name 被填成了邮箱前缀 (accounts 建号那行)。所以"有
+    display_name 就用它"是不够的: 没改过名的人, 昵称就是他的邮箱名, 而这一页
+    上所有人都看得见。只有**自己改过**的名字才算数, 其余一律打码。
+    """
+    email = (user.get("email") or "").strip()
+    head = email.split("@")[0]
+    name = (user.get("display_name") or "").strip()
+    if name and name != head:
+        return name[:16]
+    return (head[:2] + "***") if head else "观众"
+
+
+@router.get("/comments")
+async def comments(since: float = 0.0, limit: int = 40):
+    """公屏。**公开** —— 没登录也看得见, 否则路人打开直播间是一片死寂。
+
+    只回没被藏起来的。since 是上一次拿到的最后一条的时间戳, 用来只取增量。
+    """
+    if not _enabled():
+        raise HTTPException(404, "live_disabled")
+    rows = db.query(
+        "SELECT id, nick, text, created, replied FROM live_comments "
+        "WHERE room=? AND hidden=0 AND created>? ORDER BY created DESC LIMIT ?",
+        (config.LIVE_ROOM, float(since or 0), max(1, min(int(limit or 40), 100))),
+    )
+    items = [
+        {"id": r["id"], "nick": r["nick"], "text": r["text"], "t": float(r["created"]),
+         "replied": bool(r["replied"])}
+        for r in reversed(rows)
+    ]
+    return JSONResponse({"items": items, "now": time.time()})
+
+
+@router.post("/comment")
+async def comment(body: dict, user: dict = Depends(resolve_user)):
+    """观众发一条公屏。登录才能发 —— 匿名发言追不到人, 出事时没有处置手段。
+
+    返回**不等她说完**: 组织语言要几秒、排队再等十几秒, 让发言的人干等着不合理。
+    飘屏是立刻的, 开不开口由下面几道闸决定。
+    """
+    if not _enabled():
+        raise HTTPException(404, "live_disabled")
+    text = str(body.get("text", "")).strip()[: config.LIVE_COMMENT_MAX_LEN]
+    if not text:
+        raise HTTPException(400, "empty_text")
+    if not rate_limit.allow(f"live-comment:{user['id']}", 1, config.LIVE_COMMENT_COOLDOWN_S):
+        raise HTTPException(429, "too_fast")
+
+    cid = security.new_id("lc_")
+    now = time.time()
+    with db.tx() as conn:
+        conn.execute(
+            "INSERT INTO live_comments (id, room, user_id, nick, text, replied, hidden, created) "
+            "VALUES (?,?,?,?,?,?,?,?)",
+            (cid, config.LIVE_ROOM, user["id"], _nick(user), text, 0, 0, now),
+        )
+
+    replied = await _maybe_reply(cid, text)
+    return JSONResponse({"ok": True, "id": cid, "nick": _nick(user), "t": now, "replied": replied})
+
+
+async def _maybe_reply(cid: str, text: str) -> bool:
+    """够不够格让她开口。飘屏是免费的, 开口不是 —— 三道闸都过了才回。
+
+    任何一道没过都**不是错误**: 评论已经飘出去了, 她只是这一条没接话。所以这里
+    一律吞掉异常, 绝不让"回答失败"变成"评论发不出去"。
+    """
+    global _LAST_REPLY_AT
+    now = time.time()
+    if now - _LAST_REPLY_AT < config.LIVE_REPLY_COOLDOWN_S:
+        return False
+    try:
+        st = await _gpu("GET", f"/rooms/{config.LIVE_ROOM}/status", config.LIVE_ROOM)
+    except HTTPException:
+        return False
+    if not st.get("live"):
+        return False          # 没开播就没人听, 别白花钱
+    if int(st.get("queued") or 0) >= config.LIVE_REPLY_MAX_QUEUE:
+        return False          # 她已经排到几十秒开外了
+    _LAST_REPLY_AT = now      # 先占位再去调模型 —— 慢的那几秒里别放第二条进来
+    try:
+        spoken = await _compose_reply(text, _bill_account())
+        await _gpu(
+            "POST", f"/rooms/{config.LIVE_ROOM}/interject", config.LIVE_ROOM, json={"text": spoken}
+        )
+    except Exception as e:  # noqa: BLE001
+        _LAST_REPLY_AT = 0.0  # 没说成就把位子让出来
+        log.warning("[live] 自动回评失败: %s", type(e).__name__)
+        return False
+    with db.tx() as conn:
+        conn.execute("UPDATE live_comments SET replied=1 WHERE id=?", (cid,))
+    return True
+
+
+@router.post("/comment/{cid}/hide")
+async def hide_comment(cid: str, user: dict = Depends(resolve_user)):
+    """管理员把一条公屏藏起来。软删 —— 记录留着, UGC 的处置要留痕。"""
+    if not _enabled():
+        raise HTTPException(404, "live_disabled")
+    _require_admin(user)
+    with db.tx() as conn:
+        conn.execute("UPDATE live_comments SET hidden=1 WHERE id=? AND room=?", (cid, config.LIVE_ROOM))
+    return JSONResponse({"ok": True})

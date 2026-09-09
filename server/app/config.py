@@ -528,6 +528,25 @@ AVATAR_CREDITS_PER_MIN = _env_int("AVATAR_CREDITS_PER_MIN", 10)
 LIVE_GPU_URL = _env("LIVE_GPU_URL", "")
 # 官方演示直播间。用户自己的直播间以后按租户开, 这个是常驻的那个。
 LIVE_ROOM = _env("LIVE_ROOM", "official")
+
+# ── 公屏与自动回评 (2026-09-09) ──────────────────────────────────────────
+# 老板拍板: **登录才能发** + **每一条都自动回**。后者需要几道护栏, 都在这儿:
+#
+# 一条评论 = 一次模型调用 + 一次插播。插播是串行的, 一句要念十来秒, 所以真正的
+# 上限不是钱而是**她的嘴**: 十个人同时发, 她要念两分钟, 这期间话术一句都播不了。
+#: 同一个人两条评论之间至少隔这么久。挡的是刷屏, 不是正常聊天。
+LIVE_COMMENT_COOLDOWN_S = _env_int("LIVE_COMMENT_COOLDOWN_S", 20)
+#: 全场自动回评的最小间隔。到不了就只飘屏、不回答 —— 飘屏是免费的, 开口不是。
+LIVE_REPLY_COOLDOWN_S = _env_int("LIVE_REPLY_COOLDOWN_S", 12)
+#: 上游待播队列超过这么多句就先不回了。她已经排到几十秒开外, 再塞只会让话术
+#: 彻底播不出去, 而观众看到的是"她答的全是几分钟前的评论"。
+LIVE_REPLY_MAX_QUEUE = _env_int("LIVE_REPLY_MAX_QUEUE", 3)
+#: 观众评论的长度上限。比管理员那条 (600) 短得多 —— 公屏不是投稿箱, 而长文本
+#: 既是提示词注入的载体, 也会让她念上一分钟。
+LIVE_COMMENT_MAX_LEN = _env_int("LIVE_COMMENT_MAX_LEN", 100)
+#: 自动回评的模型账记在谁头上。**不能记观众头上** —— 他只是发了句话, 没同意花钱;
+#: 也不该谁都能花。留空则回落到 ADMIN_EMAILS 的第一个 (直播间的运营方)。
+LIVE_BILL_EMAIL = _env("LIVE_BILL_EMAIL", "")
 CLAUDE_CODE_DOMAIN = _env("CLAUDE_CODE_DOMAIN", "")
 CODEX_DOMAIN = _env("CODEX_DOMAIN", "")
 

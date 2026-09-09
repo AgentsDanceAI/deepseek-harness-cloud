@@ -89,3 +89,36 @@
   font-size: .74rem; border: 1px solid rgba(128,128,128,.4); opacity: .8;
 }
 .lv-logrow--in .lv-tag { border-color: #e33; color: #e33; }
+
+/* ── 公屏飘屏 (2026-09-09) ─────────────────────────────────────────────
+   覆盖在画面上, pointer-events:none —— 弹幕不能挡住"点一下开始播放"那一下。 */
+.lv-danmu {
+  position: absolute; inset: 0; overflow: hidden; pointer-events: none; z-index: 3;
+}
+.lv-dm {
+  position: absolute; left: 100%; white-space: nowrap;
+  padding: .15rem .5rem; border-radius: 999px;
+  background: rgba(0, 0, 0, .35); color: #fff;
+  font-size: .85rem; text-shadow: 0 1px 2px rgba(0, 0, 0, .8);
+  animation: lv-fly 9s linear forwards;
+}
+.lv-dm b { font-weight: 600; opacity: .8; }
+/* 她接了话的那条描个边 —— 一眼看得出"我这条被翻牌了"。 */
+.lv-dm--replied { box-shadow: 0 0 0 1px rgba(255, 214, 102, .9); }
+@keyframes lv-fly {
+  from { transform: translateX(0); }
+  to   { transform: translateX(calc(-100vw - 100%)); }
+}
+/* 动画在减少动态效果时会很难受 —— 退化成右上角淡入淡出的列表。 */
+@media (prefers-reduced-motion: reduce) {
+  .lv-dm { animation: lv-fade 6s linear forwards; left: auto; right: 8px; }
+  @keyframes lv-fade { 0% { opacity: 0 } 10%,80% { opacity: 1 } 100% { opacity: 0 } }
+}
+
+/* 观众发言 */
+.lv-say { display: flex; gap: .5rem; margin-top: .6rem; }
+.lv-say input {
+  flex: 1; padding: .5rem .7rem; border-radius: 999px; font: inherit;
+  border: 1px solid rgba(128, 128, 128, .35); background: transparent; color: inherit;
+}
+.lv-sayhint { margin-top: .35rem; font-size: .8rem; opacity: .6; min-height: 1.2em; }
