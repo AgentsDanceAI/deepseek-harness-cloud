@@ -78,6 +78,9 @@
           <button id="lvUnmute" class="lv-unmute" hidden>{{ t('live.unmute') }}</button>
           {# 控制台也飘 —— 观众在说什么, 管理员得和观众看到同一块屏。 #}
           <div id="lvDanmu" class="lv-danmu"></div>
+          <div id="lvCaps" class="lv-caps"></div>
+          <button id="lvCapsToggle" class="lv-capstoggle" type="button"
+          data-hide="{{ t('live.caps_hide') }}" data-show="{{ t('live.caps_show') }}"></button>
           <div id="lvMsg" class="lv-msg">{{ t('live.connecting') }}</div>
         </div>
         {# 互动面板贴在画面下面 —— 看着她说话的同时敲评论, 眼睛不用两头跑。
@@ -107,5 +110,6 @@
 <script src="/static/hls.min.js?v={{ asset_v }}"></script>
 <script src="/static/live.js?v={{ asset_v }}"></script>
 <script src="/static/live_chat.js?v={{ asset_v }}" defer></script>
+<script src="/static/live_captions.js?v={{ asset_v }}" defer></script>
 <script src="/static/live_console.js?v={{ asset_v }}" defer></script>
 {% endblock %}

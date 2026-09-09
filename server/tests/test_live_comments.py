@@ -255,3 +255,64 @@ def test_the_admin_path_is_not_gagged(monkeypatch):
     r = boss.post("/api/live/say", json={"text": "今天全场八折", "mode": "echo"})
     assert r.status_code == 200
     assert up.said == ["今天全场八折"]
+
+
+# ── 字幕 ─────────────────────────────────────────────────────────────────
+
+
+def test_captions_are_public_and_cached(monkeypatch):
+    """字幕是给观众看的, 所以公开; 但每个观众各自打 GPU 是不行的。
+
+    一百个人看同一场直播、看的是同一份内容 —— 不缓存就是每秒几十次打到那张卡上,
+    而它同时还在生成画面。
+    """
+    calls = {"n": 0}
+    state = {"live": True, "queued": 0,
+             "recent": [{"t": 1.0, "kind": "script", "text": "第一句"},
+                        {"t": 2.0, "kind": "interject", "text": "回你这条"}]}
+
+    async def fake_gpu(method, path, room, **kw):
+        calls["n"] += 1
+        return dict(state)
+
+    monkeypatch.setattr(live, "_gpu", fake_gpu)
+    monkeypatch.setattr(live, "_CAP_CACHE", {"at": 0.0, "data": None})
+
+    c = TestClient(app)
+    r = c.get("/api/live/captions")          # 未登录也要能拿到
+    assert r.status_code == 200
+    d = r.json()
+    assert [x["text"] for x in d["lines"]] == ["第一句", "回你这条"]
+    assert d["lines"][1]["kind"] == "interject", "回评论那句要能被前端挑出来"
+
+    for _ in range(5):
+        c.get("/api/live/captions")
+    assert calls["n"] == 1, f"缓存没生效, 打了上游 {calls['n']} 次"
+
+
+def test_captions_do_not_leak_upstream_state(monkeypatch):
+    """这条路没有鉴权 —— 别把队列深度、错误、话术全文顺手带出去。"""
+    async def fake_gpu(method, path, room, **kw):
+        return {"live": True, "queued": 7, "err": "内部错误细节",
+                "lines": ["完整话术第一句", "完整话术第二句"],
+                "person": "source-v3-head", "voice": "xiaoxiao",
+                "recent": [{"t": 1.0, "kind": "script", "text": "只该露这个"}]}
+
+    monkeypatch.setattr(live, "_gpu", fake_gpu)
+    monkeypatch.setattr(live, "_CAP_CACHE", {"at": 0.0, "data": None})
+    d = TestClient(app).get("/api/live/captions").json()
+    assert set(d) == {"live", "lines"}, f"多回了字段: {set(d) - {'live', 'lines'}}"
+    assert set(d["lines"][0]) == {"t", "kind", "text"}
+
+
+def test_captions_survive_an_unreachable_gpu(monkeypatch):
+    """上游够不着时字幕停住就行 —— 不能让整块变成红字报错。"""
+    from fastapi import HTTPException
+
+    async def boom(*a, **kw):
+        raise HTTPException(502, "upstream_unreachable")
+
+    monkeypatch.setattr(live, "_gpu", boom)
+    monkeypatch.setattr(live, "_CAP_CACHE", {"at": 0.0, "data": None})
+    r = TestClient(app).get("/api/live/captions")
+    assert r.status_code == 200 and r.json() == {"live": False, "lines": []}

@@ -122,3 +122,44 @@
   border: 1px solid rgba(128, 128, 128, .35); background: transparent; color: inherit;
 }
 .lv-sayhint { margin-top: .35rem; font-size: .8rem; opacity: .6; min-height: 1.2em; }
+
+/* ── 字幕条 (2026-09-09): 画面右侧, 半透明, 自动滚动 ──────────────────────
+   为什么压在画面上而不是排在画面下面: 观众的视线在她脸上, 字幕挪到画面外就要
+   来回跑; 而 16:9 的右侧本来就是背景, 盖住不心疼。
+   pointer-events:none —— 字幕不能挡住"点一下开始播放"和弹幕以外的任何操作。 */
+.lv-caps {
+  position: absolute; top: 0; right: 0; bottom: 0; width: 34%; min-width: 180px;
+  z-index: 4; pointer-events: none; overflow: hidden;
+  display: flex; flex-direction: column; justify-content: flex-end;
+  gap: 5px; padding: 14px 14px 16px;
+  background: linear-gradient(to left, rgba(0,0,0,.42), rgba(0,0,0,0));
+  /* 上缘化开 —— 硬切一条边, 看起来像贴了张纸 */
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 18%, #000 100%);
+  mask-image: linear-gradient(to bottom, transparent 0, #000 18%, #000 100%);
+}
+.lv-caps[hidden] { display: none; }
+.lv-cap {
+  color: rgba(255,255,255,.92); font-size: .82rem; line-height: 1.5;
+  text-shadow: 0 1px 3px rgba(0,0,0,.85);
+  animation: lv-cap-in .35s ease-out;
+}
+/* 回评论的那句挑出来 —— 观众要能看出"这句是在回我" */
+.lv-cap--in { color: #ffe08a; }
+.lv-cap--in::before { content: "↩ "; opacity: .8; }
+@keyframes lv-cap-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+/* 开关: 字幕盖住了三分之一画面, 得让人关得掉 */
+.lv-capstoggle {
+  position: absolute; right: 12px; top: 12px; z-index: 5;
+  padding: .3rem .7rem; border-radius: 999px; border: 0; cursor: pointer;
+  background: rgba(0,0,0,.45); color: #fff; font-size: .75rem;
+}
+@media (max-width: 620px) {
+  /* 手机上 34% 太窄, 一行放不下几个字 —— 改成横铺在下沿 */
+  .lv-caps {
+    width: auto; left: 0; top: auto; height: 42%;
+    background: linear-gradient(to top, rgba(0,0,0,.5), rgba(0,0,0,0));
+    -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 22%, #000 100%);
+    mask-image: linear-gradient(to bottom, transparent 0, #000 22%, #000 100%);
+  }
+}

@@ -460,6 +460,41 @@ def _nick(user: dict) -> str:
     return (head[:2] + "***") if head else "观众"
 
 
+#: 字幕的服务端缓存。观众各自轮询的话, 一百个人就是每秒几十次打到 GPU 上 ——
+#: 而所有人看的是同一场直播, 同一份内容。缓存两秒: 比切片时长 (1 秒) 长一点,
+#: 短到察觉不出延迟。
+_CAP_CACHE: dict[str, object] = {"at": 0.0, "data": None}
+_CAP_TTL = 2.0
+
+
+@router.get("/captions")
+async def captions():
+    """她刚才说了什么。**公开** —— 字幕是给观众看的。
+
+    只回文本, 不回 kind 之外的任何东西: 这条路没有鉴权, 别把上游状态 (队列深度、
+    错误、话术全文) 顺手带出去。
+    """
+    if not _enabled():
+        raise HTTPException(404, "live_disabled")
+    now = time.time()
+    if _CAP_CACHE["data"] is not None and now - float(_CAP_CACHE["at"]) < _CAP_TTL:
+        return JSONResponse(_CAP_CACHE["data"])
+    try:
+        st = await _gpu("GET", f"/rooms/{config.LIVE_ROOM}/status", config.LIVE_ROOM)
+    except HTTPException:
+        # 上游够不着不该让字幕层报错 —— 观众看到的是画面还在、字幕停住, 那比
+        # 整块红字好。
+        return JSONResponse({"live": False, "lines": []})
+    lines = [
+        {"t": float(x.get("t") or 0), "kind": str(x.get("kind") or "script"), "text": str(x.get("text") or "")}
+        for x in (st.get("recent") or [])
+        if str(x.get("text") or "").strip()
+    ]
+    data = {"live": bool(st.get("live")), "lines": lines[-12:]}
+    _CAP_CACHE["at"], _CAP_CACHE["data"] = now, data
+    return JSONResponse(data)
+
+
 @router.get("/comments")
 async def comments(since: float = 0.0, limit: int = 40):
     """公屏。**公开** —— 没登录也看得见, 否则路人打开直播间是一片死寂。

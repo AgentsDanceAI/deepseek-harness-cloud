@@ -716,6 +716,8 @@
   "live.disabled": "本站尚未开通直播间",
   "live.unsupported": "当前浏览器不支持播放此直播流",
   "live.unmute": "开声音",
+  "live.caps_hide": "关字幕",
+  "live.caps_show": "开字幕",
   "live.mute": "关声音",
   "live.tap_play": "点一下开始播放",
   "live.note": "观看不消耗机时与积分。数字人是实时生成的：直播开着就占用一路算力（与数字人通话共用三路）。",

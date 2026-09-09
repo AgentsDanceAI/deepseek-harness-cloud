@@ -716,6 +716,8 @@
   "live.disabled": "Live streaming is not enabled on this site",
   "live.unsupported": "This browser cannot play the stream",
   "live.unmute": "Unmute",
+  "live.caps_hide": "Hide captions",
+  "live.caps_show": "Show captions",
   "live.mute": "Mute",
   "live.tap_play": "Tap to play",
   "live.note": "Watching costs no machine time or credits. The stream is generated live, so it holds one compute slot (shared with the avatar calls, three in total).",
