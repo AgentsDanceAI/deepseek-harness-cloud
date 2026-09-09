@@ -390,7 +390,7 @@ class Handler(BaseHTTPRequestHandler):
             "message": (
                 f"「{vendor}」这类官方节点尚未接入本平台。"
                 "已接通: ByteDance/Seedance 视频、OpenAI GPT Image、Wan 视频、Qwen 生图；"
-                "其余能力请用「DSH Cloud 生图 / 生视频」节点。"
+                "其余能力请用「AI Store 生图 / 生视频」节点。"
             ),
         }})
 

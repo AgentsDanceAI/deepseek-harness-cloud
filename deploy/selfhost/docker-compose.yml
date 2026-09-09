@@ -1,5 +1,5 @@
 # =============================================================================
-#  DSH Cloud (deepseek-harness-cloud) — one-command self-host stack
+#  AI Store (deepseek-harness-cloud) — one-command self-host stack
 #  自部署编排：一条命令起全栈（Caddy + 服务端 + 可选云工作台）
 #
 #    cd deploy/selfhost

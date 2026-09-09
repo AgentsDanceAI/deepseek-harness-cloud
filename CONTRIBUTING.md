@@ -1,8 +1,8 @@
-# Contributing to DSH Cloud
+# Contributing to AI Store
 
 English | [简体中文](CONTRIBUTING.zh-CN.md)
 
-Thank you for improving DSH Cloud. Small, focused pull requests with tests and
+Thank you for improving AI Store. Small, focused pull requests with tests and
 clear provenance are easiest to review.
 
 By participating, you agree to follow the

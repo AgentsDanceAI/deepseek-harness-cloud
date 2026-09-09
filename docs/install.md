@@ -1,4 +1,4 @@
-# Install DSH Cloud Community Edition
+# Install AI Store Community Edition
 
 English | [简体中文](install.zh-CN.md)
 

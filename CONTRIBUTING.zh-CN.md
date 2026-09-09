@@ -1,8 +1,8 @@
-# 贡献 DSH Cloud
+# 贡献 AI Store
 
 [English](CONTRIBUTING.md) | 简体中文
 
-感谢改进 DSH Cloud。小而聚焦、带测试且来源清晰的 Pull Request 最容易审查。
+感谢改进 AI Store。小而聚焦、带测试且来源清晰的 Pull Request 最容易审查。
 参与即表示同意遵守 [行为准则](CODE_OF_CONDUCT.zh-CN.md)。安全漏洞不得提交公开
 Issue，请遵循 [安全政策](SECURITY.zh-CN.md)。
 

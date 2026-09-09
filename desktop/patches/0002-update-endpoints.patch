@@ -31,7 +31,7 @@ index 18e4fec..89d7171 100644
    const extension = platform === 'darwin' ? 'dmg' : 'exe'
    const platformName = platform === 'darwin' ? 'mac' : 'windows'
 -  const filename = `DSH-Desktop-${version}-${platformName}.${extension}`
-+  const filename = `DSH-Cloud-Desktop-${version}-${platformName}.${extension}`
++  const filename = `AI-Store-Desktop-${version}-${platformName}.${extension}`
    const completed = join(directory, filename)
    const completedStat = await lstatOptional(completed)
    if (completedStat !== undefined) {

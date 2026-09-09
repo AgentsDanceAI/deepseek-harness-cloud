@@ -43,7 +43,7 @@ export async function runLoginWindow(): Promise<LoginResult | undefined> {
     maximizable: false,
     fullscreenable: false,
     autoHideMenuBar: true,
-    title: 'DSH Cloud',
+    title: 'AI Store',
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,

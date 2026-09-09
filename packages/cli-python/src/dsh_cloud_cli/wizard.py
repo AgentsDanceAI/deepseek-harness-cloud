@@ -205,7 +205,7 @@ def _prompt_identity(out) -> dict:
 
 def prompt_answers(*, version: str, mode: str = "trial", out=sys.stdout) -> dict:
     """Run the three questions. Returns answers for apply_answers()."""
-    out.write(f"\n  DSH Cloud {version} · 自部署引导\n")
+    out.write(f"\n  AI Store {version} · 自部署引导\n")
     out.write("  按回车用默认值，任何一项都可以稍后在 .env 里改。\n\n")
 
     out.write("  模型上游（你自己的 OpenAI 兼容 API）\n")

@@ -15,9 +15,9 @@ and has no response-time commitment unless a separate agreement says otherwise.
 | Commercial support, Enterprise, or separate licensing | [support@agentsdance.ai](mailto:support@agentsdance.ai) | Use subject `Commercial licensing` and describe organization size, deployment model, and required controls. |
 | Trademark or legal request | [legal@agentsdance.ai](mailto:legal@agentsdance.ai) | Include the relevant product, document, or proposed use. |
 
-## DSH Cloud Hosted
+## AI Store Hosted
 
-[DSH Cloud Hosted](https://aistore.best/login?next=%2Fwork) is a managed
+[AI Store Hosted](https://aistore.best/login?next=%2Fwork) is a managed
 subscription service. Individual and team offerings include managed model access,
 workspace capacity, upgrades, monitoring, backups, account support, and plan
 allowances. Current public offers are paid once for the selected monthly or annual

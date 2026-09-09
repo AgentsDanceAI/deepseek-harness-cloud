@@ -1,5 +1,5 @@
 # =============================================================================
-#  DSH Cloud self-host — Caddy configuration
+#  AI Store self-host — Caddy configuration
 #
 #  Both site addresses come from docker-compose.yml (which derives them from
 #  .env), so nothing in this file needs editing for a normal deployment:

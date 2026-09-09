@@ -24,7 +24,7 @@ licensing records under [`legal/licensing/`](legal/licensing/README.md).
 
 A separate written commercial license is required to operate the software as a
 managed multi-tenant service for independent third-party customers or to remove
-or alter DSH Cloud branding in an official frontend. Contact
+or alter AI Store branding in an official frontend. Contact
 [support@agentsdance.ai](mailto:support@agentsdance.ai) with the subject
 `Commercial licensing`.
 

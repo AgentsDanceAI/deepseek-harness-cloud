@@ -1,4 +1,4 @@
-# DSH Cloud 微信小程序
+# AI Store 微信小程序
 
 [English](README.md) | 简体中文
 

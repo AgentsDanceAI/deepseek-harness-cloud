@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-#  DSH Cloud — one-command self-host bootstrap
+#  AI Store — one-command self-host bootstrap
 #  一键自部署：拷贝 .env → 生成密钥 → 起服务 → 健康检查
 #
 #    ./scripts/quickstart.sh                          # interactive

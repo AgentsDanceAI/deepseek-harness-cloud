@@ -23,7 +23,7 @@ TS_URL="${TS_URL:-http://time.certum.pl/}"
 # 签名里带的产品名和主页 —— Windows 的 UAC 提示框会把 PRODUCT_NAME 显给用户看,
 # 所以换产品线签的时候必须一起换, 否则装 A 产品弹出的是 B 产品的名字。
 # These values are descriptive metadata and do not affect the certificate chain.
-PRODUCT_NAME="${PRODUCT_NAME:-DSH Cloud Desktop}"
+PRODUCT_NAME="${PRODUCT_NAME:-AI Store Desktop}"
 PRODUCT_URL="${PRODUCT_URL:-https://aistore.best}"
 PKCS11_MODULE="${PKCS11_MODULE:-/usr/local/lib/SimplySignPKCS/SimplySignPKCS-MS-1.1.24.dylib}"
 [ -f "$PKCS11_MODULE" ] || {

@@ -1,4 +1,4 @@
-# 安装 DSH Cloud Community Edition
+# 安装 AI Store Community Edition
 
 [English](install.md) | 简体中文
 

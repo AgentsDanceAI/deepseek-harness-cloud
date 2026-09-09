@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/** Assert the upstream contract points DSH Cloud depends on, after yarn install.
+/** Assert the upstream contract points AI Store depends on, after yarn install.
  *
  *   node desktop/scripts/verify-contract.mjs <assembled-tree>
  *

@@ -1,6 +1,6 @@
-"""DSH Cloud 的视频编排节点。
+"""AI Store 的视频编排节点。
 
-设计要点: 这个节点**不认识任何一家视频厂商**。它只对着 DSH Cloud 自己的网关
+设计要点: 这个节点**不认识任何一家视频厂商**。它只对着 AI Store 自己的网关
 说话 (与 /llm/v1 聊天通道同构), 由网关去适配智谱 / Kling / Runway / 自建 GPU。
 理由是计费 —— 节点直连厂商就等于把差价让出去, 且换供应商要重发镜像。
 
@@ -137,7 +137,7 @@ class DSHCloudVideo:
     RETURN_TYPES = ("VIDEO", "STRING", "STRING")
     RETURN_NAMES = ("video", "video_url", "local_path")
     FUNCTION = "generate"
-    CATEGORY = "DSH Cloud"
+    CATEGORY = "AI Store"
     # 必须: ComfyUI 只执行通向输出节点的分支, 不标这个的话整张图会被当成
     # 死枝跳过 —— 提交返回 200、/history 里空空如也, 极难排查。
     OUTPUT_NODE = True
@@ -212,7 +212,7 @@ class DSHCloudVideo:
 
 
 NODE_CLASS_MAPPINGS = {"DSHCloudVideo": DSHCloudVideo}
-NODE_DISPLAY_NAME_MAPPINGS = {"DSHCloudVideo": "DSH Cloud 生视频"}
+NODE_DISPLAY_NAME_MAPPINGS = {"DSHCloudVideo": "AI Store 生视频"}
 
 
 class DSHCloudImage:
@@ -237,7 +237,7 @@ class DSHCloudImage:
     RETURN_TYPES = ("IMAGE",)
     RETURN_NAMES = ("images",)
     FUNCTION = "generate"
-    CATEGORY = "DSH Cloud"
+    CATEGORY = "AI Store"
 
     def generate(self, prompt, model, size, n):
         import base64
@@ -279,4 +279,4 @@ class DSHCloudImage:
 
 
 NODE_CLASS_MAPPINGS["DSHCloudImage"] = DSHCloudImage
-NODE_DISPLAY_NAME_MAPPINGS["DSHCloudImage"] = "DSH Cloud 生图"
+NODE_DISPLAY_NAME_MAPPINGS["DSHCloudImage"] = "AI Store 生图"

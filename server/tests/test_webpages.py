@@ -50,7 +50,7 @@ def test_landing_renders(client):
     r = client.get("/")
     assert r.status_code == 200
     body = r.text
-    assert "DSH Cloud" in body
+    assert "AI Store" in body
     assert "AI 原生云空间" in body
     assert "/static/app.css" in body
     assert "/download" in body
@@ -280,7 +280,7 @@ def test_legal_page_renders_markdown(client, tmp_path, monkeypatch):
     monkeypatch.setenv("DHC_LEGAL_DIR", str(tmp_path))
     path = tmp_path / "terms.zh.md"
     path.write_text(
-        "# 服务条款\n\n欢迎使用 **DSH Cloud**。\n\n- 第一条\n- 第二条\n\n"
+        "# 服务条款\n\n欢迎使用 **AI Store**。\n\n- 第一条\n- 第二条\n\n"
         "| 项目 | 说明 |\n|---|---|\n| 积分 | 1 积分 = ¥0.01 |\n\n"
         "详见[隐私政策](/legal/privacy)。\n",
         encoding="utf-8",
@@ -290,7 +290,7 @@ def test_legal_page_renders_markdown(client, tmp_path, monkeypatch):
         assert r.status_code == 200
         assert "文档整理中" not in r.text
         assert "<h1>服务条款</h1>" in r.text
-        assert "<strong>DSH Cloud</strong>" in r.text
+        assert "<strong>AI Store</strong>" in r.text
         assert "<li>第一条</li>" in r.text
         assert "<th>项目</th>" in r.text
         assert '<a href="/legal/privacy"' in r.text

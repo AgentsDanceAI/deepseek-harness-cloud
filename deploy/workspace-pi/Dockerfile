@@ -43,5 +43,5 @@ ENV PI_WEB_HOST=0.0.0.0 PI_WEB_PORT=8787 PI_WEB_CWD=/workspace
 # LABEL 不产生文件系统层, 放最后零成本。
 ARG REVISION=unknown
 LABEL org.opencontainers.image.source="https://github.com/AgentsDanceAI/deepseek-harness-cloud" \
-      org.opencontainers.image.title="DSH Cloud pi workspace (pi-web-ui)" \
+      org.opencontainers.image.title="AI Store pi workspace (pi-web-ui)" \
       org.opencontainers.image.revision="${REVISION}"

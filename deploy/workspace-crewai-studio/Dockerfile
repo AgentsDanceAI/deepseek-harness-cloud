@@ -11,7 +11,7 @@
 FROM python:3.12-slim
 ARG REVISION=unknown
 LABEL org.opencontainers.image.source="https://github.com/AgentsDanceAI/deepseek-harness-cloud" \
-      org.opencontainers.image.title="DSH Cloud CrewAI workspace (CrewAI-Studio)" \
+      org.opencontainers.image.title="AI Store CrewAI workspace (CrewAI-Studio)" \
       org.opencontainers.image.revision="${REVISION}"
 
 RUN apt-get update -qq && apt-get install -y -qq --no-install-recommends \

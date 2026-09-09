@@ -4,7 +4,7 @@ English | [简体中文](deploy.zh-CN.md)
 
 This guide covers the public Community Edition. It does not describe any live DSH
 Cloud environment. For the managed service, use
-[DSH Cloud Hosted](https://aistore.best/login?next=%2Fwork); the remaining
+[AI Store Hosted](https://aistore.best/login?next=%2Fwork); the remaining
 steps are intentionally neutral self-host instructions.
 
 ## Choose an installation path

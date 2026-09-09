@@ -1,4 +1,4 @@
-# DSH Cloud mobile (Android / iOS)
+# AI Store mobile (Android / iOS)
 
 English | [简体中文](README.zh-CN.md)
 

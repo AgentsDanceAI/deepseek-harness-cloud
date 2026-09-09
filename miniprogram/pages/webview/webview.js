@@ -1,4 +1,4 @@
-// web-view 壳页: 内嵌 DSH Cloud 网页工作台。
+// web-view 壳页: 内嵌 AI Store 网页工作台。
 //
 // 前置条件 (详见 miniprogram/README.md):
 //   业务域名必须是与小程序主体一致的 ICP 备案域名, 并已在微信公众平台

@@ -1,4 +1,4 @@
-# DSH Cloud WeChat Mini Program
+# AI Store WeChat Mini Program
 
 English | [简体中文](README.zh-CN.md)
 

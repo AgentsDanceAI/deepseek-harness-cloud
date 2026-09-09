@@ -100,7 +100,7 @@ umask 022
 
 cat > /etc/systemd/system/dsh-wg.service <<EOF
 [Unit]
-Description=DSH Cloud standby-node tunnel (WireGuard $WG_IF, config outside /etc/wireguard)
+Description=AI Store standby-node tunnel (WireGuard $WG_IF, config outside /etc/wireguard)
 After=network-online.target
 Wants=network-online.target
 

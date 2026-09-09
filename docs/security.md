@@ -122,5 +122,5 @@ backup/restore ownership, and a communication path before an incident. Preserve
 only necessary evidence in a restricted location. Do not commit incident notes,
 user data, private topology, or live indicators to this repository.
 
-Report a vulnerability in DSH Cloud privately using
+Report a vulnerability in AI Store privately using
 [SECURITY.md](../SECURITY.md).

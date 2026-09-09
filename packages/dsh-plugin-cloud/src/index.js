@@ -20,6 +20,6 @@ export function apply() {
     return
   }
   console.warn(
-    `[dsh-plugin-cloud] no DSH Cloud session — run \`npx dsh-plugin-cloud setup\` to log in`,
+    `[dsh-plugin-cloud] no AI Store session — run \`npx dsh-plugin-cloud setup\` to log in`,
   )
 }

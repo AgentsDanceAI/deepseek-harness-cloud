@@ -40,7 +40,7 @@ def build():
         model,
         tools=[calculator],
         prompt=(
-            "你是跑在 LangGraph 上的智能体, 住在 DSH Cloud 里。"
+            "你是跑在 LangGraph 上的智能体, 住在 AI Store 里。"
             "回答简洁、直接; 该算数就用 calculator 工具, 别自己心算。"
         ),
     )

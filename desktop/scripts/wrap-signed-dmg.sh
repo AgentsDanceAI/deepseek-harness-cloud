@@ -37,8 +37,8 @@ xcrun stapler validate "$APP" >/dev/null 2>&1 || { echo "公证票据缺失/无�
 
 VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$APP/Contents/Info.plist" 2>/dev/null || echo "0.0.0")
 ARCH_LABEL="${ARCH_LABEL:-$(uname -m)}"
-VOLNAME="${VOLNAME:-DSH Cloud Desktop}"
-DMG="$OUTDIR/DSH-Cloud-Desktop-${VERSION}-mac-${ARCH_LABEL}.dmg"
+VOLNAME="${VOLNAME:-AI Store Desktop}"
+DMG="$OUTDIR/AI-Store-Desktop-${VERSION}-mac-${ARCH_LABEL}.dmg"
 
 echo "==> 组装 DMG 内容 (app + /Applications 拖拽目标)"
 STAGE="$WORK/stage"; mkdir -p "$STAGE"

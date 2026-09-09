@@ -1,15 +1,15 @@
-# DSH Cloud 移动端 (Android / iOS)
+# AI Store 移动端 (Android / iOS)
 
 [English](README.md) | 简体中文
 
-DSH Cloud 的手机 App 采用 **Capacitor 远程壳** 方案（与 AgentsDance 的做法一致）：
+AI Store 的手机 App 采用 **Capacitor 远程壳** 方案（与 AgentsDance 的做法一致）：
 原生 App 只是一层 WebView，启动后直接加载线上站点 `https://aistore.best`，
 登录态走 `.aistore.best` 域下的会话 Cookie，与浏览器端完全同源。
 网页发版即 App 更新，原生工程几乎不需要迭代。
 
 - appId: `ai.agentsdance.dshcloud.app`
-- appName: `DSH Cloud`，版本 `1.0.0`
-- `www/index.html` 只是离线/首帧兜底页（"正在连接 DSH Cloud…" 并跳转线上站点）
+- appName: `AI Store`，版本 `1.0.0`
+- `www/index.html` 只是离线/首帧兜底页（"正在连接 AI Store…" 并跳转线上站点）
 - `capacitor.config.ts` 中 `server.url` 指向线上站点；`allowNavigation` 限定在
   `aistore.best` 及其子域，其余链接交给系统浏览器
 - Android 明确关闭明文流量（`usesCleartextTraffic="false"`、`allowMixedContent: false`）

@@ -14,7 +14,7 @@ index 48cd4da..b52c6ac 100644
    })
  
    try {
-+    // DSH Cloud login wall: the Host never boots without a cloud session.
++    // AI Store login wall: the Host never boots without a cloud session.
 +    const cloudSession = await cloudGate()
 +    if (cloudSession === undefined) {
 +      await shutdown.request(0)

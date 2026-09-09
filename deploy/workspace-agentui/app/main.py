@@ -1,4 +1,4 @@
-"""DSH Cloud 自研 agent 工作台的 HTTP/WS 层。
+"""AI Store 自研 agent 工作台的 HTTP/WS 层。
 
 **没有账号体系, 也不该有。** 这个域前面压着我们自己的 forward_auth, 用户走到
 这里已经登过一次了。再加一层等于第二道墙, 还会重演 Dify/Hermes/CloudCLI 那类
@@ -45,7 +45,7 @@ AGENT_HOME = os.environ.get("DSH_AGENT_HOME", "/home/agent")
 #: 这台开放哪几个 CLI 供切换。留空 = 只有默认那个。
 ENABLED_CLIS = [c for c in os.environ.get("DSH_ENABLED_CLIS", DEFAULT_CLI).split(",") if c.strip()]
 
-app = FastAPI(title="DSH Cloud Agent")
+app = FastAPI(title="AI Store Agent")
 
 
 def _agent_term_cmd() -> str:

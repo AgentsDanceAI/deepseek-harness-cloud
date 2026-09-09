@@ -7,7 +7,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thanks for helping improve DSH Cloud. Search existing issues first.
+        Thanks for helping improve AI Store. Search existing issues first.
 
         Do not use this form for security vulnerabilities. Report those privately using SECURITY.md. Never paste credentials, session tokens, personal data, customer data, private topology, or production database contents.
   - type: input
@@ -28,7 +28,7 @@ body:
         - npm / npx CLI
         - uv / uvx CLI
         - Source checkout
-        - DSH Cloud Hosted
+        - AI Store Hosted
         - Other
     validations:
       required: true

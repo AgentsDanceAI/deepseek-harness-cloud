@@ -26,11 +26,11 @@ docker run --rm --entrypoint bash "$REF" -c '
 
   # 工作台代持: 回环建码 -> 换会话 -> 拿到 Set-Cookie
   C=$(curl -fsS -X POST -H "content-type: application/json" \
-        -d "{\"label\":\"DSH Cloud\",\"scopes\":[\"admin\",\"client\"]}" \
+        -d "{\"label\":\"AI Store\",\"scopes\":[\"admin\",\"client\"]}" \
         http://127.0.0.1:8799/api/auth/pairing | node -e "let s=\"\";process.stdin.on(\"data\",d=>s+=d).on(\"end\",()=>console.log(JSON.parse(s).code))")
   [ -n "$C" ] || { echo "!! 没拿到配对码" >&2; exit 1; }
   CK=$(curl -fsS -i -X POST -H "content-type: application/json" \
-        -d "{\"code\":\"$C\",\"label\":\"DSH Cloud\",\"cookie\":true}" \
+        -d "{\"code\":\"$C\",\"label\":\"AI Store\",\"cookie\":true}" \
         http://127.0.0.1:8799/api/auth/pair | grep -i "^set-cookie:" | sed "s/^[Ss]et-[Cc]ookie: //; s/;.*//" | tr -d "\r")
   case "$CK" in omb_session_*) ;; *) echo "!! 会话 cookie 形状不对: ${CK:0:40}" >&2; exit 1;; esac
   echo "  ✓ 回环配对拿到会话 (${CK%%=*})"

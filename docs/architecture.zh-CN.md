@@ -2,8 +2,8 @@
 
 [English](architecture.md) | 简体中文
 
-DSH Cloud 在 DeepSeek Harness 智能体运行时外围提供账号、策略、计量、模型网关和
-可选浏览器工作区。同一套公开服务既可由用户自部署，也可通过 DSH Cloud Hosted
+AI Store 在 DeepSeek Harness 智能体运行时外围提供账号、策略、计量、模型网关和
+可选浏览器工作区。同一套公开服务既可由用户自部署，也可通过 AI Store Hosted
 使用。本文描述仓库接口，不披露任何线上环境的拓扑、容量、凭证或提供方配置。
 
 ## 系统上下文

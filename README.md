@@ -1,6 +1,6 @@
 <div align="center">
 
-# DSH Cloud
+# AI Store
 
 **Managed cloud agents and a self-hostable platform around DeepSeek Harness.**
 
@@ -8,7 +8,7 @@ Accounts, a server-side model gateway, usage policy, teams, and an optional
 browser workspace—without distributing an upstream model key to every client.
 
 [![CI](https://github.com/AgentsDanceAI/deepseek-harness-cloud/actions/workflows/ci.yml/badge.svg)](https://github.com/AgentsDanceAI/deepseek-harness-cloud/actions/workflows/ci.yml)
-[![License: DSH Cloud Community 1.0](https://img.shields.io/badge/license-DSH%20Cloud%20Community%201.0-4c6ef5.svg)](LICENSE)
+[![License: AI Store Community 1.0](https://img.shields.io/badge/license-DSH%20Cloud%20Community%201.0-4c6ef5.svg)](LICENSE)
 [![Security policy](https://img.shields.io/badge/security-private%20reporting-2f9e44.svg)](SECURITY.md)
 
 Release: [`0.3.0`](release/release.json)
@@ -35,9 +35,9 @@ dsh-cloud start` does the same from PyPI. Details: [Quick start](#quick-start).
 
 <!-- path:hosted -->
 
-### Use DSH Cloud Hosted
+### Use AI Store Hosted
 
-[DSH Cloud Hosted](https://aistore.best/login?next=%2Fwork) is the managed
+[AI Store Hosted](https://aistore.best/login?next=%2Fwork) is the managed
 subscription service: no server installation, with model access, workspace
 capacity, upgrades, monitoring, backups, and account support. Current plans are
 paid once for the selected monthly or annual term and **do not renew automatically**.
@@ -45,7 +45,7 @@ paid once for the selected monthly or annual term and **do not renew automatical
 **New accounts start with 500 free credits**, and the hosted gateway serves
 **20 models** with no upstream key of your own.
 
-[**Start on DSH Cloud Hosted**](https://aistore.best/login?next=%2Fwork) ·
+[**Start on AI Store Hosted**](https://aistore.best/login?next=%2Fwork) ·
 [Individual plans](https://aistore.best/pricing#plans) ·
 [Team plans](https://aistore.best/pricing#team)
 
@@ -111,7 +111,7 @@ backups, monitoring, and applicable law.
 
 **New accounts start with 500 free credits — every model above works out of the
 box.** No card, no API keys, no per-provider signups. Try them on
-[DSH Cloud Hosted](https://aistore.best), or pipe them into a stock
+[AI Store Hosted](https://aistore.best), or pipe them into a stock
 DeepSeek Harness install with one command:
 
 ```bash
@@ -228,7 +228,7 @@ browser / desktop / mobile
   TLS edge / reverse proxy
           |
           v
-  DSH Cloud FastAPI service --------> operator-selected model/search upstream
+  AI Store FastAPI service --------> operator-selected model/search upstream
    | accounts, teams, plans            server-side provider credential
    | model gateway and metering
    | web console and payments
@@ -310,6 +310,6 @@ tests, security routing, and edition-boundary review.
 - Third-party notices: [legal/THIRD_PARTY_NOTICES.md](legal/THIRD_PARTY_NOTICES.md).
 - Release changes: [CHANGELOG.md](CHANGELOG.md).
 
-DSH Cloud is independently developed and operated. It is not affiliated with or
+AI Store is independently developed and operated. It is not affiliated with or
 endorsed by DeepSeek. “DeepSeek” and related marks belong to their respective
 owners.

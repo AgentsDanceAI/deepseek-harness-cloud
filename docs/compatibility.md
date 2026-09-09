@@ -3,7 +3,7 @@
 English | [简体中文](compatibility.zh-CN.md)
 
 DeepSeek Harness and its desktop application are developer-preview dependencies
-that may introduce breaking changes. DSH Cloud does not maintain an upstream
+that may introduce breaking changes. AI Store does not maintain an upstream
 source fork. Desktop customization is limited to small patches and a
 self-contained cloud integration directory so upgrades remain auditable.
 

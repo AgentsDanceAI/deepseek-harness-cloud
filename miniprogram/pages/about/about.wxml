@@ -2,7 +2,7 @@
   <view class="card">
     <view class="card-title">产品介绍</view>
     <view class="body">
-      DSH Cloud 是桌面 AI 编程助手的云服务。桌面端登录后即可使用,
+      AI Store 是桌面 AI 编程助手的云服务。桌面端登录后即可使用,
       无需自备模型 API Key; 模型流量由云端网关统一转发。
     </view>
     <view class="body">
@@ -27,5 +27,5 @@
     </view>
   </view>
 
-  <view class="version muted">DSH Cloud 小程序 · v0.1.0</view>
+  <view class="version muted">AI Store 小程序 · v0.1.0</view>
 </view>

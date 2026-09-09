@@ -1,4 +1,4 @@
-/** Sandboxed preload for the DSH Cloud login window.
+/** Sandboxed preload for the AI Store login window.
  * Exposes the minimal bridge; all network stays in the main process. */
 'use strict'
 

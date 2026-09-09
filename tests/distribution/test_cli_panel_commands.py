@@ -29,7 +29,7 @@ NODE_BIN = ROOT / "packages/cli-npm/bin/dsh-cloud.mjs"
 # 服务端在开发模式下打给日志的样子 (server/app/accounts.py 的 _send_mail)。
 # 桩按原样吐出来, 面板里那条 grep 的模式对不对也就一并验了。
 _DEV_MAIL_SAMPLE = (
-    "[dev-mail] to=someone@example.com subject=DSH Cloud 登录验证码\n"
+    "[dev-mail] to=someone@example.com subject=AI Store 登录验证码\n"
     "您的登录验证码是 145210，10 分钟内有效。若非本人操作请忽略。\n"
 )
 

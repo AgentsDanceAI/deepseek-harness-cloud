@@ -18,7 +18,7 @@
 #
 # ⚠️ 从 macOS 传输 .app 时，使用 COPYFILE_DISABLE=1，避免 bsdtar 生成
 #    AppleDouble 文件。这些文件会污染签名清单并干扰二进制检测：
-#      COPYFILE_DISABLE=1 tar -czf app.tar.gz -C dist/mac-arm64 "DSH Cloud Desktop.app"
+#      COPYFILE_DISABLE=1 tar -czf app.tar.gz -C dist/mac-arm64 "AI Store Desktop.app"
 #    传到之后先 `find <app> -name "._*" -delete` 复查一遍再签, 便宜且能兜住。
 #
 # ⚠️ zip 不能承载公证票据 (票据写进 bundle 的 CodeResources), 所以顺序必须是
@@ -41,7 +41,7 @@ done
 command -v "$RC" >/dev/null || { echo "!! rcodesign 未安装" >&2; exit 1; }
 
 for dir in "$@"; do
-  app="$DIST/$dir/DSH Cloud Desktop.app"
+  app="$DIST/$dir/AI Store Desktop.app"
   [ -d "$app" ] || { echo "!! 找不到 $app" >&2; exit 1; }
 
   # ⚠️ --for-notarization 只统一处理 hardened runtime **标志**; entitlements 仍然

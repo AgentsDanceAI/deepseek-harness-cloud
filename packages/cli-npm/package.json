@@ -2,7 +2,7 @@
   "name": "@agentsdanceai/dsh-cloud",
   "version": "0.0.0-development",
   "private": true,
-  "description": "Safe self-host installer and lifecycle CLI for DSH Cloud Community Edition",
+  "description": "Safe self-host installer and lifecycle CLI for AI Store Community Edition",
   "type": "module",
   "bin": {"dsh-cloud": "bin/dsh-cloud.mjs"},
   "engines": {"node": ">=22.14.0"},

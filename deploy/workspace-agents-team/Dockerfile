@@ -74,5 +74,5 @@ CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8710"]
 # LABEL 不产生文件系统层, 放最后零成本。
 ARG REVISION=unknown
 LABEL org.opencontainers.image.source="https://github.com/AgentsDanceAI/deepseek-harness-cloud" \
-      org.opencontainers.image.title="DSH Cloud Operator workspace" \
+      org.opencontainers.image.title="AI Store Operator workspace" \
       org.opencontainers.image.revision="${REVISION}"

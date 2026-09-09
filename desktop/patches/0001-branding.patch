@@ -9,7 +9,7 @@ index bb502c1..249f6f8 100644
 -    "appId": "ai.deepseek.dsh.desktop",
 -    "productName": "DSH Desktop",
 +    "appId": "ai.agentsdance.dshcloud.desktop",
-+    "productName": "DSH Cloud Desktop",
++    "productName": "AI Store Desktop",
      "asar": true,
      "asarUnpack": [
        "package.json",
@@ -19,8 +19,8 @@ index bb502c1..249f6f8 100644
        "createStartMenuShortcut": true,
 -      "shortcutName": "DSH Desktop",
 -      "artifactName": "DSH-Desktop-${version}-${arch}-Setup.${ext}"
-+      "shortcutName": "DSH Cloud Desktop",
-+      "artifactName": "DSH-Cloud-Desktop-${version}-${arch}-Setup.${ext}"
++      "shortcutName": "AI Store Desktop",
++      "artifactName": "AI-Store-Desktop-${version}-${arch}-Setup.${ext}"
      },
      "linux": {
        "target": [
@@ -34,8 +34,8 @@ index 3c6bfec..466e34b 100644
        url: desktopRendererUrl(ctx.webServer.port, config.mode, ctx.desktopRuntime.platform),
 -      productName: 'DSH Desktop',
 -      windowTitle: 'DeepSeek Harness Desktop',
-+      productName: 'DSH Cloud Desktop',
-+      windowTitle: 'DSH Cloud Desktop',
++      productName: 'AI Store Desktop',
++      windowTitle: 'AI Store Desktop',
        iconPath,
        trayIcons,
        readThemeSource: () => {
@@ -48,7 +48,7 @@ index 48cd4da..1c9ed61 100644
  
  const BIN_NAME = 'dsh-plugin-desktop'
 -const PRODUCT_NAME = 'DSH Desktop'
-+const PRODUCT_NAME = 'DSH Cloud Desktop'
++const PRODUCT_NAME = 'AI Store Desktop'
  
  /** Report profile recovery without changing startup or rollback outcomes. */
  function notifyProfileRecovery(runtime: ElectronDesktopRuntime, body: string): void {
@@ -71,8 +71,8 @@ index 97a07a7..75284f3 100644
        url: 'http://127.0.0.1:43120/?dsh-desktop-mode=compatibility&dsh-desktop-platform=darwin',
 -      productName: 'DSH Desktop',
 -      windowTitle: 'DeepSeek Harness Desktop',
-+      productName: 'DSH Cloud Desktop',
-+      windowTitle: 'DSH Cloud Desktop',
++      productName: 'AI Store Desktop',
++      windowTitle: 'AI Store Desktop',
        iconPath: expect.stringMatching(/\/build\/app-icon-mac\.png$/u),
        trayIcons: {
          templatePath: expect.stringMatching(/\/build\/tray-iconTemplate\.png$/u),
@@ -86,7 +86,7 @@ index 404e5e2..f20487f 100644
      expect(manifest.version).toBe(workspaceManifest.version)
 -    expect(manifest.build?.productName).toBe('DSH Desktop')
 -    expect(manifest.build?.appId).toBe('ai.deepseek.dsh.desktop')
-+    expect(manifest.build?.productName).toBe('DSH Cloud Desktop')
++    expect(manifest.build?.productName).toBe('AI Store Desktop')
 +    expect(manifest.build?.appId).toBe('ai.agentsdance.dshcloud.desktop')
      expect(manifest.build?.asarUnpack).toEqual([
        'package.json',
@@ -97,8 +97,8 @@ index 404e5e2..f20487f 100644
        createStartMenuShortcut: true,
 -      shortcutName: 'DSH Desktop',
 -      artifactName: 'DSH-Desktop-${version}-${arch}-Setup.${ext}',
-+      shortcutName: 'DSH Cloud Desktop',
-+      artifactName: 'DSH-Cloud-Desktop-${version}-${arch}-Setup.${ext}',
++      shortcutName: 'AI Store Desktop',
++      artifactName: 'AI-Store-Desktop-${version}-${arch}-Setup.${ext}',
      })
      expect(manifest.build?.linux?.icon).toBe('build/app-icon.png')
    })
@@ -111,7 +111,7 @@ index be5a76b..17c70be 100644
      })
  
 -    expect(result).toBe(join(userDataPath, 'updates', '2.1.0', 'DSH-Desktop-2.1.0-mac.dmg'))
-+    expect(result).toBe(join(userDataPath, 'updates', '2.1.0', 'DSH-Cloud-Desktop-2.1.0-mac.dmg'))
++    expect(result).toBe(join(userDataPath, 'updates', '2.1.0', 'AI-Store-Desktop-2.1.0-mac.dmg'))
      expect(await readFile(result)).toEqual(Buffer.from(artifact))
      expect(calls).toHaveLength(1)
      expect(calls[0]?.url).toBe(DESKTOP_DOWNLOAD_URLS.darwin)
@@ -120,7 +120,7 @@ index be5a76b..17c70be 100644
      })
  
 -    expect(result).toBe(join(userDataPath, 'updates', '2.2.0', 'DSH-Desktop-2.2.0-windows.exe'))
-+    expect(result).toBe(join(userDataPath, 'updates', '2.2.0', 'DSH-Cloud-Desktop-2.2.0-windows.exe'))
++    expect(result).toBe(join(userDataPath, 'updates', '2.2.0', 'AI-Store-Desktop-2.2.0-windows.exe'))
      expect(await readFile(result)).toEqual(Buffer.from(artifact))
      await expectNoPartialFiles(userDataPath, '2.2.0')
    })
@@ -129,7 +129,7 @@ index be5a76b..17c70be 100644
        'updates',
        '2.8.0+build',
 -      'DSH-Desktop-2.8.0+build-mac.dmg',
-+      'DSH-Cloud-Desktop-2.8.0+build-mac.dmg',
++      'AI-Store-Desktop-2.8.0+build-mac.dmg',
      ))
    })
  

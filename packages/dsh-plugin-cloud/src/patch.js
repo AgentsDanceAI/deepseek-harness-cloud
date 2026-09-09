@@ -27,7 +27,7 @@ export function providerRow(models) {
     config: {
       providers: {
         'dsh-cloud': {
-          displayName: 'DSH Cloud',
+          displayName: 'AI Store',
           api: 'openai-completions',
           baseURL: `${CLOUD_BASE}/llm/v1`,
           apiKeyEnv: TOKEN_ENV,

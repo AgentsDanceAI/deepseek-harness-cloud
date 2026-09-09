@@ -1,6 +1,6 @@
 <div align="center">
 
-# DSH Cloud
+# AI Store
 
 **围绕 DeepSeek Harness 构建的托管云端智能体与可自部署平台。**
 
@@ -8,7 +8,7 @@
 无需把模型上游密钥分发给每个客户端。
 
 [![CI](https://github.com/AgentsDanceAI/deepseek-harness-cloud/actions/workflows/ci.yml/badge.svg)](https://github.com/AgentsDanceAI/deepseek-harness-cloud/actions/workflows/ci.yml)
-[![License: DSH Cloud Community 1.0](https://img.shields.io/badge/license-DSH%20Cloud%20Community%201.0-4c6ef5.svg)](LICENSE)
+[![License: AI Store Community 1.0](https://img.shields.io/badge/license-DSH%20Cloud%20Community%201.0-4c6ef5.svg)](LICENSE)
 [![Security policy](https://img.shields.io/badge/security-private%20reporting-2f9e44.svg)](SECURITY.zh-CN.md)
 
 发行版本：[`0.3.0`](release/release.json)
@@ -33,15 +33,15 @@ npx --yes @agentsdanceai/dsh-cloud start
 
 ## 选择使用方式
 
-### DSH Cloud 托管版
+### AI Store 托管版
 
-[DSH Cloud 托管版](https://aistore.best/login?next=%2Fwork)是托管订阅服务：
+[AI Store 托管版](https://aistore.best/login?next=%2Fwork)是托管订阅服务：
 无需安装服务器，按月度或年度服务期提供模型访问、工作台容量、升级、监控、
 备份与账号支持。当前方案按所选服务期一次性付费，**到期不自动续费**。
 
 **注册即送 500 积分**；网关内建 **20 个模型**，无需自备任何上游密钥。
 
-[**开始使用 DSH Cloud 托管版**](https://aistore.best/login?next=%2Fwork) ·
+[**开始使用 AI Store 托管版**](https://aistore.best/login?next=%2Fwork) ·
 [个人套餐](https://aistore.best/pricing#plans) ·
 [团队方案](https://aistore.best/pricing#team)
 
@@ -99,7 +99,7 @@ npm/npx、uv/uvx 遵循同一套版本化安装契约。
 <!-- model-catalog:end -->
 
 **注册即送 500 积分——上面每一个模型开箱直接可用。** 不绑卡、不要任何
-API Key、不用挨家注册。到 [DSH Cloud 托管版](https://aistore.best)直接试，
+API Key、不用挨家注册。到 [AI Store 托管版](https://aistore.best)直接试，
 或者一条命令把它们接进你已有的原版 DeepSeek Harness：
 
 ```bash
@@ -194,7 +194,7 @@ docker run --rm --name dsh-cloud --env-file .dsh-cloud/docker.env --publish 127.
    TLS 入口 / 反向代理
           |
           v
-  DSH Cloud FastAPI 服务 --------> 自部署方选择的模型/搜索上游
+  AI Store FastAPI 服务 --------> 自部署方选择的模型/搜索上游
    | 账号、团队、套餐                上游凭证仅在服务端
    | 模型网关与计量
    | Web 控制台与支付
@@ -259,5 +259,5 @@ DCO 签署、来源披露、测试、安全报告和版本边界要求见
 - 第三方声明：[legal/THIRD_PARTY_NOTICES.md](legal/THIRD_PARTY_NOTICES.md)
 - 发行变更：[变更日志](CHANGELOG.zh-CN.md)
 
-DSH Cloud 为独立开发与运营的项目，与 DeepSeek 无隶属或背书关系。
+AI Store 为独立开发与运营的项目，与 DeepSeek 无隶属或背书关系。
 “DeepSeek”及相关标识归其各自权利人所有。

@@ -1,4 +1,4 @@
-# DSH Cloud 自研智能体工作台。
+# AI Store 自研智能体工作台。
 #
 # 老板 2026-08-31 拍板自研, 顶掉 CloudCLI。理由不是"别人的做得不好", 是三条我们
 # 绕不过去的:
@@ -111,5 +111,5 @@ CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]
 # LABEL 不产生文件系统层, 放最后零成本。
 ARG REVISION=unknown
 LABEL org.opencontainers.image.source="https://github.com/AgentsDanceAI/deepseek-harness-cloud" \
-      org.opencontainers.image.title="DSH Cloud agent workspace (自研)" \
+      org.opencontainers.image.title="AI Store agent workspace (自研)" \
       org.opencontainers.image.revision="${REVISION}"

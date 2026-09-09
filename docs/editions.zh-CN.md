@@ -1,14 +1,14 @@
-# DSH Cloud 版本说明
+# AI Store 版本说明
 
 [English](editions.md) | 简体中文
 
 Community Edition 以 [DSH Cloud Community License 1.0](../LICENSE) 提供源码。
-DSH Cloud Hosted 是在 `aistore.best` 运营的托管订阅服务。超出 Community
+AI Store Hosted 是在 `aistore.best` 运营的托管订阅服务。超出 Community
 License 的使用方式可申请商业授权。
 
 ## 对比
 
-| 范围 | Community Edition | DSH Cloud Hosted | 商业授权 |
+| 范围 | Community Edition | AI Store Hosted | 商业授权 |
 |---|---|---|---|
 | 使用方式 | 单一组织内部使用、自部署、开发、评估和 API 集成 | 面向个人及团队订阅者的托管服务 | 托管多租户服务、官方前端去品牌或协商的其他权利 |
 | 开始使用 | Docker/Compose、npm/npx 或 uv/uvx | [打开托管工作台](https://aistore.best/login?next=%2Fwork) | 联系 `support@agentsdance.ai` |

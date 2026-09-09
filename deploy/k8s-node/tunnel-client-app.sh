@@ -1,5 +1,5 @@
 #!/bin/bash
-# DSH Cloud tunnel — client side, runs ON the prod host as root.
+# AI Store tunnel — client side, runs ON the prod host as root.
 # Installs:
 #   /usr/local/sbin/dsh-tunnel-local-up    LocalCommand hook: addresses the tun device, adds k3s routes
 #   /etc/systemd/system/dsh-tunnel.service ssh -w tunnel to <node>:<port>, auto-restart
@@ -31,7 +31,7 @@ sed -i "s|__APP_IP__|$LOCAL|; s|__NODE_IP__|$PEER|" /usr/local/sbin/dsh-tunnel-l
 
 install -m 0644 /dev/stdin /etc/systemd/system/dsh-tunnel.service <<EOF
 [Unit]
-Description=DSH Cloud L3 tunnel to the k3s node over ssh :$P
+Description=AI Store L3 tunnel to the k3s node over ssh :$P
 After=network-online.target
 Wants=network-online.target
 

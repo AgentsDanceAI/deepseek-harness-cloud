@@ -2,7 +2,7 @@
 /** dsh-plugin-cloud CLI — login / setup / status / logout.
  *
  * `setup` is the one-command onboarding: device login (RFC 8628 style, same
- * flow the DSH Cloud desktop uses) → fetch the live model catalog → write the
+ * flow the AI Store desktop uses) → fetch the live model catalog → write the
  * plugin row and the gateway provider row into $DSH_HOME/cordis.patch.yml.
  */
 
@@ -15,7 +15,7 @@ import { pluginRow, providerRow, writeManagedRows } from './patch.js'
 
 const VERSION = createRequire(import.meta.url)('../package.json').version
 
-const USAGE = `dsh-plugin-cloud ${VERSION} — connect stock DeepSeek Harness to DSH Cloud
+const USAGE = `dsh-plugin-cloud ${VERSION} — connect stock DeepSeek Harness to AI Store
 
 Usage: dsh-plugin-cloud <command>
 
@@ -30,7 +30,7 @@ Environment:
   DSH_CLOUD_BASE   service base URL (default https://aistore.best)
   DSH_HOME         DeepSeek Harness home (default ~/.dsh)
 
-DSH Cloud is a commercial hosted service by AgentsDance AI.
+AI Store is a commercial hosted service by AgentsDance AI.
 New accounts include 500 free credits. https://aistore.best`
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
@@ -100,7 +100,7 @@ async function setup() {
   const backup = writeManagedRows(path, [pluginRow(), providerRow(models)])
   console.log(`\nwrote ${models.length} models into ${path}`)
   if (backup) console.log(`previous file backed up to ${backup}`)
-  console.log(`\nDone. Restart DeepSeek Harness and pick a model under “DSH Cloud”.`)
+  console.log(`\nDone. Restart DeepSeek Harness and pick a model under “AI Store”.`)
   console.log(`Re-run \`npx dsh-plugin-cloud setup\` any time to refresh the catalog.`)
 }
 

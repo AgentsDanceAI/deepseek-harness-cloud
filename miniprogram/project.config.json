@@ -1,5 +1,5 @@
 {
-  "description": "DSH Cloud 微信小程序 — 网页工作台的 web-view 壳",
+  "description": "AI Store 微信小程序 — 网页工作台的 web-view 壳",
   "miniprogramRoot": ".",
   "compileType": "miniprogram",
   "appid": "wx0000000000000000",

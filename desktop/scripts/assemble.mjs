@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/** Assemble the DSH Cloud desktop tree from the pinned upstream + our overlay.
+/** Assemble the AI Store desktop tree from the pinned upstream + our overlay.
  *
  *   node desktop/scripts/assemble.mjs [--dest <dir>] [--no-submodule]
  *
@@ -165,7 +165,7 @@ console.log('assemble: copied dsh-plugin-cloud sources and assets')
   }
   const existing = Array.isArray(pkg.build.protocols) ? pkg.build.protocols : []
   if (!existing.some(entry => entry?.schemes?.includes(CLOUD_URL_SCHEME))) {
-    existing.push({ name: 'DSH Cloud', schemes: [CLOUD_URL_SCHEME] })
+    existing.push({ name: 'AI Store', schemes: [CLOUD_URL_SCHEME] })
     pkg.build.protocols = existing
     writeFileSync(manifestPath, `${JSON.stringify(pkg, null, 2)}\n`)
   }
@@ -197,7 +197,7 @@ const manifest = JSON.parse(readFileSync(join(dest, 'dsh-plugin-desktop', 'packa
 for (const field of ['dependencies', 'devDependencies', 'optionalDependencies']) {
   for (const name of Object.keys(manifest[field] ?? {})) {
     if (name.includes('subagent-claude-code') || name.includes('claude-agent-sdk')) {
-      throw new Error(`assemble: ${field}.${name} must not ship in DSH Cloud Desktop `
+      throw new Error(`assemble: ${field}.${name} must not ship in AI Store Desktop `
         + '(identity-scoped redistribution authorization); remove it before packaging')
     }
   }

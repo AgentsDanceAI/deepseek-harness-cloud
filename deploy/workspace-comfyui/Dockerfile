@@ -59,6 +59,6 @@ EXPOSE 8188
 # LABEL 不产生文件系统层, 放最后零成本。
 ARG REVISION=unknown
 LABEL org.opencontainers.image.source="https://github.com/AgentsDanceAI/deepseek-harness-cloud" \
-      org.opencontainers.image.title="DSH Cloud ComfyUI workspace" \
+      org.opencontainers.image.title="AI Store ComfyUI workspace" \
       org.opencontainers.image.version="${COMFY_REF}" \
       org.opencontainers.image.revision="${REVISION}"

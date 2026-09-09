@@ -254,7 +254,7 @@ export async function promptAnswers(io, { version, mode = 'trial' }) {
   const { output } = io
   const reader = createReader(io.input, output)
   try {
-    output.write(`\n  DSH Cloud ${version} · 自部署引导\n`)
+    output.write(`\n  AI Store ${version} · 自部署引导\n`)
     output.write('  按回车用默认值，任何一项都可以稍后在 .env 里改。\n\n')
 
     output.write('  模型上游（你自己的 OpenAI 兼容 API）\n')

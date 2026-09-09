@@ -1,7 +1,7 @@
 {
   "name": "dsh-plugin-cloud",
   "version": "0.1.0",
-  "description": "Connect a stock DeepSeek Harness install to DSH Cloud: device login plus a 20-model gateway provider. Commercial hosted service by AgentsDance AI — new accounts include 500 free credits.",
+  "description": "Connect a stock DeepSeek Harness install to AI Store: device login plus a 20-model gateway provider. Commercial hosted service by AgentsDance AI — new accounts include 500 free credits.",
   "license": "Apache-2.0",
   "author": "AgentsDance AI",
   "repository": {

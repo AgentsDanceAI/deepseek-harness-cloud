@@ -2,7 +2,7 @@
   "name": "dsh-cloud-mobile",
   "version": "1.0.0",
   "private": true,
-  "description": "DSH Cloud mobile shells (Capacitor WebView wrappers for https://aistore.best)",
+  "description": "AI Store mobile shells (Capacitor WebView wrappers for https://aistore.best)",
   "scripts": {
     "postinstall": "node scripts/patch-capacitor-tar.mjs",
     "check": "npm run typecheck && npm run verify:webview",

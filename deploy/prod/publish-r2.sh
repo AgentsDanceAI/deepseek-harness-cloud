@@ -207,7 +207,7 @@ for name in "${!KEY_OF[@]}"; do
     echo "       打包时 assemble.mjs 应已把 rc 号折成稳定号, 检查那一步。" >&2
     exit 1 ;;
   esac
-  v="$(printf '%s' "$name" | sed -n 's/^DSH-Cloud-Desktop-\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)-.*/\1/p')"
+  v="$(printf '%s' "$name" | sed -n 's/^AI-Store-Desktop-\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)-.*/\1/p')"
   [ -n "$v" ] || continue
   if [ -n "$ver" ] && [ "$v" != "$ver" ]; then
     echo "    !! 暂存目录里同时有 $ver 和 $v 的安装包 —— 版本号判不出来。" >&2
@@ -218,7 +218,7 @@ for name in "${!KEY_OF[@]}"; do
 done
 [ -n "$ver" ] || {
   echo "    !! 没有安装包的文件名里带稳定版本号, 无法公告版本。" >&2
-  echo "       文件名须形如 DSH-Cloud-Desktop-<x.y.z>-<平台>.<后缀>。" >&2
+  echo "       文件名须形如 AI-Store-Desktop-<x.y.z>-<平台>.<后缀>。" >&2
   exit 1
 }
 

@@ -1,4 +1,4 @@
-/** Main-process HTTP client for the DSH Cloud account service.
+/** Main-process HTTP client for the AI Store account service.
  *
  * Uses Electron's net.fetch (Chromium network stack: system proxy + system
  * certificates). Only ever called after app.whenReady().

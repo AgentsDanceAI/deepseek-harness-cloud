@@ -8,7 +8,7 @@ const liveUrl = process.env.CAPACITOR_LIVE_URL?.trim() || "https://aistore.best"
 
 const config: CapacitorConfig = {
   appId: "ai.agentsdance.dshcloud.app",
-  appName: "DSH Cloud",
+  appName: "AI Store",
   webDir: "www",
   loggingBehavior: process.env.NODE_ENV === "production" ? "none" : "debug",
   backgroundColor: "#0d1117",

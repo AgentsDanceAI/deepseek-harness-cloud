@@ -35,7 +35,7 @@ from .accounts import resolve_user, try_resolve_user
 router = APIRouter(tags=["avatar"])
 log = logging.getLogger("dhc.avatar")
 
-#: DSH Cloud 用户在 GPU 侧的租户前缀。口袋专家用的是自己的租户 id, 两边共用一张
+#: AI Store 用户在 GPU 侧的租户前缀。口袋专家用的是自己的租户 id, 两边共用一张
 #: 卡 —— 不加前缀的话两个产品线的用户可能撞 id, 而撞了就是**看到别人的形象**。
 TENANT_PREFIX = "d-"
 #: 令牌有效期。短是故意的: 它只用来建立一次连接, 拿到就该马上用掉。
@@ -101,7 +101,7 @@ async def avatar_meter(request: Request):
     if not _verify_report(ts, tenant, minutes, sig):
         raise HTTPException(401, "bad_signature")
     if not tenant.startswith(TENANT_PREFIX):
-        # 口袋专家的租户走它自己那套账, 不该记到 DSH Cloud 头上。
+        # 口袋专家的租户走它自己那套账, 不该记到 AI Store 头上。
         return {"ok": True, "skipped": "not_a_dsh_tenant"}
     user_id = tenant[len(TENANT_PREFIX) :]
     try:

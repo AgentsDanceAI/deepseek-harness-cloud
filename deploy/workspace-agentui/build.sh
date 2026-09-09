@@ -85,7 +85,7 @@ docker run --rm -u 0 --entrypoint bash "$REF" -c '
   #    被别的路由吃掉)。
   code=$(curl -s -o /tmp/idx.html -w "%{http_code}" --max-time 10 http://127.0.0.1:18080/)
   test "$code" = "200" || { echo "!! 首页 $code" >&2; exit 1; }
-  grep -q "DSH Cloud" /tmp/idx.html || { echo "!! 首页内容不对" >&2; exit 1; }
+  grep -q "AI Store" /tmp/idx.html || { echo "!! 首页内容不对" >&2; exit 1; }
 
   # 静态资源必须带内容指纹, 首页必须不缓存。
   # 没有指纹的话新版发不出去: app.js 是固定文件名, 内容改了 URL 不变, 而

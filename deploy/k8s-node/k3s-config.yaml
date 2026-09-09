@@ -1,4 +1,4 @@
-# /etc/rancher/k3s/config.yaml — DSH Cloud workspace node: single-node k3s on a shared machine.
+# /etc/rancher/k3s/config.yaml — AI Store workspace node: single-node k3s on a shared machine.
 # Replace <NODE_PRIVATE_IP> with the node's VPC address before installing.
 # Everything k3s owns lives under /mnt/k3s (system disk is 82% full). Uninstall: /usr/local/bin/k3s-uninstall.sh
 data-dir: /mnt/k3s

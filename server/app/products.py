@@ -562,10 +562,10 @@ ensure_model() {  # ensure_model <model> <model_type> <credentials-json> [defaul
   CID=$(cred_id "$1" "$2")
   if [ -n "$CID" ]; then
     OUT=$(api PUT "$CREDS_URL" \
-      "{\"credential_id\":\"$CID\",\"model\":\"$1\",\"model_type\":\"$2\",\"name\":\"DSH Cloud\",\"credentials\":$3}")
+      "{\"credential_id\":\"$CID\",\"model\":\"$1\",\"model_type\":\"$2\",\"name\":\"AI Store\",\"credentials\":$3}")
   else
     OUT=$(api POST "$CREDS_URL" \
-      "{\"model\":\"$1\",\"model_type\":\"$2\",\"name\":\"DSH Cloud\",\"credentials\":$3}")
+      "{\"model\":\"$1\",\"model_type\":\"$2\",\"name\":\"AI Store\",\"credentials\":$3}")
     if [ "$4" = default ] && echo "$OUT" | grep -q '"result":"success"'; then
       api POST "/workspaces/current/default-model" \
         "{\"model_settings\":[{\"model_type\":\"$2\",\"provider\":\"$PROV\",\"model\":\"$1\"}]}" >/dev/null
@@ -1233,10 +1233,10 @@ def _coze_model_yamls() -> str:
         # 裸写进 YAML 迟早撞上某个被当成语法的字符, 而那会让 coze-server 启动即崩。
         doc = (
             f"id: {_COZE_MODEL_ID_BASE + i}\n"
-            f'name: "{name} (DSH Cloud)"\n'
+            f'name: "{name} (AI Store)"\n'
             "description:\n"
-            '  zh: "由 DSH Cloud 提供，按积分计费"\n'
-            '  en: "Provided by DSH Cloud"\n'
+            '  zh: "由 AI Store 提供，按积分计费"\n'
+            '  en: "Provided by AI Store"\n'
             "meta:\n"
             "  protocol: openai\n"
             "  conn_config:\n"
@@ -1484,7 +1484,7 @@ def _agentui_boot(product_id: str) -> str:
         'model_provider = "dshcloud"\n'
         "\n"
         "[model_providers.dshcloud]\n"
-        'name = "DSH Cloud"\n'
+        'name = "AI Store"\n'
         f'base_url = "{gateway}/llm/v1"\n'
         'env_key = "OPENAI_API_KEY"\n'
         # Codex 0.151 起**不认 chat 面**, 只能走 responses。
@@ -1630,7 +1630,7 @@ while [ "$n" -lt 120 ]; do
     # 向导那一步要的 git 身份。/root 挂的是 NAS, 所以只在缺失时写 —— 用户自己
     # 改过就不该被下次启动覆盖。
     if [ ! -f /root/.gitconfig ]; then
-      printf '[user]\n\tname = DSH Cloud Workspace\n\temail = workspace@aistore.best\n' > /root/.gitconfig
+      printf '[user]\n\tname = AI Store Workspace\n\temail = workspace@aistore.best\n' > /root/.gitconfig
     fi
     # 一个项目都没有的话就把 /workspace 建成默认项目。不建的话用户进来看到的是
     # "No projects found — Run Claude CLI in a project directory to get started",
@@ -1806,7 +1806,7 @@ def _codecli_boot(product_id: str) -> str:
             'model_provider = "dshcloud"\n'
             "\n"
             "[model_providers.dshcloud]\n"
-            'name = "DSH Cloud"\n'
+            'name = "AI Store"\n'
             f'base_url = "{gateway}/llm/v1"\n'
             'env_key = "OPENAI_API_KEY"\n'
             'wire_api = "responses"\n'
@@ -2392,7 +2392,7 @@ def by_domain(host: str) -> Product | None:
 
 
 def _dshcloud_provider(indent: str) -> str:
-    """dsh 侧「DSH Cloud」这个 provider 的定义, 按给定缩进吐 YAML。
+    """dsh 侧「AI Store」这个 provider 的定义, 按给定缩进吐 YAML。
 
     两处要用同一份 (dsh 工作台的 settings.yaml、Open Design 那个 profile 的
     patch 层), 而它们的缩进层级不同 —— 所以参数化缩进而不是各写一份: 目录里
@@ -2408,7 +2408,7 @@ def _dshcloud_provider(indent: str) -> str:
         for m in model_catalog.catalog().values()
     )
     return (
-        f"{indent}displayName: DSH Cloud\n"
+        f"{indent}displayName: AI Store\n"
         f"{indent}apiKeyEnv: DSH_CLOUD_TOKEN\n"
         f"{indent}api: openai-completions\n"
         f"{indent}baseURL: {gateway}/llm/v1\n"
@@ -2431,7 +2431,7 @@ def _dsh_boot() -> str:
         f"  model: {model_catalog.default_model()}\n"
     )
     agents_md = (
-        "# DSH Cloud 云工作台\n\n"
+        "# AI Store 云工作台\n\n"
         "你运行在一个云端容器里，用户通过浏览器访问你。用户的电脑和这个容器"
         "**不是同一台机器**。\n\n"
         "## 让用户能打开你做的网页 / 服务\n\n"
@@ -2812,7 +2812,7 @@ log() {
 }
 
 # 会话有 30 天, 而数据目录跨实例留着 —— 先试上一次那份。每次冷启动都新配一个的话,
-# 用户的"已配对设备"列表里会堆一长串同名的 DSH Cloud。
+# 用户的"已配对设备"列表里会堆一长串同名的 AI Store。
 reuse() {
   [ -s "$SAVED" ] || return 1
   CK=$(cat "$SAVED")
@@ -2821,11 +2821,11 @@ reuse() {
 
 mint() {
   CODE=$(curl -fsS -m 15 -X POST -H 'content-type: application/json' \
-    -d '{"label":"DSH Cloud","scopes":["admin","client"]}' "$API/api/auth/pairing" \
+    -d '{"label":"AI Store","scopes":["admin","client"]}' "$API/api/auth/pairing" \
     | sed 's/.*"code":"\([^"]*\)".*/\1/')
   [ -n "$CODE" ] || { log "没拿到配对码"; return 1; }
   CK=$(curl -fsS -m 15 -i -X POST -H 'content-type: application/json' \
-    -d "{\"code\":\"$CODE\",\"label\":\"DSH Cloud\",\"cookie\":true}" "$API/api/auth/pair" \
+    -d "{\"code\":\"$CODE\",\"label\":\"AI Store\",\"cookie\":true}" "$API/api/auth/pair" \
     | grep -i '^set-cookie:' | sed 's/^[Ss]et-[Cc]ookie: //; s/;.*//' | tr -d '\r')
   case "$CK" in
     omb_session_*) ;;
@@ -2883,7 +2883,7 @@ def _openmausbot_boot() -> str:
         'model_provider = "dshcloud"\n'
         "\n"
         "[model_providers.dshcloud]\n"
-        'name = "DSH Cloud"\n'
+        'name = "AI Store"\n'
         f'base_url = "{gateway}/llm/v1"\n'
         'env_key = "OPENAI_API_KEY"\n'
         'wire_api = "responses"\n'

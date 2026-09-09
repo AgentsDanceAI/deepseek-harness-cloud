@@ -12,7 +12,7 @@ particular mark is registered.
 
 You may:
 
-- truthfully state that software is based on or compatible with DSH Cloud or
+- truthfully state that software is based on or compatible with AI Store or
   `deepseek-harness-cloud`;
 - retain notices and factual attribution in unmodified distributions;
 - link to this repository or discuss the project in articles, events, and
@@ -21,7 +21,7 @@ You may:
   official hosted service.
 
 Please make the relationship clear. For example: “Acme Agent is based on
-deepseek-harness-cloud and is not affiliated with or endorsed by the DSH Cloud
+deepseek-harness-cloud and is not affiliated with or endorsed by the AI Store
 project.”
 
 ## Uses that require written permission
@@ -29,7 +29,7 @@ project.”
 Do not, without written permission:
 
 - present a fork, hosted instance, company, or service as official or endorsed;
-- use DSH Cloud names or logos as the primary identity of a modified product;
+- use AI Store names or logos as the primary identity of a modified product;
 - register or use confusingly similar product names, organizations, domains,
   social accounts, or application-store listings; or
 - alter notices in a way that creates a false origin or sponsorship claim.
@@ -38,7 +38,7 @@ Forks can exercise the rights granted by the DSH Cloud Community License while
 using distinct branding where that license permits. Removing project marks does
 not remove license notices or attribution obligations.
 
-“DeepSeek” and related identifiers belong to their respective owners. DSH Cloud
+“DeepSeek” and related identifiers belong to their respective owners. AI Store
 is an independent project and does not claim affiliation with or endorsement by
 DeepSeek.
 

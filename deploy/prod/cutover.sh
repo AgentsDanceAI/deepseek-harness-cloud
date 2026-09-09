@@ -94,7 +94,7 @@ if existing:
 s = re.sub(r"\n?# ── DHC sites v3 BEGIN ──.*?# ── DHC sites v3 END ──\n?", "\n",
            s, flags=re.DOTALL)
 # 2) strip the pre-v3 work block (comment + block)
-s = re.sub(r"\n?# ── DSH Cloud workspaces[^\n]*\nwork\.[^\s{]+\s*\{.*?\n\}\n?",
+s = re.sub(r"\n?# ── AI Store workspaces[^\n]*\nwork\.[^\s{]+\s*\{.*?\n\}\n?",
            "\n", s, flags=re.DOTALL)
 s = s.rstrip("\n") + "\n"
 block = f"""

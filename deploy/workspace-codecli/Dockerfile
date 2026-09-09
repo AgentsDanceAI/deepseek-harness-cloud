@@ -93,7 +93,7 @@ RUN set -e; \
     printf '%s\n' \
       '{' \
       '  "name": "dsh-agent",' \
-      '  "displayName": "DSH Cloud Agent",' \
+      '  "displayName": "AI Store Agent",' \
       '  "publisher": "dshcloud",' \
       '  "version": "1.0.0",' \
       '  "engines": { "vscode": "^1.60.0" },' \
@@ -149,5 +149,5 @@ USER coder
 # LABEL 不产生文件系统层, 放最后零成本。
 ARG REVISION=unknown
 LABEL org.opencontainers.image.source="https://github.com/AgentsDanceAI/deepseek-harness-cloud" \
-      org.opencontainers.image.title="DSH Cloud coding-agent workspace" \
+      org.opencontainers.image.title="AI Store coding-agent workspace" \
       org.opencontainers.image.revision="${REVISION}"

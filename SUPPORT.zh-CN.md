@@ -14,9 +14,9 @@
 | 商业支持或授权 | `support@agentsdance.ai` | 主题写明 `Commercial licensing`，描述组织规模、部署模式和所需控制。 |
 | 商标或法律请求 | `legal@agentsdance.ai` | 说明相关产品、文档或拟议用途。 |
 
-## DSH Cloud Hosted
+## AI Store Hosted
 
-[DSH Cloud Hosted](https://aistore.best/login?next=%2Fwork) 是托管订阅服务，
+[AI Store Hosted](https://aistore.best/login?next=%2Fwork) 是托管订阅服务，
 提供模型访问、工作台容量、升级、监控、备份、账号支持和套餐额度。当前公开方案
 按月度或年度服务期一次性付费，**到期不自动续费**。
 

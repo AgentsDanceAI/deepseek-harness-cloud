@@ -4,7 +4,7 @@
     <text class="logo-glyph">></text>
   </view>
 
-  <view class="brand">DSH Cloud</view>
+  <view class="brand">AI Store</view>
   <view class="slogan">桌面 AI 编程助手的云服务</view>
   <view class="desc">
     登录即用, 无需自备 API Key。在云工作台管理你的账号、设备授权与用量,

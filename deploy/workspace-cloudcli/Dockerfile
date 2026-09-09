@@ -50,5 +50,5 @@ WORKDIR /workspace
 # LABEL 不产生文件系统层, 放最后零成本。
 ARG REVISION=unknown
 LABEL org.opencontainers.image.source="https://github.com/AgentsDanceAI/deepseek-harness-cloud" \
-      org.opencontainers.image.title="DSH Cloud CloudCLI workspace" \
+      org.opencontainers.image.title="AI Store CloudCLI workspace" \
       org.opencontainers.image.revision="${REVISION}"

@@ -1,4 +1,4 @@
-/** DSH Cloud client constants. Assembled into dsh-plugin-desktop/src/cloud/. */
+/** AI Store client constants. Assembled into dsh-plugin-desktop/src/cloud/. */
 
 /**
  * Cloud service base URL. DSH_CLOUD_BASE (real process environment only — the

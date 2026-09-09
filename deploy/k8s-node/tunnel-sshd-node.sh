@@ -1,5 +1,5 @@
 #!/bin/bash
-# DSH Cloud tunnel — server side, runs ON the k3s node as root.
+# AI Store tunnel — server side, runs ON the k3s node as root.
 # Installs a SEPARATE sshd instance on the tunnel port (the main sshd on port 22 is not touched):
 #   /etc/ssh/sshd_tunnel_config            key-only, single key, tun-only, no shell/forwarding
 #   /etc/ssh/dsh_tunnel_authorized_keys    the prod host's key with restrict + forced command
@@ -19,7 +19,7 @@ P="${2:-${DSH_TUNNEL_PORT:-}}"; LOCAL="${DSH_TUNNEL_NODE_IP:-}"; PEER="${DSH_TUN
 if ss -tln "sport = :$P" | grep -q ":$P"; then echo "port $P already in use, aborting" >&2; ss -tlnp "sport = :$P"; exit 3; fi
 
 install -m 0644 /dev/stdin /etc/ssh/sshd_tunnel_config <<'EOF'
-# DSH Cloud tunnel sshd — separate instance from the main sshd (port 22), which it never touches.
+# AI Store tunnel sshd — separate instance from the main sshd (port 22), which it never touches.
 # Purpose: one ssh -w layer-3 tunnel from the DSH prod host to the k3s node here.
 # Key-only, a single authorized key (/etc/ssh/dsh_tunnel_authorized_keys), tun only, no shell/forwarding.
 Port __PORT__
@@ -71,7 +71,7 @@ sed -i "s|__NODE_IP__|$LOCAL|; s|__APP_IP__|$PEER|" /usr/local/sbin/dsh-tunnel-u
 
 install -m 0644 /dev/stdin /etc/systemd/system/sshd-dsh-tunnel.service <<'EOF'
 [Unit]
-Description=DSH Cloud tunnel sshd (tun-only, separate from sshd.service)
+Description=AI Store tunnel sshd (tun-only, separate from sshd.service)
 Documentation=file:/etc/ssh/sshd_tunnel_config
 After=network.target
 

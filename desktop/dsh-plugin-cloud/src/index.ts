@@ -1,4 +1,4 @@
-/** DSH Cloud gate: the login wall and the gateway injection.
+/** AI Store gate: the login wall and the gateway injection.
  *
  * Called from dsh-plugin-desktop/src/main.ts by the 0003-cloud-gate patch —
  * the ONLY two upstream call sites. Everything else lives in this directory so
@@ -170,7 +170,7 @@ export function cloudProfilePatches(): { id: string, disabled?: boolean, config?
             config: {
               providers: {
                 'dsh-cloud': {
-                  displayName: 'DSH Cloud',
+                  displayName: 'AI Store',
                   apiKeyEnv: CLOUD_TOKEN_ENV,
                   api: 'openai-completions',
                   baseURL: `${CLOUD_BASE}/llm/v1`,

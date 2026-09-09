@@ -37,7 +37,7 @@ API_KEY_MAX_PER_USER = 20
 
 
 def normalize_email_identity(raw: object) -> str:
-    """Canonicalize an identity accepted by earlier DSH Cloud releases.
+    """Canonicalize an identity accepted by earlier AI Store releases.
 
     This function is for looking up existing accounts only. New identities must
     still pass :func:`normalize_email` before they are persisted.
@@ -317,7 +317,7 @@ def email_send(body: dict, request: Request):
             "INSERT INTO email_codes (email, code_hash, purpose, expires, created) VALUES (?,?,?,?,?)",
             (email, security.token_hash(code), "login", now + 600, now),
         )
-    _send_mail(email, "DSH Cloud 登录验证码", f"您的登录验证码是 {code}，10 分钟内有效。若非本人操作请忽略。")
+    _send_mail(email, "AI Store 登录验证码", f"您的登录验证码是 {code}，10 分钟内有效。若非本人操作请忽略。")
     return {"ok": True}
 
 

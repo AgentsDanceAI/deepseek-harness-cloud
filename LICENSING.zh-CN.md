@@ -20,7 +20,7 @@
 
 ## 商业授权
 
-向彼此独立的第三方客户提供多租户托管服务，或从官方前端删除、修改 DSH Cloud
+向彼此独立的第三方客户提供多租户托管服务，或从官方前端删除、修改 AI Store
 品牌，需要另行取得书面商业许可。请以 `Commercial licensing` 为主题联系
 [support@agentsdance.ai](mailto:support@agentsdance.ai)。
 

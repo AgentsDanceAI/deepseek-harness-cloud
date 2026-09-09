@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""生成 DSH Cloud App 图标 (Android mipmap 全尺寸 + iOS AppIcon).
+"""生成 AI Store App 图标 (Android mipmap 全尺寸 + iOS AppIcon).
 
 品牌图形与站点 logo 同一母题: 圆角方形蓝色渐变底 (#3574de → #1d52ad),
 白色终端提示符 ">" + 下划线 "_"。

@@ -1,4 +1,4 @@
-DSH Cloud Desktop（未签名测试版）
+AI Store Desktop（未签名测试版）
 
 此构建仅用于测试。首次打开若被 macOS 阻止：
 

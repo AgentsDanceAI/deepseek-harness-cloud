@@ -220,6 +220,6 @@ jobs:
         run: |
           gh release create "${GITHUB_REF_NAME}" dist/release/* \
             --verify-tag \
-            --title "DSH Cloud ${{ needs.build.outputs.version }}" \
+            --title "AI Store ${{ needs.build.outputs.version }}" \
             --notes-file "release/notes/v${{ needs.build.outputs.version }}.md" \
             --latest

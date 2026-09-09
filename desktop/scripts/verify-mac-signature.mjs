@@ -2,7 +2,7 @@
 /**
  * 校验 .app 里每个 Mach-O 可执行体都开了 hardened runtime —— 公证的硬性要求。
  *
- *   node desktop/scripts/verify-mac-signature.mjs "<path>/DSH Cloud Desktop.app"
+ *   node desktop/scripts/verify-mac-signature.mjs "<path>/AI Store Desktop.app"
  *
  * Local inspection reports every missing runtime flag before the slower
  * notarization step, with the exact path for each failure.

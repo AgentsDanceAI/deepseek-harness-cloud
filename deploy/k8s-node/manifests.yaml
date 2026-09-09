@@ -1,4 +1,4 @@
-# DSH Cloud 工作台命名空间 —— 在 k3s 节点上 `k3s kubectl apply -f manifests.yaml`。
+# AI Store 工作台命名空间 —— 在 k3s 节点上 `k3s kubectl apply -f manifests.yaml`。
 #
 # 一个命名空间、一个总配额、一个用户数据卷、一个只管这个命名空间里 Pod 的
 # ServiceAccount (dhc-server 拿它的 token 调 API)。

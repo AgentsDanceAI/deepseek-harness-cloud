@@ -1,4 +1,4 @@
-# 自部署 DSH Cloud
+# 自部署 AI Store
 
 [English / 双语详细版](README.md) | 简体中文
 

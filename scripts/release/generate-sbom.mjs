@@ -29,7 +29,7 @@ const document = {
   spdxVersion: 'SPDX-2.3',
   dataLicense: 'CC0-1.0',
   SPDXID: 'SPDXRef-DOCUMENT',
-  name: `DSH Cloud CLI ${manifest.version}`,
+  name: `AI Store CLI ${manifest.version}`,
   documentNamespace: namespace,
   creationInfo: {
     created,

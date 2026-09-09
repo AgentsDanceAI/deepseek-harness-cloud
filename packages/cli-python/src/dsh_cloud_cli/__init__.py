@@ -1,1 +1,1 @@
-"""DSH Cloud Community installer CLI."""
+"""AI Store Community installer CLI."""

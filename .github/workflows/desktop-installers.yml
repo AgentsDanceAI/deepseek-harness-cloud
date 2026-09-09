@@ -125,8 +125,8 @@ jobs:
           ln -s /Applications "$STAGE/Applications"
           # Include first-launch guidance while distributing an unsigned build.
           cp "$GITHUB_WORKSPACE/desktop/dmg-extras/请先阅读.txt" "$STAGE/"
-          hdiutil create -volname "DSH Cloud Desktop" -srcfolder "$STAGE" -ov -format UDZO \
-            "../out/DSH-Cloud-Desktop-${VERSION}-mac-${ARCH_LABEL:-arm64}.dmg"
+          hdiutil create -volname "AI Store Desktop" -srcfolder "$STAGE" -ov -format UDZO \
+            "../out/AI-Store-Desktop-${VERSION}-mac-${ARCH_LABEL:-arm64}.dmg"
           ls -la ../out/
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -187,8 +187,8 @@ jobs:
           ln -s /Applications "$STAGE/Applications"
           # Include first-launch guidance while distributing an unsigned build.
           cp "$GITHUB_WORKSPACE/desktop/dmg-extras/请先阅读.txt" "$STAGE/"
-          hdiutil create -volname "DSH Cloud Desktop" -srcfolder "$STAGE" -ov -format UDZO \
-            "../out/DSH-Cloud-Desktop-${VERSION}-mac-${ARCH_LABEL:-arm64}.dmg"
+          hdiutil create -volname "AI Store Desktop" -srcfolder "$STAGE" -ov -format UDZO \
+            "../out/AI-Store-Desktop-${VERSION}-mac-${ARCH_LABEL:-arm64}.dmg"
           ls -la ../out/
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:

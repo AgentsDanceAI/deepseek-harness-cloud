@@ -1,15 +1,15 @@
-# DSH Cloud editions
+# AI Store editions
 
 English | [简体中文](editions.zh-CN.md)
 
 The Community Edition is source-available under the
-[DSH Cloud Community License 1.0](../LICENSE). DSH Cloud Hosted is the operated
+[DSH Cloud Community License 1.0](../LICENSE). AI Store Hosted is the operated
 subscription at `aistore.best`. Commercial authorization is available for
 uses outside the Community License.
 
 ## Comparison
 
-| Area | Community Edition | DSH Cloud Hosted | Commercial authorization |
+| Area | Community Edition | AI Store Hosted | Commercial authorization |
 |---|---|---|---|
 | Use | Single-organization internal use, self-hosting, development, evaluation, and API integrations | Managed service for individual and team subscribers | Managed multi-tenant services, rebranding of official frontends, or negotiated rights |
 | Start | Docker/Compose, npm/npx, or uv/uvx | [Open a managed workspace](https://aistore.best/login?next=%2Fwork) | Contact `support@agentsdance.ai` |

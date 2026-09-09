@@ -1,4 +1,4 @@
-/** HTTP client for the DSH Cloud account service and gateway catalog.
+/** HTTP client for the AI Store account service and gateway catalog.
  * Endpoint contracts mirror desktop/dsh-plugin-cloud/src/api.ts (production-tested). */
 
 import { CLOUD_BASE } from './config.js'

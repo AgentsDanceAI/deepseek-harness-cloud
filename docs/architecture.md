@@ -2,9 +2,9 @@
 
 English | [简体中文](architecture.zh-CN.md)
 
-DSH Cloud adds accounts, policy, metering, a model gateway, and an optional
+AI Store adds accounts, policy, metering, a model gateway, and an optional
 browser workspace around the DeepSeek Harness agent runtime. The same public
-service can be operated by a self-hoster or used through DSH Cloud Hosted.
+service can be operated by a self-hoster or used through AI Store Hosted.
 
 This document describes repository interfaces, not the topology, capacity,
 credentials, or provider configuration of any live environment.
@@ -153,7 +153,7 @@ client -> authenticate -> authorize/limit -> map model -> upstream stream
 ```text
 browser -> workspace route authorization -> ensure assigned runtime
         -> trusted reverse-proxy route -> agent UI/runtime
-        -> model calls return through the DSH Cloud gateway
+        -> model calls return through the AI Store gateway
 ```
 
 ## Trust boundaries

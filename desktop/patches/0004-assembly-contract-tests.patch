@@ -61,11 +61,11 @@ index f20487f..8aa60f7 100644
      expect(manifest.build?.nsis).toEqual({
        oneClick: false,
 @@ -176,5 +178,9 @@ describe('published package surface', () => {
-       shortcutName: 'DSH Cloud Desktop',
-       artifactName: 'DSH-Cloud-Desktop-${version}-${arch}-Setup.${ext}',
+       shortcutName: 'AI Store Desktop',
+       artifactName: 'AI-Store-Desktop-${version}-${arch}-Setup.${ext}',
      })
 +    expect(manifest.build?.protocols).toEqual([{
-+      name: 'DSH Cloud',
++      name: 'AI Store',
 +      schemes: ['dshcloud'],
 +    }])
      expect(manifest.build?.linux?.icon).toBe('build/app-icon.png')
