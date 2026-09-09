@@ -56,8 +56,12 @@ window.LiveCaptions = (function () {
           box.textContent = ''; seen = {};
           return;
         }
+        // ⚠️ **不能取最新那一条。** 上游是在句子"发出去"时记的账, 而队列里始终
+        // 压着两句 (QUEUE_AHEAD=2) —— 最新那条还排着没播, 正在播的是倒数第二条。
+        // 取最新的表现是字幕比声音早两句, 观众看到的字和听到的话对不上。
         var ls = d.lines || [];
-        if (ls.length) add(ls[ls.length - 1]);   // 只要最新那一句
+        if (ls.length >= 2) add(ls[ls.length - 2]);
+        else if (ls.length) add(ls[0]);
       })
       .catch(function () {});
   }
