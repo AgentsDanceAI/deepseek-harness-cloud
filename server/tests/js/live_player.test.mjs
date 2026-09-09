@@ -80,6 +80,11 @@ function makeDom({ nativeHls = false, autoplayBlocked = false } = {}) {
       enabled: state.enabled, live: state.live, hls: "/api/live/hls/official/index.m3u8",
     }) }),
     setInterval: (fn, ms) => { timers.push({ fn, ms }); return timers.length; },
+    // 卡死恢复那一路是 1 秒一拍, 状态刷新是 15 秒 —— 按周期挑, 别按顺序猜
+    __tick: (ms, n) => {
+      const t = timers.filter((x) => x.ms === ms);
+      for (let i = 0; i < n; i++) t.forEach((x) => x.fn());
+    },
   };
   window.Hls.Events = { MANIFEST_PARSED: "mp", ERROR: "err" };
   window.Hls.ErrorTypes = { NETWORK_ERROR: "net", MEDIA_ERROR: "media" };
@@ -169,4 +174,43 @@ await check("未开播时也要把播放器收掉, 别留着最后一帧", async
   await api.refresh(); await tick();
   assert.equal(dom.els["#lvMsg"].textContent, "主播暂时不在");
   assert.equal(dom.hlsInstances[0].destroyed, true);
+});
+
+await check("卡住 6 秒 -> 自己跳回直播边缘 (hls.js)", async () => {
+  const dom = makeDom();
+  const api = load(dom);
+  await tick(); await tick();
+  const inst = dom.hlsInstances[0];
+  inst.liveSyncPosition = 120;
+  dom.video.paused = false;
+  dom.video.currentTime = 5;          // 时间停在这儿不动了
+
+  // 第一拍只是记基准, 所以"6 秒不动"要 7 拍才成立
+  dom.window.__tick(1000, 6);
+  assert.equal(dom.video.currentTime, 5, "不到 6 秒就跳了 —— 会误伤正常抖动");
+  dom.window.__tick(1000, 1);
+  assert.equal(dom.video.currentTime, 120, "卡了 6 秒还不跳 —— 观众只能自己刷新");
+  assert.equal(inst.restarted, true, "没有重新拉流");
+});
+
+await check("Safari 原生那条路也要能恢复", async () => {
+  const dom = makeDom({ nativeHls: true });
+  const api = load(dom);
+  await tick(); await tick();
+  dom.video.paused = false;
+  dom.video.currentTime = 3;
+  dom.video.seekable = { length: 1, end: () => 300 };
+  dom.window.__tick(1000, 8);
+  assert.ok(dom.video.currentTime > 290,
+    `Safari 上没恢复 (currentTime=${dom.video.currentTime}) —— 而创始人用的就是 Mac`);
+});
+
+await check("正常播放时绝不乱跳", async () => {
+  const dom = makeDom();
+  const api = load(dom);
+  await tick(); await tick();
+  dom.hlsInstances[0].liveSyncPosition = 999;
+  dom.video.paused = false;
+  for (let i = 0; i < 20; i++) { dom.video.currentTime = i; dom.window.__tick(1000, 1); }
+  assert.ok(dom.video.currentTime < 100, "播得好好的却被跳到直播边缘");
 });
