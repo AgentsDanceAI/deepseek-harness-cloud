@@ -141,6 +141,37 @@ window.LivePlayer = (function () {
     v.addEventListener('volumechange', paintSound);   // 系统/键盘改的也跟上
   }
 
+  /* 卡住了自己爬起来。
+   *
+   * 产出慢于播放时缓冲会被慢慢抽干, 见底之后播放器就停在那儿 —— 观众看到的是
+   * 画面定住, 而服务端一切正常 (流照跑、状态照报直播中)。以前只能靠刷新页面。
+   *
+   * 判据是 **currentTime 连着几拍没往前走**, 不是 waiting/stalled 事件: 那两个
+   * 事件在缓冲见底时不一定发 (这一页头注释里为别的原因记过同一件事), 而漏一次
+   * 的代价是画面永远停在那儿。
+   */
+  var STUCK_TICKS = 6;            // 每秒一拍; 6 秒不动才算卡, 短了会误伤正常抖动
+  var lastT = -1, stuckFor = 0;
+  setInterval(function () {
+    if (!v || v.paused || !playingUrl) { stuckFor = 0; lastT = -1; return; }
+    if (v.currentTime !== lastT) { lastT = v.currentTime; stuckFor = 0; return; }
+    if (++stuckFor < STUCK_TICKS) return;
+    stuckFor = 0;
+    // 跳到直播边缘 —— 卡住期间落下的那几十秒没有追的价值, 观众要看的是"现在"。
+    try {
+      if (hls) {
+        hls.startLoad();
+        var p = hls.liveSyncPosition;
+        if (p && isFinite(p)) v.currentTime = p;
+      } else if (v.seekable && v.seekable.length) {
+        // Safari 原生放 HLS 时 hls 恒为 null —— 以前这条路**完全没有恢复手段**,
+        // 而创始人用的就是 Mac。
+        v.currentTime = Math.max(0, v.seekable.end(v.seekable.length - 1) - 1);
+      }
+      tryPlay();
+    } catch (e) { /* 跳失败就等下一拍再来 */ }
+  }, 1000);
+
   refresh();
   setInterval(refresh, 15000);
   document.addEventListener('visibilitychange', function () {
