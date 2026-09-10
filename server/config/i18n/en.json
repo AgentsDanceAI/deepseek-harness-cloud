@@ -725,6 +725,7 @@
   "live.mute": "Mute",
   "live.tap_play": "Tap to play",
   "live.remuted": "Sound was blocked after reconnecting — tap Unmute to restore.",
+  "live.away": "She has stepped away — the stream is still running",
   "live.note": "Watching costs no machine time or credits. The stream is generated live, so it holds one compute slot (shared with the avatar calls, three in total).",
   "live.say_ph": "Say something… (sign in to post)",
   "live.say_btn": "Send",

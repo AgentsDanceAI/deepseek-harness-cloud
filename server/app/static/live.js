@@ -292,7 +292,9 @@ window.LivePlayer = (function () {
           reportIssue('rebuild', 0, '换场重建');
           teardown();
         }
-        note(''); retry = 0; play(d.hls);
+        // 上游很久没出声了 —— 画面是空镜顶着的。说出来, 别让"直播中"三个字骗人。
+        note(d.degraded ? t('away') : '');
+        retry = 0; play(d.hls);
         playingSince = d.since || playingSince;
         return d;
       })
