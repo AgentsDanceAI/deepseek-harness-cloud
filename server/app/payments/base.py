@@ -105,7 +105,7 @@ def resolve_item(item: str, cur: str | None = None) -> dict:
             "amount_cents": int(cents),
             "intro_cents": intro if 0 < intro < int(cents) else 0,
             "currency": p.get("currency", "CNY"),
-            "description": f"deepseek-harness-cloud {tdef['name']} ({'年付' if cycle == 'yearly' else '月付'})",
+            "description": f"AI Store {tdef['name']} ({'年付' if cycle == 'yearly' else '月付'})",
         }
     if parts[0] == "pack" and len(parts) == 2:
         pdef = p["packs"].get(parts[1])
@@ -118,7 +118,7 @@ def resolve_item(item: str, cur: str | None = None) -> dict:
             "valid_days": int(pdef.get("valid_days", 365)),
             "amount_cents": int(pdef["cents"]),
             "currency": p.get("currency", "CNY"),
-            "description": f"deepseek-harness-cloud {pdef['name']}",
+            "description": f"AI Store {pdef['name']}",
         }
     # Team seats: N seats for a month. The pool credits scale with the seat
     # count, so a bigger team gets a bigger shared balance, not just more logins.
@@ -138,7 +138,7 @@ def resolve_item(item: str, cur: str | None = None) -> dict:
             "credits": int(terms["seat_credits"]) * n,
             "minutes": int(terms["seat_minutes"]) * n,
             "currency": p.get("currency", "CNY"),
-            "description": f"deepseek-harness-cloud 团队席位 × {n}（月付）",
+            "description": f"AI Store 团队席位 × {n}（月付）",
         }
     raise HTTPException(400, "unknown_item")
 

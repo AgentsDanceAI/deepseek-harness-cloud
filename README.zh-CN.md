@@ -8,7 +8,7 @@
 无需把模型上游密钥分发给每个客户端。
 
 [![CI](https://github.com/AgentsDanceAI/deepseek-harness-cloud/actions/workflows/ci.yml/badge.svg)](https://github.com/AgentsDanceAI/deepseek-harness-cloud/actions/workflows/ci.yml)
-[![License: AI Store Community 1.0](https://img.shields.io/badge/license-DSH%20Cloud%20Community%201.0-4c6ef5.svg)](LICENSE)
+[![License: DSH Cloud Community 1.0](https://img.shields.io/badge/license-DSH%20Cloud%20Community%201.0-4c6ef5.svg)](LICENSE)
 [![Security policy](https://img.shields.io/badge/security-private%20reporting-2f9e44.svg)](SECURITY.zh-CN.md)
 
 发行版本：[`0.3.0`](release/release.json)
@@ -44,6 +44,33 @@ npx --yes @agentsdanceai/dsh-cloud start
 [**开始使用 AI Store 托管版**](https://aistore.best/login?next=%2Fwork) ·
 [个人套餐](https://aistore.best/pricing#plans) ·
 [团队方案](https://aistore.best/pricing#team)
+
+### 把工作台跑在自己的机器上
+
+账号、模型网关、计费还是托管这一份，**只把容器挪到你自己的 5090 或 Mac 上**。
+跑在你硬件上的工作台不吃云端机时；模型调用照样走托管网关、照样按积分计费。
+
+```bash
+python3 scripts/local/aistore-local.py login      # 一次性: 用浏览器授权这台机器
+python3 scripts/local/aistore-local.py run codex  # 拉镜像 + 起容器, 开 localhost:8080
+```
+
+**我们的服务器从不反向连接你的机器** —— 没有隧道、不用公网 IP、不用开端口。
+运行器用一把可吊销的设备令牌授权（与桌面端同一条 RFC 8628 流程），容器里的
+agent 拿着它调 `aistore.best/llm/*`，用量记在你账上，和在云端跑一模一样。
+
+不是每一格都能本地跑：`aistore-local.py list` 会列出能跑的。多容器栈
+（Dify、Coze、Hermes）还得走托管；数字人那两格是托管专有，因为它们驱动的是
+我们的 GPU 节点。
+
+开始之前有两件事得知道：
+
+- **工作台镜像只出 `linux/amd64`。** x86 机器（比如装 5090 那台）原生跑；
+  Apple Silicon 走模拟，能用但明显更慢。运行器会主动提示，不让你自己猜。
+- **有几个镜像在 ghcr 上还是私有的。** `agentui`、`comfy-local`、
+  `codecli-local`、`od-local`、`autogen-studio`、`dsh-local`、`coze-assets`、
+  `cloudcli-local` 是公开的；`pi-web-ui`、`langchain-agent`、
+  `agent-frameworks`、`openmausbot` 还不是，组织外的人拉不动那几格。
 
 ### 自部署 Community Edition
 

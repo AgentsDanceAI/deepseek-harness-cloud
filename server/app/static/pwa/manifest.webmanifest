@@ -1,6 +1,6 @@
 {
-  "name": "deepseek-harness-cloud 云工作台",
-  "short_name": "deepseek-harness-cloud",
+  "name": "AI Store 云工作台",
+  "short_name": "AI Store",
   "description": "桌面 AI 编程助手的云工作台，手机也能办公",
   "start_url": "/",
   "scope": "/",
