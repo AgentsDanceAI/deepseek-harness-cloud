@@ -55,21 +55,46 @@ log = logging.getLogger("dhc.live")
 #:    数字人这些底线由 _REPLY 兜着, 而且排在后面(更靠近输出, 约束更强)。人设只管
 #:    "怎么说话", 不管"能说什么"。
 LIVE_PRESETS = [
-    {"id": "default", "person": "source-v3-head", "voice": "xiaoya",
-     "name": "初雪", "trait": "温柔",
-     "persona": "你叫初雪。说话温柔、慢一点，句子短，语气软但不腻。"},
-    {"id": "hao", "person": "hao", "voice": "yunxi",
-     "name": "皓", "trait": "阳光",
-     "persona": "你叫皓。说话阳光利落、有精神但不吵，偶尔带一点轻快的语气词。"},
-    {"id": "chen", "person": "chen", "voice": "yunjian",
-     "name": "晨", "trait": "沉稳",
-     "persona": "你叫晨。说话沉稳、有分寸，不夸张也不起哄，像个可靠的老手。"},
-    {"id": "yue", "person": "yue", "voice": "hsiaochen",
-     "name": "悦", "trait": "干练",
-     "persona": "你叫悦。说话干练直接，一句话说清楚，不绕弯子。"},
-    {"id": "lin", "person": "lin", "voice": "xiaoxiao",
-     "name": "林", "trait": "安静",
-     "persona": "你叫林。说话安静、克制，不抢话，答得实在。"},
+    {
+        "id": "default",
+        "person": "source-v3-head",
+        "voice": "xiaoya",
+        "name": "初雪",
+        "trait": "温柔",
+        "persona": "你叫初雪。说话温柔、慢一点，句子短，语气软但不腻。",
+    },
+    {
+        "id": "hao",
+        "person": "hao",
+        "voice": "yunxi",
+        "name": "皓",
+        "trait": "阳光",
+        "persona": "你叫皓。说话阳光利落、有精神但不吵，偶尔带一点轻快的语气词。",
+    },
+    {
+        "id": "chen",
+        "person": "chen",
+        "voice": "yunjian",
+        "name": "晨",
+        "trait": "沉稳",
+        "persona": "你叫晨。说话沉稳、有分寸，不夸张也不起哄，像个可靠的老手。",
+    },
+    {
+        "id": "yue",
+        "person": "yue",
+        "voice": "hsiaochen",
+        "name": "悦",
+        "trait": "干练",
+        "persona": "你叫悦。说话干练直接，一句话说清楚，不绕弯子。",
+    },
+    {
+        "id": "lin",
+        "person": "lin",
+        "voice": "xiaoxiao",
+        "name": "林",
+        "trait": "安静",
+        "persona": "你叫林。说话安静、克制，不抢话，答得实在。",
+    },
 ]
 
 
@@ -144,7 +169,7 @@ async def status():
         # 直播间挂了不该让整页报错 —— 卡片显示"未开播"就够了。
         log.warning("取直播状态失败: %s", e)
         return JSONResponse({"enabled": True, "live": False, "error": "unreachable"})
-    _sample_rate(d)      # 顺手算产出速率, 掉出实时会记一条
+    _sample_rate(d)  # 顺手算产出速率, 掉出实时会记一条
     return JSONResponse(
         {
             "enabled": True,
@@ -398,8 +423,7 @@ def _claims(text: str) -> str:
     return m.group(0) if m else ""
 
 
-async def _compose_reply(comment: str, bill_to: str, device_id: str = "",
-                         person: str = "") -> str:
+async def _compose_reply(comment: str, bill_to: str, device_id: str = "", person: str = "") -> str:
     """让模型按 `_REPLY` 的口径回一句, 并把账记在 bill_to 头上。
 
     抽出来是因为**观众公屏和管理员插播走的是同一条路** —— 口径必须完全一致,
@@ -498,8 +522,7 @@ async def say(body: dict, user: dict = Depends(resolve_user)):
             person = str(cfg.get("person") or "")
         except Exception:
             person = ""
-        spoken = await _compose_reply(text, user["id"], user.get("device_id", ""),
-                                      person=person)
+        spoken = await _compose_reply(text, user["id"], user.get("device_id", ""), person=person)
 
     await _gpu("POST", f"/rooms/{config.LIVE_ROOM}/interject", config.LIVE_ROOM, json={"text": spoken[:600]})
     return JSONResponse({"ok": True, "comment": text, "spoken": spoken[:600], "mode": mode})
@@ -551,19 +574,20 @@ def _nick(user: dict) -> str:
 #: 而产能不足时数字人自己就是瓶颈, 一刻不闲。于是每次报障都只能现场架探针去量,
 #: 回头什么都查不到。这一段就是补这个洞。
 _INCIDENT_KINDS = {
-    "stall",     # 画面冻住 (观众侧)
-    "waiting",   # 缓冲见底, 播放器在等数据 (观众侧) —— "播一会儿没声音"就是这个
-    "fatal",     # 播放器致命错误 (观众侧)
-    "rebuild",   # 换场重建 (观众侧)
+    "stall",  # 画面冻住 (观众侧)
+    "waiting",  # 缓冲见底, 播放器在等数据 (观众侧) —— "播一会儿没声音"就是这个
+    "fatal",  # 播放器致命错误 (观众侧)
+    "rebuild",  # 换场重建 (观众侧)
     "autoplay",  # 自动播放被拒 (观众侧)
-    "remuted",   # 被迫退回静音 (观众侧)
-    "slow",      # 产出掉到实时以下 (产出侧)
-    "recovered", # 产出恢复 (产出侧)
+    "remuted",  # 被迫退回静音 (观众侧)
+    "slow",  # 产出掉到实时以下 (产出侧)
+    "recovered",  # 产出恢复 (产出侧)
 }
 
 
-def _record(kind: str, side: str, *, secs: float = 0.0, lag: float = 0.0,
-            detail: str = "", user_id: str = "") -> None:
+def _record(
+    kind: str, side: str, *, secs: float = 0.0, lag: float = 0.0, detail: str = "", user_id: str = ""
+) -> None:
     """记一条直播事件。**绝不能把主流程带崩** —— 观测坏了不该拖垮播放。"""
     try:
         with db.tx() as conn:
@@ -571,8 +595,17 @@ def _record(kind: str, side: str, *, secs: float = 0.0, lag: float = 0.0,
                 "INSERT INTO live_incidents "
                 "(id, room, kind, side, user_id, secs, lag, detail, created) "
                 "VALUES (?,?,?,?,?,?,?,?,?)",
-                (security.new_id("li_"), config.LIVE_ROOM, kind, side, user_id,
-                 float(secs), float(lag), str(detail)[:200], time.time()),
+                (
+                    security.new_id("li_"),
+                    config.LIVE_ROOM,
+                    kind,
+                    side,
+                    user_id,
+                    float(secs),
+                    float(lag),
+                    str(detail)[:200],
+                    time.time(),
+                ),
             )
     except Exception as e:
         log.warning("记直播事件失败 (%s): %s", kind, e)
@@ -581,13 +614,13 @@ def _record(kind: str, side: str, *, secs: float = 0.0, lag: float = 0.0,
 #: 产出速率采样。这一层本来就在轮询上游状态, 顺手拿 edge(直播边缘的视频秒数)算,
 #: 所以**不用改 GPU 侧, 也就不用中断播出**。
 _RATE: dict = {"pts": [], "slow": False}
-_RATE_WINDOW = 150.0     # 采样保留多久
+_RATE_WINDOW = 150.0  # 采样保留多久
 #: ⚠️ 跨度不够长不判定。节流让产出变成锯齿(句内出片, 句间空 5~8 秒), 短窗会把稳态
 #: 1.000× 读成 0.79× 或 1.4× —— 2026-09-10 我就被这个骗过一次, 拿 45 秒的窗得出过
 #: 相反的结论。
 _RATE_MIN_SPAN = 60.0
-_RATE_BAD = 0.95         # 低于这个算掉出实时
-_RATE_OK = 0.99          # 回到这个才算恢复 (留迟滞, 免得在边界反复报)
+_RATE_BAD = 0.95  # 低于这个算掉出实时
+_RATE_OK = 0.99  # 回到这个才算恢复 (留迟滞, 免得在边界反复报)
 
 
 def _rate_now() -> float:
@@ -614,9 +647,9 @@ def _sample_rate(d: dict) -> None:
             return
         edge = float(d.get("edge") or 0)
         if edge <= 0:
-            return                       # 上游还没升级, 给不出 edge
+            return  # 上游还没升级, 给不出 edge
         now = time.time()
-        if pts and edge < pts[-1][1]:    # 换场了: 时间轴从 0 重来, 之前的采样作废
+        if pts and edge < pts[-1][1]:  # 换场了: 时间轴从 0 重来, 之前的采样作废
             pts.clear()
             _RATE["slow"] = False
         pts.append((now, edge))
@@ -665,7 +698,7 @@ async def captions():
         # 上游够不着不该让字幕层报错 —— 观众看到的是画面还在、字幕停住, 那比
         # 整块红字好。
         return JSONResponse({"live": False, "lines": []})
-    _sample_rate(st)     # 字幕是三秒一问的, 采样主要靠这里
+    _sample_rate(st)  # 字幕是三秒一问的, 采样主要靠这里
     lines = [
         {
             "t": float(x.get("t") or 0),
@@ -717,14 +750,19 @@ async def report(body: dict, user: dict = Depends(resolve_user)):
             return 0.0
         return v if 0 <= v < 86400 else 0.0
 
-    _record(kind, "viewer", secs=_num("secs"), lag=_num("lag"),
-            detail=str(body.get("detail", ""))[:200], user_id=user["id"])
+    _record(
+        kind,
+        "viewer",
+        secs=_num("secs"),
+        lag=_num("lag"),
+        detail=str(body.get("detail", ""))[:200],
+        user_id=user["id"],
+    )
     return JSONResponse({"ok": True})
 
 
 @router.get("/incidents")
-async def incidents(hours: float = 6.0, limit: int = 200,
-                    user: dict = Depends(resolve_user)):
+async def incidents(hours: float = 6.0, limit: int = 200, user: dict = Depends(resolve_user)):
     """最近发生过什么。回答的是"什么时候开始出问题的"。
 
     不回 user_id —— 要的是"卡了多少次", 不是"谁卡了"。
@@ -739,9 +777,12 @@ async def incidents(hours: float = 6.0, limit: int = 200,
     )
     items = [
         {
-            "kind": r["kind"], "side": r["side"],
-            "secs": float(r["secs"]), "lag": float(r["lag"]),
-            "detail": r["detail"], "t": float(r["created"]),
+            "kind": r["kind"],
+            "side": r["side"],
+            "secs": float(r["secs"]),
+            "lag": float(r["lag"]),
+            "detail": r["detail"],
+            "t": float(r["created"]),
         }
         for r in rows
     ]

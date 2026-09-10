@@ -70,15 +70,13 @@ class RateSampler(unittest.TestCase):
         self.feed([(0, 0.0), (90, 71.0)])
         self.feed([(0, 0.0), (100, 79.0)])
         self.feed([(0, 0.0), (120, 95.0)])
-        self.assertEqual(len(self.recorded), 1,
-                         f"慢的期间反复写库, 表会被噪声填满: {self.recorded}")
+        self.assertEqual(len(self.recorded), 1, f"慢的期间反复写库, 表会被噪声填满: {self.recorded}")
 
     def test_恢复了要报_而且要有迟滞(self):
-        self.feed([(0, 0.0), (90, 71.0)])          # slow
-        self.feed([(0, 0.0), (90, 87.0)])          # 0.967x —— 在 0.95~0.99 之间
-        self.assertEqual(len(self.recorded), 1,
-                         "刚过 0.95 就报恢复 —— 会在边界反复报, 迟滞没起作用")
-        self.feed([(0, 0.0), (90, 90.0)])          # 1.0x
+        self.feed([(0, 0.0), (90, 71.0)])  # slow
+        self.feed([(0, 0.0), (90, 87.0)])  # 0.967x —— 在 0.95~0.99 之间
+        self.assertEqual(len(self.recorded), 1, "刚过 0.95 就报恢复 —— 会在边界反复报, 迟滞没起作用")
+        self.feed([(0, 0.0), (90, 90.0)])  # 1.0x
         self.assertEqual(len(self.recorded), 2)
         self.assertEqual(self.recorded[1][0], "recovered")
 
@@ -88,7 +86,7 @@ class RateSampler(unittest.TestCase):
         30 秒的窗如果正好停在空档里, 稳态 1.000x 会被读成 0.7x —— 2026-09-10 我
         真的被这个骗过一次, 拿短窗得出过相反的结论。
         """
-        self.feed([(0, 0.0), (30, 21.0)])          # 跨度不够 _RATE_MIN_SPAN
+        self.feed([(0, 0.0), (30, 21.0)])  # 跨度不够 _RATE_MIN_SPAN
         self.assertEqual(self.recorded, [], "窗不够长就下了结论")
 
     def test_换场要把采样清掉__否则边缘倒退会被当成掉速(self):
@@ -100,7 +98,7 @@ class RateSampler(unittest.TestCase):
         real_time = live.time.time
         live.time.time = lambda: base + 5  # type: ignore[assignment]
         try:
-            live._sample_rate({"live": True, "edge": 1.0})   # 换场: 时间轴回到 0
+            live._sample_rate({"live": True, "edge": 1.0})  # 换场: 时间轴回到 0
         finally:
             live.time.time = real_time  # type: ignore[assignment]
         self.assertEqual(self.recorded, [], "换场被当成掉速报了一条")
@@ -174,9 +172,15 @@ class ReportEndToEnd(unittest.TestCase):
         )
 
     def test_观众报一条卡顿能落库_且字段对得上(self):
-        r = self.c.post("/api/live/report", json={
-            "kind": "waiting", "secs": 2.5, "lag": 11.8, "detail": "缓冲见底 2.5 秒",
-        })
+        r = self.c.post(
+            "/api/live/report",
+            json={
+                "kind": "waiting",
+                "secs": 2.5,
+                "lag": 11.8,
+                "detail": "缓冲见底 2.5 秒",
+            },
+        )
         self.assertEqual(r.status_code, 200, r.text)
         self.assertTrue(r.json().get("ok"), r.text)
         rows = self._rows("waiting")
@@ -189,8 +193,7 @@ class ReportEndToEnd(unittest.TestCase):
         first = self.c.post("/api/live/report", json={"kind": "stall", "secs": 6})
         again = self.c.post("/api/live/report", json={"kind": "stall", "secs": 6})
         self.assertTrue(first.json().get("ok"), first.text)
-        self.assertFalse(again.json().get("ok"),
-                         "同一种事件连着两条都收了 —— 卡住时会刷屏")
+        self.assertFalse(again.json().get("ok"), "同一种事件连着两条都收了 —— 卡住时会刷屏")
         self.assertEqual(len(self._rows("stall")), 1)
 
     def test_编造的种类不落库(self):
@@ -207,9 +210,15 @@ class ReportEndToEnd(unittest.TestCase):
             self.assertEqual(self._rows(kind), [])
 
     def test_离谱的数字要被丢掉_不能污染统计(self):
-        self.c.post("/api/live/report", json={
-            "kind": "fatal", "secs": -5, "lag": 10 ** 9, "detail": "x" * 500,
-        })
+        self.c.post(
+            "/api/live/report",
+            json={
+                "kind": "fatal",
+                "secs": -5,
+                "lag": 10**9,
+                "detail": "x" * 500,
+            },
+        )
         rows = self._rows("fatal")
         self.assertTrue(rows)
         self.assertEqual(rows[0]["secs"], 0.0, "负数被收了")
@@ -233,6 +242,7 @@ class ReportEndToEnd(unittest.TestCase):
         anon = TestClient(app)
         self.assertEqual(anon.post("/api/live/report", json={"kind": "stall"}).status_code, 401)
         self.assertEqual(anon.get("/api/live/incidents").status_code, 401)
+
 
 if __name__ == "__main__":
     unittest.main()
