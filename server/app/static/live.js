@@ -32,7 +32,28 @@ window.LivePlayer = (function () {
   function tryPlay() {
     if (!v) return;
     var pr = v.play();
-    if (pr && pr.catch) pr.catch(function () { note(t('tapplay')); armTap(); });
+    if (!pr || !pr.catch) return;
+    pr.catch(function () {
+      /* 非静音被拒 —— **先退回静音播放, 别把整块画面变成"点一下"的黑屏**。
+       *
+       * 什么时候会走到这: 管理员在控制台按一次保存, live_server 就把播出停掉重开
+       * (那是话术即时生效的代价, 见它的 put_room)。观众这边 teardown 之后重连,
+       * 而此时元素已经被观众解除静音过 —— 浏览器不放行非静音自动播放, play() 被拒。
+       * 旧写法直接挂出"点一下开始播放": 观众看到的是**画面没了**, 只会以为直播挂了。
+       * 退回静音至少画面是连着的, 声音一键就能拿回来。 */
+      if (!v.muted) {
+        v.muted = true;
+        paintSound();
+        note(t('remuted'));
+        var again = v.play();
+        if (again && again.catch) {
+          again.catch(function () { note(t('tapplay')); armTap(); });
+        }
+        return;
+      }
+      note(t('tapplay'));
+      armTap();
+    });
   }
   function armTap() {
     var stage = v && v.parentNode;

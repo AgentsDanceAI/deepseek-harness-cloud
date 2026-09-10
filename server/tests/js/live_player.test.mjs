@@ -15,8 +15,9 @@ import assert from "node:assert/strict";
 const here = dirname(fileURLToPath(import.meta.url));
 const SRC = join(here, "..", "..", "app", "static", "live.js");
 
-function makeDom({ nativeHls = false, autoplayBlocked = false } = {}) {
+function makeDom({ nativeHls = false, autoplayBlocked = false, blockedWhenUnmuted = false } = {}) {
   const state = { live: true, enabled: true };
+  const gate = { blockUnmuted: blockedWhenUnmuted };
   const hlsInstances = [];
   const el = (id, extra = {}) => ({
     id, textContent: "", hidden: false, className: "", dataset: {}, style: {},
@@ -38,7 +39,12 @@ function makeDom({ nativeHls = false, autoplayBlocked = false } = {}) {
     canPlayType: () => (nativeHls ? "maybe" : ""),
     play() {
       this.plays++;
-      if (autoplayBlocked) return Promise.reject(new Error("NotAllowedError"));
+      // 浏览器的真实行为: **静音**自动播放放行, 非静音的自动播放被拒。
+      // ⚠️ 用户手势(点按钮)触发的非静音播放是**放行**的 —— 所以这道闸要能中途切换,
+      // 一直开着的话连"点开声音"都会被拒, 测的就不是真实浏览器了。
+      if (autoplayBlocked || (gate.blockUnmuted && !this.muted)) {
+        return Promise.reject(new Error("NotAllowedError"));
+      }
       this.paused = false;
       return Promise.resolve();
     },
@@ -55,6 +61,7 @@ function makeDom({ nativeHls = false, autoplayBlocked = false } = {}) {
   // live.js 用 t('unmute') 取按钮文案, 而 unmute 这一条在观看页上是按钮自己的初始
   // 文本; badge 上没有 —— 补一条, 否则切回静音时文案是空的。
   badge.dataset.unmute = "开声音";
+  badge.dataset.remuted = "重连后浏览器挡住了声音，点「开声音」恢复";
 
   const els = { "#lvVideo": video, "#lvMsg": el("lvMsg"), "#lvBadge": badge, "#lvUnmute": el("lvUnmute") };
   const byId = { lvVideo: video, lvMsg: els["#lvMsg"], lvBadge: badge, lvUnmute: els["#lvUnmute"] };
@@ -88,7 +95,7 @@ function makeDom({ nativeHls = false, autoplayBlocked = false } = {}) {
   };
   window.Hls.Events = { MANIFEST_PARSED: "mp", ERROR: "err" };
   window.Hls.ErrorTypes = { NETWORK_ERROR: "net", MEDIA_ERROR: "media" };
-  return { document, window, els, video, badge, stage, state, hlsInstances, timers };
+  return { document, window, els, video, badge, stage, state, hlsInstances, timers, gate };
 }
 
 function load(dom) {
@@ -225,4 +232,64 @@ await check("正常播放时绝不乱跳", async () => {
   dom.video.paused = false;
   for (let i = 0; i < 20; i++) { dom.video.currentTime = i; dom.window.__tick(1000, 1); }
   assert.ok(dom.video.currentTime < 100, "播得好好的却被跳到直播边缘");
+});
+
+await check("重连后非静音被拒: 退回静音播放, **不能把画面变成一块黑屏**", async () => {
+  /* 管理员在控制台按一次保存, live_server 就把播出停掉重开 (话术即时生效的代价,
+     见它的 put_room)。观众这边 teardown 之后重连, 而元素已经被观众解除过静音 ——
+     浏览器不放行非静音的自动播放。
+     旧写法直接挂"点一下开始播放": 观众看到的是**画面没了**, 只会以为直播挂了。 */
+  const dom = makeDom();
+  const api = load(dom);
+  await tick(); await tick();
+  dom.hlsInstances[0].handlers.mp();             // 起播
+  await tick();
+  dom.video.fire("playing");                     // 声音按钮出现
+  dom.els["#lvUnmute"].fire("click");            // 观众点开声音 (有手势, 浏览器放行)
+  await tick();
+  assert.equal(dom.video.muted, false, "点了开声音却还是静音的");
+
+  dom.gate.blockUnmuted = true;                  // 此后的**自动**播放才会被拒
+  dom.state.live = false;                        // 保存 -> 停播
+  await api.refresh(); await tick();
+  dom.state.live = true;                         // -> 重开
+  await api.refresh(); await tick();
+  dom.hlsInstances[1].handlers.mp();             // 新实例起播 -> 非静音被拒
+  await tick(); await tick();
+
+  assert.equal(dom.video.paused, false,
+    "画面停住了 —— 观众看到的是直播挂了, 而其实只是保存了一次配置");
+  assert.equal(dom.video.muted, true, "没有退回静音, 那这次 play() 根本没成功");
+  assert.match(dom.els["#lvMsg"].textContent, /开声音/,
+    "没告诉观众声音被挡了, 他不知道点哪儿能拿回来");
+  assert.ok(!/点一下开始播放/.test(dom.els["#lvMsg"].textContent),
+    "还是挂出了'点一下开始播放' —— 画面本可以是连着的");
+});
+
+await check("被迫静音之后, 点「开声音」要能把声音拿回来", async () => {
+  /* 这是这次改动真正的风险: 我们**程序性地**把 muted 设回了 true。要是按钮的状态
+     跟不上, 观众就卡在一个"有声音按钮但按了没用"的地方 —— 比黑屏更让人火大。 */
+  const dom = makeDom();
+  const api = load(dom);
+  await tick(); await tick();
+  dom.hlsInstances[0].handlers.mp();
+  await tick();
+  dom.video.fire("playing");
+  dom.els["#lvUnmute"].fire("click");
+  await tick();
+
+  dom.gate.blockUnmuted = true;
+  dom.state.live = false; await api.refresh(); await tick();
+  dom.state.live = true;  await api.refresh(); await tick();
+  dom.hlsInstances[1].handlers.mp();
+  await tick(); await tick();
+  assert.equal(dom.video.muted, true, "前置条件不成立: 没被迫静音");
+  assert.equal(dom.els["#lvUnmute"].textContent, "开声音",
+    "被迫静音后按钮文案没跟上 —— 上面写着'关声音'而其实是静音的");
+
+  dom.gate.blockUnmuted = false;                 // 观众这次点是有手势的
+  dom.els["#lvUnmute"].fire("click");
+  await tick();
+  assert.equal(dom.video.muted, false, "点了开声音拿不回声音 —— 播放器卡死在静音里了");
+  assert.equal(dom.video.paused, false, "拿回声音的同时把画面停了");
 });
