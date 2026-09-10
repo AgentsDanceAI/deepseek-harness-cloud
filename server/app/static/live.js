@@ -14,6 +14,9 @@ window.LivePlayer = (function () {
   var badge = document.getElementById('lvBadge');
   var unmute = document.getElementById('lvUnmute');
   var hls = null, retry = 0, playingUrl = '';
+  //: 正在播的是哪一场 (开播时刻)。地址永远是同一个 index.m3u8, 所以只有它
+  //: 能告诉我们"换了一场" —— 换场时播放列表被重建, 手里的缓冲全作废。
+  var playingSince = 0;
 
   function t(k) { return (badge && badge.dataset[k]) || ''; }
   function note(s) { if (msg) { msg.textContent = s || ''; msg.hidden = !s; } }
@@ -155,6 +158,7 @@ window.LivePlayer = (function () {
      上一切正常, 就是黑着。 */
   function teardown() {
     playingUrl = '';
+    playingSince = 0;
     if (hls) { hls.destroy(); hls = null; }
     if (v) { try { v.pause(); v.removeAttribute('src'); v.load(); } catch (e) { /* 忽略 */ } }
   }
@@ -166,7 +170,15 @@ window.LivePlayer = (function () {
         online(!!d.live);
         if (!d.enabled) { teardown(); note(t('disabled')); return d; }
         if (!d.live) { teardown(); note(t('notlive')); return d; }
+        // **换了一场就必须拆掉重来。** 切形象/音色是在同一个请求里 stop+start,
+        // 这里很可能从头到尾都看到 live:true —— 但播放列表已经被 rmtree 重建,
+        // MEDIA-SEQUENCE 退回 0, 手里缓冲的切片全 404, 时间轴还倒退了。
+        // 地址永远是同一个 index.m3u8, play() 开头的 `url === playingUrl` 守卫
+        // 会直接返回, 于是播放器一直卡在废掉的 MSE 缓冲上: 画面全黑, 点一下也
+        // 没反应(创始人 2026-09-10 切形象后撞到)。
+        if (d.since && playingSince && d.since !== playingSince) teardown();
         note(''); retry = 0; play(d.hls);
+        playingSince = d.since || playingSince;
         return d;
       })
       .catch(function () { note(t('reconnect')); return null; });

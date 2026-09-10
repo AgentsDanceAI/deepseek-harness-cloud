@@ -84,7 +84,8 @@ function makeDom({ nativeHls = false, autoplayBlocked = false, blockedWhenUnmute
       destroy() { this.destroyed = true; }
     },
     fetch: () => Promise.resolve({ json: () => Promise.resolve({
-      enabled: state.enabled, live: state.live, hls: "/api/live/hls/official/index.m3u8",
+      enabled: state.enabled, live: state.live, since: state.since,
+      hls: "/api/live/hls/official/index.m3u8",
     }) }),
     setInterval: (fn, ms) => { timers.push({ fn, ms }); return timers.length; },
     // 卡死恢复那一路是 1 秒一拍, 状态刷新是 15 秒 —— 按周期挑, 别按顺序猜
@@ -214,14 +215,31 @@ await check("Safari 原生那条路也要能恢复", async () => {
     `Safari 恢复位置不对 (currentTime=${dom.video.currentTime}), 应该在 edge-10 附近`);
 });
 
-await check("缓冲配到 12 秒 —— 0.9× 产出下这决定多久见底", () => {
+/* 观众落后直播边缘多少秒。2026-09-10 产出侧加了墙钟节流(把 1.65× 压回 1.0×)之后,
+   产出变成锯齿: 句内每 0.5~1.1 秒出片, **句间有 5~8 秒空档**(实测 75 秒内七次,
+   最大 8.0 秒) —— 那是压回 1.0× 的固有代价, 不是 bug。
+   落后不够多, 空档一来缓冲就见底: 画面停、没声音, 过几秒又恢复(线上真出过, 当时是 7 秒)。 */
+const MAX_GAP = 8;      // 句间最大空档, 实测值
+await check("缓冲必须大于句间空档 —— 小了就是「播一会儿没声音」", () => {
   const src = readFileSync(SRC, "utf8");
-  const m = /liveSyncDurationCount:\s*(\d+)/.exec(src);
-  assert.ok(m, "找不到 liveSyncDurationCount");
+  const m = /liveSyncDuration:\s*(\d+)/.exec(src);
+  assert.ok(m, "找不到 liveSyncDuration (注意: 不是 Count —— count 要乘 TARGETDURATION)");
   const n = +m[1];
-  assert.ok(n >= 12, `缓冲只有 ${n} 秒 —— 0.9× 产出下约 ${(n / 0.1 / 60).toFixed(1)} 分钟就见底`);
-  const mx = /liveMaxLatencyDurationCount:\s*(\d+)/.exec(src);
-  assert.ok(mx && +mx[1] > n, "liveMaxLatencyDurationCount 必须大于 liveSyncDurationCount");
+  assert.ok(n > MAX_GAP,
+    `落后只有 ${n} 秒, 而句间空档最大 ${MAX_GAP} 秒 —— 缓冲会见底, 观众听到的是断断续续`);
+  const mx = /liveMaxLatencyDuration:\s*(\d+)/.exec(src);
+  assert.ok(mx && +mx[1] > n, "liveMaxLatencyDuration 必须大于 liveSyncDuration");
+  const behind = /BEHIND_LIVE\s*=\s*(\d+)/.exec(src);
+  assert.ok(behind && +behind[1] === n,
+    `Safari 那条路的 BEHIND_LIVE=${behind && behind[1]} 与 liveSyncDuration=${n} 不一致 —— 两处要一起改`);
+});
+
+await check("不能开变速追赶 —— 锯齿会让语速每十秒忽快忽慢", () => {
+  const src = readFileSync(SRC, "utf8");
+  const m = /maxLiveSyncPlaybackRate:\s*([\d.]+)/.exec(src);
+  assert.ok(m, "找不到 maxLiveSyncPlaybackRate");
+  assert.equal(+m[1], 1,
+    "开着变速追赶时, 每次产出爆发后落后变大就提速、空档里又降回来, 听感是一顿一顿的");
 });
 
 await check("正常播放时绝不乱跳", async () => {
@@ -292,4 +310,46 @@ await check("被迫静音之后, 点「开声音」要能把声音拿回来", as
   await tick();
   assert.equal(dom.video.muted, false, "点了开声音拿不回声音 —— 播放器卡死在静音里了");
   assert.equal(dom.video.paused, false, "拿回声音的同时把画面停了");
+});
+
+/* ── 换场必须重建播放器 ──────────────────────────────────────────────────────
+ *
+ * 切形象/音色时 live_server 的 put_room 是在**同一个请求里** stop+start, 所以客户端
+ * 很可能从头到尾都看到 live:true —— 而播放列表已经被 rmtree 重建, MEDIA-SEQUENCE
+ * 退回 0, 手里缓冲的切片全 404, 时间轴还倒退了。地址永远是同一个 index.m3u8,
+ * play() 开头的 `url === playingUrl` 守卫会直接返回, 播放器就一直卡在废掉的 MSE
+ * 缓冲上: **画面全黑, 点一下也没反应**(创始人 2026-09-10 切形象后撞到)。
+ * 判据只能是 since(这一场的开播时刻)。
+ */
+console.log("换场:");
+
+await check("切形象 (live 一直是 true, 地址没变) -> 播放器必须重建", async () => {
+  const dom = makeDom();
+  dom.state.since = 1000;
+  const api = load(dom);
+  await tick(); await tick();
+  assert.equal(dom.hlsInstances.length, 1, "第一次开播没起播");
+  dom.state.since = 2000;                       // 换了一场, 其余一切不变
+  await api.refresh(); await tick();
+  assert.equal(dom.hlsInstances[0].destroyed, true,
+    "换场了却没拆掉旧实例 —— 它卡在废掉的缓冲上, 画面全黑且点了也没反应");
+  assert.equal(dom.hlsInstances.length, 2, "没有重建播放器");
+});
+
+await check("同一场里反复轮询绝不能重建 —— 每重建一次就是一次黑屏", async () => {
+  const dom = makeDom();
+  dom.state.since = 1000;
+  const api = load(dom);
+  await tick(); await tick();
+  for (let i = 0; i < 5; i++) { await api.refresh(); await tick(); }
+  assert.equal(dom.hlsInstances.length, 1,
+    `同一场被重建了 ${dom.hlsInstances.length} 次 —— since 没变就不该动`);
+});
+
+await check("上游给不出 since 时也不能乱拆 (老版本上游)", async () => {
+  const dom = makeDom();
+  const api = load(dom);                        // state.since 是 undefined
+  await tick(); await tick();
+  for (let i = 0; i < 3; i++) { await api.refresh(); await tick(); }
+  assert.equal(dom.hlsInstances.length, 1, "没有 since 就该按兵不动, 而不是每轮都重建");
 });

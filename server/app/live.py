@@ -130,6 +130,11 @@ async def status():
             "live": bool(d.get("live")),
             "title": d.get("title", ""),
             "room": room,
+            # 这一场是什么时候开的。播放器靠它认出"换了一场" —— 切形象/音色是在
+            # 同一个请求里 stop+start, 客户端可能从头到尾都看到 live:true, 而播放
+            # 列表已经被 rmtree 重建、MEDIA-SEQUENCE 退回 0。地址永远是同一个
+            # index.m3u8, 所以不给这个信号就没法判断该不该拆掉重来。
+            "since": float(d.get("since") or 0),
             # 播放地址一律指向**我们自己**, 见模块头注释。
             "hls": f"/api/live/hls/{room}/index.m3u8",
         }
