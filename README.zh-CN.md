@@ -72,10 +72,8 @@ agent 拿着它调 `aistore.best/llm/*`，用量记在你账上，和在云端�
 
 - **工作台镜像只出 `linux/amd64`。** x86 机器（比如装 5090 那台）原生跑；
   Apple Silicon 走模拟，能用但明显更慢。运行器会主动提示，不让你自己猜。
-- **有几个镜像在 ghcr 上还是私有的。** `agentui`、`comfy-local`、
-  `codecli-local`、`od-local`、`autogen-studio`、`dsh-local`、`coze-assets`、
-  `cloudcli-local` 是公开的；`pi-web-ui`、`langchain-agent`、
-  `agent-frameworks`、`openmausbot` 还不是，组织外的人拉不动那几格。
+- **镜像全部公开**（2026-09-10 起）：目录里每一格引用的那个 tag 都能匿名
+  `docker pull`，不需要 ghcr 登录。合同测试钉着这一条，新增格子忘了设公开会红。
 
 ### 自部署 Community Edition
 
