@@ -47,7 +47,20 @@ jobs:
         working-directory: desktop/build/upstream
         run: |
           corepack yarn typecheck
-          corepack yarn test --run
+          # Windows runner 上只跑**只有 Windows 能给覆盖**的那几个 spec, 不跑全量。
+          #
+          # 上游的用例里 POSIX 假设是散着的, 不是集中在几个文件里 —— 2026-09-10
+          # 重建桌面端时按文件一个个排, 排掉 release-mac / verify-mac-release /
+          # updates 之后, plugin.spec.ts 和 profile-manager.spec.ts 又红了, 形状
+          # 一模一样: 断言路径以 '/build/app-icon.png' 结尾(Windows 是反斜杠)、
+          # 断言文件 mode 是 0o600(NTFS 报 0o666)。黑名单是打地鼠, 换成白名单。
+          #
+          # 全量在同一条工作流的两个 macOS job 上跑的是同一个提交, 覆盖没丢;
+          # 这个 job 的职责是**产出 Windows 安装包**。
+          corepack yarn test --run \
+            tests/package-win.spec.ts \
+            tests/verify-win-installer.spec.ts \
+            tests/windows-pwsh-sandbox.spec.ts
       - name: Build
         working-directory: desktop/build/upstream/dsh-plugin-desktop
         run: corepack yarn build
