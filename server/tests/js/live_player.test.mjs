@@ -436,3 +436,12 @@ await check("缓冲必须大于实测的最大空档 9.2 秒", () => {
   const mx = +/liveMaxLatencyDuration:\s*(\d+)/.exec(src)[1];
   assert.ok(mx > n && mx < 38, `liveMaxLatencyDuration ${mx} 要在 ${n} 和窗长 38.6 之间`);
 });
+
+await check("上报要带上客户端版本 —— 否则「用户刷没刷新」只能靠猜", () => {
+  const src = readFileSync(SRC, "utf8");
+  assert.ok(/function clientVer/.test(src), "没有取客户端版本的地方");
+  assert.ok(/\[v' \+ VER \+ '\]/.test(src) || /VER \+ '\]'/.test(src),
+    "版本号没拼进上报的 detail 里");
+  // 2026-09-10: 我按新参数分析了半天卡顿, 实际创始人跑的是旧 JS —— 指纹是
+  // waiting 的"落后"恒等于旧的 liveSyncDuration。有版本号就不用靠这种间接推断。
+});

@@ -42,6 +42,25 @@ window.LivePlayer = (function () {
    *    网络本来就不好, 重试只会雪上加霜。
    * ⚠️ 同一种事件本地先压一道(服务端还有一道), 卡住时事件是连着来的。 */
   var lastReport = {};
+  /* 这份 live.js 是哪一版。**跟事件一起报上来** —— 否则"用户刷没刷新"只能靠猜,
+     而新旧代码的表现完全不同(2026-09-10: 我按新参数分析了半天, 实际他跑的是旧的,
+     指纹是 waiting 的落后恒等于旧的 liveSyncDuration)。
+     取的是加载这个脚本时用的 ?v= —— 服务端拿它做缓存击穿, 正好就是版本号。 */
+  function clientVer() {
+    try {
+      var el = document.currentScript;
+      if (!el) {
+        var all = document.getElementsByTagName('script');
+        for (var i = 0; i < all.length; i++) {
+          if (/live\.js/.test(all[i].src || '')) { el = all[i]; break; }
+        }
+      }
+      var m = /[?&]v=([0-9]+)/.exec((el && el.src) || '');
+      return m ? m[1] : '?';
+    } catch (e) { return '?'; }
+  }
+  var VER = clientVer();
+
   function reportIssue(kind, secs, detail) {
     try {
       var now = Date.now();
@@ -55,7 +74,7 @@ window.LivePlayer = (function () {
           kind: kind,
           secs: secs || 0,
           lag: lag(),                       // 出事时观众落后直播边缘多少
-          detail: String(detail || '').slice(0, 200),
+          detail: (String(detail || '') + ' [v' + VER + ']').slice(0, 200),
         }),
       }).catch(function () { /* 观测坏了不该影响播放 */ });
     } catch (e) { /* 同上 */ }
