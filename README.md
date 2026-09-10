@@ -2,10 +2,13 @@
 
 # AI Store
 
-**Managed cloud agents and a self-hostable platform around DeepSeek Harness.**
+**Sixteen open-source AI products behind one account—hosted, or pulled onto
+your own machine with a single command.**
 
-Accounts, a server-side model gateway, usage policy, teams, and an optional
-browser workspace—without distributing an upstream model key to every client.
+DeepSeek Harness, ComfyUI, Dify, OpenManus… each slot is its own workspace.
+This repo is the layer behind them: accounts, a server-side model gateway,
+metering and billing, teams, and the workspace orchestration—with the upstream
+key never leaving the server.
 
 [![CI](https://github.com/AgentsDanceAI/deepseek-harness-cloud/actions/workflows/ci.yml/badge.svg)](https://github.com/AgentsDanceAI/deepseek-harness-cloud/actions/workflows/ci.yml)
 [![License: DSH Cloud Community 1.0](https://img.shields.io/badge/license-DSH%20Cloud%20Community%201.0-4c6ef5.svg)](LICENSE)
