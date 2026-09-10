@@ -60,9 +60,10 @@ python3 scripts/local/aistore-local.py run codex  # 拉镜像 + 起容器, 开 l
 运行器用一把可吊销的设备令牌授权（与桌面端同一条 RFC 8628 流程），容器里的
 agent 拿着它调 `aistore.best/llm/*`，用量记在你账上，和在云端跑一模一样。
 
-不是每一格都能本地跑：`aistore-local.py list` 会列出能跑的。多容器栈
-（Dify、Coze、Hermes）还得走托管；数字人那两格是托管专有，因为它们驱动的是
-我们的 GPU 节点。
+不是每一格都能本地跑：`aistore-local.py list` 会列出能跑的。多容器栈（Dify 10 个
+容器、Hermes 3 个）也能跑——主容器建网络命名空间，其余容器 `--network container:`
+加进来，和云端的 pod 语义一致，所以上游那些写死 `127.0.0.1` 的配置原样成立。
+数字人那两格是托管专有，因为它们驱动的是我们的 GPU 节点。
 
 这份清单和启动编排都**由服务端下发**（`/api/local/catalog`、`/api/local/plan/<格>`），
 所以镜像换版本、新格子上线，这个脚本都不用改 —— 它只是个执行器。计划里不含任何
@@ -71,7 +72,9 @@ agent 拿着它调 `aistore.best/llm/*`，用量记在你账上，和在云端�
 开始之前有两件事得知道：
 
 - **工作台镜像只出 `linux/amd64`。** x86 机器（比如装 5090 那台）原生跑；
-  Apple Silicon 走模拟，能用但明显更慢。运行器会主动提示，不让你自己猜。
+  Apple Silicon 上 `docker pull` **会直接失败**（`no matching manifest for
+  linux/arm64/v8`），不是"慢一点"——运行器自动退回 `--platform linux/amd64`
+  并告诉你在走模拟。要 Docker Desktop 里开着 Rosetta / 多架构支持。
 - **镜像全部公开**（2026-09-10 起）：目录里每一格引用的那个 tag 都能匿名
   `docker pull`，不需要 ghcr 登录。合同测试钉着这一条，新增格子忘了设公开会红。
 

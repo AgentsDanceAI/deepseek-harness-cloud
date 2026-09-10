@@ -10,7 +10,7 @@ index 48cd4da..b52c6ac 100644
  import type { DesktopPnpmBootstrap } from './pnpm.ts'
  import {
    createDesktopExitCoordinator,
-@@ -116,6 +117,12 @@ async function start(): Promise<void> {
+@@ -116,6 +117,15 @@ async function start(): Promise<void> {
    })
  
    try {
@@ -20,6 +20,9 @@ index 48cd4da..b52c6ac 100644
 +      await shutdown.request(0)
 +      return
 +    }
++    // 打开桌面版先看见货架, DSH 是十六格里的一格 —— 用户点了那一格才往下起 Host。
++    // 一直不点就一直不起: 应用只有货架, 启动也快得多。
++    await cloudSession.hostRequested
      const environment = loadLayeredEnv(BIN_NAME, process.cwd())
      const electronVersion = process.versions.electron
      if (electronVersion === undefined) {

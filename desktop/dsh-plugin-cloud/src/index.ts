@@ -25,6 +25,16 @@ let discoveredModels: CloudModel[] = []
 export interface CloudSession {
   token: string
   user?: CloudUser
+  /**
+   * 什么时候才起 DeepSeek Harness 的原生 Host。
+   *
+   * 桌面版打开先看见货架, **不再自动把 DSH 拉起来** —— 它是十六格里的一格, 不是
+   * 这个应用本身 (2026-09-10 老板: 「又启动 dsh」)。补丁在这个 Promise 上等,
+   * 用户点了那一格才继续往下走; 一直不点就一直不起, 应用只有货架。
+   *
+   * 离线宽限那条路不开货架, 所以给一个**已经完成**的 Promise: 行为与以前一致。
+   */
+  hostRequested: Promise<void>
 }
 
 /**
@@ -86,13 +96,17 @@ export function registerDeepLink(): void {
  * **不 await, 也不让它抛**: 启动流程不该押在 docker 探测或一次目录请求上。
  * 离线宽限那条路不开货架 —— 那时候连目录都拉不到, 开出来只会是一页错误。
  */
-function withShelf(session: CloudSession): CloudSession {
+function withShelf(base: { token: string, user?: CloudUser }): CloudSession {
+  let requestHost: () => void = () => {}
+  const hostRequested = new Promise<void>(resolve => { requestHost = resolve })
   try {
-    openShelf(session.token)
+    openShelf(base.token, requestHost)
   } catch {
-    // 货架开不出来是遗憾, 不是故障: 云端和桌面端该照常能用
+    // 货架开不出来是遗憾, 不是故障 —— 但那样就没人能点「DeepSeek Harness」那一格了,
+    // 所以直接放行, 退回到以前那样直接起 Host。
+    requestHost()
   }
-  return session
+  return { ...base, hostRequested }
 }
 
 export async function cloudGate(): Promise<CloudSession | undefined> {
@@ -112,7 +126,8 @@ export async function cloudGate(): Promise<CloudSession | undefined> {
       // Network failure: offline grace. The gateway is the real enforcement
       // point — a revoked token still dies there on the next request.
       process.env[CLOUD_TOKEN_ENV] = stored.token
-      return { token: stored.token }
+      // 离线: 拉不到目录, 货架只会是一页错误 —— 直接起 Host, 和以前一样。
+      return { token: stored.token, hostRequested: Promise.resolve() }
     }
   }
 

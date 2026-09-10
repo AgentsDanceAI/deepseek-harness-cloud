@@ -47,12 +47,16 @@
   function card(p) {
     const st = uiOf(p.id)
     const live = typeof p.port_local === 'number'
+    // DeepSeek Harness 这一格是**原生**跑的: 桌面版本身就是它的运行方式, 任务在
+    // 本机执行、有完整文件系统。跑成容器反而是降级 (那是云工作台的沙箱形态)。
+    const native = p.id === 'dsh'
     // 「起不动」和「没买」是两件事: 11 个容器的栈, 买了通行证照样起不动。
     const runnable = p.runnable === 'ready' && !p.locked
     const why = st.error
       ? st.error
       : p.locked ? '要先买这一格的通行证'
       : p.reason ? p.reason
+      : native ? '原生跑在这台机器上，任务直接读写本地文件'
       : live ? `跑在 127.0.0.1:${p.port_local}` : '可以在本机跑'
 
     const el = document.createElement('div')
@@ -77,6 +81,19 @@
         refresh()
       }
       row.append(open, halt)
+      return el
+    }
+
+    if (native) {
+      const boot = document.createElement('button')
+      boot.className = 'primary'
+      boot.textContent = st.busy ? '启动中…' : '打开'
+      boot.disabled = st.busy
+      boot.onclick = async () => {
+        setUi(p.id, { busy: true })
+        await window.aiStoreShelf.bootHost()
+      }
+      row.append(boot)
       return el
     }
 

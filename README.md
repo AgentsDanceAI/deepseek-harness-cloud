@@ -72,9 +72,12 @@ RFC 8628 flow the desktop client uses); the agent inside the container calls
 `aistore.best/llm/*` with it, so usage lands on your account exactly as it does
 in the cloud.
 
-Not every slot runs locally yet: `aistore-local.py list` prints the ones that
-do. Multi-container stacks (Dify, Coze, Hermes) still need the hosted side, and
-the two digital-human slots are hosted-only because they drive our GPU nodes.
+Not every slot runs locally yet: `aistore-local.py list` prints the ones that do.
+Multi-container stacks run too (Dify is ten containers, Hermes three): the main
+container owns the network namespace and the rest join it with `--network
+container:`, matching the pod semantics used in the cloud — so the upstream
+configs that hard-code `127.0.0.1` hold as written. The two digital-human slots
+stay hosted-only because they drive our GPU nodes.
 
 That list and the start-up orchestration both come **from the server**
 (`/api/local/catalog`, `/api/local/plan/<slot>`), so a new image tag or a new
@@ -85,8 +88,10 @@ with the one on your machine.
 Two things worth knowing before you start:
 
 - **The workspace images are `linux/amd64` only.** An x86 box (the 5090 case)
-  runs them natively; Apple Silicon runs them under emulation—it works, it is
-  just noticeably slower. The runner says so rather than letting you guess.
+  runs them natively. On Apple Silicon `docker pull` **fails outright** (`no
+  matching manifest for linux/arm64/v8`) — not "a bit slower": the runner falls
+  back to `--platform linux/amd64` on its own and tells you it is emulating.
+  Docker Desktop needs Rosetta / multi-arch support switched on.
 - **Every image is public** (since 2026-09-10): the exact tag each slot
   references can be pulled anonymously, no ghcr login needed. A contract test
   pins this, so a new slot whose image was left private turns CI red.

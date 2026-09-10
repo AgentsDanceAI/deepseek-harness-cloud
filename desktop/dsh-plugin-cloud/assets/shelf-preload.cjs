@@ -6,6 +6,7 @@ const { contextBridge, ipcRenderer } = require('electron')
 
 contextBridge.exposeInMainWorld('aiStoreShelf', {
   list: () => ipcRenderer.invoke('dsh-cloud:shelf-list'),
+  bootHost: () => ipcRenderer.invoke('dsh-cloud:shelf-boot-host'),
   start: id => ipcRenderer.invoke('dsh-cloud:shelf-start', id),
   stop: id => ipcRenderer.invoke('dsh-cloud:shelf-stop', id),
   open: id => ipcRenderer.invoke('dsh-cloud:shelf-open', id),

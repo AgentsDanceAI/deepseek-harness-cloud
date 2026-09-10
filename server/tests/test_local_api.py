@@ -74,7 +74,9 @@ def test_stack_products_are_described_but_flagged(signed_in):
     先把数据备齐、执行端跟上就能用; 反过来(接口先不给)会逼客户端再抄一遍。
     """
     plan = signed_in.get("/api/local/plan/dify").json()
-    assert plan["runnable"] == "runner_no_stack"
+    # 多容器栈现在能跑了 (共享网络命名空间), 但 reason 要说清楚要起几个
+    assert plan["runnable"] == "ready"
+    assert "个容器的栈" in plan["reason"]
     roles = [c["role"] for c in plan["containers"]]
     assert roles.count("main") == 1
     assert roles.count("sidecar") == len(products.get("dify").sidecars) > 1
@@ -91,7 +93,7 @@ def test_locked_product_needs_a_pass(signed_in, monkeypatch):
     # 混成一个状态就会提示用户去买一个买完也没用的东西。
     assert signed_in.get("/api/local/plan/dify").status_code == 402
     row = next(x for x in signed_in.get("/api/local/catalog").json()["products"] if x["id"] == "dify")
-    assert row["locked"] is True and row["runnable"] == "runner_no_stack"
+    assert row["locked"] is True and row["runnable"] == "ready"
 
 
 def test_catalog_lists_every_enabled_product(signed_in):
