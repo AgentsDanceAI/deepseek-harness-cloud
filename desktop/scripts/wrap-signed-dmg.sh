@@ -36,7 +36,21 @@ codesign --verify --deep --strict "$APP" 2>&1 | tail -2 || { echo "签名校验�
 xcrun stapler validate "$APP" >/dev/null 2>&1 || { echo "公证票据缺失/无效 —— 先公证再封 DMG" >&2; exit 1; }
 
 VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$APP/Contents/Info.plist" 2>/dev/null || echo "0.0.0")
-ARCH_LABEL="${ARCH_LABEL:-$(uname -m)}"
+# 架构标签必须来自**这个 .app 里的二进制**, 不是构建机的 uname -m。
+# 2026-09-10 重建桌面端时踩到: 在 Apple Silicon 上封 Intel 包, 默认值给出 arm64,
+# 产物就叫 ...-mac-arm64.dmg —— 正好覆盖掉前一分钟刚封好的那份真 arm64, 全程零
+# 报错。发出去就是 Intel 用户和 M 系用户下到同一个包, 而两边都以为自己拿对了。
+if [ -z "${ARCH_LABEL:-}" ]; then
+  _exe=$(/usr/libexec/PlistBuddy -c "Print :CFBundleExecutable" "$APP/Contents/Info.plist" 2>/dev/null)
+  _bin="$APP/Contents/MacOS/${_exe:-$(basename "${APP%.app}")}"
+  case " $(lipo -archs "$_bin" 2>/dev/null) " in
+    *" arm64 "*" x86_64 "*|*" x86_64 "*" arm64 "*) ARCH_LABEL=universal ;;
+    *" arm64 "*)  ARCH_LABEL=arm64 ;;
+    *" x86_64 "*) ARCH_LABEL=x64 ;;   # 与 CI 产物命名一致 (mac-x64)
+    *) echo "!! 认不出 $_bin 的架构, 请显式传 ARCH_LABEL=" >&2; exit 1 ;;
+  esac
+  echo "==> 架构: $ARCH_LABEL (读自 $(basename "$_bin"))"
+fi
 VOLNAME="${VOLNAME:-AI Store Desktop}"
 DMG="$OUTDIR/AI-Store-Desktop-${VERSION}-mac-${ARCH_LABEL}.dmg"
 
