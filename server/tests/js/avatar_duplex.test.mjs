@@ -54,7 +54,9 @@ function makeDom({ stored = null } = {}) {
     // boot() 在加载时就会打接口 —— 桩必须是**真的 Promise**, 否则模块自己的
     // .catch 链会炸, 而那与被测的双工逻辑毫无关系。
     fetch: () => Promise.resolve({ ok: true, json: () => Promise.resolve({}) }),
-    setInterval: () => 0, clearInterval() {}, setTimeout: () => 0,
+    setInterval: () => 0, clearInterval() {},
+    setTimeout: (fn, ms) => setTimeout(fn, ms),
+    clearTimeout: (id) => clearTimeout(id),
     // 手动驱动的动画帧队列 —— 露出视频层要等它, 测试里得能一帧一帧推
     requestAnimationFrame: (fn) => { rafq.push(fn); return rafq.length; },
     URL: { createObjectURL: () => "blob:x", revokeObjectURL() {} },
@@ -76,15 +78,17 @@ function load(dom) {
   // 把 IIFE 尾部改成把内部对象抛出来, 只为测试可观察状态。其余一字不改。
   const patched = src.replace(
     /\}\)\(\);\s*$/,
-    "  window.__test = { st, setDuplex, showVideo, listen, micGate, fill, loadBg, layout };\n})();\n"
+    "  window.__test = { st, setDuplex, showVideo, listen, micGate, fill, loadBg, layout,\n"
+    + "                     herSpoke, isEcho, MIC_REOPEN_MS };\n})();\n"
   );
   assert.notEqual(patched, src, "没能挂上测试钩子 —— IIFE 尾部形状变了");
   const fn = new Function(
     "document", "window", "localStorage", "fetch", "setInterval", "clearInterval",
-    "setTimeout", "URL", "WebSocket", "location", "console",
+    "setTimeout", "clearTimeout", "URL", "WebSocket", "location", "console",
     "requestAnimationFrame", patched);
   fn(dom.document, dom.window, dom.window.localStorage, dom.window.fetch,
      dom.window.setInterval, dom.window.clearInterval, dom.window.setTimeout,
+     dom.window.clearTimeout,
      dom.window.URL, dom.window.WebSocket, dom.window.location, console,
      dom.window.requestAnimationFrame);
   return dom.window.__test;
@@ -93,6 +97,31 @@ function load(dom) {
 function check(name, fn) {
   try { fn(); console.log("  ✓", name); }
   catch (e) { console.log("  ✗", name, "\n     ", e.message); process.exitCode = 1; }
+}
+
+/* 开麦保护期是真的等一会儿, 所以这几条必须异步 —— 用假定时器的话就等于没测到
+   "它确实等了", 而那正是这条改动的全部内容。 */
+async function checkAsync(name, fn) {
+  try { await fn(); console.log("  ✓", name); }
+  catch (e) { console.log("  ✗", name, "\n     ", e.message); process.exitCode = 1; }
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/* 只盯 /api/avatar/say 那一条 —— 「她有没有把这句当成用户说话」就看它。
+   ⚠️ 别整个 fetch 替掉: 模块启动时自己会打一次接口, 替成没有 .json() 的桩会让
+   boot 当场抛错, 而且把那一次算进"被调用过", 于是这类用例永远是错的绿/错的红。 */
+function sayProbe(dom) {
+  const probe = { hit: false, said: "" };
+  dom.window.fetch = (url, opt) => {
+    if (String(url).includes("/api/avatar/say")) {
+      probe.hit = true;
+      try { probe.said = JSON.parse(opt.body).text; } catch { /* 不关心 */ }
+      return Promise.resolve({ ok: false });
+    }
+    return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+  };
+  return probe;
 }
 
 console.log("数字人 半双工/全双工:");
@@ -109,7 +138,7 @@ check("记住上次的选择", () => {
   assert.equal(api.st.duplex, "full");
 });
 
-check("半双工: 她一开口就闭麦, 说完再开", () => {
+await checkAsync("半双工: 她一开口就闭麦, 说完等一下再开", async () => {
   const dom = makeDom();
   const api = load(dom);
   api.st.ws = {};                      // 通话中
@@ -118,8 +147,26 @@ check("半双工: 她一开口就闭麦, 说完再开", () => {
 
   api.showVideo(true);                 // 她开始说
   assert.equal(dom.ear.running, false, "她说话时麦克风还开着 —— 会把自己听回去");
+
   api.showVideo(false);                // 她说完
-  assert.equal(dom.ear.running, true, "她说完了麦克风没开回来 —— 表现是她突然不理人");
+  // **不能立刻开**: 画面停住那一刻声音还在往外走 (设备输出缓冲 + 蓝牙 100~300ms
+  // + 房间混响), 立刻开麦收到的就是她最后半个字。
+  assert.equal(dom.ear.running, false, "她话音刚落就开麦了 —— 会把音箱的尾巴收进来");
+  await sleep(api.MIC_REOPEN_MS + 120);
+  assert.equal(dom.ear.running, true, "保护期过了麦克风还没开回来 —— 表现是她突然不理人");
+});
+
+await checkAsync("半双工: 保护期里她又开口, 就不该开麦", async () => {
+  const dom = makeDom();
+  const api = load(dom);
+  api.st.ws = {};
+  api.listen();
+  api.showVideo(true);
+  api.showVideo(false);                // 她"说完了"(其实只是卡了一下)
+  api.showVideo(true);                 // 保护期内又接着说
+  await sleep(api.MIC_REOPEN_MS + 120);
+  assert.equal(dom.ear.running, false,
+    "定时器到点还是把麦开了 —— 她正说着话, 这一开就是把自己听回去");
 });
 
 check("半双工: 闭麦期间 onend 不能把麦顶开", () => {
@@ -144,6 +191,77 @@ check("半双工: 她说话期间识别到的话要丢掉", () => {
   assert.equal(replied, false, "把音箱里绕回来的声音当成了用户说话");
 });
 
+/* 下面这组是**内容闸**: 与她说没说、麦开没开都无关。
+   时序闸有两个躲不掉的漏点(声音比画面慢、中途卡顿被当成说完), 而全双工压根没有
+   时序闸 —— 所以按内容认回声是唯一盖得全的一道。 */
+check("回声闸: 听回来的就是她刚说过的那句, 丢掉", () => {
+  const dom = makeDom();
+  const probe = sayProbe(dom);
+  const api = load(dom);
+  api.st.ws = {};
+  api.listen();
+  api.herSpoke("你先看懂它到底能解决你什么问题，再决定要不要");
+  api.st.speaking = false;             // 时序闸此刻是开的 —— 只有内容闸能拦
+  dom.ear.onresult({ results: [[{ transcript: "你先看懂它到底能解决你什么问题" }]] });
+  assert.equal(probe.hit, false, "她自己的话绕回来被当成了用户说话");
+});
+
+check("回声闸: 识别器把两句连着吐出来也认得出", () => {
+  const dom = makeDom();
+  const probe = sayProbe(dom);
+  const api = load(dom);
+  api.st.ws = {};
+  api.listen();
+  api.herSpoke("我在呢");
+  api.st.speaking = false;
+  dom.ear.onresult({ results: [[{ transcript: "我在呢，你说" }]] });
+  assert.equal(probe.hit, false, "只比对完全相等 —— 识别器多听/少听一点就漏了");
+});
+
+check("回声闸: 真人说的话不能被误杀", () => {
+  const dom = makeDom();
+  const probe = sayProbe(dom);
+  const api = load(dom);
+  api.st.ws = {};
+  api.listen();
+  api.herSpoke("你先看懂它到底能解决你什么问题");
+  api.st.speaking = false;
+  dom.ear.onresult({ results: [[{ transcript: "帮我看看这个多少钱" }]] });
+  assert.equal(probe.hit, true, "把真人说的话当回声丢了 —— 用户会以为她不理人");
+});
+
+check("回声闸: 短句一律放行", () => {
+  const dom = makeDom();
+  const api = load(dom);
+  api.st.ws = {};
+  api.listen();
+  api.herSpoke("好的，那我们继续");
+  assert.equal(api.isEcho("好的"), false,
+    "「好的」这种谁都会说的短句被当成回声 —— 用户附和一句就被吞掉");
+});
+
+check("回声闸: 太久以前说的不算 (声音早散了)", () => {
+  const dom = makeDom();
+  const api = load(dom);
+  api.st.ws = {};
+  api.listen();
+  api.herSpoke("这件事比抢到手要紧得多");
+  api.st.herSaid[0].at -= 60000;       // 一分钟前说的
+  assert.equal(api.isEcho("这件事比抢到手要紧得多"), false,
+    "一分钟前的话还在拦 —— 用户复述她说过的内容会被永久吞掉");
+});
+
+check("回声闸: 记的句数有上限, 不会一直涨", () => {
+  const dom = makeDom();
+  const api = load(dom);
+  api.st.ws = {};
+  api.listen();
+  for (let i = 0; i < 30; i++) api.herSpoke("这是第" + i + "句话说得挺长的");
+  assert.ok(api.st.herSaid.length <= 6,
+    "她说过的话无上限地攒着 —— 长通话会把内存和比对成本一起拖大");
+  assert.equal(api.isEcho("这是第29句话说得挺长的"), true, "最近说的那句反而没留住");
+});
+
 check("全双工: 她说话时照样听 (能打断)", () => {
   const dom = makeDom({ stored: "full" });
   const api = load(dom);
@@ -153,7 +271,7 @@ check("全双工: 她说话时照样听 (能打断)", () => {
   assert.equal(dom.ear.running, true, "全双工被闭麦了 —— 打断功能没了");
 });
 
-check("通话中切换立即生效", () => {
+await checkAsync("通话中切换立即生效", async () => {
   const dom = makeDom();
   const api = load(dom);
   api.st.ws = {};
@@ -162,6 +280,7 @@ check("通话中切换立即生效", () => {
   assert.equal(dom.ear.running, false);
 
   api.setDuplex("full");               // 走进安静的地方
+  await sleep(api.MIC_REOPEN_MS + 120);   // 开麦有保护期, 见 micGate
   assert.equal(dom.ear.running, true, "切到全双工后麦克风没开回来");
 
   api.setDuplex("half");               // 又走进嘈杂的地方, 而她还在说

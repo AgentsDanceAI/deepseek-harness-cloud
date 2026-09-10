@@ -44,6 +44,8 @@
     ms: null, sb: null, url: null, queue: [], speaking: false, watch: null,
     t0: null, timer: null, rate: 0,
     duplex: loadDuplex(), micOff: false,
+    // 她最近说过的几句 —— 用来认出从音箱绕回来的她自己, 见 isEcho。
+    herSaid: [], micTimer: null,
   };
 
   /* iPhone 没有标准 MediaSource — iOS 17.1+ 给的是同形的 ManagedMediaSource。
@@ -259,15 +261,73 @@
     else setTimeout(fn, 16);
   }
 
+  /* ---------- 回声: 别把她自己听回去 ---------- */
+  /* 半双工靠的是**时序**闸(她说话时停掉识别器), 而时序闸有两个躲不掉的漏点:
+   *
+   *   1. **音箱里的声音比 currentTime 慢。** 我们判定"她说完了"看的是画面停没停,
+   *      而那一刻声音还在往外走 —— 设备输出缓冲几十毫秒, 蓝牙音箱/耳机是 100~300
+   *      毫秒, 再加上房间的混响尾巴。闸一开就正好收到她最后半个字。
+   *   2. **中途卡一下也会被当成"她说完了"。** 判据是 currentTime 连着两拍没动,
+   *      而网络抖一下、缓冲见底同样不动。于是闸在她话说到一半时打开, 她接着说,
+   *      这时 st.speaking 是 false —— onresult 里那道 `speaking` 判断根本拦不住。
+   *
+   * 所以再加一道**按内容**的闸: 她说的每一句我们都有原文(是我们发给上游让她念的),
+   * 听回来的如果就是那几句里的一段, 那必然是绕回来的, 不是人说的。
+   * 这道闸与时序无关, 上面两个漏点它都盖得住; **全双工更需要它** —— 那个模式下
+   * 麦克风全程开着, 时序闸压根不存在。
+   *
+   * 判据故意保守, 宁可漏也不要误伤真人:
+   *   · 少于 4 个字不算 —— "好的""对"这种谁都会说, 拿它当回声会把人憋死;
+   *   · 只比她 20 秒内说过的 —— 再早的声音不可能还在空气里;
+   *   · 双向包含 —— 识别器可能只听清一半("看清楚再说"), 也可能连着两句一起吐。
+   */
+  const ECHO_WINDOW_MS = 20000;
+  const ECHO_MIN_CHARS = 4;
+
+  /* 比对前把标点、空白、大小写抹平: 识别器给的标点和我们发下去的从来对不上。 */
+  function normSaid(x) {
+    return String(x || "").toLowerCase().replace(/[\s\p{P}\p{S}]/gu, "");
+  }
+
+  /* 她要念的每一句都登记一下。**登记点是"发给上游"那一刻**, 不是"播出来"那一刻
+     —— 后者散落在好几条路上(首句问候、逐句回答), 漏登记一条就漏一条回声。 */
+  function herSpoke(text) {
+    const v = normSaid(text);
+    if (!v) return;
+    st.herSaid.push({ s: v, at: Date.now() });
+    while (st.herSaid.length > 6) st.herSaid.shift();
+  }
+
+  function isEcho(said) {
+    const v = normSaid(said);
+    if (v.length < ECHO_MIN_CHARS) return false;
+    const now = Date.now();
+    return st.herSaid.some((h) =>
+      now - h.at < ECHO_WINDOW_MS && (h.s.includes(v) || v.includes(h.s)));
+  }
+
   /* 半双工的闸: 她说话时把识别器停掉, 说完再开。
      只靠 onresult 里判断是不够的 —— 识别器照样在听, 而 stop() 时会把这期间听
-     到的东西定稿吐出来, 那正是从音箱里绕回来的她自己。所以要真的停。 */
+     到的东西定稿吐出来, 那正是从音箱里绕回来的她自己。所以要真的停。
+
+     ⚠️ 开麦要**等一下**再开: 见上面回声那段第 1 条, 画面停住的那一刻声音还在往外
+     走。等 MIC_REOPEN_MS 再开, 把设备输出缓冲和混响尾巴让过去。这段等待对真人
+     没有代价 —— 没有人能在她话音落下半秒内就接上话。 */
+  const MIC_REOPEN_MS = 500;
+
   function micGate(on) {
     const ear = st.ear;
     st.micOff = !on;
+    clearTimeout(st.micTimer);
+    st.micTimer = null;
     if (!ear || !st.ws) return;
     if (on) {
-      try { ear.start(); } catch { /* 已在跑 */ }
+      st.micTimer = setTimeout(() => {
+        st.micTimer = null;
+        // 等的这会儿她可能又开口了, 或者电话已经挂了。
+        if (st.micOff || st.ear !== ear || !st.ws) return;
+        try { ear.start(); } catch { /* 已在跑 */ }
+      }, MIC_REOPEN_MS);
       turnHint(t("js.avatar.listening", "说话吧，她在听"));
     } else {
       try { ear.stop(); } catch { /* 已停 */ }
@@ -363,6 +423,7 @@
         // 双方干等的那几秒, 用户只会以为点了没反应。
         const hi = t("js.avatar.hello", "喂，我在呢，你说。");
         say2log("her", hi);
+        herSpoke(hi);
         ws.send(JSON.stringify({ type: "say", sid: ++st.sid, text: hi }));
       }
     };
@@ -389,6 +450,8 @@
       // 半双工里她还在说 = 这句多半是从音箱绕回来的她自己 (stop() 会把停之前
       // 听到的定稿吐出来)。丢掉, 别让她跟自己对话。
       if (st.duplex === "half" && st.speaking) return;
+      // 时序闸拦不住的那部分交给内容闸 (见 isEcho 上面那段)。
+      if (isEcho(said)) { console.info("[avatar] 丢掉绕回来的回声:", said); return; }
       reply(said);
     };
     // 识别器会自己停 (静默久了、或一次会话到点)。通话还在就重开 —— 不重开的
@@ -439,6 +502,7 @@
         whole += d.text;
         if (!st.ws) return;                   // 说到一半挂断了
         say2log("her", d.text);
+        herSpoke(d.text);
         st.ws.send(JSON.stringify({ type: "say", sid: ++st.sid, text: d.text }));
       }
     }
@@ -470,6 +534,8 @@
     if (st.ear) { const e = st.ear; st.ear = null; e.onend = null; try { e.stop(); } catch { /* 已停 */ } }
     st.micOff = false;
     st.history = [];
+    st.herSaid = [];
+    clearTimeout(st.micTimer); st.micTimer = null;
     if (st.timer) { clearInterval(st.timer); st.timer = null; }
     st.t0 = null; st.queue = [];
     $("#avCall").textContent = t("js.avatar.start", "开始通话");

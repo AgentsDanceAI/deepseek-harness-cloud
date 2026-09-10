@@ -107,7 +107,7 @@ CATALOG: tuple[AppEntry, ...] = (
     # 数字人反过来是我们最独特的一块: 实时口型 + 用户自定义形象 + 定制音色,
     # 零件全在自己手上 (SoulX-FlashHead 跑在我们的 GPU 节点上)。
     AppEntry(
-        "avatar", "数字人视频", "avatar",
+        "avatar", "数字人伴聊", "avatar",
         '<circle cx="12" cy="8" r="4"/><path d="M4.5 20a7.5 7.5 0 0 1 15 0"/>'
         '<path d="M19 5.5a5 5 0 0 1 0 5M21.5 3.5a8.5 8.5 0 0 1 0 9"/>',
         href="/avatar",
