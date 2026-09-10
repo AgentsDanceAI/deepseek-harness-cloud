@@ -135,5 +135,104 @@ class ReportGuard(unittest.TestCase):
         self.assertNotIn("whatever", live._INCIDENT_KINDS)
 
 
+class ReportEndToEnd(unittest.TestCase):
+    """真的走一遍 HTTP —— 登录、白名单、限流、落库。
+
+    创始人要去实测了 (2026-09-10), 单元测试证明不了"字段名两边对得上"这类事。
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        from fastapi.testclient import TestClient
+
+        from app import config
+        from app.main import app
+        from tests._signup import signup
+
+        # _enabled() 看的是 LIVE_GPU_URL, 测试环境默认空 —— 不打开的话所有请求
+        # 都是 404 live_disabled。这里只借它开闸, 不会真去连上游: 这几条用例走的
+        # 是 /report 和 /incidents, 它们只读写本地库。
+        cls._real_url = config.LIVE_GPU_URL
+        config.LIVE_GPU_URL = "http://gpu.test/live"
+        cls.c = TestClient(app)
+        signup(cls.c, "incident-probe@example.com")
+        cls.room = config.LIVE_ROOM
+
+    @classmethod
+    def tearDownClass(cls):
+        from app import config
+
+        config.LIVE_GPU_URL = cls._real_url
+
+    def _rows(self, kind):
+        from app import db
+
+        return db.query(
+            "SELECT kind, side, secs, lag, detail FROM live_incidents "
+            "WHERE room=? AND kind=? ORDER BY created DESC",
+            (self.room, kind),
+        )
+
+    def test_观众报一条卡顿能落库_且字段对得上(self):
+        r = self.c.post("/api/live/report", json={
+            "kind": "waiting", "secs": 2.5, "lag": 11.8, "detail": "缓冲见底 2.5 秒",
+        })
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertTrue(r.json().get("ok"), r.text)
+        rows = self._rows("waiting")
+        self.assertTrue(rows, "上报成功却没落库")
+        self.assertEqual(rows[0]["side"], "viewer")
+        self.assertAlmostEqual(rows[0]["secs"], 2.5, places=3)
+        self.assertAlmostEqual(rows[0]["lag"], 11.8, places=3)
+
+    def test_同一种事件会被冷却挡住_卡住时是连着来的(self):
+        first = self.c.post("/api/live/report", json={"kind": "stall", "secs": 6})
+        again = self.c.post("/api/live/report", json={"kind": "stall", "secs": 6})
+        self.assertTrue(first.json().get("ok"), first.text)
+        self.assertFalse(again.json().get("ok"),
+                         "同一种事件连着两条都收了 —— 卡住时会刷屏")
+        self.assertEqual(len(self._rows("stall")), 1)
+
+    def test_编造的种类不落库(self):
+        r = self.c.post("/api/live/report", json={"kind": "whatever"})
+        self.assertEqual(r.status_code, 200, "不该报错, 静静丢掉就行")
+        self.assertFalse(r.json().get("ok"))
+        self.assertEqual(self._rows("whatever"), [])
+
+    def test_产出侧的种类不接受客户端声称(self):
+        """否则谁都能往表里塞「产出掉了」, 这张表就不能用来定位问题。"""
+        for kind in ("slow", "recovered"):
+            r = self.c.post("/api/live/report", json={"kind": kind, "detail": "假的"})
+            self.assertFalse(r.json().get("ok"), f"{kind} 被客户端写进去了")
+            self.assertEqual(self._rows(kind), [])
+
+    def test_离谱的数字要被丢掉_不能污染统计(self):
+        self.c.post("/api/live/report", json={
+            "kind": "fatal", "secs": -5, "lag": 10 ** 9, "detail": "x" * 500,
+        })
+        rows = self._rows("fatal")
+        self.assertTrue(rows)
+        self.assertEqual(rows[0]["secs"], 0.0, "负数被收了")
+        self.assertEqual(rows[0]["lag"], 0.0, "离谱的 lag 被收了")
+        self.assertLessEqual(len(rows[0]["detail"]), 200, "detail 没截断")
+
+    def test_读取口不回user_id(self):
+        """要的是「卡了多少次」, 不是「谁卡了」。"""
+        r = self.c.get("/api/live/incidents?hours=1")
+        self.assertEqual(r.status_code, 200, r.text)
+        d = r.json()
+        self.assertIn("tally", d)
+        self.assertTrue(d["items"], "刚写进去的事件读不出来")
+        self.assertNotIn("user_id", d["items"][0])
+
+    def test_没登录不给写也不给读(self):
+        from fastapi.testclient import TestClient
+
+        from app.main import app
+
+        anon = TestClient(app)
+        self.assertEqual(anon.post("/api/live/report", json={"kind": "stall"}).status_code, 401)
+        self.assertEqual(anon.get("/api/live/incidents").status_code, 401)
+
 if __name__ == "__main__":
     unittest.main()
