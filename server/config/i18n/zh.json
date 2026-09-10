@@ -776,5 +776,7 @@
   "live.kind_script": "话术",
   "live.kind_interject": "回评论",
   "live.sending": "正在让她组织语言…",
-  "live.queued": "已排上，她接下来会说："
+  "live.queued": "已排上，她接下来会说：",
+  "live.rate_ok": "产出 {r}× 实时 · 正常",
+  "live.rate_slow": "产出只有 {r}× 实时 —— 生产比播放慢, 观众会卡。换一个走云端 TTS 的形象可以解决"
 }

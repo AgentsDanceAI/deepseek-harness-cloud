@@ -776,5 +776,7 @@
   "live.kind_script": "script",
   "live.kind_interject": "reply",
   "live.sending": "Working out what to say…",
-  "live.queued": "Queued. She will say:"
+  "live.queued": "Queued. She will say:",
+  "live.rate_ok": "Producing at {r}× realtime · healthy",
+  "live.rate_slow": "Producing at only {r}× realtime — slower than playback, viewers will stall. Switch to a cloud-TTS avatar to fix"
 }

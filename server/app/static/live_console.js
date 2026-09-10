@@ -50,12 +50,28 @@
     recast.hidden = !(loaded.person && (c.person !== loaded.person || c.voice !== loaded.voice));
   }
 
+  /* 产出速率。**低于 1.0 = 观众必卡**, 而且换多大的缓冲都没用 —— 生产比消费慢,
+     缓冲只是决定多久被抽干。这一行是控制台上唯一能回答"现在卡不卡"的东西。
+     2026-09-10 加: 形象下拉只有名字, 看不出哪个走云端 TTS(实测 2.4×)、哪个走自建
+     (0.7×), 于是"我明明换了却还卡"这种误会没法自己排除。 */
+  var rateEl = $('lvRate');
+  function paintRate(d) {
+    if (!rateEl) return;
+    var r = +(d && d.rate) || 0;
+    if (!d || !d.live || !r) { rateEl.hidden = true; return; }
+    rateEl.hidden = false;
+    var slow = r < 0.98;
+    rateEl.className = 'lv-rate' + (slow ? ' lv-rate--slow' : '');
+    rateEl.textContent = t(rateEl, slow ? 'slow' : 'ok').replace('{r}', r.toFixed(2));
+  }
+
   function paint(d) {
     if (document.activeElement !== name) name.value = d.title || '';
     if (document.activeElement !== script) script.value = (d.lines || []).join('\n');
     // 只在首次落位 —— 之后 15 秒一次的刷新不能把没保存的改动顶回去。
     if (!presetInit) { presetInit = true; selectPreset(d.person || '', d.voice || ''); }
     loaded = { person: d.person || '', voice: d.voice || '' };
+    paintRate(d);
     var n = (d.lines || []).length;
     counts.textContent = n === 0 ? '' : t(counts, 'fmt').replace('{n}', n);
     // 上游接了 start 就返回, 真正出流要几秒到几十秒 (要先生成第一句)。这中间

@@ -217,8 +217,15 @@ async def get_room(user: dict = Depends(resolve_user)):
     _require_admin(user)
     room = config.LIVE_ROOM
     d = await _gpu("GET", f"/rooms/{room}/status", room)
+    _sample_rate(d)
     d["room"] = room
     d["hls"] = f"/api/live/hls/{room}/index.m3u8"
+    # 实测产出速率。**这是控制台上唯一能回答"观众现在卡不卡"的数**: 低于 1.0 就是
+    # 生产比消费慢, 缓冲开多大都会被抽干。
+    # 2026-09-10 加: 之前控制台上完全看不出自己处在什么状态 —— 形象下拉只有名字,
+    # 看不出哪个走云端 TTS(2.4x)哪个走自建(0.7x), 于是"我明明换了却还卡"这种误会
+    # 没法自己排除。
+    d["rate"] = _rate_now()
     return JSONResponse(d)
 
 
@@ -581,6 +588,17 @@ _RATE_WINDOW = 150.0     # 采样保留多久
 _RATE_MIN_SPAN = 60.0
 _RATE_BAD = 0.95         # 低于这个算掉出实时
 _RATE_OK = 0.99          # 回到这个才算恢复 (留迟滞, 免得在边界反复报)
+
+
+def _rate_now() -> float:
+    """当前窗口内的实测产出速率; 采样不够就回 0 (界面上显示成"测量中")。"""
+    pts = _RATE["pts"]
+    if len(pts) < 2:
+        return 0.0
+    span = pts[-1][0] - pts[0][0]
+    if span < 20:
+        return 0.0
+    return round((pts[-1][1] - pts[0][1]) / span, 3)
 
 
 def _sample_rate(d: dict) -> None:

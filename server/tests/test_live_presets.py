@@ -231,3 +231,28 @@ def test_房间的形象要真的传到回评论那条路(monkeypatch):
     assert up.person_seen == "chen", (
         f"房间的形象没传到回评论那条路 (拿到 {up.person_seen!r}) —— 人设不会生效"
     )
+
+
+def test_控制台要能看出产出低于实时(monkeypatch):
+    """低于 1.0 = 观众必卡, 而这在界面上本来完全看不出来。
+
+    形象下拉只有名字, 看不出哪个走云端 TTS(实测 2.4x)、哪个走自建(0.7x) ——
+    2026-09-10 创始人因此以为自己换了云端却还卡, 实际配置里从没换过。
+    """
+    live._RATE["pts"] = [(1000.0, 0.0), (1100.0, 87.0)]      # 0.87x, 跨度 100 秒
+    assert live._rate_now() == 0.87
+
+    live._RATE["pts"] = [(1000.0, 0.0), (1005.0, 5.0)]        # 跨度才 5 秒
+    assert live._rate_now() == 0.0, "采样不够就该回 0, 别拿短窗的数去吓人"
+
+
+def test_速率提示中英成对且带占位符():
+    import json
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1] / "config" / "i18n"
+    for lang in ("zh", "en"):
+        d = json.loads((root / f"{lang}.json").read_text("utf-8"))
+        for k in ("live.rate_ok", "live.rate_slow"):
+            assert k in d, f"{lang} 缺 {k}"
+            assert "{r}" in d[k], f"{lang} 的 {k} 没有速率占位符"
