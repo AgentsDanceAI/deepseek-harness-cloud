@@ -353,3 +353,40 @@ await check("上游给不出 since 时也不能乱拆 (老版本上游)", async 
   for (let i = 0; i < 3; i++) { await api.refresh(); await tick(); }
   assert.equal(dom.hlsInstances.length, 1, "没有 since 就该按兵不动, 而不是每轮都重建");
 });
+
+/* ── 点了还播不了 ───────────────────────────────────────────────────────────
+ *
+ * play() 被拒有两种完全不同的原因, 而以前一律当成第一种:
+ *   · 没点过就播 —— 浏览器的自动播放策略, 挂个"点一下"就解决了;
+ *   · **点了还被拒** —— 播放器废了(MSE 缓冲坏掉、切片全 404), 再挂"点一下"是死循环。
+ * 创始人 2026-09-10 撞到: 18:10~18:16 连着七次"自动播放被拒", 每点一次又弹一次
+ * (live_incidents 表记下的)。
+ */
+console.log("点了还播不了:");
+
+await check("点击后仍被拒 -> 拆掉重建, 而不是再挂一次「点一下」", async () => {
+  const dom = makeDom({ autoplayBlocked: true });
+  const api = load(dom);
+  await tick(); await tick();
+  const inst = dom.hlsInstances[0];
+  inst.handlers.mp();                      // MANIFEST_PARSED -> 起播 -> 被拒
+  await tick();
+  assert.equal(dom.els["#lvMsg"].textContent, "点一下开始播放", "没挂出「点一下」");
+  assert.equal(inst.destroyed, false, "还没点就把播放器拆了");
+
+  dom.stage.fire("click");                 // 点了 —— 但依旧被拒(播放器废了)
+  await tick(); await tick(); await tick();
+  assert.equal(inst.destroyed, true,
+    "点了还播不了却没拆掉旧实例 —— 再点多少次都一样, 死循环");
+});
+
+await check("没点过的时候不能拆 —— 那只是自动播放策略, 挂「点一下」就够了", async () => {
+  const dom = makeDom({ autoplayBlocked: true });
+  load(dom);
+  await tick(); await tick();
+  dom.hlsInstances[0].handlers.mp();
+  await tick(); await tick();
+  assert.equal(dom.hlsInstances.length, 1, `起播就建了 ${dom.hlsInstances.length} 个实例`);
+  assert.equal(dom.hlsInstances[0].destroyed, false,
+    "自动播放被拒就把播放器拆了 —— 点一下本来能救回来的");
+});

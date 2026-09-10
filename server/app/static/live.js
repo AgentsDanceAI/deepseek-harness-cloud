@@ -62,7 +62,13 @@ window.LivePlayer = (function () {
   }
 
   var tapArmed = false;
-  function tryPlay() {
+  /* fromTap: 这次是**人点出来的**。
+     区分它是因为 play() 被拒有两种完全不同的原因, 而以前一律当成前者:
+       · 没点过就播 —— 浏览器的自动播放策略, 挂个"点一下"就解决了;
+       · **点了还被拒** —— 不是策略问题, 是播放器废了(MSE 缓冲坏掉、切片全 404),
+         再挂"点一下"是死循环。创始人 2026-09-10 撞到: 18:10~18:16 连着七次
+         "自动播放被拒", 每次点完又弹一次(见 live_incidents 表)。 */
+  function tryPlay(fromTap) {
     if (!v) return;
     var pr = v.play();
     if (!pr || !pr.catch) return;
@@ -81,14 +87,28 @@ window.LivePlayer = (function () {
         reportIssue('remuted', 0, '非静音被拒, 退回静音');
         var again = v.play();
         if (again && again.catch) {
-          again.catch(function () { note(t('tapplay')); armTap(); });
+          again.catch(function () { giveUp(fromTap); });
         }
         return;
       }
-      note(t('tapplay'));
-      reportIssue('autoplay', 0, '自动播放被拒, 挂出「点一下」');
-      armTap();
+      giveUp(fromTap);
     });
+  }
+
+  /* 静音也播不了的时候怎么办。 */
+  function giveUp(fromTap) {
+    if (fromTap) {
+      // 点了还播不了 = 播放器废了, 再挂"点一下"没有意义。拆掉重建 —— 下一次
+      // refresh() 会重新起一个干净的实例。
+      reportIssue('fatal', 0, '点击后仍无法播放, 重建播放器');
+      note(t('reconnect'));
+      teardown();
+      refresh();
+      return;
+    }
+    note(t('tapplay'));
+    reportIssue('autoplay', 0, '自动播放被拒, 挂出「点一下」');
+    armTap();
   }
   function armTap() {
     var stage = v && v.parentNode;
@@ -98,7 +118,7 @@ window.LivePlayer = (function () {
       stage.removeEventListener('click', once);
       tapArmed = false;
       note('');
-      tryPlay();
+      tryPlay(true);          // 人点的 —— 再失败就是播放器废了, 不是策略问题
     });
   }
 
