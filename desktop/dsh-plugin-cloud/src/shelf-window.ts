@@ -12,7 +12,7 @@
 import { BrowserWindow, ipcMain, shell } from 'electron'
 import { fileURLToPath } from 'node:url'
 import { fetchLocalCatalog, fetchLocalPlan, type LocalCatalogEntry } from './api.ts'
-import { dockerReady, freePort, pull, running, start, stop } from './local-runner.ts'
+import { dockerState, freePort, pull, running, start, stop, type DockerState } from './local-runner.ts'
 
 const IPC_CHANNELS = [
   'dsh-cloud:shelf-list',
@@ -65,9 +65,9 @@ export function openShelf(token: string): BrowserWindow {
   }
 
   ipcMain.handle('dsh-cloud:shelf-list', async (): Promise<{
-    docker: boolean, products: ShelfRow[], error?: string,
+    docker: DockerState, products: ShelfRow[], error?: string,
   }> => {
-    const docker = await dockerReady()
+    const docker = await dockerState()
     try {
       const products = await fetchLocalCatalog(token)
       const live = new Set((await running()).map(r => r.product))
@@ -90,8 +90,14 @@ export function openShelf(token: string): BrowserWindow {
     try {
       // Docker 先验, 再动别的: 否则用户看到的是一行"拉镜像 ghcr.io/..."然后
       // 一个 ENOENT, 而真正的原因是这台机器上根本没有 docker。
-      if (!await dockerReady()) {
-        return { ok: false, error: '这台机器上没有可用的 Docker，装好 Docker Desktop 并启动后再试' }
+      const state = await dockerState()
+      if (state !== 'ready') {
+        return {
+          ok: false,
+          error: state === 'missing'
+            ? '找不到 docker 命令，装好 Docker Desktop 再试'
+            : 'Docker 装了但没在运行，先把 Docker Desktop 打开',
+        }
       }
       const plan = await fetchLocalPlan(token, productId)
       if (plan.runnable !== 'ready') return { ok: false, error: plan.reason }

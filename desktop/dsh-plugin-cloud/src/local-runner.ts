@@ -9,6 +9,7 @@
  */
 
 import { execFile } from 'node:child_process'
+import { homedir } from 'node:os'
 import { promisify } from 'node:util'
 import type { LocalPlan, PlanContainer } from './api.ts'
 
@@ -22,20 +23,72 @@ export function containerName(productId: string): string {
 }
 
 export class DockerMissingError extends Error {
-  constructor() {
-    super('docker not available')
+  constructor(readonly state: DockerState) {
+    super(`docker not available: ${state}`)
   }
 }
 
-/** docker 在不在、守护进程通不通。**两件事一起验**: 装了但没启动的机器上
- * `docker --version` 照样成功, 而任何真实操作都会挂。 */
-export async function dockerReady(): Promise<boolean> {
-  try {
-    await exec('docker', ['info', '--format', '{{.ServerVersion}}'], { timeout: 10_000 })
-    return true
-  } catch {
-    return false
+/**
+ * docker 可执行文件的候选位置。
+ *
+ * **不能只 execFile('docker')**: 从 Finder / Dock 启动的 GUI 应用**不继承登录
+ * shell 的 PATH** —— macOS 给的是 launchd 的默认值 (/usr/bin:/bin:/usr/sbin:/sbin),
+ * 而 Docker Desktop 把 CLI 装在 /usr/local/bin 或 ~/.docker/bin。表现是应用里说
+ * 「这台机器上没有可用的 Docker」, 而用户在终端里 `docker info` 好好的。
+ * 2026-09-10 老板第一次跑本地包就是这样: 机器上装着 29.2.1, 货架说没有。
+ */
+export function candidates(): string[] {
+  if (process.platform === 'win32') {
+    return ['docker.exe', 'C:\\Program Files\\Docker\\Docker\\resources\\bin\\docker.exe']
   }
+  return [
+    'docker', // PATH 里有就用 PATH 的 (终端启动、Linux、Windows 都走这条)
+    '/usr/local/bin/docker',
+    '/opt/homebrew/bin/docker',
+    `${homedir()}/.docker/bin/docker`,
+    '/Applications/Docker.app/Contents/Resources/bin/docker',
+    '/usr/bin/docker',
+  ]
+}
+
+let resolvedBin: string | undefined
+
+/** 找到 docker 可执行文件的绝对路径; 找不到返回 undefined。找到的结果会记住。 */
+export async function dockerBin(): Promise<string | undefined> {
+  if (resolvedBin !== undefined) return resolvedBin
+  for (const candidate of candidates()) {
+    try {
+      await exec(candidate, ['--version'], { timeout: 8_000 })
+      resolvedBin = candidate
+      return resolvedBin
+    } catch {
+      // 换下一个候选
+    }
+  }
+  return undefined
+}
+
+export type DockerState = 'ready' | 'daemon-down' | 'missing'
+
+/**
+ * 「找不到 docker」和「docker 装了但没启动」是**两种状态, 两种说法**。
+ *
+ * 合成一个 boolean 的话, 用户得到的提示永远是"去装 Docker Desktop" —— 而他可能
+ * 已经装了, 只是没打开。`--version` 只证明二进制在, `info` 才证明守护进程通。
+ */
+export async function dockerState(): Promise<DockerState> {
+  const bin = await dockerBin()
+  if (bin === undefined) return 'missing'
+  try {
+    await exec(bin, ['info', '--format', '{{.ServerVersion}}'], { timeout: 15_000 })
+    return 'ready'
+  } catch {
+    return 'daemon-down'
+  }
+}
+
+export async function dockerReady(): Promise<boolean> {
+  return await dockerState() === 'ready'
 }
 
 function mainOf(plan: LocalPlan): PlanContainer {
@@ -91,8 +144,10 @@ export interface PullProgress { (line: string): void }
 /** 拉镜像。逐行回调, 让界面能显示进度 —— 首次拉一格是 2.5GB 起, 没有进度的
  *  等待会被当成卡死。 */
 export async function pull(image: string, onLine?: PullProgress): Promise<void> {
+  const bin = await dockerBin()
+  if (bin === undefined) throw new DockerMissingError('missing')
   await new Promise<void>((resolve, reject) => {
-    const child = execFile('docker', ['pull', image], { maxBuffer: 1 << 24 }, error => {
+    const child = execFile(bin, ['pull', image], { maxBuffer: 1 << 24 }, error => {
       if (error) reject(error)
       else resolve()
     })
@@ -103,15 +158,19 @@ export async function pull(image: string, onLine?: PullProgress): Promise<void> 
 /** 起一格。同名容器还在就先收掉 —— 否则 docker 只回一句名字冲突, 而用户看到的
  *  是一行看不懂的红字, 不知道那是"上次那个还开着"。 */
 export async function start(plan: LocalPlan, token: string, hostPort: number): Promise<void> {
-  if (!await dockerReady()) throw new DockerMissingError()
+  const state = await dockerState()
+  if (state !== 'ready') throw new DockerMissingError(state)
   if (plan.runnable !== 'ready') throw new Error(plan.reason || 'not runnable locally')
   await stop(plan.product)
-  await exec('docker', buildRunArgs(plan, token, hostPort), { timeout: 120_000 })
+  const bin = await dockerBin()
+  await exec(bin as string, buildRunArgs(plan, token, hostPort), { timeout: 120_000 })
 }
 
 export async function stop(productId: string): Promise<void> {
+  const bin = await dockerBin()
+  if (bin === undefined) return
   try {
-    await exec('docker', ['rm', '-f', containerName(productId)], { timeout: 60_000 })
+    await exec(bin, ['rm', '-f', containerName(productId)], { timeout: 60_000 })
   } catch {
     // 没在跑就没什么可停的
   }
@@ -120,9 +179,10 @@ export async function stop(productId: string): Promise<void> {
 export interface RunningSlot { product: string, status: string, ports: string }
 
 export async function running(): Promise<RunningSlot[]> {
-  if (!await dockerReady()) return []
+  const bin = await dockerBin()
+  if (bin === undefined) return []
   const { stdout } = await exec(
-    'docker',
+    bin,
     ['ps', '--filter', `name=${CONTAINER_PREFIX}`, '--format', '{{.Names}}\t{{.Status}}\t{{.Ports}}'],
     { timeout: 15_000 },
   )

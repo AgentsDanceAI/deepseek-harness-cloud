@@ -6,7 +6,7 @@
 
 import { describe, expect, it } from 'vitest'
 import type { LocalPlan } from '../../src/cloud/api.ts'
-import { buildRunArgs, containerName, homeOf } from '../../src/cloud/local-runner.ts'
+import { buildRunArgs, candidates, containerName, homeOf } from '../../src/cloud/local-runner.ts'
 
 const PLACEHOLDER = '${AISTORE_TOKEN}'
 
@@ -81,5 +81,20 @@ describe('homeOf', () => {
 describe('containerName', () => {
   it('带前缀, 停和查都按它过滤, 碰不到用户自己的容器', () => {
     expect(containerName('codex')).toBe('aistore-codex')
+  })
+})
+
+describe('candidates', () => {
+  it('macOS 上不能只靠 PATH', () => {
+    // 从 Finder / Dock 启动的应用拿到的是 launchd 的默认 PATH
+    // (/usr/bin:/bin:/usr/sbin:/sbin) —— Docker Desktop 的 CLI 不在里面。
+    // 实测: 老写法在这个 PATH 下 ENOENT, 而机器上装着 29.2.1。
+    if (process.platform === 'win32') return
+    const list = candidates()
+    expect(list[0]).toBe('docker') // PATH 里有就先用 PATH 的
+    for (const known of ['/usr/local/bin/docker', '/Applications/Docker.app/Contents/Resources/bin/docker']) {
+      expect(list).toContain(known)
+    }
+    expect(list.some(p => p.endsWith('/.docker/bin/docker'))).toBe(true)
   })
 })
