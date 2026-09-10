@@ -443,7 +443,16 @@ def process_webhook(raw: bytes, sig_header: str) -> dict | None:
     if not order:
         logger.warning("[waffo] webhook for unknown order id=%r", order_id)
         return None
-    session_id = str(data.get("sessionId") or data.get("id") or "").strip()
+    # 兄弟渠道存的都是"这笔交易"的号: 微信 transaction_id · 支付宝 trade_no ·
+    # Stripe payment_intent。Waffo 的对应物是 data.paymentId (PAY_…), 退款时
+    # 要拿它去开退款单; data.orderId (ORD_…) 是兜底的持久记录。
+    # `sessionId` / `id` 这两个键**在真实事件载荷里根本不存在** —— 结果 2026-09-10
+    # 之前每一笔 waffo 订单的 provider_ref 都是空串: 页面全绿、钱也到账, 只是
+    # 对账和退款时没有任何回指 Waffo 的线索。老测试里写死的 "SESS_9" 是编出来的
+    # 字段名, 反过来把这个 bug 钉成了规范。
+    session_id = str(
+        data.get("paymentId") or data.get("orderId") or data.get("sessionId") or data.get("id") or ""
+    ).strip()
     if kind == "reversal":
         # Reversals can be forged to downgrade a paying user — always require a
         # valid signature.

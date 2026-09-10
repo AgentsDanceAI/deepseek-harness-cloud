@@ -309,3 +309,36 @@ def test_missing_webhook_key_disables_provider(monkeypatch):
     from app.payments import api
 
     assert "waffo" not in api.active_providers()
+
+
+def test_provider_ref_comes_from_the_real_event_shape():
+    """`order.completed` 里带回指 Waffo 的号, 必须落进 orders.provider_ref。
+
+    2026-09-10 用真钱跑通第一笔时发现: 订单翻了 paid、通行证也发了, 但
+    provider_ref 是空串 —— 代码读的是 `data.sessionId` / `data.id`, 而真实载荷
+    里这两个键**都不存在** (文档的 order.completed 样例给的是 orderId 与
+    paymentId)。上面那些用例里写死的 "SESS_9" 是编出来的字段名, 所以全绿也照不到。
+
+    退款/对账全靠这一列, 空了就只能靠订单号去 Waffo 后台人工翻。
+    """
+    uid, _ = make_user()
+    oid = base.create_order(uid, "waffo", "plan:plus:monthly")["order_id"]
+    event = {
+        "id": "PAY_6eYCunG3IMmIgcQOnaXdoA",
+        "eventType": "order.completed",
+        "data": {
+            "orderId": "ORD_5dXBtmF2HLlHfbPNm0Wcnz",
+            "orderMerchantExternalId": oid,
+            "paymentId": "PAY_6eYCunG3IMmIgcQOnaXdoA",
+            "paymentStatus": "succeeded",
+        },
+    }
+    payload = json.dumps(event).encode()
+    r = client.post(
+        "/api/pay/webhook/waffo", content=payload, headers={"X-Waffo-Signature": waffo_sig(payload)}
+    )
+    assert r.status_code == 200
+    row = base.get_order(oid)
+    assert row["status"] == "paid"
+    # 兄弟渠道存的是交易号 (transaction_id / trade_no / payment_intent), 这里同理
+    assert row["provider_ref"] == "PAY_6eYCunG3IMmIgcQOnaXdoA"
