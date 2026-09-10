@@ -179,7 +179,8 @@ def _settle(result: dict | None) -> None:
         if base.mark_paid(result["order_id"], result.get("provider_ref", "")):
             base.fulfil(result["order_id"])  # exactly once, on the first transition
     elif result["event"] == "refund":
-        base.mark_refunded(result["order_id"])
+        if base.mark_refunded(result["order_id"]):
+            base.revoke(result["order_id"])  # exactly once, on the first transition
 
 
 @router.post("/webhook/stripe")

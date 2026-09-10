@@ -13,12 +13,15 @@ Item encoding: "plan:<tier>:<cycle>" or "pack:<pack_id>".
 
 from __future__ import annotations
 
+import logging
 import secrets
 import time
 
 from fastapi import HTTPException
 
 from .. import config, credits, db, plans, teams, work_access
+
+logger = logging.getLogger("dhc.pay")
 
 ORDER_PREFIX = {"stripe": "DHS", "alipay": "DHA", "wechat": "DHW", "waffo": "DHF"}
 
@@ -284,6 +287,77 @@ def fulfil(order_id: str) -> None:
         credits.grant(
             order["user_id"], info["credits"], info["valid_days"] * 86400, kind="grant_topup", ref=order_id
         )
+
+
+# 额度类凭据 (积分券 / 机时券) 两张表形状相同, 都按 ref 记着是哪一单发的。
+_GRANT_TABLES = {"credit_grants": "积分", "minute_grants": "机时"}
+
+
+def _zero_grants(table: str, order_id: str) -> tuple[int, int]:
+    """把这一单发出的额度余量清零。返回 (收回, 已花掉)。"""
+    if table not in _GRANT_TABLES:  # 表名只能来自上面那张白名单
+        raise ValueError(table)
+    rows = db.query(f"SELECT amount, remaining FROM {table} WHERE ref=?", (order_id,))
+    if not rows:
+        return 0, 0
+    took = sum(int(r["remaining"]) for r in rows)
+    spent = sum(int(r["amount"]) - int(r["remaining"]) for r in rows)
+    with db.tx() as conn:
+        conn.execute(f"UPDATE {table} SET remaining=0 WHERE ref=?", (order_id,))
+    return took, spent
+
+
+def revoke(order_id: str) -> dict:
+    """`fulfil` 的逆操作 —— 退款时把发出去的东西收回来。
+
+    在此之前退款只翻订单状态, 发出去的通行证/订阅/积分/席位**一样都不收**
+    (2026-09-10 用真钱走完一轮才发现: 钱退了, 7 天通行证还在)。
+
+    口径是老板定的**只收回没花掉的**: 凭据类 (通行证) 直接撤; 额度类 (积分、
+    机时) 只把该订单那笔的余量清零, 已经花掉的部分不追、**不让余额变负** ——
+    一个正常退款的人不该被锁到必须先充值才能用。缺口记进日志等人看。
+
+    只有 mark_refunded 那次真转移才会调到这里, 所以天然只跑一次。
+    """
+    order = db.query_one("SELECT * FROM orders WHERE id=?", (order_id,))
+    if order is None:
+        raise ValueError(f"order {order_id} not found")
+    info = resolve_item(order["item"], order["currency"])
+    out: dict = {"order": order_id, "kind": info["kind"]}
+
+    for table, label in _GRANT_TABLES.items():
+        took, spent = _zero_grants(table, order_id)
+        if took or spent:
+            out[f"{label}收回"] = took
+            if spent:
+                out[f"{label}已花掉"] = spent
+
+    if info["kind"] == "pass":
+        with db.tx() as conn:
+            out["通行证撤销"] = conn.execute("DELETE FROM work_passes WHERE ref=?", (order_id,)).rowcount
+    elif info["kind"] == "plan":
+        # 订阅只有一行 expires 被往后推过, 没有按 ref 标记的凭据可撤 —— 只能把
+        # 这一单加的天数减回去。注意 apply_plan 的升级分支是从"现在"重新起算的,
+        # 所以升级后再退款会连原套餐的剩余时间一起减掉。退款路径上宁可多收一点,
+        # 也别让人白拿; 真出现了看日志人工补。
+        days = 366 if info["cycle"] == "yearly" else 31
+        with db.tx() as conn:
+            row = conn.execute(
+                "SELECT expires FROM subscriptions WHERE user_id=?", (order["user_id"],)
+            ).fetchone()
+            if row:
+                conn.execute(
+                    "UPDATE subscriptions SET expires=?, updated=? WHERE user_id=?",
+                    (float(row["expires"]) - days * 86400, time.time(), order["user_id"]),
+                )
+                out["订阅回退天数"] = days
+    elif info["kind"] == "seats":
+        # 席位数是**绝对值**写进 orgs 的, 没人记过改之前是几个 —— 按 ref 收不回来。
+        # 上面已经把团队的积分池和机时池清了, 席位数只能留给人工。
+        out["席位待人工处理"] = info["seats"]
+
+    logger.warning("[pay] 退款回收 %s", out)
+    return out
 
 
 def get_order(order_id: str, user_id: str | None = None):

@@ -619,3 +619,75 @@ def test_orders_listing_and_polling():
     _, other = make_user()
     assert client.get(f"/api/pay/orders/{r1.json()['order_id']}", headers=other).status_code == 404
     assert client.get("/api/pay/orders/DHSNOPE", headers=headers).status_code == 404
+
+
+# --- 退款要把发出去的东西收回来 (2026-09-10) --------------------------------
+#
+# 在此之前 _settle 的退款分支只有一行 mark_refunded: 订单翻 refunded, 而 fulfil()
+# 发出去的通行证/订阅/积分/席位一样都不收。真钱走完一轮才发现 —— 钱退了, 7 天
+# 通行证还在。口径是**只收回没花掉的**, 余额不许变负。
+
+
+def test_refund_revokes_the_pass_it_granted(monkeypatch):
+    from app import work_access
+
+    # 通行证只对"上锁"的格子卖, 而锁定名单来自 env, 测试环境默认是空的
+    monkeypatch.setattr(config, "WORK_LOCKED_PRODUCTS", "dify")
+    uid, _ = make_user()
+    o = base.create_order(uid, "stripe", "pass:dify", "CNY")
+    assert base.mark_paid(o["order_id"], "pi_x")
+    base.fulfil(o["order_id"])
+    assert work_access.pass_active(uid, "dify")
+
+    assert base.mark_refunded(o["order_id"])
+    base.revoke(o["order_id"])
+    assert not work_access.pass_active(uid, "dify"), "钱退了通行证还在 = 白拿"
+
+
+def test_refund_takes_back_unspent_credits_but_never_goes_negative():
+    uid, _ = make_user()
+    o = base.create_order(uid, "stripe", "pack:pack1000", "CNY")
+    granted = base.resolve_item("pack:pack1000", "CNY")["credits"]
+    assert base.mark_paid(o["order_id"], "pi_y")
+    base.fulfil(o["order_id"])
+    assert credits.balance(uid) == granted
+
+    spent = granted // 4
+    credits.spend(uid, spent, kind="test")
+    assert credits.balance(uid) == granted - spent
+
+    assert base.mark_refunded(o["order_id"])
+    out = base.revoke(o["order_id"])
+
+    # 没花掉的收回, 已经花掉的写掉 —— 余额落在 0, 不是负数
+    assert credits.balance(uid) == 0
+    assert out["积分收回"] == granted - spent
+    assert out["积分已花掉"] == spent
+
+
+def test_refund_rolls_the_subscription_back():
+    uid, _ = make_user()
+    o = base.create_order(uid, "stripe", "plan:plus:monthly", "CNY")
+    assert base.mark_paid(o["order_id"], "pi_z")
+    base.fulfil(o["order_id"])
+    assert plans.current_plan(uid)["tier"] == "plus"
+    assert credits.balance(uid) > 0
+
+    assert base.mark_refunded(o["order_id"])
+    base.revoke(o["order_id"])
+    assert plans.current_plan(uid)["tier"] == "free", "退了款还留着套餐"
+    assert credits.balance(uid) == 0, "套餐送的积分没收回"
+
+
+def test_second_refund_webhook_does_not_revoke_twice():
+    """重复投递是常态 (新旧域两条 webhook 并存)。回收只能跑一次。"""
+    uid, _ = make_user()
+    o = base.create_order(uid, "stripe", "pack:pack1000", "CNY")
+    base.mark_paid(o["order_id"], "pi_w")
+    base.fulfil(o["order_id"])
+    credits.grant(uid, 500, 86400, kind="grant_topup", ref="别人的钱")
+
+    assert base.mark_refunded(o["order_id"]) is True
+    base.revoke(o["order_id"])
+    assert base.mark_refunded(o["order_id"]) is False  # 第二条 webhook: 什么都不做
+    assert credits.balance(uid) == 500, "不该动到别的订单发的积分"

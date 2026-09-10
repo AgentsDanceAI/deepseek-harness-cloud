@@ -342,3 +342,29 @@ def test_provider_ref_comes_from_the_real_event_shape():
     assert row["status"] == "paid"
     # 兄弟渠道存的是交易号 (transaction_id / trade_no / payment_intent), 这里同理
     assert row["provider_ref"] == "PAY_6eYCunG3IMmIgcQOnaXdoA"
+
+
+def test_refund_webhook_actually_takes_the_goods_back(monkeypatch):
+    """走**真 webhook 路径**验回收 —— 这才是当初漏掉的那一环。
+
+    `revoke()` 自己好使不算数: 2026-09-10 的 bug 不在回收逻辑, 而在 `_settle` 的
+    退款分支根本没人调它。只有从 HTTP 入口打进来的用例才照得到这段接线。
+    """
+    from app import config, work_access
+
+    monkeypatch.setattr(config, "WORK_LOCKED_PRODUCTS", "dify")
+    uid, _ = make_user()
+    oid = base.create_order(uid, "waffo", "pass:dify")["order_id"]
+
+    paid = {"eventType": "order.completed", "data": {"orderMerchantExternalId": oid, "paymentId": "PAY_1"}}
+    pp = json.dumps(paid).encode()
+    r = client.post("/api/pay/webhook/waffo", content=pp, headers={"X-Waffo-Signature": waffo_sig(pp)})
+    assert r.status_code == 200
+    assert work_access.pass_active(uid, "dify")
+
+    refund = {"eventType": "refund.succeeded", "data": {"orderMerchantExternalId": oid, "paymentId": "PAY_1"}}
+    rp = json.dumps(refund).encode()
+    r = client.post("/api/pay/webhook/waffo", content=rp, headers={"X-Waffo-Signature": waffo_sig(rp)})
+    assert r.status_code == 200
+    assert base.get_order(oid)["status"] == "refunded"
+    assert not work_access.pass_active(uid, "dify"), "钱退了通行证还在 = 白拿"
