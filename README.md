@@ -85,7 +85,13 @@ slot needs no change here — the script is only an executor. The plan carries n
 credentials: wherever a token belongs there is a placeholder, filled in locally
 with the one on your machine.
 
-Two things worth knowing before you start:
+Three things worth knowing before you start:
+
+- **The images are large.** Measured: 0.6–1.9 GB per slot (the one Codex and
+  Claude Code share is 1.17 GB, OpenManus is 1.93 GB); the Dify stack is about
+  6 GB across its ten containers. They are pulled on demand and cached, but
+  trying every slot costs twenty-odd GB. `docker system df` shows the usage,
+  `docker image prune` reclaims what is unused.
 
 - **The workspace images are `linux/amd64` only.** An x86 box (the 5090 case)
   runs them natively. On Apple Silicon `docker pull` **fails outright** (`no

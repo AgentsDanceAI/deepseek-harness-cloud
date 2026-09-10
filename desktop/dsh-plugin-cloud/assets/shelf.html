@@ -52,12 +52,15 @@
     const native = p.id === 'dsh'
     // 「起不动」和「没买」是两件事: 11 个容器的栈, 买了通行证照样起不动。
     const runnable = p.runnable === 'ready' && !p.locked
+    // 顺序有讲究: 已经在跑的时候, 端口比"这格要起几个容器"有用 —— reason 那句
+    // (「10 个容器的栈, 会一起起来」) 是**启动前**的说明, 起来之后还挂着就挡住了
+    // 用户真正需要的那个地址。
     const why = st.error
       ? st.error
       : p.locked ? '要先买这一格的通行证'
-      : p.reason ? p.reason
       : native ? '原生跑在这台机器上，任务直接读写本地文件'
-      : live ? `跑在 127.0.0.1:${p.port_local}` : '可以在本机跑'
+      : live ? `跑在 127.0.0.1:${p.port_local}`
+      : p.reason ? p.reason : '可以在本机跑'
 
     const el = document.createElement('div')
     el.className = 'card'
