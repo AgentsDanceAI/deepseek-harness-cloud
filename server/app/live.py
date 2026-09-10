@@ -28,7 +28,8 @@ import uuid
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import JSONResponse, Response, StreamingResponse
+from starlette.background import BackgroundTask
 
 from . import config, credits, db, model_catalog, rate_limit, security
 from .accounts import resolve_user
@@ -94,6 +95,29 @@ def preset_of(person: str, voice: str) -> dict:
 _M3U8 = "application/vnd.apple.mpegurl"
 
 
+#: 走到 GPU 节点的**常驻**客户端。
+#:
+#: 以前每一次请求都 `async with httpx.AsyncClient()`, 也就是每取一片切片就要 144 →
+#: GPU 重做一次 TCP + TLS 握手。切片是 1 秒一片, 于是握手的频率等于播放的帧率级别。
+#: 2026-09-10 在创始人自己的 Chrome 里量到: 取回一片(1 秒视频)中位数 **1.32 秒**、
+#: p90 1.86 秒, 首字节就要等 440~1420 毫秒 —— **交付只有 0.76× 实时**。播放器因此
+#: 永远攒不出缓冲(上报里缓冲恒为 1~2 秒, 尽管客户端要的是 18 秒), 表现就是"一直卡"。
+#: 服务端产出多健康、客户端缓冲调多大, 在这条约束面前全是白搭。
+#:
+#: 连接池按观众数给: 每个观众每秒一片, 复用的是同一批到 GPU 的长连接。
+_pool: httpx.AsyncClient | None = None
+
+
+def _upstream() -> httpx.AsyncClient:
+    global _pool
+    if _pool is None or _pool.is_closed:
+        _pool = httpx.AsyncClient(
+            timeout=httpx.Timeout(20.0, connect=5.0),
+            limits=httpx.Limits(max_keepalive_connections=64, max_connections=128, keepalive_expiry=120.0),
+        )
+    return _pool
+
+
 def _enabled() -> bool:
     return bool(config.LIVE_GPU_URL)
 
@@ -115,8 +139,7 @@ async def _gpu(method: str, path: str, room: str, **kw):
     传什么都只能操作自己那间。房间隔离全靠这一条, 别让房间名从请求体里进来。
     """
     try:
-        async with httpx.AsyncClient(timeout=20) as c:
-            r = await c.request(method, f"{config.LIVE_GPU_URL}{path}", params={"token": _sign(room)}, **kw)
+        r = await _upstream().request(method, f"{config.LIVE_GPU_URL}{path}", params={"token": _sign(room)}, **kw)
     except httpx.HTTPError as e:
         # GPU 节点够不着是**常态之一** (它是别人的共享机, 还跟同事的排序管线挤一张卡)。
         # 不接的话异常一路冒到框架外, 用户看到 500 加一页栈 —— 而这只是"算力那头
@@ -136,10 +159,11 @@ async def status():
         return JSONResponse({"enabled": False, "live": False})
     room = config.LIVE_ROOM
     try:
-        async with httpx.AsyncClient(timeout=8) as c:
-            r = await c.get(f"{config.LIVE_GPU_URL}/rooms/{room}/status", params={"token": _sign(room)})
-            r.raise_for_status()
-            d = r.json()
+        r = await _upstream().get(
+            f"{config.LIVE_GPU_URL}/rooms/{room}/status", params={"token": _sign(room)}, timeout=8
+        )
+        r.raise_for_status()
+        d = r.json()
     except Exception as e:
         # 直播间挂了不该让整页报错 —— 卡片显示"未开播"就够了。
         log.warning("取直播状态失败: %s", e)
@@ -192,19 +216,39 @@ async def hls(room: str, name: str):
     if room != config.LIVE_ROOM:
         raise HTTPException(404, "no_such_room")
     url = f"{config.LIVE_GPU_URL}/hls/{room}/{name}"
+    is_list = name.endswith(".m3u8")
+    hdrs = {"Cache-Control": "no-store" if is_list else "public, max-age=60"}
+    mt = _M3U8 if is_list else "video/mp2t"
+    # 播放列表很小, 整份读回来就行 —— 它还要被上面那句 no-store 钉死。
+    if is_list:
+        try:
+            r = await _upstream().get(url)
+        except Exception as e:
+            log.warning("取播放列表失败 %s: %s", name, e)
+            raise HTTPException(502, "upstream") from None
+        if r.status_code != 200:
+            raise HTTPException(r.status_code if r.status_code in (404, 403) else 502, "upstream")
+        return Response(content=r.content, media_type=mt, headers=hdrs)
+    # 切片**边收边转发**。原先是先把整片(约 250 KB)从 GPU 读完再开始回给浏览器,
+    # 于是观众的首字节时间 = 144→GPU 下载整片的时间。串起来之后两段传输重叠,
+    # 观众几乎立刻开始收到数据 —— 而这条路上每一片都只有 1 秒的预算。
     try:
-        async with httpx.AsyncClient(timeout=20) as c:
-            r = await c.get(url)
+        req = _upstream().build_request("GET", url)
+        up = await _upstream().send(req, stream=True)
     except Exception as e:
         log.warning("取切片失败 %s: %s", name, e)
         raise HTTPException(502, "upstream") from None
-    if r.status_code != 200:
-        raise HTTPException(r.status_code if r.status_code in (404, 403) else 502, "upstream")
-    is_list = name.endswith(".m3u8")
-    return Response(
-        content=r.content,
-        media_type=_M3U8 if is_list else "video/mp2t",
-        headers={"Cache-Control": "no-store" if is_list else "public, max-age=60"},
+    if up.status_code != 200:
+        code = up.status_code if up.status_code in (404, 403) else 502
+        await up.aclose()
+        raise HTTPException(code, "upstream")
+    return StreamingResponse(
+        up.aiter_bytes(),
+        media_type=mt,
+        headers=hdrs,
+        # ⚠️ 必须显式关: 流式响应的上游连接不会自己回到连接池, 漏一次就少一条长连接,
+        #    漏够了整条代转就退回"每片重新握手", 而那正是这次要修的东西。
+        background=BackgroundTask(up.aclose),
     )
 
 
