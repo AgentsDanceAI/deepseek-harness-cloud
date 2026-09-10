@@ -87,7 +87,7 @@ window.LivePlayer = (function () {
     if (hls) { hls.destroy(); hls = null; }
     if (v.canPlayType('application/vnd.apple.mpegurl')) {   // Safari 原生放 HLS
       // Safari 自己挑直播位置, 通常只留三个目标时长 —— 1 秒一片时就是 3 秒跑道,
-      // 而生成侧是 0.9×, 三秒钟就见底。hls.js 那边靠 liveSyncDurationCount 拉开,
+      // 而生成侧是 0.9×, 三秒钟就见底。hls.js 那边靠 liveSyncDuration 拉开,
       // 原生这条没有那个旋钮, 只能起播后自己往回退。
       v.src = url;
       v.addEventListener('loadedmetadata', function once() {
@@ -108,13 +108,32 @@ window.LivePlayer = (function () {
       // (见底速率 = 1 - 0.9 = 0.1×)。创始人给领导演示时就是看了一分多钟卡住的。
       // 代价是观众晚 6 秒看到 —— 这一页本来就不是互动视频 (回一条评论要十几秒),
       // 6 秒换一倍的续航是划算的。
-      // ⚠️ 治本是让产出 ≥ 1.0×, 那在 avatar 侧 (每句串行付 TTS, QUEUE_AHEAD 没
-      // 实现重叠 —— 实测第 N+1 句的 begin 与第 N 句的 end 同刻)。这里只是拖时间。
-      liveSyncDurationCount: 12,
-      liveMaxLatencyDurationCount: 20,   // 落后 20 秒才算真掉队
-      // 关键的一条: 落后了**加速追**(最多 1.1 倍), 而不是跳过去。
-      // 跳 = 缓冲被清 = 黑一下; 加速 10% 听感上几乎察觉不到。
-      maxLiveSyncPlaybackRate: 1.1,
+      // ⚠️ 2026-09-10: 上面这段"数字就是缓冲的秒数"是**错的**, 别照着推。count 要
+      // 乘 TARGETDURATION, 而我们的 TARGETDURATION 是 **2** (片长约 0.96 秒, 但
+      // HLS 规范要求向上取整)。所以 `12` 实际要的是 24 秒, 而播放列表窗一共才
+      // 15.3 秒 —— 要不到, hls.js 只能把观众钉在窗口**最老那一片**上: 对"产慢了"
+      // 最耐受, 对"产快了"零容忍。改用**秒**为单位, 这类乘法坑就不存在了。
+      //
+      // 而产出侧换成百炼 TTS 之后实测 **1.65× 实时**, 问题正好翻了个面: 直播边缘
+      // 每秒推进 1.85 片, 观众每秒往后掉 0.85 秒, 十几秒就被甩出窗口, 播放器只能
+      // 往前跳。治本在产出侧(live_server.py 按墙钟把产出压回 1.0×), 这里配合它定位。
+      //
+      // ⚠️ 这个数**必须大于产出侧的空档**。节流让产出变成锯齿: 句内每 0.5~1.1 秒
+      // 出片, 句间有 5~8 秒空档(实测 75 秒内七次, 最大 8.0 秒) —— 那是压回 1.0× 的
+      // 固有代价。落后不够多, 空档一来缓冲就见底: **画面停、没声音, 过几秒又恢复**。
+      // 7 -> 12 (2026-09-10): 7 秒小于 8 秒的空档, 线上真出了这个症状。
+      // 12 秒配 38 秒的窗(live_server.py LIST_SIZE=40): 前面挡得住 8 秒空档,
+      // 后面离窗沿还有二十多秒, 两头都不紧张。
+      liveSyncDuration: 12,
+      liveMaxLatencyDuration: 25,   // 25 < 窗长 38, 这条才真会触发
+      // 1.1 -> 1 (2026-09-10): **关掉变速追赶。**
+      // 这行是按"产出不足、观众持续落后、要一路追"的年代调的。现在产出被墙钟节流
+      // 压在 1.0×, 观众不会持续落后; 但节流让产出变成锯齿(句内出片、句间空 5~8 秒),
+      // 于是变成每十秒一个来回: 爆发后落后变大 -> 提速 1.1×, 空档里落回 -> 降回 1.0×。
+      // **语速每十秒变一次, 听感就是一顿一顿的**(创始人 2026-09-10 报"一卡一卡")。
+      // 窗长 38 秒、落后 12 秒, 余量足够, 不需要追; 真掉队了还有
+      // liveMaxLatencyDuration(25 秒) 兜底。
+      maxLiveSyncPlaybackRate: 1,
     });
     hls.loadSource(url);
     hls.attachMedia(v);
@@ -188,7 +207,9 @@ window.LivePlayer = (function () {
   var STUCK_TICKS = 6;            // 每秒一拍; 6 秒不动才算卡, 短了会误伤正常抖动
   //: 恢复时退到直播边缘**之后**这么多秒。贴着边缘恢复的话, 0.9× 的产出几秒钟就
   //: 又把它抽干, 于是变成每隔几秒跳一次 —— 比一直卡着还难看。
-  var BEHIND_LIVE = 10;
+  // 落后直播边缘多少秒。必须大于产出侧的句间空档(实测最大 8 秒), 否则缓冲见底,
+  // 表现为"画面停、没声音"。与 hls.js 的 liveSyncDuration 保持同一个数。
+  var BEHIND_LIVE = 12;
 
   function seekBehindLive() {
     if (!v || !v.seekable || !v.seekable.length) return;
