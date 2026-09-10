@@ -88,6 +88,31 @@ window.LiveCaptions = (function () {
     return idx;
   }
 
+  /* 按**视频时间**挑正在播的那一句。**纯函数, 给测试用。**
+   *
+   * 为什么要有它: 上面那条 pick() 按墙钟算, 它依赖"派单紧跟在上一句生成结束之后"
+   * (队列里压着 QUEUE_AHEAD 句, 所以要往回退一句)。2026-09-10 产出侧加了墙钟节流
+   * 把产出压回 1.0×, 派单和上一句结束之间多了 3.5~8 秒的刹车等待 —— 那个前提没了,
+   * 字幕就对不上(创始人当天第三次报)。**补一个偏移量治不了本**: 等待长度随机器
+   * 负载变, 邻居一抢 CPU 就又错开。
+   *
+   * vt 是物理量: 这一句的视频从整条流的第几秒开始 (服务端在数字人 `begin` 时用
+   * 当时的时间轴偏移记的, 见 live_server 的 begin 分支)。观众此刻播到第几秒:
+   *     viewerVt = 直播边缘的视频秒数 - 落后秒数 + 收到这批数据之后过去的时间
+   * 观众永远按 1.0× 走, 与产出快慢无关, 所以这条外推是准的。落在哪一句的区间里
+   * 就显示哪一句 —— **不用往回退一句**, vt 说的就是"这句从哪开始"。
+   */
+  function pickVt(lines, edgeVt, elapsed, lag) {
+    var n = lines.length;
+    if (!n) return -1;
+    var target = edgeVt - lag + elapsed;
+    var i = -1;
+    for (var k = 0; k < n; k++) {
+      if (lines[k].vt <= target) i = k; else break;
+    }
+    return i < 0 ? 0 : i;               // 全都比 target 新: 退到最早的一句
+  }
+
   /* 上一句 / 正在说 / 下一句 —— 共三行, 中间那句加重。
    *
    * 第一版堆最近十几句, 占满右侧还盖住了声音按钮; 第二版只留一句, 但中途进来的
@@ -120,7 +145,12 @@ window.LiveCaptions = (function () {
      字幕的推进靠这里而不是靠轮询 —— 三秒一问的话, 换句的时刻最多能差三秒。 */
   function tick() {
     if (!snap || !snap.lines.length) return;
-    var idx = pick(snap.lines, snap.edgeT, nowSec() - snap.at, lagBehindEdge());
+    var elapsed = nowSec() - snap.at, lag = lagBehindEdge();
+    // 服务端给了视频时间就走 vt —— 那条不依赖队列深度和节流。给不出(老版本上游)
+    // 才回落到墙钟那条, 所以客户端可以先发, 不会因为上游还没升级而破。
+    var idx = snap.hasVt
+      ? pickVt(snap.lines, snap.edgeVt, elapsed, lag)
+      : pick(snap.lines, snap.edgeT, elapsed, lag);
     if (idx >= 0) render(snap.lines, idx);
   }
 
@@ -134,7 +164,9 @@ window.LiveCaptions = (function () {
         if (!ls.length) return;
         var edgeT = 0;
         for (var i = 0; i < ls.length; i++) if (ls[i].t > edgeT) edgeT = ls[i].t;
-        snap = { lines: ls, edgeT: edgeT, at: nowSec() };
+        // 全部句子都带 vt 且边缘也给了, 才走视频时间那条 —— 半套数据比没有更危险。
+        var hasVt = isFinite(d.edge) && ls.every(function (x) { return isFinite(x.vt); });
+        snap = { lines: ls, edgeT: edgeT, edgeVt: +d.edge, at: nowSec(), hasVt: hasVt };
         tick();
       })
       .catch(function () {});
@@ -153,6 +185,7 @@ window.LiveCaptions = (function () {
   return {
     pull: pull,
     pick: pick,                  // 给测试用 —— 时间轴对齐是这一页唯一容易算错的地方
+    pickVt: pickVt,
     stop: function () { clearInterval(timer); clearInterval(ticker); },
   };
 })();

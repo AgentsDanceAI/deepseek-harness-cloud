@@ -256,3 +256,67 @@ await check("落后多少秒优先问播放器, 别自己去读 seekable", async
   assert.equal(nowLine(dom), "第1句",
     "还是信了 seekable —— 播放器报的 26 秒延迟被忽略, 字幕会比声音早一句半");
 });
+
+/* ── 按视频时间对齐 ────────────────────────────────────────────────────────
+ *
+ * 2026-09-10 创始人第三次报"字幕对不上"。这次的根因不在客户端算式, 而在于产出侧
+ * 当天加了**墙钟节流**(把 1.65× 的产能压回 1.0×): 派单不再紧跟在上一句生成结束
+ * 之后, 中间多了 3.5~8 秒的刹车等待。而墙钟那条算法整个建立在"派单≈上一句结束"
+ * 之上(所以它要往回退一句)。前提没了, 补偏移量也治不了 —— 等待长度随负载变。
+ *
+ * 解法是让服务端记**物理量**: 每句的视频从整条流的第几秒开始 (vt)。
+ */
+// 五句, 每句 9 秒视频 —— vt 是它在整条流里的起点
+const VT5 = [0, 9, 18, 27, 36].map((vt, i) =>
+  ({ vt, t: 0, kind: "script", text: "第" + (i + 1) + "句" }));
+
+console.log("字幕按视频时间对齐:");
+
+await check("vt 直接给出正在播的那一句 —— 没有「往回退一句」的修正", async () => {
+  const dom = makeDom();
+  const api = load(dom);
+  // 边缘播到第 45 秒, 观众落后 12 秒 -> 33 秒 -> 落在第 4 句 (vt 区间 27~36)
+  assert.equal(api.pickVt(VT5, 45, 0, 12), 3);
+  // 贴着边缘就是最后一句 —— 墙钟那条在这里要退一句, vt 这条不退
+  assert.equal(api.pickVt(VT5, 45, 0, 0), 4);
+});
+
+await check("轮询延迟要往前推 —— 观众永远按 1.0× 走, 与产出快慢无关", async () => {
+  const dom = makeDom();
+  const api = load(dom);
+  assert.equal(api.pickVt(VT5, 45, 0, 12), 3);
+  assert.equal(api.pickVt(VT5, 45, 9, 12), 4, "过了九秒该进下一句");
+});
+
+await check("⛔ 节流把派单时间戳推开之后, 墙钟那条必然算错 —— 这就是要 vt 的原因", async () => {
+  const dom = makeDom();
+  const api = load(dom);
+  // 节流稳态: 产出领先墙钟 4 秒, 所以第 k 句在 t = 9k - 4 派出去
+  const paced = [-4, 5, 14, 23, 32].map((t, i) =>
+    ({ t, vt: VT5[i].vt, kind: "script", text: VT5[i].text }));
+  const byWall = api.pick(paced, 32, 0, 12);
+  const byVt = api.pickVt(paced, 45, 0, 12);
+  assert.equal(byVt, 3, "视频时间该落在第 4 句");
+  assert.notEqual(byWall, byVt,
+    "墙钟那条居然也对了 —— 这个用例没复现出问题, 说明构造的时间戳不对");
+  assert.equal(byWall, 1, `墙钟那条落在第 ${byWall + 1} 句, 比声音早了两句`);
+});
+
+await check("端到端: 载荷带 vt 和 edge 时走视频时间那条", async () => {
+  const dom = makeDom();
+  const api = load(dom);
+  await tick();
+  setLag(dom, 12);
+  dom.set({ live: true, edge: 45, lines: VT5 });
+  await api.pull();
+  assert.equal(nowLine(dom), "第4句");
+});
+
+await check("上游还没升级(缺 vt/edge)要回落到墙钟那条 —— 客户端才能先发", async () => {
+  const dom = makeDom();
+  const api = load(dom);
+  await tick();
+  dom.set({ live: true, lines: FIVE });     // 没有 vt, 也没有 edge
+  await api.pull();
+  assert.equal(nowLine(dom), "第4句", "缺 vt 时没回落到墙钟算法, 字幕会整个飞掉");
+});

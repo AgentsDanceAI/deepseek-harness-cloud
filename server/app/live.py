@@ -520,13 +520,23 @@ async def captions():
     lines = [
         {
             "t": float(x.get("t") or 0),
+            # 这一句的视频从整条流的第几秒开始。字幕靠它对齐 —— 墙钟那条依赖
+            # "派单紧跟上一句结束", 而产出侧的墙钟节流打破了那个前提。
+            # 上游给不出就是 None, 客户端会回落到墙钟算法。
+            "vt": (float(x["vt"]) if x.get("vt") is not None else None),
             "kind": str(x.get("kind") or "script"),
             "text": str(x.get("text") or ""),
         }
         for x in (st.get("recent") or [])
         if str(x.get("text") or "").strip()
     ]
-    data = {"live": bool(st.get("live")), "lines": lines[-12:]}
+    # edge = 直播边缘此刻的视频秒数。是个单调计数, 不涉及队列深度/错误/话术全文,
+    # 与上面"别把上游状态带出去"的约束不冲突 —— 而没有它就没法算观众播到哪一句。
+    data = {
+        "live": bool(st.get("live")),
+        "edge": float(st.get("edge") or 0.0),
+        "lines": lines[-12:],
+    }
     _CAP_CACHE["at"], _CAP_CACHE["data"] = now, data
     return JSONResponse(data)
 
