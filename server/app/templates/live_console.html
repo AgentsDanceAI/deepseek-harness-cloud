@@ -48,10 +48,6 @@
         {# 上一版是预渲染的, 这里写着"换形象要整场重渲、等二十分钟"。改成实时
            生成之后那句话就不成立了, 但留着会让人不敢改 —— 现在存完下一句就换。 #}
         <p class="lv-warn" id="lvRecast" hidden>{{ t('live.recast_warn') }}</p>
-        {# 实测产出速率。低于 1.0 就是生产比消费慢, 观众必卡, 而这在界面上本来
-           完全看不出来 —— 形象下拉只有名字, 看不出哪个走云端 TTS 哪个走自建。 #}
-        <p class="lv-rate" id="lvRate" hidden
-           data-ok="{{ t('live.rate_ok') }}" data-slow="{{ t('live.rate_slow') }}"></p>
 
         <label class="lv-field">
           <span>{{ t('live.script') }} <em class="lv-hint">{{ t('live.script_hint') }}</em></span>

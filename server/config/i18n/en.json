@@ -776,7 +776,5 @@
   "live.kind_script": "script",
   "live.kind_interject": "reply",
   "live.sending": "Working out what to say…",
-  "live.queued": "Queued. She will say:",
-  "live.rate_ok": "Producing {r}×",
-  "live.rate_slow": "Producing {r}× · slow"
+  "live.queued": "Queued. She will say:"
 }

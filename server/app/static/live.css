@@ -29,13 +29,6 @@
 .lv-two { display: grid; grid-template-columns: 1fr 1fr; gap: .8rem; }
 .lv-warn { font-size: .82rem; color: #c80; margin: -.3rem 0 .8rem; }
 .lv-counts { font-size: .82rem; opacity: .7; margin-bottom: .8rem; min-height: 1.2em; }
-/* 产出速率。正常时低调, 低于实时时要**显眼** —— 那种状态下观众必卡, 而且
-   界面上没有别的地方能看出来。 */
-.lv-rate { font-size: .82rem; opacity: .7; margin: -.3rem 0 .8rem; }
-.lv-rate--slow {
-  opacity: 1; color: #b3261e; font-weight: 600;
-  border-left: 3px solid currentColor; padding-left: .5rem;
-}
 
 .lv-actions { display: flex; gap: .5rem; flex-wrap: wrap; }
 .lv-btn {

@@ -246,15 +246,3 @@ def test_控制台要能看出产出低于实时(monkeypatch):
 
     live._RATE["pts"] = [(1000.0, 0.0), (1005.0, 5.0)]  # 跨度才 5 秒
     assert live._rate_now() == 0.0, "采样不够就该回 0, 别拿短窗的数去吓人"
-
-
-def test_速率提示中英成对且带占位符():
-    import json
-    from pathlib import Path
-
-    root = Path(__file__).resolve().parents[1] / "config" / "i18n"
-    for lang in ("zh", "en"):
-        d = json.loads((root / f"{lang}.json").read_text("utf-8"))
-        for k in ("live.rate_ok", "live.rate_slow"):
-            assert k in d, f"{lang} 缺 {k}"
-            assert "{r}" in d[k], f"{lang} 的 {k} 没有速率占位符"

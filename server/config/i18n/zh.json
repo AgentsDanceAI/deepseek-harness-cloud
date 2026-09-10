@@ -776,7 +776,5 @@
   "live.kind_script": "话术",
   "live.kind_interject": "回评论",
   "live.sending": "正在让她组织语言…",
-  "live.queued": "已排上，她接下来会说：",
-  "live.rate_ok": "产出 {r}×",
-  "live.rate_slow": "产出 {r}× · 偏慢"
+  "live.queued": "已排上，她接下来会说："
 }
