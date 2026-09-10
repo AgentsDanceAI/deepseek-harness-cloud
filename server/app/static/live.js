@@ -305,10 +305,21 @@ window.LivePlayer = (function () {
      过几秒又有"的精确信号 —— 比卡死检测(要冻住 6 秒才算)灵敏得多, 短暂的一顿也能
      抓到。配对的 `playing` 给出它到底停了多久。
      ⚠️ 0.4 秒以下不报: 正常起播和拖进度条都会发 waiting, 全报就是噪声。 */
+  /* ⚠️ **标签页在后台时不要上报。**
+   *
+   * 后台标签页的定时器被节流、媒体管线也可能被挂起, 于是 waiting→playing 之间那段
+   * 墙钟量到的是"这个标签页在后台待了多久", 而不是"观众看到了多久的卡顿"。
+   * 指纹很清楚(2026-09-11 抓到): 两条相隔一分钟的上报都写着"缓冲见底 58.4 秒",
+   * 而同一条里的快照是 `缓冲23.6s 带宽3.8Mbps rs4` —— 一个握着 23 秒缓冲、
+   * readyState 4 的播放器不可能在断粮。
+   *
+   * 这张表是我们判断"直播到底好没好"的主要证据, 混进这种数就会**把没问题的时段
+   * 读成有问题**, 然后照着去改本来没坏的东西。所以: 进后台就把这次计时作废,
+   * 上报前再确认一次仍在前台。 */
   var waitAt = 0;
   if (v) {
     v.addEventListener('waiting', function () {
-      if (!v.paused && playingUrl) waitAt = Date.now();
+      if (!v.paused && playingUrl && !document.hidden) waitAt = Date.now();
     });
     v.addEventListener('playing', function () {
       note('');
@@ -316,10 +327,16 @@ window.LivePlayer = (function () {
       if (waitAt) {
         var held = (Date.now() - waitAt) / 1000;
         waitAt = 0;
-        if (held >= 0.4) reportIssue('waiting', held, '缓冲见底 ' + held.toFixed(1) + ' 秒');
+        if (held >= 0.4 && !document.hidden) {
+          reportIssue('waiting', held, '缓冲见底 ' + held.toFixed(1) + ' 秒');
+        }
       }
     });
   }
+  document.addEventListener('visibilitychange', function () {
+    // 切走再切回来那一段不算数 —— 量的是后台时长, 不是卡顿。
+    if (document.hidden) waitAt = 0;
+  });
   /* 声音是**开关**, 不是一次性的。原先点完就 hidden=true, 于是开了再也关不掉
      —— 而直播是会一直开着的, 想静音只能关掉整个页面。 */
   function paintSound() {
@@ -411,7 +428,11 @@ window.LivePlayer = (function () {
     if (++stuckFor < STUCK_TICKS) return;
     // ⚠️ 报的秒数是**阈值**不是真实冻结时长(卡死检测到 6 秒就动手了)。真实时长
     //    要看落后量涨了多少。以前写 6.0 会让人以为每次都正好冻 6 秒。
-    reportIssue('stall', stuckFor, (hls ? '' : 'Safari ') + '画面冻住(阈值6s)');
+    // 后台标签页的 currentTime 本来就可能不推进, 那不是"冻住", 别往表里塞 ——
+    // 同 waiting 那条的理由。恢复动作照做(下面), 只是不上报。
+    if (!document.hidden) {
+      reportIssue('stall', stuckFor, (hls ? '' : 'Safari ') + '画面冻住(阈值6s)');
+    }
     stuckFor = 0;
     // 跳到直播边缘 —— 卡住期间落下的那几十秒没有追的价值, 观众要看的是"现在"。
     try {
