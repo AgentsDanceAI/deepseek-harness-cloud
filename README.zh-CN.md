@@ -69,7 +69,12 @@ agent 拿着它调 `aistore.best/llm/*`，用量记在你账上，和在云端�
 所以镜像换版本、新格子上线，这个脚本都不用改 —— 它只是个执行器。计划里不含任何
 凭据：该填令牌的位置是占位符，由本机替换成你自己那把。
 
-开始之前有两件事得知道：
+开始之前有三件事得知道：
+
+- **镜像很占地方。** 实测单格 0.6–1.9 GB（Codex/Claude Code 共用的那个 1.17 GB，
+  OpenManus 1.93 GB），Dify 那个栈十个容器加起来约 6 GB。按需拉、拉过就有缓存，
+  但把所有格子都试一遍，二十几 GB 是要的。`docker system df` 看占用，
+  `docker image prune` 清没在用的。
 
 - **工作台镜像只出 `linux/amd64`。** x86 机器（比如装 5090 那台）原生跑；
   Apple Silicon 上 `docker pull` **会直接失败**（`no matching manifest for
