@@ -224,5 +224,29 @@ window.LivePlayer = (function () {
     if (!document.hidden && (!hls || (v && v.paused))) refresh();
   });
 
-  return { refresh: refresh, online: online };
+  /* 落后直播边缘多少秒。**字幕靠它对齐**, 所以要挑最准的来源。
+   *
+   * ⚠️ 别用 video.seekable: hls.js 走 MSE, seekable 常常只反映**已缓冲范围**,
+   * 播放器明明落后十几秒, 它也能算出接近 0 —— 拿它对字幕等于没对
+   * (2026-09-10 创始人第三次报"字幕对不齐", 根子就在这)。
+   * hls.js 自己算的 latency 才是距直播边缘的真实延迟; 退一步用 liveSyncPosition。 */
+  function lag() {
+    if (!v) return 0;
+    var l = null;
+    if (hls) {
+      if (typeof hls.latency === 'number' && isFinite(hls.latency) && hls.latency > 0) {
+        l = hls.latency;
+      } else if (typeof hls.liveSyncPosition === 'number' && isFinite(hls.liveSyncPosition)) {
+        l = hls.liveSyncPosition - v.currentTime;
+      }
+    }
+    if (l === null && v.seekable && v.seekable.length) {   // Safari 原生 HLS 只有这条
+      var edge = v.seekable.end(v.seekable.length - 1);
+      if (isFinite(edge)) l = edge - v.currentTime;
+    }
+    if (l === null || !isFinite(l) || !(l > 0)) return 0;
+    return l > 120 ? 120 : l;      // 离谱值当没有, 别把字幕甩到几分钟前
+  }
+
+  return { refresh: refresh, online: online, lag: lag };
 })();

@@ -62,6 +62,13 @@ function load(dom) {
 }
 const tick = () => new Promise((r) => setImmediate(r));
 
+/* 三行字幕里"正在说"的那一行 —— 断言要盯它, 不能再盯 children[0]
+   (children[0] 现在是**上一句**)。 */
+function nowLine(dom) {
+  const hit = dom.ids.lvCaps.children.filter((c) => /lv-cap--now/.test(c.className));
+  return hit.length ? hit[0].textContent : null;
+}
+
 async function check(name, fn) {
   try { await fn(); console.log("  ✓", name); }
   catch (e) { console.log("  ✗", name, "\n     ", e.message); process.exitCode = 1; }
@@ -79,10 +86,11 @@ await check("只留一句, 而且是**正在播**的那一句 (不是最新那�
     { t: 3, kind: "script", text: "第三句" }] });
   await api.pull();
   const box = dom.ids.lvCaps;
-  assert.equal(box.children.length, 1, `堆了 ${box.children.length} 句 —— 会占满右侧并盖住声音按钮`);
+  assert.ok(box.children.length <= 3,
+    `堆了 ${box.children.length} 行 —— 上限是三行(上一句/正在说/下一句), 再多会盖住声音按钮`);
   // 上游是在句子"发出去"时记账的, 而队列里始终压着两句 —— 最新那条还没播。
   // 取最新的表现是字幕比声音早两句, 观众看到的字和听到的话对不上。
-  assert.equal(box.children[0].textContent, "第二句",
+  assert.equal(nowLine(dom), "第二句",
     "取了最新那一句 —— 那条还在队列里没播, 字幕会比声音早两句");
 });
 
@@ -93,7 +101,7 @@ await check("只有一句时也要显示 —— 刚开播就是这种情况", as
   dom.set({ live: true, lines: [{ t: 1, kind: "script", text: "开播第一句" }] });
   await api.pull();
   assert.equal(dom.ids.lvCaps.children.length, 1, "只有一句时字幕是空的");
-  assert.equal(dom.ids.lvCaps.children[0].textContent, "开播第一句");
+  assert.equal(nowLine(dom), "开播第一句");
 });
 
 await check("下一句到了要换掉上一句", async () => {
@@ -104,8 +112,7 @@ await check("下一句到了要换掉上一句", async () => {
   await api.pull();
   dom.set({ live: true, lines: [{ t: 2, kind: "script", text: "新的" }] });
   await api.pull();
-  assert.equal(dom.ids.lvCaps.children.length, 1);
-  assert.equal(dom.ids.lvCaps.children[0].textContent, "新的");
+  assert.equal(nowLine(dom), "新的");
 });
 
 await check("回评论那句要能被认出来", async () => {
@@ -114,7 +121,8 @@ await check("回评论那句要能被认出来", async () => {
   await tick();
   dom.set({ live: true, lines: [{ t: 9, kind: "interject", text: "回你这条" }] });
   await api.pull();
-  assert.match(dom.ids.lvCaps.children[0].className, /lv-cap--in/);
+  const inl = dom.ids.lvCaps.children.filter((c) => /lv-cap--in/.test(c.className));
+  assert.ok(inl.length, "回评论那句没被标出来");
 });
 
 await check("停播清空 —— 别把上一场的字留在屏幕上", async () => {
@@ -179,7 +187,7 @@ await check("端到端: 落后 12 秒时屏幕上不是倒数第二句", async (
   setLag(dom, 12);
   dom.set({ live: true, lines: FIVE });
   await api.pull();
-  const shown = dom.ids.lvCaps.children[0].textContent;
+  const shown = nowLine(dom);
   assert.notEqual(shown, "第4句", "还是取了倒数第二条 —— lag 没被算进去");
   assert.equal(shown, "第2句", `落后 12 秒该显示第 2 句, 实际显示 ${shown}`);
 });
@@ -200,11 +208,11 @@ await check("观众往回拖进度条, 字幕要跟着退回去", async () => {
   setLag(dom, 0);
   dom.set({ live: true, lines: FIVE });
   await api.pull();
-  assert.equal(dom.ids.lvCaps.children[0].textContent, "第4句");
+  assert.equal(nowLine(dom), "第4句");
   setLag(dom, 26);                        // 往回拖了 26 秒
   await api.pull();
-  assert.equal(dom.ids.lvCaps.children.length, 1, "回退后堆了多句");
-  assert.equal(dom.ids.lvCaps.children[0].textContent, "第1句",
+  assert.ok(dom.ids.lvCaps.children.length <= 3, "回退后堆了超过三行");
+  assert.equal(nowLine(dom), "第1句",
     "退回去之后字幕没跟着退 —— 旧实现的 seen 去重会把它挡住");
 });
 
@@ -214,4 +222,37 @@ await check("lag 离谱 (取不到 seekable 之类) 时不能把字幕甩飞", a
   assert.equal(api.pick(FIVE, 34.4, 0, 99999), 0, "lag 异常时应停在最早那句, 而不是越界");
   assert.equal(api.pick([], 0, 0, 0), -1, "空表应返回 -1");
   assert.equal(api.pick([FIVE[0]], 0, 0, 12), 0, "只有一句时无论 lag 都显示它");
+});
+
+await check("三行: 上一句 / 正在说 / 下一句, 中间那句加重", async () => {
+  /* 只留一句时, 中途进来的观众没有上下文; 堆十几句又会占满右侧盖住声音按钮。
+     三行是折中 —— .lv-caps 底部留的 56px 正好容得下。 */
+  const dom = makeDom();
+  const api = load(dom);
+  await tick();
+  setLag(dom, 0);
+  dom.set({ live: true, lines: FIVE });
+  await api.pull();
+  const kids = dom.ids.lvCaps.children;
+  assert.equal(kids.length, 3, `显示了 ${kids.length} 行, 应该是三行`);
+  assert.deepEqual(kids.map((c) => c.textContent), ["第3句", "第4句", "第5句"],
+    "三行的内容或顺序不对 —— 应该是上一句/正在说/下一句");
+  assert.match(kids[1].className, /lv-cap--now/, "中间那行没加重, 观众分不出该看哪行");
+  assert.match(kids[0].className, /lv-cap--dim/, "上一句没压暗");
+  assert.match(kids[2].className, /lv-cap--dim/, "下一句没压暗");
+});
+
+await check("落后多少秒优先问播放器, 别自己去读 seekable", async () => {
+  /* hls.js 走 MSE, seekable 常常只反映**已缓冲范围** —— 播放器明明落后十几秒,
+     它也能算出接近 0, 拿它对字幕等于没对 (创始人第三次报"对不齐"的根子)。
+     播放器那边能拿到 hls.latency, 那才是距直播边缘的真实延迟。 */
+  const dom = makeDom();
+  setLag(dom, 0);                       // seekable 说"我贴着边缘"
+  dom.window.LivePlayer = { lag: () => 26 };   // 播放器说"其实落后 26 秒"
+  const api = load(dom);
+  await tick();
+  dom.set({ live: true, lines: FIVE });
+  await api.pull();
+  assert.equal(nowLine(dom), "第1句",
+    "还是信了 seekable —— 播放器报的 26 秒延迟被忽略, 字幕会比声音早一句半");
 });

@@ -41,13 +41,20 @@ window.LiveCaptions = (function () {
    * (live.js 的 liveSyncDurationCount=12; 卡顿恢复还会退到 BEHIND_LIVE=10),
    * 而一句话约 8-9 秒 —— 也就是说观众听到的比直播边缘晚一句半。 */
   function lagBehindEdge() {
+    // 首选播放器自己报的 —— 它能拿到 hls.latency, 那是距直播边缘的真实延迟。
+    // seekable 在 MSE 下只反映已缓冲范围, 播放器落后十几秒时也能算出接近 0。
+    var P = window.LivePlayer;
+    if (P && typeof P.lag === 'function') {
+      var l = P.lag();
+      if (isFinite(l) && l >= 0) return l;
+    }
     if (!video || !video.seekable || !video.seekable.length) return 0;
     var edge = video.seekable.end(video.seekable.length - 1);
     var cur = video.currentTime;
     if (!isFinite(edge) || !isFinite(cur)) return 0;
-    var l = edge - cur;
-    if (!(l > 0)) return 0;
-    return l > 120 ? 120 : l;      // 离谱值当没有, 别把字幕甩到几分钟前
+    var l2 = edge - cur;
+    if (!(l2 > 0)) return 0;
+    return l2 > 120 ? 120 : l2;
   }
 
   /* 挑出"此刻正在播"的那一句。**纯函数, 给测试用。**
@@ -81,15 +88,26 @@ window.LiveCaptions = (function () {
     return idx;
   }
 
-  function render(line) {
-    var id = line.t + '|' + line.text;
+  /* 上一句 / 正在说 / 下一句 —— 共三行, 中间那句加重。
+   *
+   * 第一版堆最近十几句, 占满右侧还盖住了声音按钮; 第二版只留一句, 但中途进来的
+   * 观众看不到上下文。三行是折中: 有上下文, 又不会长到盖住底下的按钮
+   * (.lv-caps 底部留了 56px 给它, 见 live.css)。 */
+  function render(lines, idx) {
+    var cur = lines[idx];
+    var id = idx + '|' + (cur ? cur.t : '') + '|' + (cur ? cur.text : '');
     if (id === shownId) return;
     shownId = id;
-    var el = document.createElement('div');
-    el.className = 'lv-cap' + (line.kind === 'interject' ? ' lv-cap--in' : '');
-    el.textContent = line.text;
-    box.textContent = '';        // 换掉上一句, 不堆叠
-    box.appendChild(el);
+    box.textContent = '';
+    [idx - 1, idx, idx + 1].forEach(function (i) {
+      var line = lines[i];
+      if (!line || !line.text) return;
+      var el = document.createElement('div');
+      el.className = 'lv-cap' + (i === idx ? ' lv-cap--now' : ' lv-cap--dim')
+        + (line.kind === 'interject' ? ' lv-cap--in' : '');
+      el.textContent = line.text;
+      box.appendChild(el);
+    });
   }
 
   function clear() {
@@ -103,7 +121,7 @@ window.LiveCaptions = (function () {
   function tick() {
     if (!snap || !snap.lines.length) return;
     var idx = pick(snap.lines, snap.edgeT, nowSec() - snap.at, lagBehindEdge());
-    if (idx >= 0) render(snap.lines[idx]);
+    if (idx >= 0) render(snap.lines, idx);
   }
 
   function pull() {

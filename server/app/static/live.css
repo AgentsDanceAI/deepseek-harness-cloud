@@ -147,6 +147,10 @@
   text-shadow: 0 1px 3px rgba(0,0,0,.85);
   animation: lv-cap-in .35s ease-out;
 }
+/* 三行里只有中间那句是"正在说的" —— 不加重的话观众分不出该看哪一行 */
+.lv-cap--now { opacity: 1; font-weight: 600; }
+.lv-cap--dim { opacity: .42; }
+.lv-cap--dim + .lv-cap--now, .lv-cap--now + .lv-cap--dim { margin-top: .35em; }
 /* 回评论的那句挑出来 —— 观众要能看出"这句是在回我" */
 .lv-cap--in { color: #ffe08a; }
 .lv-cap--in::before { content: "↩ "; opacity: .8; }
