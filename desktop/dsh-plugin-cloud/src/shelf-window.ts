@@ -12,7 +12,7 @@
 import { app, BrowserWindow, ipcMain, shell } from 'electron'
 import { fileURLToPath } from 'node:url'
 import { fetchLocalCatalog, fetchLocalPlan, type LocalCatalogEntry } from './api.ts'
-import { dockerState, freePort, pull, running, start, stop, type DockerState } from './local-runner.ts'
+import { dockerState, freePort, pullAll, running, start, stop, type DockerState } from './local-runner.ts'
 
 const IPC_CHANNELS = [
   'dsh-cloud:shelf-boot-host',
@@ -102,14 +102,15 @@ export function openShelf(token: string, requestHost: () => void): BrowserWindow
       }
       const plan = await fetchLocalPlan(token, productId)
       if (plan.runnable !== 'ready') return { ok: false, error: plan.reason }
-      const image = plan.containers.find(c => c.role === 'main')?.image_ref ?? ''
-      say('dsh-cloud:shelf-progress', { id: productId, line: `拉镜像 ${image}` })
-      const platform = await pull(image, line => {
+      // 整栈的镜像一次拉完: 交给 `docker run` 顺手拉的话, 用户在"起容器…"这一步
+      // 干等好几分钟, 而进度条上什么都没有。
+      const platforms = await pullAll(plan, line => {
         say('dsh-cloud:shelf-progress', { id: productId, line })
       })
       const port = await freePort(plan.port)
-      say('dsh-cloud:shelf-progress', { id: productId, line: '起容器…' })
-      await start(plan, token, port, platform)
+      const n = plan.containers.length
+      say('dsh-cloud:shelf-progress', { id: productId, line: n > 1 ? `起 ${n} 个容器…` : '起容器…' })
+      await start(plan, token, port, platforms)
       openPorts.set(productId, port)
       // 开根路径, 不是 ready_path —— 后者是给探针用的 (codex 那格是
       // /api/health), 直接开会给用户看一段 JSON。

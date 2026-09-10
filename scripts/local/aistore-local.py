@@ -48,8 +48,17 @@ def die(msg: str) -> None:
     raise SystemExit(1)
 
 
+#: 请求头里的 User-Agent。
+#:
+#: **不能用 urllib 的默认值**: 站点在 Cloudflare 后面, 而 `Python-urllib/3.x` 会被
+#: 直接挡掉 —— 返回 403 与一句 `error code: 1010`, 既不是 JSON 也没有任何提示。
+#: 2026-09-10 实测: 同一把令牌, curl 200 / urllib 403。这个脚本是 README 里写给
+#: 陌生人的第一条命令, 撞上的话第一步就走不下去, 而报错会指向令牌 —— 指错方向。
+USER_AGENT = "aistore-local/1.0 (+https://aistore.best)"
+
+
 def _req(path: str, body: dict | None = None, token: str = "") -> dict:
-    headers = {"content-type": "application/json"}
+    headers = {"content-type": "application/json", "user-agent": USER_AGENT}
     if token:
         headers["authorization"] = "Bearer " + token
     data = json.dumps(body).encode() if body is not None else None
@@ -100,9 +109,17 @@ def _api(path: str) -> dict:
     except urllib.error.HTTPError as e:
         detail = ""
         try:
-            detail = json.load(e).get("detail", "")
+            raw = e.read()
         except Exception:  # noqa: BLE001
-            pass
+            raw = b""
+        try:
+            detail = json.loads(raw).get("detail", "")
+        except Exception:  # noqa: BLE001
+            # 非 JSON 的错误体也要留着 —— Cloudflare 的拦截页就是纯文本, 丢掉它
+            # 等于把"被挡了"读成"令牌不对"。
+            detail = raw.decode("utf-8", "replace")[:200].strip()
+        if e.code == 403 and "1010" in detail:
+            die("被 Cloudflare 挡了 (error 1010) —— 通常是 User-Agent 被拦。请更新这个脚本。")
         if e.code in (401, 403):
             die("令牌不认了 (可能已在网页端吊销)。重新跑一次 login。")
         die(f"服务端拒绝了这个请求: HTTP {e.code} {detail}")
@@ -163,6 +180,12 @@ def _pull(image: str) -> str:
     return "linux/amd64"
 
 
+def _sidecar_name(slot: str, name: str) -> str:
+    """伴随容器的名字。双横线分隔, 好让 stop 按一个正则收干净整栈,
+    又不会误伤名字前缀相同的另一格 (aistore-dify 与 aistore-dify-x)。"""
+    return f"{_container(slot)}--{name}"
+
+
 def cmd_run(args) -> int:
     slot = args.product
     tok = _token()
@@ -171,51 +194,99 @@ def cmd_run(args) -> int:
         die("这一格现在起不动: {}".format(plan["reason"]))
     ph = plan["token_placeholder"]
     main = next(c for c in plan["containers"] if c["role"] == "main")
+    inits = [c for c in plan["containers"] if c["role"] == "init"]
+    sides = [c for c in plan["containers"] if c["role"] == "sidecar"]
     name, port = _container(slot), args.port or plan["port"]
 
-    # 同名容器还在就先收掉 —— 否则 docker run 直接报名字冲突, 而用户看到的
-    # 只是一行红字, 不知道那是"上次那个还开着"。
-    _docker("rm", "-f", name, check=False)
+    # 整栈先收干净 —— 否则 docker 只回一句名字冲突, 而用户看到的是一行看不懂的
+    # 红字, 不知道那是"上次那个还开着"。
+    _stop_stack(slot)
 
-    # 镜像目前只出 linux/amd64。Apple Silicon 上 docker 会自动用模拟跑, 能用但慢;
-    # 不说一声的话, 用户只会觉得"这东西怎么这么卡"而不知道是模拟。
     if os.uname().machine in ("arm64", "aarch64"):
-        print("  提示: 镜像只有 linux/amd64, 这台机器是 arm64 —— 会走模拟, 明显更慢。")
+        print("  提示: 我们自己的工作台镜像只有 linux/amd64 —— 这台机器会走模拟, 明显更慢。")
         print("        x86 的机器 (比如装 5090 那台) 是原生跑。\n")
 
-    image = main["image_ref"]
-    print(f"==> 拉镜像 {image} (第一次会久一点)")
-    platform = _pull(image)
+    # 逐个镜像判架构, 不一刀切: 栈里的上游中间件 (postgres/redis) 多是多架构的,
+    # 一刀切给它们扣上 amd64 等于让本来能原生跑的东西白白走模拟。
+    platforms = {}
+    for c in plan["containers"]:
+        if c["image_ref"] in platforms:
+            continue
+        print(f"==> 拉镜像 {c['image_ref']}")
+        platforms[c["image_ref"]] = _pull(c["image_ref"])
 
     env = {k: _fill(v, tok, ph) for k, v in (main.get("env") or {}).items()}
     home = env.get("DSH_AGENT_HOME") or env.get("HOME") or "/home/agent"
+
+    # 1. 初始化容器逐个跑完 —— 不能并行, 它们之间就是靠顺序保证的
+    for ic in inits:
+        cmd = ["run", "--rm", "--name", _sidecar_name(slot, "init-" + ic["name"])]
+        if platforms.get(ic["image_ref"]):
+            cmd += ["--platform", platforms[ic["image_ref"]]]
+        cmd += ["-v", f"aistore-{slot}-data:{home}", ic["image_ref"]]
+        cmd += [_fill(a, tok, ph) for a in (ic.get("cmd") or [])]
+        print(f"==> 初始化 {ic['name']}")
+        r = _docker(*cmd, check=False)
+        if r.returncode != 0:
+            die(f"初始化容器 {ic['name']} 失败:\n" + (r.stderr or r.stdout))
+
+    # 2. 主容器: 它建网络命名空间, 端口也只有它映射
     cmd = ["run", "-d", "--name", name, "-p", f"127.0.0.1:{port}:{plan['port']}"]
-    # 拉的时候用了哪个 platform, 跑的时候必须一致 —— 否则 docker 会去找一个本机
-    # 架构的镜像, 而那个镜像根本不存在。
-    if platform:
-        cmd += ["--platform", platform]
+    if platforms.get(main["image_ref"]):
+        cmd += ["--platform", platforms[main["image_ref"]]]
     cmd += ["-v", f"aistore-{slot}-data:{home}"]
     if main.get("run_as_user") is not None:
         cmd += ["--user", str(main["run_as_user"])]
+    # 只有主容器能加 host 映射: 伴随容器用 --network container: 加进来之后,
+    # docker 会拒绝 --add-host。上游那些配置把服务名当主机名用, 共享命名空间里
+    # 都指回环。
+    for alias in plan.get("host_aliases") or []:
+        cmd += ["--add-host", f"{alias}:127.0.0.1"]
     for k, v in env.items():
         cmd += ["-e", f"{k}={v}"]
-    cmd.append(image)
+    cmd.append(main["image_ref"])
     cmd += [_fill(a, tok, ph) for a in (main.get("cmd") or [])]
-
-    print("==> 起容器")
+    print(f"==> 起 {1 + len(sides)} 个容器" if sides else "==> 起容器")
     r = _docker(*cmd, check=False)
     if r.returncode != 0:
         die("起不来:\n" + (r.stderr or r.stdout))
-    print(f"\n  ✓ {slot} 跑起来了\n\n      http://localhost:{port}{plan['ready_path']}\n")
+
+    # 3. 伴随容器加入主容器的网络命名空间 (与云端的 pod 语义一致)。
+    # 不接同一个 bridge 再靠 DNS: 上游那些栈的配置里全是 127.0.0.1。
+    for sc in sides:
+        cmd = ["run", "-d", "--name", _sidecar_name(slot, sc["name"]), "--network", f"container:{name}"]
+        if platforms.get(sc["image_ref"]):
+            cmd += ["--platform", platforms[sc["image_ref"]]]
+        for k, v in (sc.get("env") or {}).items():
+            cmd += ["-e", f"{k}={_fill(v, tok, ph)}"]
+        cmd.append(sc["image_ref"])
+        # cmd 顶掉 entrypoint, args 不顶 —— 顺序不能反
+        cmd += [_fill(a, tok, ph) for a in (sc.get("cmd") or [])]
+        cmd += [_fill(a, tok, ph) for a in (sc.get("args") or [])]
+        r = _docker(*cmd, check=False)
+        if r.returncode != 0:
+            _stop_stack(slot)
+            die(f"伴随容器 {sc['name']} 起不来:\n" + (r.stderr or r.stdout))
+
+    print(f"\n  ✓ {slot} 跑起来了\n\n      http://localhost:{port}\n")
+    print(f"    就绪探针: http://localhost:{port}{plan['ready_path']}")
     print(f"    日志: docker logs -f {name}")
     print(f"    收工: python3 {pathlib.Path(__file__).name} stop {slot}")
     return 0
 
 
+def _stop_stack(slot: str) -> int:
+    """收掉这一格的整栈。按名字正则匹配, 两端锚定, 免得停 dify 顺手带走 dify-x。"""
+    r = _docker("ps", "-aq", "--filter", f"name=^{_container(slot)}(--.*)?$", check=False)
+    ids = [x for x in (r.stdout or "").split() if x]
+    if ids:
+        _docker("rm", "-f", *ids, check=False)
+    return len(ids)
+
+
 def cmd_stop(args) -> int:
-    n = _container(args.product)
-    r = _docker("rm", "-f", n, check=False)
-    print("已停 " + n if r.returncode == 0 else "没有在跑的 " + n)
+    n = _stop_stack(args.product)
+    print(f"已停 {_container(args.product)} ({n} 个容器)" if n else "没有在跑的 " + _container(args.product))
     return 0
 
 
@@ -223,7 +294,8 @@ def cmd_ps(_args) -> int:
     r = _docker(
         "ps", "--filter", "name=aistore-", "--format", "{{.Names}}\t{{.Status}}\t{{.Ports}}", check=False
     )
-    print(r.stdout.strip() or "(本机没有在跑的格子)")
+    rows = [ln for ln in (r.stdout or "").splitlines() if "--" not in ln.split("\t")[0]]
+    print("\n".join(rows) or "(本机没有在跑的格子)")
     return 0
 
 

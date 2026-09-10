@@ -32,9 +32,12 @@ router = APIRouter(prefix="/api/local", tags=["local"])
 #: 令牌占位符。计划里凡是该填令牌的地方都是这个串, 本机替换。
 TOKEN_PLACEHOLDER = "${AISTORE_TOKEN}"
 
-#: 本机运行器目前只会起单容器。多容器栈 (Dify 11 个、Coze 10 个、Hermes 2 个)
-#: 的编排信息计划里照样给全 —— 先把数据备齐, 执行端跟上就能直接用。
-_SINGLE_ONLY = "runner_no_stack"
+#: 运行器还没实现的那部分编排。
+#:
+#: 多容器栈本身已经能跑了 (主容器建网络命名空间, 伴随容器 --network container: 加
+#: 进来, 与云端的 pod 语义一致)。**种子卷**还没有: 那要把一个只装文件的镜像铺到
+#: 组内共享卷上再让各容器去取, 本机对应物得再设计一轮。
+_NO_SEEDS = "runner_no_seeds"
 
 
 def available() -> list[products.Product]:
@@ -55,12 +58,14 @@ def available() -> list[products.Product]:
 def _runnable(p: products.Product) -> tuple[str, str]:
     """**运行器**能不能起这一格 —— 只谈技术, 不谈资格。返回 (状态, 人话)。
 
-    权限单独一个字段: 把"起不动"和"没买"混成一个状态, 就会出现"这格是 11 个
+    权限单独一个字段: 把"起不动"和"没买"混成一个状态, 就会出现"这格是 10 个
     容器的栈"却提示用户去买通行证 —— 买完照样起不动。
     """
-    if p.sidecars or p.init_containers:
+    if p.seeds or any(sc.seeds for sc in p.sidecars):
+        return _NO_SEEDS, "要往组内共享卷铺种子文件, 本机运行器还没有这一步"
+    if p.sidecars:
         n = 1 + len(p.sidecars) + len(p.init_containers)
-        return _SINGLE_ONLY, f"{n} 个容器的栈, 本机运行器还只会起单容器"
+        return "ready", f"{n} 个容器的栈, 会一起起来"
     return "ready", ""
 
 

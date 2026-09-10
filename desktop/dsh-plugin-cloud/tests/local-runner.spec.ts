@@ -6,7 +6,8 @@
 
 import { describe, expect, it } from 'vitest'
 import type { LocalPlan } from '../../src/cloud/api.ts'
-import { buildRunArgs, candidates, containerName, homeOf } from '../../src/cloud/local-runner.ts'
+import { buildRunArgs, buildSidecarArgs, candidates, containerName, freePort, homeOf, sidecarName }
+  from '../../src/cloud/local-runner.ts'
 
 const PLACEHOLDER = '${AISTORE_TOKEN}'
 
@@ -108,5 +109,53 @@ describe('buildRunArgs 的 --platform', () => {
     expect(args[args.indexOf('--platform') + 1]).toBe('linux/amd64')
     // 本机原生的时候不能瞎加 —— 写死 amd64 会让将来的 arm64 镜像白白走模拟
     expect(buildRunArgs(planOf({ HOME: '/x' }), 't', 1)).not.toContain('--platform')
+  })
+})
+
+describe('多容器栈', () => {
+  function stackPlan(): LocalPlan {
+    const p = planOf({ HOME: '/home/agent' })
+    p.product = 'dify'
+    p.host_aliases = ['api', 'redis']
+    p.containers.push({
+      role: 'sidecar', name: 'redis', image_ref: 'redis:6-alpine',
+      cmd: ['redis-server'], args: ['--requirepass', 'x'], env: { FOO: 'bar' }, network: 'share:main',
+    })
+    return p
+  }
+
+  it('伴随容器加入主容器的网络命名空间, 不是接同一个 bridge', () => {
+    // 上游那些栈的配置里全是 127.0.0.1 (实测 Dify: 24 处回环、0 处服务名) ——
+    // 接 bridge 再靠 DNS 解析服务名的话, 这些配置一条都不成立。
+    const p = stackPlan()
+    const args = buildSidecarArgs(p, p.containers[1]!, 'tok', undefined)
+    expect(args[args.indexOf('--network') + 1]).toBe('container:aistore-dify')
+    expect(args).not.toContain('-p')       // 端口只有主容器映射
+    expect(args).not.toContain('--add-host') // 共享命名空间时 docker 会拒绝
+    // cmd 在 args 前面, 顺序不能反 —— 反了就是给 entrypoint 传了一堆它不认的参数
+    expect(args.slice(-3)).toEqual(['redis-server', '--requirepass', 'x'])
+  })
+
+  it('host 别名只加在主容器上', () => {
+    const args = buildRunArgs(stackPlan(), 'tok', 18080)
+    expect(args[args.indexOf('--add-host') + 1]).toBe('api:127.0.0.1')
+    expect(args.filter(a => a === '--add-host')).toHaveLength(2)
+  })
+
+  it('伴随容器的名字带双横线, 好让 stop 一把收干净又不误伤别的格', () => {
+    expect(sidecarName('dify', 'redis')).toBe('aistore-dify--redis')
+    expect(sidecarName('dify', 'redis').startsWith(containerName('dify'))).toBe(true)
+  })
+})
+
+describe('freePort', () => {
+  it('特权端口要挪到高位 —— 不然 Dify(容器端口 80) 一个都绑不上', async () => {
+    // 失败形状很坑: 五十次 EACCES 报出来是"附近没有空闲端口", 和端口真被占完
+    // 长得一样, 排查方向会跑偏。
+    const port = await freePort(80)
+    expect(port).toBeGreaterThanOrEqual(1024)
+    // 普通端口保持"能用原号就用原号"的好处: 用户看到的端口和产品端口对得上
+    const high = await freePort(28123)
+    expect(high).toBeGreaterThanOrEqual(28123)
   })
 })
