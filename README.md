@@ -76,6 +76,12 @@ Not every slot runs locally yet: `aistore-local.py list` prints the ones that
 do. Multi-container stacks (Dify, Coze, Hermes) still need the hosted side, and
 the two digital-human slots are hosted-only because they drive our GPU nodes.
 
+That list and the start-up orchestration both come **from the server**
+(`/api/local/catalog`, `/api/local/plan/<slot>`), so a new image tag or a new
+slot needs no change here — the script is only an executor. The plan carries no
+credentials: wherever a token belongs there is a placeholder, filled in locally
+with the one on your machine.
+
 Two things worth knowing before you start:
 
 - **The workspace images are `linux/amd64` only.** An x86 box (the 5090 case)
