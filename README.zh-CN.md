@@ -2,10 +2,11 @@
 
 # AI Store
 
-**围绕 DeepSeek Harness 构建的托管云端智能体与可自部署平台。**
+**16 个开源 AI 产品，一个账号全打开——云端托管，或者一行命令拉到你自己的机器上。**
 
-提供账号体系、服务端模型网关、用量策略、团队能力和可选浏览器工作台，
-无需把模型上游密钥分发给每个客户端。
+DeepSeek Harness、ComfyUI、Dify、OpenManus…… 每一格都是一个独立工作台。本仓是
+它们背后的那一层：账号体系、服务端模型网关、用量与计费、团队能力和工作台编排——
+上游密钥只留在服务端，不下发给任何客户端。
 
 [![CI](https://github.com/AgentsDanceAI/deepseek-harness-cloud/actions/workflows/ci.yml/badge.svg)](https://github.com/AgentsDanceAI/deepseek-harness-cloud/actions/workflows/ci.yml)
 [![License: DSH Cloud Community 1.0](https://img.shields.io/badge/license-DSH%20Cloud%20Community%201.0-4c6ef5.svg)](LICENSE)
