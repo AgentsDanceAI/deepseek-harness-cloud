@@ -61,7 +61,7 @@ class Upstream:
         # 一律吞异常(评论已经飘出去了), 于是表现成"她就是不接话", 很难查。
         async def fake_compose(comment, bill_to, device_id="", person=""):
             self.billed = bill_to
-            self.person_seen = person      # 房间的形象有没有传到 —— 人设靠它
+            self.person_seen = person  # 房间的形象有没有传到 —— 人设靠它
             return reply
 
         monkeypatch.setattr(live, "_gpu", fake_gpu)

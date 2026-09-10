@@ -91,6 +91,7 @@ def create_app() -> FastAPI:
     from .gateway import router as gateway_router
     from .health import router as health_router
     from .live import router as live_router
+    from .local_api import router as local_router
     from .media import router as media_router
     from .oauth import router as oauth_router
     from .payments.api import router as payments_router
@@ -106,6 +107,7 @@ def create_app() -> FastAPI:
     app.include_router(gateway_router)
     app.include_router(avatar_router)
     app.include_router(live_router)
+    app.include_router(local_router)
     app.include_router(media_router)
     app.include_router(payments_router)
     app.include_router(admin_router)

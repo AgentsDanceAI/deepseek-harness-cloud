@@ -89,6 +89,7 @@ def test_console_labels_are_translated(monkeypatch):
 # (avatar.js 的 PRESETS)。创始人 2026-09-10: "我每一次切形象·音色·人设, 你就给我
 # 切对应的人设"。
 
+
 def _i18n(lang: str = "zh") -> dict:
     import json
     from pathlib import Path
@@ -116,8 +117,7 @@ def test_同一个形象在通话页和直播间必须是同一个名字():
         key = "js.avatar.p." + p["id"]
         assert key in zh, f"通话页没有 {p['id']} 这个形象, 两边的清单对不上"
         assert zh[key] == f"{p['name']} · {p['trait']}", (
-            f"{p['id']} 两处名字不一致: 直播间 {p['name']} · {p['trait']}, "
-            f"通话页 {zh[key]}"
+            f"{p['id']} 两处名字不一致: 直播间 {p['name']} · {p['trait']}, 通话页 {zh[key]}"
         )
 
 
@@ -161,10 +161,12 @@ def test_人设是加在底线前面_不是替换掉它():
             seen["system"] = json["messages"][0]["content"]
             return _Resp()
 
-    with mock.patch.object(live.config, "UPSTREAM_BASE_URL", "http://x/v1"), \
-         mock.patch.object(live.config, "UPSTREAM_API_KEY", "k"), \
-         mock.patch.object(live.httpx, "AsyncClient", lambda **kw: _Client()), \
-         mock.patch.object(live.credits, "spend", lambda *a, **kw: None):
+    with (
+        mock.patch.object(live.config, "UPSTREAM_BASE_URL", "http://x/v1"),
+        mock.patch.object(live.config, "UPSTREAM_API_KEY", "k"),
+        mock.patch.object(live.httpx, "AsyncClient", lambda **kw: _Client()),
+        mock.patch.object(live.credits, "spend", lambda *a, **kw: None),
+    ):
         asyncio.run(live._compose_reply("在吗", "u_1", person="chen"))
 
     sys_prompt = seen["system"]
@@ -202,10 +204,12 @@ def test_没给形象时退回通用口径():
             seen["system"] = json["messages"][0]["content"]
             return _Resp()
 
-    with mock.patch.object(live.config, "UPSTREAM_BASE_URL", "http://x/v1"), \
-         mock.patch.object(live.config, "UPSTREAM_API_KEY", "k"), \
-         mock.patch.object(live.httpx, "AsyncClient", lambda **kw: _Client()), \
-         mock.patch.object(live.credits, "spend", lambda *a, **kw: None):
+    with (
+        mock.patch.object(live.config, "UPSTREAM_BASE_URL", "http://x/v1"),
+        mock.patch.object(live.config, "UPSTREAM_API_KEY", "k"),
+        mock.patch.object(live.httpx, "AsyncClient", lambda **kw: _Client()),
+        mock.patch.object(live.credits, "spend", lambda *a, **kw: None),
+    ):
         asyncio.run(live._compose_reply("在吗", "u_1", person=""))
 
     assert seen["system"] == live._REPLY, "没给形象却硬塞了一个人设进去"
@@ -228,9 +232,7 @@ def test_房间的形象要真的传到回评论那条路(monkeypatch):
     monkeypatch.setattr(live, "_LAST_REPLY_AT", 0.0)
 
     assert asyncio.run(live._maybe_reply("c_1", "在吗")) is True
-    assert up.person_seen == "chen", (
-        f"房间的形象没传到回评论那条路 (拿到 {up.person_seen!r}) —— 人设不会生效"
-    )
+    assert up.person_seen == "chen", f"房间的形象没传到回评论那条路 (拿到 {up.person_seen!r}) —— 人设不会生效"
 
 
 def test_控制台要能看出产出低于实时(monkeypatch):
@@ -239,10 +241,10 @@ def test_控制台要能看出产出低于实时(monkeypatch):
     形象下拉只有名字, 看不出哪个走云端 TTS(实测 2.4x)、哪个走自建(0.7x) ——
     2026-09-10 创始人因此以为自己换了云端却还卡, 实际配置里从没换过。
     """
-    live._RATE["pts"] = [(1000.0, 0.0), (1100.0, 87.0)]      # 0.87x, 跨度 100 秒
+    live._RATE["pts"] = [(1000.0, 0.0), (1100.0, 87.0)]  # 0.87x, 跨度 100 秒
     assert live._rate_now() == 0.87
 
-    live._RATE["pts"] = [(1000.0, 0.0), (1005.0, 5.0)]        # 跨度才 5 秒
+    live._RATE["pts"] = [(1000.0, 0.0), (1005.0, 5.0)]  # 跨度才 5 秒
     assert live._rate_now() == 0.0, "采样不够就该回 0, 别拿短窗的数去吓人"
 
 
