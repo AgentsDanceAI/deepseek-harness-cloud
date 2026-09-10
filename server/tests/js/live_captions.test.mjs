@@ -34,6 +34,9 @@ function makeDom() {
   };
   const ids = { lvVideo: mk("lvVideo"), lvCaps: mk("lvCaps"), lvCapsToggle: mk("lvCapsToggle") };
   ids.lvVideo.parentNode = mk("stage");
+  // 默认: 没有 seekable = 落后 0 秒 (老用例就是在这个前提下写的)
+  ids.lvVideo.currentTime = 0;
+  ids.lvVideo.seekable = { length: 0, end: () => 0 };
   ids.lvCapsToggle.dataset = { hide: "关字幕", show: "开字幕" };
   let payload = { live: true, lines: [] };
   const document = {
@@ -137,4 +140,78 @@ await check("字幕层不能压住声音按钮", async () => {
   assert.ok(z(unmute) > z(caps),
     `声音按钮 z-index ${z(unmute)} 不高于字幕层 ${z(caps)} —— 会被盖住, 而它起播才出现, 更难发现`);
   assert.ok(!/top:\s*0/.test(caps), "字幕又铺满整条右侧了, 会盖住右下角的按钮");
+});
+
+/* ── 时间轴对齐 ────────────────────────────────────────────────────────────
+ *
+ * 2026-09-10 创始人第二次报"字幕对不上"。上一版按"倒数第二条"取, 那只在观众正好
+ * 贴着直播边缘时才成立 —— 而播放器是**故意**退后十几秒的 (liveSyncDurationCount=12,
+ * 卡顿恢复退到 BEHIND_LIVE=10), 一句约 8-9 秒, 于是字幕比声音早了一句半。
+ */
+function setLag(dom, seconds) {
+  const v = dom.ids.lvVideo;
+  v.currentTime = 1000 - seconds;
+  v.seekable = { length: 1, end: () => 1000 };
+}
+// 5 句, 每句 8.6 秒 —— 线上实测的句长
+const FIVE = [0, 8.6, 17.2, 25.8, 34.4].map((t, i) => ({ t, kind: "script", text: "第" + (i + 1) + "句" }));
+
+console.log("字幕时间轴对齐:");
+
+await check("贴着边缘 (lag=0) 时取倒数第二条 —— 与上一版一致, 别改坏了", async () => {
+  const dom = makeDom();
+  const api = load(dom);
+  assert.equal(api.pick(FIVE, 34.4, 0, 0), 3, "lag=0 的口径变了");
+});
+
+await check("播放器退后 12 秒时必须再往回退 —— 这就是「字幕对不上」", async () => {
+  const dom = makeDom();
+  const api = load(dom);
+  const idx = api.pick(FIVE, 34.4, 0, 12);
+  assert.ok(idx < 3, `lag=12 仍然取到第 ${idx} 条 —— 字幕比声音早了一句半`);
+  assert.equal(idx, 1, `按时间轴该落在第 1 条 (t=8.6), 实际第 ${idx} 条`);
+});
+
+await check("端到端: 落后 12 秒时屏幕上不是倒数第二句", async () => {
+  const dom = makeDom();
+  const api = load(dom);
+  await tick();
+  setLag(dom, 12);
+  dom.set({ live: true, lines: FIVE });
+  await api.pull();
+  const shown = dom.ids.lvCaps.children[0].textContent;
+  assert.notEqual(shown, "第4句", "还是取了倒数第二条 —— lag 没被算进去");
+  assert.equal(shown, "第2句", `落后 12 秒该显示第 2 句, 实际显示 ${shown}`);
+});
+
+await check("轮询本身的延迟要补回来, 不能算进 lag 里", async () => {
+  const dom = makeDom();
+  const api = load(dom);
+  // 数据是 5 秒前收到的 —— 服务端此刻已经往前走了 5 秒, 字幕也该跟着往前
+  const a = api.pick(FIVE, 34.4, 0, 12);
+  const b = api.pick(FIVE, 34.4, 5, 12);
+  assert.ok(b >= a, `收到数据后过了 5 秒, 字幕反而往回退了 (${a} -> ${b})`);
+});
+
+await check("观众往回拖进度条, 字幕要跟着退回去", async () => {
+  const dom = makeDom();
+  const api = load(dom);
+  await tick();
+  setLag(dom, 0);
+  dom.set({ live: true, lines: FIVE });
+  await api.pull();
+  assert.equal(dom.ids.lvCaps.children[0].textContent, "第4句");
+  setLag(dom, 26);                        // 往回拖了 26 秒
+  await api.pull();
+  assert.equal(dom.ids.lvCaps.children.length, 1, "回退后堆了多句");
+  assert.equal(dom.ids.lvCaps.children[0].textContent, "第1句",
+    "退回去之后字幕没跟着退 —— 旧实现的 seen 去重会把它挡住");
+});
+
+await check("lag 离谱 (取不到 seekable 之类) 时不能把字幕甩飞", async () => {
+  const dom = makeDom();
+  const api = load(dom);
+  assert.equal(api.pick(FIVE, 34.4, 0, 99999), 0, "lag 异常时应停在最早那句, 而不是越界");
+  assert.equal(api.pick([], 0, 0, 0), -1, "空表应返回 -1");
+  assert.equal(api.pick([FIVE[0]], 0, 0, 12), 0, "只有一句时无论 lag 都显示它");
 });
