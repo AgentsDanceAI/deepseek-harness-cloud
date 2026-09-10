@@ -127,3 +127,17 @@ def test_display_name_follows_the_shelf_catalog(signed_in):
         if entry.id in names:
             assert names[entry.id] == entry.name, f"{entry.id} 两处叫法不一致"
     assert products.get("dsh").name != names["dsh"], "products.name 还是旧的, 这条用例才有意义"
+
+
+def test_stack_products_get_a_real_autologin_secret(signed_in):
+    """栈产品的免登录口令不能是空的。
+
+    2026-09-10 本机跑 hermes 撞到: `_containers` 没把 secret 传下去, 于是
+    `HERMES_PASS` 是空串, 免登录脚本看到空口令直接 exit 0 不写就绪标记 ——
+    三个容器全起来了、`/__dsh_ready` 永远 503、页面永远「启动中」, 一行错都没有。
+    与 2026-09-09 Dify 那次同一形状 (见 dsh-workspace-readiness-gate)。
+    """
+    plan = signed_in.get("/api/local/plan/hermes").json()
+    main = next(c for c in plan["containers"] if c["role"] == "main")
+    assert main["env"].get("HERMES_PASS"), "免登录口令是空的 —— 就绪探针会永远 503"
+    assert main["env"].get("HERMES_USER") == "owner"

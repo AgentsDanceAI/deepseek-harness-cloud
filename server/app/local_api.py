@@ -24,7 +24,7 @@ from dataclasses import asdict
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from . import apps_catalog, config, products, work_access
+from . import apps_catalog, config, products, security, work_access
 from .accounts import resolve_user
 
 router = APIRouter(prefix="/api/local", tags=["local"])
@@ -74,10 +74,19 @@ def _locked_for(p: products.Product, user: dict) -> bool:
     return products.is_locked(p.id) and not work_access.can_open_locked(user, p.id)
 
 
-def _containers(p: products.Product) -> list[dict]:
-    """主容器 + 伴随容器, 按启动顺序。"""
+def _containers(p: products.Product, secret: str) -> list[dict]:
+    """主容器 + 伴随容器, 按启动顺序。
+
+    `secret` 就是云端那一份 `security.stack_secret(user_id)` —— 栈产品用它派生
+    应用内的免登录口令 (见 products.autologin_password)。**必须给**: 传空串的话
+    口令是空的, 而 hermes 的免登录脚本看到空口令会直接 exit 0 不写就绪标记, 于是
+    容器全起来了、`/__dsh_ready` 永远 503、页面永远"启动中" —— 一行错都没有
+    (2026-09-10 本机跑 hermes 撞上; 与 2026-09-09 Dify 那次同一形状)。
+
+    它不是 AI Store 的凭据, 是这个工作台自己的口令, 与云端下发给容器的是同一个值。
+    """
     out: list[dict] = []
-    for ic in products.resolve_init_containers(p.init_containers, token=TOKEN_PLACEHOLDER):
+    for ic in products.resolve_init_containers(p.init_containers, secret, TOKEN_PLACEHOLDER):
         d = asdict(ic)
         d.update(role="init", network="own")
         out.append(d)
@@ -90,13 +99,13 @@ def _containers(p: products.Product) -> list[dict]:
             # boot_script 是一段 shell, 不是 argv —— 必须由 sh -c 执行。
             "cmd": ["sh", "-c", products.boot_script(p.id)],
             "args": [],
-            "env": products.env_for(p.id, TOKEN_PLACEHOLDER),
+            "env": products.env_for(p.id, TOKEN_PLACEHOLDER, secret),
             "port": p.port,
             "network": "own",
             "run_as_user": p.run_as_user,
         }
     )
-    for sc in p.sidecars:
+    for sc in products.resolve_sidecars(p.sidecars, secret, TOKEN_PLACEHOLDER):
         d = asdict(sc)
         d.update(role="sidecar", network="share:main")
         d["env"] = dict(d.get("env") or ())
@@ -150,5 +159,5 @@ def plan(product_id: str, user: dict = Depends(resolve_user)):
         "reason": why,
         "host_aliases": list(p.host_aliases),
         "seeds": [list(s) for s in p.seeds],
-        "containers": _containers(p),
+        "containers": _containers(p, security.stack_secret(user["id"])),
     }
