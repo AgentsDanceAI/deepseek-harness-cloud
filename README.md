@@ -87,11 +87,9 @@ Two things worth knowing before you start:
 - **The workspace images are `linux/amd64` only.** An x86 box (the 5090 case)
   runs them natively; Apple Silicon runs them under emulation—it works, it is
   just noticeably slower. The runner says so rather than letting you guess.
-- **Some images are still private on ghcr.** `agentui`, `comfy-local`,
-  `codecli-local`, `od-local`, `autogen-studio`, `dsh-local`, `coze-assets` and
-  `cloudcli-local` are public; `pi-web-ui`, `langchain-agent`,
-  `agent-frameworks` and `openmausbot` are not, so those slots cannot be pulled
-  from outside the org yet.
+- **Every image is public** (since 2026-09-10): the exact tag each slot
+  references can be pulled anonymously, no ghcr login needed. A contract test
+  pins this, so a new slot whose image was left private turns CI red.
 
 <!-- path:selfhost -->
 

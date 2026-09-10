@@ -10,6 +10,7 @@ import { fetchModels, validateToken, type CloudModel, type CloudUser } from './a
 import { clearToken, loadToken, saveToken } from './auth-store.ts'
 import { CLOUD_BASE, CLOUD_TOKEN_ENV } from './config.ts'
 import { runLoginWindow } from './login-window.ts'
+import { openShelf } from './shelf-window.ts'
 
 /**
  * 网关目录, 由 cloudGate() 在登录成功后拉一次填上。
@@ -78,6 +79,22 @@ export function registerDeepLink(): void {
   app.on('second-instance', () => { bringToFront() })
 }
 
+/**
+ * 登录成功后顺手把货架开出来 —— 打开桌面版先看见十六格, 而不是直接掉进
+ * DeepSeek Harness 一个 agent。DSH 只是货架上的第一格。
+ *
+ * **不 await, 也不让它抛**: 启动流程不该押在 docker 探测或一次目录请求上。
+ * 离线宽限那条路不开货架 —— 那时候连目录都拉不到, 开出来只会是一页错误。
+ */
+function withShelf(session: CloudSession): CloudSession {
+  try {
+    openShelf(session.token)
+  } catch {
+    // 货架开不出来是遗憾, 不是故障: 云端和桌面端该照常能用
+  }
+  return session
+}
+
 export async function cloudGate(): Promise<CloudSession | undefined> {
   registerDeepLink()
   const userDataDir = app.getPath('userData')
@@ -88,7 +105,7 @@ export async function cloudGate(): Promise<CloudSession | undefined> {
       if (user !== undefined) {
         process.env[CLOUD_TOKEN_ENV] = stored.token
         await loadCatalog(stored.token)
-        return { token: stored.token, user }
+        return withShelf({ token: stored.token, user })
       }
       clearToken(userDataDir) // definitively rejected (revoked device, epoch bump)
     } catch {
@@ -104,7 +121,7 @@ export async function cloudGate(): Promise<CloudSession | undefined> {
   saveToken(userDataDir, outcome.token, outcome.user.email)
   process.env[CLOUD_TOKEN_ENV] = outcome.token
   await loadCatalog(outcome.token)
-  return outcome
+  return withShelf(outcome)
 }
 
 /**

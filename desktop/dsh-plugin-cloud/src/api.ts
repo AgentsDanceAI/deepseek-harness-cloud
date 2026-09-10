@@ -124,3 +124,65 @@ export async function fetchModels(token: string): Promise<CloudModel[]> {
   }
   return models
 }
+
+// ── 本机工作台: 目录与启动计划都由服务端下发 ────────────────────────────────
+//
+// 客户端**不留第二份目录**。products.py 已经把 16 格的完整拓扑写成数据, 而镜像
+// tag 一直在动 (2026-09-10 一天重建了五个) —— 客户端抄一份的下场不是报错, 是拉到
+// 一个过期镜像然后一切"正常"。这里只搬运。
+
+/** 目录里的一格: 能不能在本机跑, 不能的话为什么。 */
+export interface LocalCatalogEntry {
+  id: string
+  name: string
+  port: number
+  mem_mb: number
+  /** 'ready' | 'runner_no_stack' —— 只谈**运行器**起不起得动。 */
+  runnable: string
+  reason: string
+  /** 上了锁而这个账号没有通行证。与 runnable 是两件事: 11 个容器的栈, 买了也起不动。 */
+  locked: boolean
+  containers: number
+}
+
+export interface PlanContainer {
+  role: 'init' | 'main' | 'sidecar'
+  name: string
+  image_ref: string
+  cmd: string[]
+  args: string[]
+  env: Record<string, string>
+  /** 'own' | 'share:main' —— 伴随容器共享主容器的网络命名空间 (k8s pod 语义),
+   *  上游那些写死 127.0.0.1 的配置全靠这一条成立。 */
+  network: string
+  port?: number
+  run_as_user?: number | null
+}
+
+export interface LocalPlan {
+  product: string
+  name: string
+  port: number
+  ready_path: string
+  gateway: string
+  /** 计划里凡是该填令牌的地方都是这个串。计划本身不含凭据。 */
+  token_placeholder: string
+  runnable: string
+  reason: string
+  host_aliases: string[]
+  seeds: Array<[string, string]>
+  containers: PlanContainer[]
+}
+
+export async function fetchLocalCatalog(token: string): Promise<LocalCatalogEntry[]> {
+  const { status, json } = await request('/api/local/catalog', { token })
+  if (status !== 200) throw new CloudApiError(status, 'local_catalog_unavailable')
+  return Array.isArray(json.products) ? json.products as LocalCatalogEntry[] : []
+}
+
+export async function fetchLocalPlan(token: string, productId: string): Promise<LocalPlan> {
+  const { status, json } = await request(`/api/local/plan/${encodeURIComponent(productId)}`, { token })
+  // 402 = 这一格上了锁而这个账号没买通行证。调用方要把它和"起不动"分开显示。
+  if (status !== 200) throw new CloudApiError(status, String(json.detail ?? 'local_plan_unavailable'))
+  return json as unknown as LocalPlan
+}

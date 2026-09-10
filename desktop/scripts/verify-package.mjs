@@ -14,7 +14,9 @@
 import { closeSync, existsSync, openSync, readFileSync, readSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 
-const REQUIRED = ['login.html', 'login-preload.cjs']
+// 货架的两个资源和登录墙同一个下场: electron-builder 的 files 是允许清单,
+// 漏掉不会报错 —— 用户看到的是一个空白窗口。所以一起钉在这里。
+const REQUIRED = ['login.html', 'login-preload.cjs', 'shelf.html', 'shelf-preload.cjs']
 const outDir = process.argv[2]
 if (!outDir || !existsSync(outDir)) {
   console.error(`verify-package: output dir not found: ${outDir}`)

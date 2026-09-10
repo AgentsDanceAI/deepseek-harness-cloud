@@ -80,7 +80,12 @@ cpSync(join(desktopDir, 'dsh-plugin-cloud', 'src'),
   join(dest, 'dsh-plugin-desktop', 'src', 'cloud'), { recursive: true })
 cpSync(join(desktopDir, 'dsh-plugin-cloud', 'assets'),
   join(dest, 'dsh-plugin-desktop', 'build', 'cloud'), { recursive: true })
-console.log('assemble: copied dsh-plugin-cloud sources and assets')
+// 覆盖层自己的用例要落进 tests/ 才跑得到: 上游 vitest 的 include 是
+// `tests/**/*.spec.ts`, 放在 src/cloud/ 旁边的 spec 一个都不会被收进去 ——
+// 而"用例文件存在但从没运行过"是最难发现的那种假绿。
+cpSync(join(desktopDir, 'dsh-plugin-cloud', 'tests'),
+  join(dest, 'dsh-plugin-desktop', 'tests', 'cloud'), { recursive: true })
+console.log('assemble: copied dsh-plugin-cloud sources, assets and tests')
 
 // 4b. electron-builder's `files` is an explicit ALLOW-LIST: upstream names its
 // icons under build/ one by one, so copying assets into build/cloud/ is not

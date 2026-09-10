@@ -1,0 +1,99 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>AI Store</title>
+<style>
+  :root { color-scheme: light dark; --line:#e5e9f0; --muted:#6b7280; --accent:#5d7bf9; --ok:#16a34a; --bad:#dc2626; }
+  @media (prefers-color-scheme: dark) { :root { --line:#2a2f3a; --muted:#8b93a1; } }
+  body { margin:0; font:14px/1.55 -apple-system, "Segoe UI", system-ui, sans-serif; }
+  header { padding:22px 26px 10px; }
+  h1 { margin:0; font-size:19px; }
+  .lede { margin:6px 0 0; color:var(--muted); }
+  .banner { margin:14px 26px 0; padding:11px 14px; border:1px solid var(--line); border-radius:9px; color:var(--muted); }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(268px,1fr)); gap:12px; padding:16px 26px 30px; }
+  .card { border:1px solid var(--line); border-radius:11px; padding:13px 15px; display:flex; flex-direction:column; gap:7px; }
+  .name { font-weight:600; }
+  .why { color:var(--muted); font-size:12.5px; min-height:1.4em; }
+  .row { display:flex; gap:8px; align-items:center; margin-top:2px; }
+  button { font:inherit; padding:5px 13px; border-radius:7px; border:1px solid var(--line); background:transparent; cursor:pointer; }
+  button.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+  button[disabled] { opacity:.45; cursor:default; }
+  .dot { width:7px; height:7px; border-radius:50%; background:var(--ok); display:inline-block; }
+  .log { font:11.5px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; color:var(--muted);
+         white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+</style>
+
+<header>
+  <h1>本机工作台</h1>
+  <p class="lede">跑在这台机器上，不占云端机时。账号、模型网关和计费仍走 AI Store。</p>
+</header>
+<div id="banner" class="banner" hidden></div>
+<div id="grid" class="grid"></div>
+
+<script>
+  const grid = document.getElementById('grid')
+  const banner = document.getElementById('banner')
+  const logs = new Map()
+
+  window.aiStoreShelf.onProgress(({ id, line }) => {
+    logs.set(id, line)
+    const el = document.querySelector(`[data-log="${id}"]`)
+    if (el) el.textContent = line
+  })
+
+  function card(p) {
+    const el = document.createElement('div')
+    el.className = 'card'
+    const live = typeof p.port_local === 'number'
+    // 「起不动」和「没买」是两件事: 11 个容器的栈, 买了通行证照样起不动。
+    const why = p.locked ? '要先买这一格的通行证' : (p.reason || (live ? `跑在 127.0.0.1:${p.port_local}` : '可以在本机跑'))
+    el.innerHTML = `
+      <div class="name">${live ? '<span class="dot"></span> ' : ''}${p.name}</div>
+      <div class="why">${why}</div>
+      <div class="row"></div>
+      <div class="log" data-log="${p.id}">${logs.get(p.id) ?? ''}</div>`
+    const row = el.querySelector('.row')
+    const runnable = p.runnable === 'ready' && !p.locked
+    if (live) {
+      const open = document.createElement('button')
+      open.className = 'primary'; open.textContent = '打开'
+      open.onclick = () => window.aiStoreShelf.open(p.id)
+      const halt = document.createElement('button')
+      halt.textContent = '停止'
+      halt.onclick = async () => { halt.disabled = true; await window.aiStoreShelf.stop(p.id); refresh() }
+      row.append(open, halt)
+    } else {
+      const run = document.createElement('button')
+      run.className = 'primary'
+      run.textContent = '在本机启动'
+      run.disabled = !runnable
+      run.onclick = async () => {
+        run.disabled = true
+        run.textContent = '启动中…'
+        const out = await window.aiStoreShelf.start(p.id)
+        if (!out.ok) {
+          el.querySelector('.why').textContent = out.error
+          run.textContent = '重试'
+          run.disabled = false
+          return
+        }
+        refresh()
+      }
+      row.append(run)
+    }
+    return el
+  }
+
+  async function refresh() {
+    const out = await window.aiStoreShelf.list()
+    banner.hidden = out.docker && !out.error
+    if (out.error) banner.textContent = `目录拉不到：${out.error}`
+    else if (!out.docker) {
+      // 没装 Docker 不是错误状态 —— 云端那条路一直都在, 这里只说明少了什么。
+      banner.textContent = '这台机器上没有可用的 Docker，所以暂时只能用云端工作台。装好 Docker Desktop 再回来即可。'
+    }
+    grid.replaceChildren(...out.products.map(card))
+  }
+
+  refresh()
+  setInterval(refresh, 15000)
+</script>
