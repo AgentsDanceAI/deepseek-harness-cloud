@@ -131,3 +131,24 @@ export async function running(): Promise<RunningSlot[]> {
     return { product: name.slice(CONTAINER_PREFIX.length), status, ports }
   })
 }
+
+/**
+ * 从 `preferred` 起找一个本机能绑的端口。
+ *
+ * 不直接用计划里那个: 端口是**容器内**的, 两格撞车很正常 (agentui 那几格都是
+ * 8080)。而 docker 端口被占时的报错发生在 `docker run` 之后 —— 容器已经建了,
+ * 用户看到的是一行 bind 失败的红字, 而不是"换一个端口就好"。
+ */
+export async function freePort(preferred: number, tries = 50): Promise<number> {
+  const { createServer } = await import('node:net')
+  const usable = (port: number): Promise<boolean> => new Promise(resolve => {
+    const server = createServer()
+    server.once('error', () => { resolve(false) })
+    server.once('listening', () => { server.close(() => { resolve(true) }) })
+    server.listen(port, '127.0.0.1')
+  })
+  for (let port = preferred; port < preferred + tries; port += 1) {
+    if (await usable(port)) return port
+  }
+  throw new Error(`no free port near ${preferred}`)
+}
