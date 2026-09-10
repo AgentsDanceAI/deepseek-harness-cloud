@@ -47,7 +47,20 @@ jobs:
         working-directory: desktop/build/upstream
         run: |
           corepack yarn typecheck
-          corepack yarn test --run
+          # 上游三个 spec 只在 POSIX 上成立, 在 Windows runner 上必红 (2026-09-10
+          # 重建桌面端时撞上, 三条都不是我们的代码):
+          #   release-mac / verify-mac-release  —— 断言 '/repo'、'/private/tmp/...',
+          #     Windows 上拿到 'D:\\repo'、'\\private\\tmp\\...'
+          #   updates.spec.ts —— 断言状态文件 mode 是 0o600, NTFS 上报 0o666
+          # 这三个文件在同一条工作流的两个 macOS job 里跑的是同一个提交, 覆盖没丢;
+          # 而 Windows 独有的那几个 (package-win / verify-win-installer /
+          # windows-pwsh-sandbox) 照跑 —— 那才是只有 Windows 能给的覆盖。
+          # vitest 配置里 include 只收 tests/**/*.spec.ts, 所以就算 --exclude 覆盖了
+          # 默认排除项也波及不到 node_modules。
+          corepack yarn test --run \
+            --exclude '**/release-mac.spec.ts' \
+            --exclude '**/verify-mac-release.spec.ts' \
+            --exclude '**/updates.spec.ts'
       - name: Build
         working-directory: desktop/build/upstream/dsh-plugin-desktop
         run: corepack yarn build
