@@ -390,3 +390,49 @@ await check("没点过的时候不能拆 —— 那只是自动播放策略, 挂
   assert.equal(dom.hlsInstances[0].destroyed, false,
     "自动播放被拒就把播放器拆了 —— 点一下本来能救回来的");
 });
+
+/* ── 卡住时该等还是该跳 ─────────────────────────────────────────────────────
+ *
+ * 跳是有代价的: 把已经缓冲的内容全丢掉, 而且本身就是一次可见的跳段。以前只要卡住
+ * 6 秒就无条件跳, 结果是个**自我维持的循环**(2026-09-10 实测, live_incidents 记下的):
+ *   产出空档耗干缓冲 -> 冻 6 秒 -> 跳 -> 跳把缓冲清空 -> 下一个空档立刻又见底 -> 再冻。
+ *   (那批 waiting 事件的"落后"恒等于 12.0 —— 正是跳过去的落点, 指纹很清楚。)
+ * 观众感受到的就是"一卡一卡"。
+ */
+console.log("卡住时该等还是该跳:");
+
+await check("只是暂时没数据 -> 催拉流, **不跳** (跳会把缓冲清空, 下一个空档又见底)", async () => {
+  const dom = makeDom();
+  load(dom);
+  await tick(); await tick();
+  const inst = dom.hlsInstances[0];
+  inst.liveSyncPosition = 100;
+  dom.video.paused = false;
+  dom.video.currentTime = 95;         // 只落后同步点 5 秒 —— 还在窗口里
+  dom.window.__tick(1000, 7);
+  assert.equal(dom.video.currentTime, 95,
+    "还在窗口里就跳了 —— 缓冲被清空, 下一个空档马上又见底, 于是一卡一卡");
+  assert.equal(inst.restarted, true, "连拉流都没催");
+});
+
+await check("掉得太远 -> 还是要跳, 否则永远动不了", async () => {
+  const dom = makeDom();
+  load(dom);
+  await tick(); await tick();
+  const inst = dom.hlsInstances[0];
+  inst.liveSyncPosition = 100;
+  dom.video.paused = false;
+  dom.video.currentTime = 60;         // 落后同步点 40 秒, 快掉出窗口了
+  dom.window.__tick(1000, 7);
+  assert.equal(dom.video.currentTime, 100, "掉这么远还不跳, 观众只能自己刷新");
+});
+
+await check("缓冲必须大于实测的最大空档 9.2 秒", () => {
+  const src = readFileSync(SRC, "utf8");
+  const n = +/liveSyncDuration:\s*(\d+)/.exec(src)[1];
+  assert.ok(n > 9.2, `缓冲 ${n} 秒盖不住 9.2 秒的空档`);
+  const behind = +/BEHIND_LIVE\s*=\s*(\d+)/.exec(src)[1];
+  assert.equal(behind, n, "Safari 那条路的 BEHIND_LIVE 与 liveSyncDuration 不一致");
+  const mx = +/liveMaxLatencyDuration:\s*(\d+)/.exec(src)[1];
+  assert.ok(mx > n && mx < 38, `liveMaxLatencyDuration ${mx} 要在 ${n} 和窗长 38.6 之间`);
+});
