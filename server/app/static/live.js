@@ -61,6 +61,33 @@ window.LivePlayer = (function () {
   }
   var VER = clientVer();
 
+  /* 出事那一刻播放器手里到底有什么。**这三个数能直接定死是哪一类问题**, 不用猜:
+   *   buf  = 播放头前面还缓冲着多少秒。0 = 断粮; 大 = 有数据却播不动(空洞/解码)。
+   *   bw   = hls.js 估的下行带宽。这条流约 2.1 Mbps, 低于它就是送不过来。
+   *   rs   = readyState。0/1 = 浏览器认为自己没数据; 4 = 有数据却不动。
+   * 2026-09-10: 我拿服务端指标猜了一晚上观众为什么卡, 每次都猜错。产出健康、
+   * 时间轴连续、我这边带宽 5.2Mbps —— 但这些都不是观众那条路径上的量。 */
+  function snapshot() {
+    var out = [];
+    try {
+      var ahead = 0;
+      if (v && v.buffered) {
+        for (var i = 0; i < v.buffered.length; i++) {
+          if (v.buffered.start(i) <= v.currentTime + 0.1
+              && v.buffered.end(i) > v.currentTime) {
+            ahead = v.buffered.end(i) - v.currentTime;
+          }
+        }
+      }
+      out.push('缓冲' + ahead.toFixed(1) + 's');
+      if (hls && isFinite(hls.bandwidthEstimate)) {
+        out.push('带宽' + (hls.bandwidthEstimate / 1e6).toFixed(1) + 'Mbps');
+      }
+      if (v) out.push('rs' + v.readyState);
+    } catch (e) { /* 观测坏了不该影响播放 */ }
+    return out.join(' ');
+  }
+
   function reportIssue(kind, secs, detail) {
     try {
       var now = Date.now();
@@ -74,7 +101,8 @@ window.LivePlayer = (function () {
           kind: kind,
           secs: secs || 0,
           lag: lag(),                       // 出事时观众落后直播边缘多少
-          detail: (String(detail || '') + ' [v' + VER + ']').slice(0, 200),
+          detail: (String(detail || '') + ' | ' + snapshot()
+                   + ' [v' + VER + ']').slice(0, 200),
         }),
       }).catch(function () { /* 观测坏了不该影响播放 */ });
     } catch (e) { /* 同上 */ }
