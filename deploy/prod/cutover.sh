@@ -101,6 +101,8 @@ block = f"""
 # ── DHC sites v3 BEGIN ── (managed by deepseek-harness-cloud cutover.sh; do not hand-edit)
 {primary} {{
 \treverse_proxy dhc-server:8100 {{
+\t\tlb_try_duration 20s
+\t\tlb_try_interval 250ms
 \t\tflush_interval -1
 \t}}
 }}
@@ -117,10 +119,15 @@ www.{primary} {{
 \thandle @pwa {{
 \t\t@rootdoc path / /index.html
 \t\trewrite @rootdoc /api/work/shell
-\t\treverse_proxy dhc-server:8100
+\t\treverse_proxy dhc-server:8100 {{
+\t\t\tlb_try_duration 20s
+\t\t\tlb_try_interval 250ms
+\t\t}}
 \t}}
 \thandle {{
 \t\tforward_auth dhc-server:8100 {{
+\t\t\tlb_try_duration 20s
+\t\t\tlb_try_interval 250ms
 \t\t\turi /api/work/route
 \t\t\tcopy_headers X-Work-Upstream
 \t\t\t# Strip the WS Upgrade header from the AUTH subrequest: dsh's chat
@@ -145,6 +152,8 @@ if preview:
 # 谁都能手改的反代配置里。
 {preview} {{
 \treverse_proxy dhc-server:8100 {{
+\t\tlb_try_duration 20s
+\t\tlb_try_interval 250ms
 \t\tflush_interval -1
 \t}}
 }}
@@ -160,6 +169,8 @@ if old:
 \t@passthrough path /api/* /llm/* /releases/*
 \thandle @passthrough {{
 \t\treverse_proxy dhc-server:8100 {{
+\t\t\tlb_try_duration 20s
+\t\t\tlb_try_interval 250ms
 \t\t\tflush_interval -1
 \t\t}}
 \t}}
