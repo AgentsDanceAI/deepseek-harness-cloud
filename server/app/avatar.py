@@ -286,6 +286,13 @@ async def avatar_say(request: Request, user: dict = Depends(resolve_user)):
         ],
         # 电话里的一句话。放开了她会说成一段稿子, 而那要读上一分钟 (还按分钟计费)。
         "max_tokens": 200,
+        # ⛔ 关思考。2026-09-10 实测: 默认模型会吐 reasoning_content, 而 max_tokens 是
+        # **共享预算** —— 思考吃掉多少, 正文就少多少。同一句"现在是几点啦", 思考长度
+        # 在 0 / 40 / 713 字之间乱跳, 一旦越过 200 正文就是空的, 前端显示"她没想出该
+        # 说什么"。电话里本来也不该思考: 实测关掉后 completion_tokens 从 143/31/38 降到
+        # 20/14, 答案质量没差, 又快又省。
+        # (网关只认 thinking.type=disabled 这一种写法。)
+        "thinking": {"type": "disabled"},
         "temperature": 0.7,
         "stream": True,
         "stream_options": {"include_usage": True},
@@ -296,6 +303,7 @@ async def avatar_say(request: Request, user: dict = Depends(resolve_user)):
         # 名字不能叫 raw —— 下面解析 SSE 那行已经占了这个名字, 撞上就把原始
         # JSON 当成她要说的话 (测试当场抓到)。
         pending, buf, usage, said_anything = "", "", {}, False
+        reasoned = 0  # 思考字数。**不下发**, 只在没出正文时用来判因
         try:
             async with httpx.AsyncClient(timeout=httpx.Timeout(90.0, connect=10.0)) as c:
                 async with c.stream(
@@ -325,7 +333,9 @@ async def avatar_say(request: Request, user: dict = Depends(resolve_user)):
                             continue
                         if d.get("usage"):
                             usage = d["usage"]
-                        delta = ((d.get("choices") or [{}])[0].get("delta") or {}).get("content") or ""
+                        dl = (d.get("choices") or [{}])[0].get("delta") or {}
+                        reasoned += len(dl.get("reasoning_content") or dl.get("reasoning") or "")
+                        delta = dl.get("content") or ""
                         if not delta:
                             continue
                         pending += delta
@@ -338,6 +348,16 @@ async def avatar_say(request: Request, user: dict = Depends(resolve_user)):
             if buf.strip():  # 收尾那半句
                 said_anything = True
                 yield "data: " + json.dumps({"text": buf.strip()}, ensure_ascii=False) + "\n\n"
+            if not said_anything:
+                # **留痕**: 上游 200、流也正常收完, 却一个正文字都没有。原先这条路
+                # 服务端一行日志都不打 —— 故障只存在于用户的截图里。思考字数一起记,
+                # 因为"思考吃光了 max_tokens"是已知的一种成因。
+                log.warning(
+                    "[avatar] 上游没给正文 (思考 %d 字, completion_tokens=%s) "
+                    "—— 前端会显示「她没想出该说什么」",
+                    reasoned,
+                    usage.get("completion_tokens"),
+                )
         except httpx.HTTPError as e:
             # **一定要留痕**: 先前这条路是静默的, 表现只是"她不说话" —— 而那与
             # 模型没话说、与网络慢, 从外面看一模一样。

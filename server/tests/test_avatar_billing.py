@@ -174,8 +174,11 @@ def test_a_websocket_from_another_site_is_refused(secret, monkeypatch):
     assert accounts._cookie_write_allowed(_EvilWS()) is False
 
 
-def _fake_upstream(monkeypatch, capture: dict, deltas=("你好呀。", "今天怎么样？")):
-    """把上游 chat/completions 换成假的**流式**响应, 把请求体留下来看。"""
+def _fake_upstream(monkeypatch, capture: dict, deltas=("你好呀。", "今天怎么样？"), reasoning=()):
+    """把上游 chat/completions 换成假的**流式**响应, 把请求体留下来看。
+
+    reasoning: 先吐的 reasoning_content。默认空 —— 老用例的行为一个字都不变。
+    """
     import json as _json
 
     import httpx
@@ -184,6 +187,10 @@ def _fake_upstream(monkeypatch, capture: dict, deltas=("你好呀。", "今天�
         status_code = 200
 
         async def aiter_lines(self):
+            for rd in reasoning:
+                yield "data: " + _json.dumps(
+                    {"choices": [{"delta": {"reasoning_content": rd}}]}, ensure_ascii=False
+                )
             for d in deltas:
                 yield "data: " + _json.dumps({"choices": [{"delta": {"content": d}}]}, ensure_ascii=False)
             yield "data: " + _json.dumps({"usage": {"prompt_tokens": 120, "completion_tokens": 8}})
@@ -357,3 +364,62 @@ def test_she_never_reads_the_models_scratchpad_aloud():
     assert out == "你好" and held == "<think>让我想想", (out, held)
     # 攒着的那半截接上闭合之后才放出来
     assert _speakable(held + "</think>好的")[0] == "好的"
+
+
+def test_say_turns_thinking_off(secret, monkeypatch):
+    """电话里**不思考**。
+
+    2026-09-10 实测: 默认模型会吐 reasoning_content, 而 max_tokens 是共享预算 ——
+    思考吃掉多少正文就少多少。同一句"现在是几点啦", 思考长度在 0 / 40 / 713 字之间
+    乱跳; 越过 200 那次正文就是空的, 用户看到的是"她没想出该说什么"。
+    关掉之后 completion_tokens 从 143/31/38 降到 20/14, 答案质量没差。
+    """
+    from fastapi.testclient import TestClient
+
+    from app import config, credits
+    from app.main import app
+
+    monkeypatch.setattr(config, "UPSTREAM_BASE_URL", "https://upstream.test/v1")
+    monkeypatch.setattr(config, "UPSTREAM_API_KEY", "k")
+    cap: dict = {}
+    _fake_upstream(monkeypatch, cap)
+    monkeypatch.setattr(credits, "spend", lambda *a, **kw: None)
+
+    with TestClient(app) as c:
+        signup(c, "avatar-think@example.com")
+        _say(c, text="在吗")
+    assert cap["body"].get("thinking") == {"type": "disabled"}, (
+        "没关思考 —— 思考会吃掉 max_tokens, 正文可能一个字都出不来"
+    )
+
+
+def test_say_leaves_a_trace_when_only_thinking_comes_back(secret, monkeypatch, caplog):
+    """上游 200、流也收完, 却一个正文字都没有时, **服务端必须留一行日志**。
+
+    原先这条路在服务端完全隐形 (错误分支只在上游非 200 时记), 故障只存在于用户的
+    截图里 —— 而"她不说话"和"网络慢"从外面看一模一样。同一个教训这文件里已经吃过
+    一次 (见 httpx.HTTPError 那条的注释), 这里是它漏掉的另一半。
+    """
+    import logging
+
+    from fastapi.testclient import TestClient
+
+    from app import config, credits
+    from app.main import app
+
+    monkeypatch.setattr(config, "UPSTREAM_BASE_URL", "https://upstream.test/v1")
+    monkeypatch.setattr(config, "UPSTREAM_API_KEY", "k")
+    cap: dict = {}
+    # 只吐思考, 不吐正文 —— 就是思考吃光 max_tokens 时的样子
+    _fake_upstream(monkeypatch, cap, deltas=(), reasoning=("嗯……让我想想……" * 30,))
+    monkeypatch.setattr(credits, "spend", lambda *a, **kw: None)
+
+    caplog.set_level(logging.WARNING, logger="dhc.avatar")
+    with TestClient(app) as c:
+        signup(c, "avatar-empty@example.com")
+        got = _say(c, text="现在是几点啦")
+
+    assert [d for d in got if d.get("text")] == [], "上游没给正文, 却下发了文本"
+    hit = [r for r in caplog.records if "没给正文" in r.getMessage()]
+    assert hit, "上游一个正文字都没给, 服务端却一行日志都没留 —— 下次还是只能靠截图"
+    assert "思考" in hit[0].getMessage(), "日志里没带思考字数, 出事时判不了因"
