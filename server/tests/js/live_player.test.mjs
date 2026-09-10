@@ -209,17 +209,26 @@ await check("Safari 原生那条路也要能恢复", async () => {
   dom.video.currentTime = 3;
   dom.video.seekable = { length: 1, end: () => 300 };
   dom.window.__tick(1000, 8);
-  // 退到边缘**之后** 10 秒, 不是贴着边缘 —— 贴着边恢复的话 0.9× 的产出几秒钟
-  // 就又抽干, 变成每几秒跳一次, 比一直卡着还难看。
-  assert.ok(dom.video.currentTime > 280 && dom.video.currentTime <= 291,
+  // 退到边缘**之后** BEHIND_LIVE 秒, 不是贴着边缘 —— 贴着边恢复的话产出一慢
+  // 几秒钟就又抽干, 变成每几秒跳一次, 比一直卡着还难看。
+  // ⚠️ 读源码里的常量, **别写死** —— 写死 10 的那一版在缓冲从 18 调到 5 时红了,
+  //    而那次改动本身是对的。
+  const behind = +/BEHIND_LIVE\s*=\s*(\d+)/.exec(readFileSync(SRC, "utf8"))[1];
+  assert.ok(dom.video.currentTime > 300 - behind - 1
+            && dom.video.currentTime <= 300 - behind + 1,
     `Safari 恢复位置不对 (currentTime=${dom.video.currentTime}), 应该在 edge-10 附近`);
 });
 
-/* 观众落后直播边缘多少秒。2026-09-10 产出侧加了墙钟节流(把 1.65× 压回 1.0×)之后,
-   产出变成锯齿: 句内每 0.5~1.1 秒出片, **句间有 5~8 秒空档**(实测 75 秒内七次,
-   最大 8.0 秒) —— 那是压回 1.0× 的固有代价, 不是 bug。
-   落后不够多, 空档一来缓冲就见底: 画面停、没声音, 过几秒又恢复(线上真出过, 当时是 7 秒)。 */
-const MAX_GAP = 8;      // 句间最大空档, 实测值
+/* 观众落后直播边缘多少秒, **必须大于产出侧的句间空档**。
+   落后不够多, 空档一来缓冲就见底: 画面停、没声音, 过几秒又恢复(线上真出过, 当时
+   落后 7 秒而空档 8 秒)。
+
+   ⚠️ MAX_GAP 是**实测值**, 产出侧一改就要重测:
+     · 2026-09-10 早: 墙钟节流(1.65× 压回 1.0×)带来 5~9.2 秒空档 -> 缓冲曾调到 18;
+     · 2026-09-10 晚: 改成蓄水池按墙钟发布之后 **2.5 秒** -> 缓冲降回 5, 回评论快十几秒。
+   写死 8 / 9.2 的那两版在缓冲降到 5 时红了, 而那次改动本身是对的 —— 所以这个常量
+   只留一处, 并且注明它从哪来。重测法: scratchpad/gap.py(每 0.4 秒轮询 MEDIA-SEQUENCE)。 */
+const MAX_GAP = 2.5;
 await check("缓冲必须大于句间空档 —— 小了就是「播一会儿没声音」", () => {
   const src = readFileSync(SRC, "utf8");
   const m = /liveSyncDuration:\s*(\d+)/.exec(src);
@@ -444,16 +453,6 @@ await check("掉得太远 -> 还是要跳, 否则永远动不了", async () => {
   dom.video.currentTime = 60;         // 落后同步点 40 秒, 快掉出窗口了
   dom.window.__tick(1000, 7);
   assert.equal(dom.video.currentTime, 100, "掉这么远还不跳, 观众只能自己刷新");
-});
-
-await check("缓冲必须大于实测的最大空档 9.2 秒", () => {
-  const src = readFileSync(SRC, "utf8");
-  const n = +/liveSyncDuration:\s*(\d+)/.exec(src)[1];
-  assert.ok(n > 9.2, `缓冲 ${n} 秒盖不住 9.2 秒的空档`);
-  const behind = +/BEHIND_LIVE\s*=\s*(\d+)/.exec(src)[1];
-  assert.equal(behind, n, "Safari 那条路的 BEHIND_LIVE 与 liveSyncDuration 不一致");
-  const mx = +/liveMaxLatencyDuration:\s*(\d+)/.exec(src)[1];
-  assert.ok(mx > n && mx < 38, `liveMaxLatencyDuration ${mx} 要在 ${n} 和窗长 38.6 之间`);
 });
 
 await check("上报要带上客户端版本 —— 否则「用户刷没刷新」只能靠猜", () => {

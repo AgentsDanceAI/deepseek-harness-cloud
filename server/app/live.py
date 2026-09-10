@@ -164,7 +164,9 @@ async def _gpu(method: str, path: str, room: str, **kw):
     传什么都只能操作自己那间。房间隔离全靠这一条, 别让房间名从请求体里进来。
     """
     try:
-        r = await _upstream().request(method, f"{config.LIVE_GPU_URL}{path}", params={"token": _sign(room)}, **kw)
+        r = await _upstream().request(
+            method, f"{config.LIVE_GPU_URL}{path}", params={"token": _sign(room)}, **kw
+        )
     except httpx.HTTPError as e:
         # GPU 节点够不着是**常态之一** (它是别人的共享机, 还跟同事的排序管线挤一张卡)。
         # 不接的话异常一路冒到框架外, 用户看到 500 加一页栈 —— 而这只是"算力那头
