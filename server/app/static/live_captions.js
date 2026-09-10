@@ -143,14 +143,46 @@ window.LiveCaptions = (function () {
 
   /* 在**已有**数据上重算该显示哪一句。半秒一次, 不发请求。
      字幕的推进靠这里而不是靠轮询 —— 三秒一问的话, 换句的时刻最多能差三秒。 */
+  /* 观众此刻播到整条流的第几秒 —— **直接问 video, 别再算了**。
+   *
+   * 每一句都是用 `-output_ts_offset <累计时长>` 编码的(见 live_server 的 _Cutter),
+   * 所以切片里的 PTS 就是绝对时间轴, 而 `video.currentTime` 正是那条轴上的读数。
+   * 也就是说它和 `vt` **是同一个量**, 不需要任何换算。
+   * 实测(2026-09-10, 4 次采样): currentTime 与服务端 edge 的差稳定在 10.4~11.9 秒,
+   * 也就是观众的直播延迟本身 —— 两者确实同轴。
+   *
+   * 原来那条 `edge - lag + elapsed` 是把同一个数从三个估计量里拼出来, 每一项都带
+   * 自己的误差: edge 过了服务端 2 秒缓存、elapsed 是客户端外推、lag 取自
+   * hls.latency(实测偏大 0.5~1.3 秒, 而 **Safari 上 hls 恒为 null, 走的是另一条
+   * 完全不同的代码**)。一句话 8~10 秒, 几秒的系统性偏差就足够读错一句 ——
+   * 创始人 2026-09-10 报"每次读的都是三段里最上面那段", 就是这么来的。
+   *
+   * 返回 null = 这条路不可信(还没起播, 或者时间轴明显不同源), 让调用方回落。 */
+  function viewerVt(snap, elapsed) {
+    if (!video || !isFinite(video.currentTime) || video.currentTime <= 0) return null;
+    var ct = video.currentTime;
+    // 同源性自检: 播放头不该跑到直播边缘前面去, 也不该落后一整场。不满足就说明
+    // 播放器把时间轴重置过(换场重建、原生播放器自己 rebase), 这时宁可回落。
+    var edge = snap.edgeVt + elapsed;
+    if (ct > edge + 5 || ct < edge - 300) return null;
+    return ct;
+  }
+
   function tick() {
     if (!snap || !snap.lines.length) return;
     var elapsed = nowSec() - snap.at, lag = lagBehindEdge();
-    // 服务端给了视频时间就走 vt —— 那条不依赖队列深度和节流。给不出(老版本上游)
-    // 才回落到墙钟那条, 所以客户端可以先发, 不会因为上游还没升级而破。
-    var idx = snap.hasVt
-      ? pickVt(snap.lines, snap.edgeVt, elapsed, lag)
-      : pick(snap.lines, snap.edgeT, elapsed, lag);
+    var idx;
+    var ct = snap.hasVt ? viewerVt(snap, elapsed) : null;
+    if (ct !== null) {
+      // 首选: 直接用播放头在时间轴上的读数, 零换算。
+      idx = pickVt(snap.lines, ct, 0, 0);
+    } else if (snap.hasVt) {
+      // 回落一: 播放头不可信, 用 edge - lag 那条推。
+      idx = pickVt(snap.lines, snap.edgeVt, elapsed, lag);
+    } else {
+      // 回落二: 上游是老版本, 根本没给 vt —— 只能按墙钟推。
+      idx = pick(snap.lines, snap.edgeT, elapsed, lag);
+    }
     if (idx >= 0) render(snap.lines, idx);
   }
 
