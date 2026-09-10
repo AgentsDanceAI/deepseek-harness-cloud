@@ -464,3 +464,43 @@ await check("上报要带上客户端版本 —— 否则「用户刷没刷新�
   // 2026-09-10: 我按新参数分析了半天卡顿, 实际创始人跑的是旧 JS —— 指纹是
   // waiting 的"落后"恒等于旧的 liveSyncDuration。有版本号就不用靠这种间接推断。
 });
+
+/* ── Safari 走的是另一条路 ──────────────────────────────────────────────────
+ *
+ * Safari 原生放 HLS, hls 恒为 null —— 2026-09-10 我给 hls.js 那条分支做的所有修复
+ * (条件跳转、跨洞、缓冲加大) Safari **一条都享受不到**。而它的恢复函数
+ * seekBehindLive() 只在 `edge - BEHIND_LIVE > currentTime` 时才动: Safari 自己就贴在
+ * 边缘后约 6 秒, 而 BEHIND_LIVE 被我一路从 10 调到 18, 条件恒为假, 等于什么都没做。
+ * 创始人: "safari 卡住不动, chrome 正常"。
+ */
+console.log("Safari 原生 HLS:");
+
+await check("卡住时必须**往前**挪 —— 往回退等于什么都没做", async () => {
+  const dom = makeDom({ nativeHls: true });
+  load(dom);
+  await tick(); await tick();
+  dom.video.paused = false;
+  // Safari 典型状态: 贴在边缘后 6 秒, 而 BEHIND_LIVE 是 18
+  dom.video.seekable = { length: 1, end: () => 200 };
+  dom.video.buffered = { length: 0, start: () => 0, end: () => 0 };
+  dom.video.currentTime = 194;
+  dom.window.__tick(1000, 7);
+  assert.ok(dom.video.currentTime > 194,
+    `卡住了却没往前挪 (currentTime=${dom.video.currentTime}) —— ` +
+    "edge-18 比它还靠后, 旧的 seekBehindLive() 条件恒为假, Safari 会永远冻着");
+  assert.ok(dom.video.currentTime < 200, "挪过头到直播边缘之外了");
+});
+
+await check("Safari 也要能跨洞 (v.buffered 两个浏览器都有)", async () => {
+  const dom = makeDom({ nativeHls: true });
+  load(dom);
+  await tick(); await tick();
+  dom.video.paused = false;
+  dom.video.seekable = { length: 1, end: () => 200 };
+  dom.video.currentTime = 190;
+  // 播放头卡在洞里, 洞后面 192.5 起还有一段
+  dom.video.buffered = { length: 2, start: (i) => [180, 192.5][i], end: (i) => [190, 199][i] };
+  dom.window.__tick(1000, 7);
+  assert.ok(dom.video.currentTime > 192.5 && dom.video.currentTime < 192.7,
+    `没跨到洞后面那段缓冲 (currentTime=${dom.video.currentTime})`);
+});

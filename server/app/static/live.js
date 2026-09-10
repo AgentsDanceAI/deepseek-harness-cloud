@@ -370,6 +370,7 @@ window.LivePlayer = (function () {
     return 0;
   }
 
+  /* 起播时往回退, 把跑道拉开。**只用于起播**, 不能用来救卡住的播放器。 */
   function seekBehindLive() {
     if (!v || !v.seekable || !v.seekable.length) return;
     var edge = v.seekable.end(v.seekable.length - 1);
@@ -377,12 +378,29 @@ window.LivePlayer = (function () {
     var want = Math.max(0, edge - BEHIND_LIVE);
     if (want > v.currentTime) v.currentTime = want;
   }
+
+  /* 卡住时往**前**挪。
+     ⛔ 以前 Safari 那条路卡住了是调 seekBehindLive(), 而它只在
+        `edge - BEHIND_LIVE > currentTime` 时才动 —— Safari 原生播放自己就贴在边缘后
+        约 6 秒(它只留三个目标时长的跑道), 而 BEHIND_LIVE 是 18, 条件恒为假,
+        **等于什么都没做**。于是 Safari 卡住之后没有任何脱困手段, 永远冻着。
+        而 BEHIND_LIVE 从 10 一路调到 18, 只让这个条件更不可能成立 —— 是我把它调坏的。
+        创始人 2026-09-10: "safari 卡住不动, chrome 正常"。 */
+  function seekForwardLive() {
+    if (!v || !v.seekable || !v.seekable.length) return;
+    var edge = v.seekable.end(v.seekable.length - 1);
+    if (!isFinite(edge) || edge <= v.currentTime + 0.2) return;
+    var want = Math.max(v.currentTime + 1, edge - BEHIND_LIVE);
+    v.currentTime = Math.min(want, edge - 0.5);
+  }
   var lastT = -1, stuckFor = 0;
   setInterval(function () {
     if (!v || v.paused || !playingUrl) { stuckFor = 0; lastT = -1; return; }
     if (v.currentTime !== lastT) { lastT = v.currentTime; stuckFor = 0; return; }
     if (++stuckFor < STUCK_TICKS) return;
-    reportIssue('stall', stuckFor, '画面冻住, 跳回直播边缘');
+    // ⚠️ 报的秒数是**阈值**不是真实冻结时长(卡死检测到 6 秒就动手了)。真实时长
+    //    要看落后量涨了多少。以前写 6.0 会让人以为每次都正好冻 6 秒。
+    reportIssue('stall', stuckFor, (hls ? '' : 'Safari ') + '画面冻住(阈值6s)');
     stuckFor = 0;
     // 跳到直播边缘 —— 卡住期间落下的那几十秒没有追的价值, 观众要看的是"现在"。
     try {
@@ -401,9 +419,12 @@ window.LivePlayer = (function () {
           else if (p && isFinite(p)) v.currentTime = p;   // 后面没数据: 只能回同步点
         }
       } else {
-        // Safari 原生放 HLS 时 hls 恒为 null —— 以前这条路**完全没有恢复手段**,
-        // 而创始人用的就是 Mac。
-        seekBehindLive();
+        // Safari 原生放 HLS 时 hls 恒为 null。
+        // v.buffered 两个浏览器都有, 所以跨洞这条对 Safari 一样适用 —— 优先用它,
+        // 它能保住洞后面那段缓冲。跨不了(后面确实没数据)才往前贴近边缘。
+        var nb2 = nextBufferedStart();
+        if (nb2) v.currentTime = nb2 + 0.05;
+        else seekForwardLive();
       }
       tryPlay();
     } catch (e) { /* 跳失败就等下一拍再来 */ }
