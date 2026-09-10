@@ -9,7 +9,7 @@
  * 占位符。
  */
 
-import { BrowserWindow, ipcMain, shell } from 'electron'
+import { app, BrowserWindow, ipcMain, shell } from 'electron'
 import { fileURLToPath } from 'node:url'
 import { fetchLocalCatalog, fetchLocalPlan, type LocalCatalogEntry } from './api.ts'
 import { dockerState, freePort, pull, running, start, stop, type DockerState } from './local-runner.ts'
@@ -129,7 +129,28 @@ export function openShelf(token: string): BrowserWindow {
     return { ok: port !== undefined }
   })
 
+  // DeepSeek Harness 的主窗口是 cloudGate() **返回之后**才建的, 所以它天然盖在
+  // 货架上面 —— 「打开桌面版先看见货架」这句话就不成立了 (2026-09-10 实测: 前台
+  // 是 DSH, 货架在后面, 用户以为货架没打开)。
+  //
+  // 用**事件**而不是定时器: 等那扇窗真的建出来再把货架提上来。只认第一扇非货架
+  // 窗口, 认完就摘掉监听 —— 否则用户后面每开一个工作台窗口, 货架都要抢一次焦点。
+  const raiseShelf = (): void => {
+    if (window.isDestroyed()) return
+    window.moveTop()
+    window.focus()
+  }
+  const onWindowCreated = (_event: unknown, created: BrowserWindow): void => {
+    if (created === window) return
+    app.off('browser-window-created', onWindowCreated)
+    created.once('show', raiseShelf)
+    // 兜底: 有的窗口建出来时已经 show 过了, 'show' 不会再来一次。
+    setTimeout(raiseShelf, 3_000)
+  }
+  app.on('browser-window-created', onWindowCreated)
+
   window.on('closed', () => {
+    app.off('browser-window-created', onWindowCreated)
     for (const channel of IPC_CHANNELS) ipcMain.removeHandler(channel)
   })
   void window.loadFile(fileURLToPath(new URL('../build/cloud/shelf.html', import.meta.url)))
