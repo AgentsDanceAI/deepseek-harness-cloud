@@ -241,6 +241,22 @@ SCHEMA = [
         hidden INTEGER NOT NULL DEFAULT 0,
         created REAL NOT NULL
     )""",
+    # 直播出问题时到底发生了什么。2026-09-10 之前这件事**完全没有记录**: 观众卡了
+    # 几次没人知道(播放器检测到冻住只是自己跳一下, 不上报), 产出什么时候掉到实时
+    # 以下也没人知道(服务端那个 starved 计数在产能不足时恒为 0, 是假信号)。每次报
+    # 障都只能现场架探针去量, 回头查不了。
+    # side: viewer(观众侧, 播放器报的) / server(产出侧, 由轮询上游状态算出来的)。
+    """CREATE TABLE IF NOT EXISTS live_incidents (
+        id TEXT PRIMARY KEY,
+        room TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        side TEXT NOT NULL,
+        user_id TEXT NOT NULL DEFAULT '',
+        secs REAL NOT NULL DEFAULT 0,
+        lag REAL NOT NULL DEFAULT 0,
+        detail TEXT NOT NULL DEFAULT '',
+        created REAL NOT NULL
+    )""",
     "CREATE INDEX IF NOT EXISTS idx_grants_user ON credit_grants(user_id, expires)",
     "CREATE INDEX IF NOT EXISTS idx_usage_user ON usage_log(user_id, created)",
     "CREATE INDEX IF NOT EXISTS idx_orders_user ON orders(user_id, created)",
@@ -253,6 +269,7 @@ SCHEMA = [
     "CREATE INDEX IF NOT EXISTS idx_org_members_user ON org_members(user_id)",
     "CREATE INDEX IF NOT EXISTS idx_org_invites_org ON org_invites(org_id)",
     "CREATE INDEX IF NOT EXISTS idx_live_comments ON live_comments(room, created)",
+    "CREATE INDEX IF NOT EXISTS idx_live_incidents ON live_incidents(room, created)",
 ]
 
 

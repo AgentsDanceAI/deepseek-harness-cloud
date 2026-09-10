@@ -124,6 +124,7 @@ async def status():
         # 直播间挂了不该让整页报错 —— 卡片显示"未开播"就够了。
         log.warning("取直播状态失败: %s", e)
         return JSONResponse({"enabled": True, "live": False, "error": "unreachable"})
+    _sample_rate(d)      # 顺手算产出速率, 掉出实时会记一条
     return JSONResponse(
         {
             "enabled": True,
@@ -497,6 +498,92 @@ def _nick(user: dict) -> str:
     return (head[:2] + "***") if head else "观众"
 
 
+#: ── 直播出问题时记一笔 ──────────────────────────────────────────────────────
+#:
+#: 2026-09-10 之前这件事**完全没有记录**。观众卡了几次没人知道(播放器检测到画面
+#: 冻住只是自己跳一下, 不上报); 产出什么时候掉到实时以下也没人知道 —— 上游那个
+#: `starved` 计数在产能不足时**恒为 0**, 因为它只在我们主动踩刹车导致队列空时才加,
+#: 而产能不足时数字人自己就是瓶颈, 一刻不闲。于是每次报障都只能现场架探针去量,
+#: 回头什么都查不到。这一段就是补这个洞。
+_INCIDENT_KINDS = {
+    "stall",     # 画面冻住 (观众侧)
+    "waiting",   # 缓冲见底, 播放器在等数据 (观众侧) —— "播一会儿没声音"就是这个
+    "fatal",     # 播放器致命错误 (观众侧)
+    "rebuild",   # 换场重建 (观众侧)
+    "autoplay",  # 自动播放被拒 (观众侧)
+    "remuted",   # 被迫退回静音 (观众侧)
+    "slow",      # 产出掉到实时以下 (产出侧)
+    "recovered", # 产出恢复 (产出侧)
+}
+
+
+def _record(kind: str, side: str, *, secs: float = 0.0, lag: float = 0.0,
+            detail: str = "", user_id: str = "") -> None:
+    """记一条直播事件。**绝不能把主流程带崩** —— 观测坏了不该拖垮播放。"""
+    try:
+        with db.tx() as conn:
+            conn.execute(
+                "INSERT INTO live_incidents "
+                "(id, room, kind, side, user_id, secs, lag, detail, created) "
+                "VALUES (?,?,?,?,?,?,?,?,?)",
+                (security.new_id("li_"), config.LIVE_ROOM, kind, side, user_id,
+                 float(secs), float(lag), str(detail)[:200], time.time()),
+            )
+    except Exception as e:
+        log.warning("记直播事件失败 (%s): %s", kind, e)
+
+
+#: 产出速率采样。这一层本来就在轮询上游状态, 顺手拿 edge(直播边缘的视频秒数)算,
+#: 所以**不用改 GPU 侧, 也就不用中断播出**。
+_RATE: dict = {"pts": [], "slow": False}
+_RATE_WINDOW = 150.0     # 采样保留多久
+#: ⚠️ 跨度不够长不判定。节流让产出变成锯齿(句内出片, 句间空 5~8 秒), 短窗会把稳态
+#: 1.000× 读成 0.79× 或 1.4× —— 2026-09-10 我就被这个骗过一次, 拿 45 秒的窗得出过
+#: 相反的结论。
+_RATE_MIN_SPAN = 60.0
+_RATE_BAD = 0.95         # 低于这个算掉出实时
+_RATE_OK = 0.99          # 回到这个才算恢复 (留迟滞, 免得在边界反复报)
+
+
+def _sample_rate(d: dict) -> None:
+    """从上游状态里顺手算产出速率, 掉出实时/恢复各记一条。
+
+    只记**状态转换**, 不是每次采样都写库 —— 否则表会被正常运行时的噪声填满,
+    而真正要回答的问题是"什么时候开始掉的"。
+    """
+    try:
+        pts = _RATE["pts"]
+        if not d.get("live"):
+            pts.clear()
+            return
+        edge = float(d.get("edge") or 0)
+        if edge <= 0:
+            return                       # 上游还没升级, 给不出 edge
+        now = time.time()
+        if pts and edge < pts[-1][1]:    # 换场了: 时间轴从 0 重来, 之前的采样作废
+            pts.clear()
+            _RATE["slow"] = False
+        pts.append((now, edge))
+        while pts and now - pts[0][0] > _RATE_WINDOW:
+            pts.pop(0)
+        if len(pts) < 2:
+            return
+        span = pts[-1][0] - pts[0][0]
+        if span < _RATE_MIN_SPAN:
+            return
+        rate = (pts[-1][1] - pts[0][1]) / span
+        if not _RATE["slow"] and rate < _RATE_BAD:
+            _RATE["slow"] = True
+            _record("slow", "server", secs=span, detail=f"产出 {rate:.3f}x")
+            log.warning("直播产出掉出实时: %.3fx (%.0f 秒窗)", rate, span)
+        elif _RATE["slow"] and rate >= _RATE_OK:
+            _RATE["slow"] = False
+            _record("recovered", "server", secs=span, detail=f"产出 {rate:.3f}x")
+            log.info("直播产出恢复: %.3fx", rate)
+    except Exception as e:
+        log.warning("产出速率采样失败: %s", e)
+
+
 #: 字幕的服务端缓存。观众各自轮询的话, 一百个人就是每秒几十次打到 GPU 上 ——
 #: 而所有人看的是同一场直播, 同一份内容。缓存两秒: 比切片时长 (1 秒) 长一点,
 #: 短到察觉不出延迟。
@@ -522,6 +609,7 @@ async def captions():
         # 上游够不着不该让字幕层报错 —— 观众看到的是画面还在、字幕停住, 那比
         # 整块红字好。
         return JSONResponse({"live": False, "lines": []})
+    _sample_rate(st)     # 字幕是三秒一问的, 采样主要靠这里
     lines = [
         {
             "t": float(x.get("t") or 0),
@@ -544,6 +632,67 @@ async def captions():
     }
     _CAP_CACHE["at"], _CAP_CACHE["data"] = now, data
     return JSONResponse(data)
+
+
+#: 同一个观众同一种事件多久才收第二条。播放器卡住时事件会连着来, 全收就是噪声。
+_REPORT_COOLDOWN_S = 20
+
+
+@router.post("/report")
+async def report(body: dict, user: dict = Depends(resolve_user)):
+    """播放器报一次它遇到的麻烦。登录才收 —— 直播页本来就要登录, 匿名收等于开个写口。
+
+    只收固定几种 kind 和三个数, 不收自由文本以外的任何东西; detail 截断后入库。
+    **失败不报错**: 观测坏了不该让播放页看到红字, 更不该让它重试。
+    """
+    if not _enabled():
+        raise HTTPException(404, "live_disabled")
+    kind = str(body.get("kind", ""))[:32]
+    if kind not in _INCIDENT_KINDS or kind in ("slow", "recovered"):
+        # slow/recovered 是产出侧自己算的, 不接受客户端声称
+        return JSONResponse({"ok": False, "skipped": "bad_kind"})
+    if not rate_limit.allow(f"live-report:{user['id']}:{kind}", 1, _REPORT_COOLDOWN_S):
+        return JSONResponse({"ok": False, "skipped": "too_fast"})
+
+    def _num(key: str) -> float:
+        try:
+            v = float(body.get(key) or 0)
+        except (TypeError, ValueError):
+            return 0.0
+        return v if 0 <= v < 86400 else 0.0
+
+    _record(kind, "viewer", secs=_num("secs"), lag=_num("lag"),
+            detail=str(body.get("detail", ""))[:200], user_id=user["id"])
+    return JSONResponse({"ok": True})
+
+
+@router.get("/incidents")
+async def incidents(hours: float = 6.0, limit: int = 200,
+                    user: dict = Depends(resolve_user)):
+    """最近发生过什么。回答的是"什么时候开始出问题的"。
+
+    不回 user_id —— 要的是"卡了多少次", 不是"谁卡了"。
+    """
+    if not _enabled():
+        raise HTTPException(404, "live_disabled")
+    since = time.time() - max(0.1, min(float(hours or 6), 24 * 14)) * 3600
+    rows = db.query(
+        "SELECT kind, side, secs, lag, detail, created FROM live_incidents "
+        "WHERE room=? AND created>? ORDER BY created DESC LIMIT ?",
+        (config.LIVE_ROOM, since, max(1, min(int(limit or 200), 1000))),
+    )
+    items = [
+        {
+            "kind": r["kind"], "side": r["side"],
+            "secs": float(r["secs"]), "lag": float(r["lag"]),
+            "detail": r["detail"], "t": float(r["created"]),
+        }
+        for r in rows
+    ]
+    tally: dict = {}
+    for it in items:
+        tally[it["kind"]] = tally.get(it["kind"], 0) + 1
+    return JSONResponse({"items": items, "tally": tally, "now": time.time()})
 
 
 @router.get("/comments")

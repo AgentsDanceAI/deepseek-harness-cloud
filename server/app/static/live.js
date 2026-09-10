@@ -31,6 +31,36 @@ window.LivePlayer = (function () {
      控制台里只有一行 NotAllowedError。这就是"有时候打开黑屏"。
      接住之后把整块画面变成一个"点一下播放"的按钮 (.lv-msg 是 pointer-events:none,
      点击会落到舞台上)。 */
+  /* 把播放器遇到的麻烦报给服务端。
+   *
+   * 为什么要有它: 播放器**早就知道**自己什么时候冻住、什么时候在等数据 —— 卡死
+   * 检测每秒一拍, 冻住 6 秒就自己跳一下。但它从来不说, 于是"观众到底卡了几次"这个
+   * 问题一直没人答得上来, 每次报障都只能现场架探针去量, 回头什么都查不到
+   * (创始人 2026-09-10 问到)。
+   *
+   * ⚠️ 失败**完全忽略**: 观测坏了不该在播放页上冒红字, 更不该重试 —— 卡顿的时候
+   *    网络本来就不好, 重试只会雪上加霜。
+   * ⚠️ 同一种事件本地先压一道(服务端还有一道), 卡住时事件是连着来的。 */
+  var lastReport = {};
+  function reportIssue(kind, secs, detail) {
+    try {
+      var now = Date.now();
+      if (lastReport[kind] && now - lastReport[kind] < 20000) return;
+      lastReport[kind] = now;
+      fetch('/api/live/report', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          kind: kind,
+          secs: secs || 0,
+          lag: lag(),                       // 出事时观众落后直播边缘多少
+          detail: String(detail || '').slice(0, 200),
+        }),
+      }).catch(function () { /* 观测坏了不该影响播放 */ });
+    } catch (e) { /* 同上 */ }
+  }
+
   var tapArmed = false;
   function tryPlay() {
     if (!v) return;
@@ -48,6 +78,7 @@ window.LivePlayer = (function () {
         v.muted = true;
         paintSound();
         note(t('remuted'));
+        reportIssue('remuted', 0, '非静音被拒, 退回静音');
         var again = v.play();
         if (again && again.catch) {
           again.catch(function () { note(t('tapplay')); armTap(); });
@@ -55,6 +86,7 @@ window.LivePlayer = (function () {
         return;
       }
       note(t('tapplay'));
+      reportIssue('autoplay', 0, '自动播放被拒, 挂出「点一下」');
       armTap();
     });
   }
@@ -146,6 +178,7 @@ window.LivePlayer = (function () {
       if (d.type === window.Hls.ErrorTypes.NETWORK_ERROR) { hls.startLoad(); return; }
       if (d.type === window.Hls.ErrorTypes.MEDIA_ERROR) { hls.recoverMediaError(); return; }
       retry += 1; playingUrl = '';
+      reportIssue('fatal', 0, String((d && d.details) || 'unknown'));
       note(t('reconnect'));
       setTimeout(refresh, Math.min(30000, 2000 * retry));
     });
@@ -176,7 +209,10 @@ window.LivePlayer = (function () {
         // 地址永远是同一个 index.m3u8, play() 开头的 `url === playingUrl` 守卫
         // 会直接返回, 于是播放器一直卡在废掉的 MSE 缓冲上: 画面全黑, 点一下也
         // 没反应(创始人 2026-09-10 切形象后撞到)。
-        if (d.since && playingSince && d.since !== playingSince) teardown();
+        if (d.since && playingSince && d.since !== playingSince) {
+          reportIssue('rebuild', 0, '换场重建');
+          teardown();
+        }
         note(''); retry = 0; play(d.hls);
         playingSince = d.since || playingSince;
         return d;
@@ -184,10 +220,23 @@ window.LivePlayer = (function () {
       .catch(function () { note(t('reconnect')); return null; });
   }
 
+  /* 缓冲见底: `waiting` 是浏览器**拿不到下一帧**时发的, 这就是"播一会儿没声音,
+     过几秒又有"的精确信号 —— 比卡死检测(要冻住 6 秒才算)灵敏得多, 短暂的一顿也能
+     抓到。配对的 `playing` 给出它到底停了多久。
+     ⚠️ 0.4 秒以下不报: 正常起播和拖进度条都会发 waiting, 全报就是噪声。 */
+  var waitAt = 0;
   if (v) {
+    v.addEventListener('waiting', function () {
+      if (!v.paused && playingUrl) waitAt = Date.now();
+    });
     v.addEventListener('playing', function () {
       note('');
       if (unmute) { unmute.hidden = false; paintSound(); }   // 起播了才给声音开关
+      if (waitAt) {
+        var held = (Date.now() - waitAt) / 1000;
+        waitAt = 0;
+        if (held >= 0.4) reportIssue('waiting', held, '缓冲见底 ' + held.toFixed(1) + ' 秒');
+      }
     });
   }
   /* 声音是**开关**, 不是一次性的。原先点完就 hidden=true, 于是开了再也关不掉
@@ -235,6 +284,7 @@ window.LivePlayer = (function () {
     if (!v || v.paused || !playingUrl) { stuckFor = 0; lastT = -1; return; }
     if (v.currentTime !== lastT) { lastT = v.currentTime; stuckFor = 0; return; }
     if (++stuckFor < STUCK_TICKS) return;
+    reportIssue('stall', stuckFor, '画面冻住, 跳回直播边缘');
     stuckFor = 0;
     // 跳到直播边缘 —— 卡住期间落下的那几十秒没有追的价值, 观众要看的是"现在"。
     try {

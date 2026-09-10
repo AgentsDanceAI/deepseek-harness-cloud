@@ -296,7 +296,18 @@ def test_captions_are_public_and_cached(monkeypatch):
 
 
 def test_captions_do_not_leak_upstream_state(monkeypatch):
-    """这条路没有鉴权 —— 别把队列深度、错误、话术全文顺手带出去。"""
+    """这条路没有鉴权 —— 别把队列深度、错误、话术全文顺手带出去。
+
+    判据是"能不能从公开的东西里推出来", 不是"看着像不像内部数据":
+    · queued / err / lines / person / voice —— 只有上游知道, 一个都不能露。
+    · edge(产出到第几秒) 和 vt(每句从第几秒开始) —— HLS 播放列表本身就是公开的,
+      切片数一数就有, 露出来不多给任何信息。而字幕对齐**必须**靠它们:
+      墙钟那条算法依赖"派单紧跟上一句结束", 被产出侧的墙钟节流打破了
+      (2026-09-10)。
+
+    集合断言是这条测试的价值所在 —— 它挡的是"顺手多回一个字段"。加字段之前
+    先回答上面那个判据。
+    """
 
     async def fake_gpu(method, path, room, **kw):
         return {
@@ -312,8 +323,16 @@ def test_captions_do_not_leak_upstream_state(monkeypatch):
     monkeypatch.setattr(live, "_gpu", fake_gpu)
     monkeypatch.setattr(live, "_CAP_CACHE", {"at": 0.0, "data": None})
     d = TestClient(app).get("/api/live/captions").json()
-    assert set(d) == {"live", "lines"}, f"多回了字段: {set(d) - {'live', 'lines'}}"
-    assert set(d["lines"][0]) == {"t", "kind", "text"}
+    allowed = {"live", "lines", "edge"}
+    assert set(d) == allowed, f"多回了字段: {set(d) - allowed}"
+    assert set(d["lines"][0]) == {"t", "vt", "kind", "text"}
+    # 真正敏感的那几个仍然一个都不能出现 —— 上面的 fake 里全放了
+    body = str(d)
+    for leaked in ("内部错误细节", "完整话术第一句", "source-v3-head", "xiaoxiao", "7"):
+        if leaked == "7":
+            assert "queued" not in d, "队列深度漏出去了"
+            continue
+        assert leaked not in body, f"漏了: {leaked}"
 
 
 def test_captions_survive_an_unreachable_gpu(monkeypatch):
