@@ -140,6 +140,29 @@ def cmd_list(_args) -> int:
     return 0
 
 
+def _pull(image: str) -> str:
+    """拉镜像; 返回跑它要用的 --platform (空串表示本机原生)。
+
+    先按原生拉, 拉不动再退回 linux/amd64 —— 不一上来就写死, 是因为哪天我们出了
+    arm64 镜像, 写死的那版会让 M 系机器继续白白走模拟。
+
+    必须有这个回退: Apple Silicon 上拉一个只有 amd64 manifest 的镜像**会直接失败**,
+    不是"慢一点" —— `no matching manifest for linux/arm64/v8`。
+    """
+    r = subprocess.run(["docker", "pull", image], capture_output=True, text=True)
+    if r.returncode == 0:
+        print(r.stdout.strip().splitlines()[-1] if r.stdout.strip() else "")
+        return ""
+    err = (r.stderr or "") + (r.stdout or "")
+    if "no matching manifest" not in err and "no match for platform" not in err:
+        print(err.strip()[-500:], file=sys.stderr)
+        die("拉不动。镜像可见性见 README, 网络问题请重试。")
+    print("  本机架构没有原生镜像, 改用 linux/amd64 模拟运行 (会慢一些)")
+    if subprocess.run(["docker", "pull", "--platform", "linux/amd64", image]).returncode != 0:
+        die("模拟架构也拉不动 —— 确认 Docker Desktop 里开了 Rosetta / 多架构支持。")
+    return "linux/amd64"
+
+
 def cmd_run(args) -> int:
     slot = args.product
     tok = _token()
@@ -162,12 +185,15 @@ def cmd_run(args) -> int:
 
     image = main["image_ref"]
     print(f"==> 拉镜像 {image} (第一次会久一点)")
-    if subprocess.run(["docker", "pull", image]).returncode != 0:
-        die("拉不动。这几个镜像里有一部分还没设成公开, 见 README 的「镜像可见性」。")
+    platform = _pull(image)
 
     env = {k: _fill(v, tok, ph) for k, v in (main.get("env") or {}).items()}
     home = env.get("DSH_AGENT_HOME") or env.get("HOME") or "/home/agent"
-    cmd = ["run", "-d", "--name", name, "-p", f"{port}:{plan['port']}"]
+    cmd = ["run", "-d", "--name", name, "-p", f"127.0.0.1:{port}:{plan['port']}"]
+    # 拉的时候用了哪个 platform, 跑的时候必须一致 —— 否则 docker 会去找一个本机
+    # 架构的镜像, 而那个镜像根本不存在。
+    if platform:
+        cmd += ["--platform", platform]
     cmd += ["-v", f"aistore-{slot}-data:{home}"]
     if main.get("run_as_user") is not None:
         cmd += ["--user", str(main["run_as_user"])]

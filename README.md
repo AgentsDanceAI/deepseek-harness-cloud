@@ -85,8 +85,10 @@ with the one on your machine.
 Two things worth knowing before you start:
 
 - **The workspace images are `linux/amd64` only.** An x86 box (the 5090 case)
-  runs them natively; Apple Silicon runs them under emulation—it works, it is
-  just noticeably slower. The runner says so rather than letting you guess.
+  runs them natively. On Apple Silicon `docker pull` **fails outright** (`no
+  matching manifest for linux/arm64/v8`) — not "a bit slower": the runner falls
+  back to `--platform linux/amd64` on its own and tells you it is emulating.
+  Docker Desktop needs Rosetta / multi-arch support switched on.
 - **Every image is public** (since 2026-09-10): the exact tag each slot
   references can be pulled anonymously, no ghcr login needed. A contract test
   pins this, so a new slot whose image was left private turns CI red.

@@ -71,7 +71,9 @@ agent 拿着它调 `aistore.best/llm/*`，用量记在你账上，和在云端�
 开始之前有两件事得知道：
 
 - **工作台镜像只出 `linux/amd64`。** x86 机器（比如装 5090 那台）原生跑；
-  Apple Silicon 走模拟，能用但明显更慢。运行器会主动提示，不让你自己猜。
+  Apple Silicon 上 `docker pull` **会直接失败**（`no matching manifest for
+  linux/arm64/v8`），不是"慢一点"——运行器自动退回 `--platform linux/amd64`
+  并告诉你在走模拟。要 Docker Desktop 里开着 Rosetta / 多架构支持。
 - **镜像全部公开**（2026-09-10 起）：目录里每一格引用的那个 tag 都能匿名
   `docker pull`，不需要 ghcr 登录。合同测试钉着这一条，新增格子忘了设公开会红。
 

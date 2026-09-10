@@ -118,7 +118,9 @@ function fill(value: string, plan: LocalPlan, token: string): string {
  * 地方: 端口映射、卷挂载、降权、令牌替换错了都不会抛异常, 只会安静地跑出一个
  * 不对的容器。
  */
-export function buildRunArgs(plan: LocalPlan, token: string, hostPort: number): string[] {
+export function buildRunArgs(
+  plan: LocalPlan, token: string, hostPort: number, platform?: string,
+): string[] {
   const main = mainOf(plan)
   const env = Object.fromEntries(
     Object.entries(main.env).map(([k, v]) => [k, fill(v, plan, token)]),
@@ -126,6 +128,9 @@ export function buildRunArgs(plan: LocalPlan, token: string, hostPort: number): 
   const args = [
     'run', '-d',
     '--name', containerName(plan.product),
+    // 拉的时候用了哪个 platform, 跑的时候必须一致 —— 否则 docker 会去找一个本机
+    // 架构的镜像, 而那个镜像根本不存在。
+    ...platform === undefined ? [] : ['--platform', platform],
     // **只绑回环**: 容器里带着一把能花钱的令牌, 不该对局域网可见。
     '-p', `127.0.0.1:${hostPort}:${plan.port}`,
     '-v', `${containerName(plan.product)}-data:${homeOf(env)}`,
@@ -141,13 +146,17 @@ export function buildRunArgs(plan: LocalPlan, token: string, hostPort: number): 
 
 export interface PullProgress { (line: string): void }
 
-/** 拉镜像。逐行回调, 让界面能显示进度 —— 首次拉一格是 2.5GB 起, 没有进度的
- *  等待会被当成卡死。 */
-export async function pull(image: string, onLine?: PullProgress): Promise<void> {
-  const bin = await dockerBin()
-  if (bin === undefined) throw new DockerMissingError('missing')
-  await new Promise<void>((resolve, reject) => {
-    const child = execFile(bin, ['pull', image], { maxBuffer: 1 << 24 }, error => {
+/** 本机架构上没有原生 manifest 时 docker 的说法。 */
+const NO_NATIVE_MANIFEST = /no matching manifest|no match for platform/i
+
+/** 工作台镜像目前只出 linux/amd64。 */
+export const FOREIGN_PLATFORM = 'linux/amd64'
+
+function pullOnce(bin: string, image: string, platform: string | undefined, onLine?: PullProgress):
+Promise<void> {
+  const args = platform === undefined ? ['pull', image] : ['pull', '--platform', platform, image]
+  return new Promise<void>((resolve, reject) => {
+    const child = execFile(bin, args, { maxBuffer: 1 << 24 }, error => {
       if (error) reject(error)
       else resolve()
     })
@@ -155,15 +164,44 @@ export async function pull(image: string, onLine?: PullProgress): Promise<void> 
   })
 }
 
+/**
+ * 拉镜像。返回**跑它要用的 --platform**: undefined 表示本机原生。
+ *
+ * 先按原生拉, 拉不动再退回 linux/amd64 —— 而不是一上来就写死 amd64: 哪天我们出了
+ * arm64 镜像, 写死的那版会让 M 系机器继续白白走模拟。
+ *
+ * 为什么必须有这个回退: Apple Silicon 上 `docker pull` 一个只有 amd64 manifest 的
+ * 镜像**会直接失败**, 不是"慢一点" ——
+ *   no matching manifest for linux/arm64/v8 in the manifest list entries
+ * 2026-09-10 老板点 Codex 撞上的就是这个, 而我在 README 里写的是"走模拟, 能用但慢"。
+ * 说错了: 不给 --platform 根本拉不下来。
+ */
+export async function pull(image: string, onLine?: PullProgress): Promise<string | undefined> {
+  const bin = await dockerBin()
+  if (bin === undefined) throw new DockerMissingError('missing')
+  try {
+    await pullOnce(bin, image, undefined, onLine)
+    return undefined
+  } catch (cause) {
+    const message = cause instanceof Error ? cause.message : String(cause)
+    if (!NO_NATIVE_MANIFEST.test(message)) throw cause
+    onLine?.(`本机架构没有原生镜像，改用 ${FOREIGN_PLATFORM} 模拟运行（会慢一些）`)
+    await pullOnce(bin, image, FOREIGN_PLATFORM, onLine)
+    return FOREIGN_PLATFORM
+  }
+}
+
 /** 起一格。同名容器还在就先收掉 —— 否则 docker 只回一句名字冲突, 而用户看到的
  *  是一行看不懂的红字, 不知道那是"上次那个还开着"。 */
-export async function start(plan: LocalPlan, token: string, hostPort: number): Promise<void> {
+export async function start(
+  plan: LocalPlan, token: string, hostPort: number, platform?: string,
+): Promise<void> {
   const state = await dockerState()
   if (state !== 'ready') throw new DockerMissingError(state)
   if (plan.runnable !== 'ready') throw new Error(plan.reason || 'not runnable locally')
   await stop(plan.product)
   const bin = await dockerBin()
-  await exec(bin as string, buildRunArgs(plan, token, hostPort), { timeout: 120_000 })
+  await exec(bin as string, buildRunArgs(plan, token, hostPort, platform), { timeout: 120_000 })
 }
 
 export async function stop(productId: string): Promise<void> {

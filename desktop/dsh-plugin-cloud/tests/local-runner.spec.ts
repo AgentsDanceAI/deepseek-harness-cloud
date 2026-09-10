@@ -98,3 +98,15 @@ describe('candidates', () => {
     expect(list.some(p => p.endsWith('/.docker/bin/docker'))).toBe(true)
   })
 })
+
+describe('buildRunArgs 的 --platform', () => {
+  it('拉的时候用了哪个 platform, 跑的时候就得带上同一个', () => {
+    // Apple Silicon 上 `docker pull` 一个只有 amd64 manifest 的镜像**会失败**,
+    // 不是"慢一点"。拉用了 --platform, run 不带 = docker 去找一个不存在的本机
+    // 架构镜像, 容器起不来。
+    const args = buildRunArgs(planOf({ HOME: '/home/agent' }), 't', 1, 'linux/amd64')
+    expect(args[args.indexOf('--platform') + 1]).toBe('linux/amd64')
+    // 本机原生的时候不能瞎加 —— 写死 amd64 会让将来的 arm64 镜像白白走模拟
+    expect(buildRunArgs(planOf({ HOME: '/x' }), 't', 1)).not.toContain('--platform')
+  })
+})

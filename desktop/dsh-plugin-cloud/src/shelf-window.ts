@@ -104,10 +104,12 @@ export function openShelf(token: string, requestHost: () => void): BrowserWindow
       if (plan.runnable !== 'ready') return { ok: false, error: plan.reason }
       const image = plan.containers.find(c => c.role === 'main')?.image_ref ?? ''
       say('dsh-cloud:shelf-progress', { id: productId, line: `拉镜像 ${image}` })
-      await pull(image, line => { say('dsh-cloud:shelf-progress', { id: productId, line }) })
+      const platform = await pull(image, line => {
+        say('dsh-cloud:shelf-progress', { id: productId, line })
+      })
       const port = await freePort(plan.port)
       say('dsh-cloud:shelf-progress', { id: productId, line: '起容器…' })
-      await start(plan, token, port)
+      await start(plan, token, port, platform)
       openPorts.set(productId, port)
       // 开根路径, 不是 ready_path —— 后者是给探针用的 (codex 那格是
       // /api/health), 直接开会给用户看一段 JSON。
