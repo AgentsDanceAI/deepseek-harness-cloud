@@ -143,7 +143,7 @@
   </div>
 </section>
 
-{# ============ 两种用法 (云 / 桌面) ============ #}
+{# ============ 三种用法 (云 / 本机工作台 / 桌面端) ============ #}
 <section class="section">
   <div class="container">
     <span class="eyebrow">{{ t("home.two.eyebrow") }}</span>
@@ -151,7 +151,7 @@
     <p class="section-lede">
       {{ t("home.two.lede") }}
     </p>
-    <div class="grid grid-2" style="margin-top:28px">
+    <div class="grid {{ "grid-3" if work_enabled else "grid-2" }}" style="margin-top:28px">
       {# 云工作台没开的部署 (自部署默认) 不摆这张卡: 它整张都在讲一个本实例
          并不提供的能力, 按钮还会把人送进 /work → /download 的死循环。 #}
       {% if work_enabled %}
@@ -162,6 +162,20 @@
           {{ t("home.two.cloud_body", hours=(work_free_minutes // 60)) }}
         </p>
         <a class="btn btn-primary" href="/apps" style="margin-top:14px">{{ t("home.two.cloud_cta") }}</a>
+      </div>
+      {% endif %}
+      {# 本机工作台: 容器搬到用户机器上, 账号/网关/计费仍走托管。自部署实例
+         上没有"托管网关"这个前提, 所以跟着云卡一起收起来。 #}
+      {% if work_enabled %}
+      <div class="card feature">
+        <span class="eyebrow">{{ t("home.two.local_eyebrow") }}</span>
+        <h3>{{ t("home.two.local_title") }}</h3>
+        <p>
+          {{ t("home.two.local_body") }}
+        </p>
+        <a class="btn btn-ghost" rel="noopener" target="_blank"
+           href="https://github.com/AgentsDanceAI/deepseek-harness-cloud#run-the-workspaces-on-your-own-machine"
+           style="margin-top:14px">{{ t("home.two.local_cta") }}</a>
       </div>
       {% endif %}
       <div class="card feature">
