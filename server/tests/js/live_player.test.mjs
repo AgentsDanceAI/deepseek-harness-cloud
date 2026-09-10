@@ -409,13 +409,29 @@ await check("卡在缓冲空洞上 -> 推一小步跨过去, **不跳回同步�
   inst.liveSyncPosition = 100;
   dom.video.paused = false;
   dom.video.currentTime = 95;         // 只落后同步点 5 秒 —— 还在窗口里
+  // 播放头 95 卡在洞里, 洞后面 97.4 起有一整段缓冲
+  dom.video.buffered = { length: 2, start: (i) => [90, 97.4][i], end: (i) => [95, 105][i] };
   dom.window.__tick(1000, 7);
   assert.notEqual(dom.video.currentTime, 100,
     "跳回同步点了 —— 缓冲被清空, 下一个产出空档马上又见底, 于是一卡一卡");
-  assert.ok(dom.video.currentTime > 95 && dom.video.currentTime < 96,
-    `没推过去也没跳 (currentTime=${dom.video.currentTime}) —— 会一直冻着, ` +
-    "创始人报的「半天还没有说话」就是这个");
+  assert.ok(dom.video.currentTime > 97.4 && dom.video.currentTime < 97.6,
+    `没跨到洞后面那段缓冲 (currentTime=${dom.video.currentTime}) —— 固定步长推 0.3 秒` +
+    "要卡好几分钟才跨得过去, 创始人报的「半天还没有说话」就是这个");
   assert.equal(inst.restarted, true, "连拉流都没催");
+});
+
+await check("洞后面根本没数据 -> 只能回同步点", async () => {
+  const dom = makeDom();
+  load(dom);
+  await tick(); await tick();
+  const inst = dom.hlsInstances[0];
+  inst.liveSyncPosition = 100;
+  dom.video.paused = false;
+  dom.video.currentTime = 95;
+  dom.video.buffered = { length: 1, start: () => 90, end: () => 95 };  // 前面没了
+  dom.window.__tick(1000, 7);
+  assert.equal(dom.video.currentTime, 100,
+    "后面没数据还赖着不动 —— 会一直冻着");
 });
 
 await check("掉得太远 -> 还是要跳, 否则永远动不了", async () => {

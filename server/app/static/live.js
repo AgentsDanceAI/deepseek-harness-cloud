@@ -357,7 +357,18 @@ window.LivePlayer = (function () {
      ⛔ 别用"跳回同步点"来解决它: 那会把整个缓冲丢掉, 下一个产出空档立刻又见底,
         于是循环(2026-09-10 实测)。也别不管: 上一版改成"掉太远才跳"之后, 落后没超
         门槛的就永远冻着 —— 创始人报"半天还没有说话"。 */
-  var NUDGE = 0.3;
+  /* ⛔ 别用固定步长推。洞有多大是不知道的, 而卡死检测 6 秒才响一次 —— 一次推
+     0.3 秒等于要卡好几分钟才跨得过去(2026-09-10 实测就是这样)。
+     正确做法: **跨到下一段缓冲的起点**。指纹是上报里的 `缓冲8.0s rs2` —— 播放头
+     前面明明有 8 秒数据却接不上下一帧, 说明它正落在洞里, 洞后面就是那 8 秒。 */
+  function nextBufferedStart() {
+    if (!v || !v.buffered) return 0;
+    for (var i = 0; i < v.buffered.length; i++) {
+      var a = v.buffered.start(i);
+      if (a > v.currentTime + 0.01) return a;
+    }
+    return 0;
+  }
 
   function seekBehindLive() {
     if (!v || !v.seekable || !v.seekable.length) return;
@@ -383,8 +394,11 @@ window.LivePlayer = (function () {
           // 掉得太远(快掉出窗口后沿) —— 只能跳回同步点, 代价是丢掉缓冲。
           v.currentTime = p;
         } else {
-          // 还在窗口里: 卡的是缓冲空洞, 推一小步跨过去就行, **别丢缓冲**。
-          v.currentTime = v.currentTime + NUDGE;
+          // 还在窗口里: 卡的是缓冲空洞。跨到下一段缓冲的起点 —— 洞多大都能跨,
+          // 而且**保住后面那段缓冲**(跳回同步点会把它一起丢掉)。
+          var nb = nextBufferedStart();
+          if (nb) v.currentTime = nb + 0.05;
+          else if (p && isFinite(p)) v.currentTime = p;   // 后面没数据: 只能回同步点
         }
       } else {
         // Safari 原生放 HLS 时 hls 恒为 null —— 以前这条路**完全没有恢复手段**,
