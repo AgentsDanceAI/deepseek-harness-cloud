@@ -322,6 +322,14 @@ window.LivePlayer = (function () {
         空档耗干缓冲 -> 冻 6 秒 -> 跳 -> **跳把缓冲清空** -> 下一个空档立刻又见底
         -> 再冻 6 秒。观众感受到的就是"一卡一卡"。 */
   var SEEK_IF_BEHIND = 12;
+  /* 卡在缓冲空洞上时往前推多少。
+     指纹: **画面冻住(stall)但浏览器从没报过没数据(waiting)** —— 缓冲不空却播不动,
+     那是 MSE 的播放位置正好落在一个空洞里(每句独立编码再按累计偏移拼接, 句边界上
+     可能差几毫秒)。这种卡只需要推过去, 不需要重新定位。
+     ⛔ 别用"跳回同步点"来解决它: 那会把整个缓冲丢掉, 下一个产出空档立刻又见底,
+        于是循环(2026-09-10 实测)。也别不管: 上一版改成"掉太远才跳"之后, 落后没超
+        门槛的就永远冻着 —— 创始人报"半天还没有说话"。 */
+  var NUDGE = 0.3;
 
   function seekBehindLive() {
     if (!v || !v.seekable || !v.seekable.length) return;
@@ -343,9 +351,13 @@ window.LivePlayer = (function () {
         // 先把拉流催起来 —— 大多数时候这就够了, 前面只是暂时没数据。
         hls.startLoad();
         var p = hls.liveSyncPosition;
-        // **只在掉得太远时才跳。** 还在窗口里就等着, 数据会来; 跳过去反而把已经
-        // 缓冲的内容丢掉, 下一个空档马上又见底。
-        if (p && isFinite(p) && p - v.currentTime > SEEK_IF_BEHIND) v.currentTime = p;
+        if (p && isFinite(p) && p - v.currentTime > SEEK_IF_BEHIND) {
+          // 掉得太远(快掉出窗口后沿) —— 只能跳回同步点, 代价是丢掉缓冲。
+          v.currentTime = p;
+        } else {
+          // 还在窗口里: 卡的是缓冲空洞, 推一小步跨过去就行, **别丢缓冲**。
+          v.currentTime = v.currentTime + NUDGE;
+        }
       } else {
         // Safari 原生放 HLS 时 hls 恒为 null —— 以前这条路**完全没有恢复手段**,
         // 而创始人用的就是 Mac。

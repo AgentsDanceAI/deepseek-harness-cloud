@@ -401,7 +401,7 @@ await check("没点过的时候不能拆 —— 那只是自动播放策略, 挂
  */
 console.log("卡住时该等还是该跳:");
 
-await check("只是暂时没数据 -> 催拉流, **不跳** (跳会把缓冲清空, 下一个空档又见底)", async () => {
+await check("卡在缓冲空洞上 -> 推一小步跨过去, **不跳回同步点**", async () => {
   const dom = makeDom();
   load(dom);
   await tick(); await tick();
@@ -410,8 +410,11 @@ await check("只是暂时没数据 -> 催拉流, **不跳** (跳会把缓冲清�
   dom.video.paused = false;
   dom.video.currentTime = 95;         // 只落后同步点 5 秒 —— 还在窗口里
   dom.window.__tick(1000, 7);
-  assert.equal(dom.video.currentTime, 95,
-    "还在窗口里就跳了 —— 缓冲被清空, 下一个空档马上又见底, 于是一卡一卡");
+  assert.notEqual(dom.video.currentTime, 100,
+    "跳回同步点了 —— 缓冲被清空, 下一个产出空档马上又见底, 于是一卡一卡");
+  assert.ok(dom.video.currentTime > 95 && dom.video.currentTime < 96,
+    `没推过去也没跳 (currentTime=${dom.video.currentTime}) —— 会一直冻着, ` +
+    "创始人报的「半天还没有说话」就是这个");
   assert.equal(inst.restarted, true, "连拉流都没催");
 });
 
