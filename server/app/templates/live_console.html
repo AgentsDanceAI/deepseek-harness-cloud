@@ -33,16 +33,17 @@
           </span>
         </label>
 
-        <div class="lv-two">
-          <label class="lv-field">
-            <span>{{ t('live.person') }}</span>
-            <select id="lvPerson"></select>
-          </label>
-          <label class="lv-field">
-            <span>{{ t('live.voice') }}</span>
-            <select id="lvVoice"></select>
-          </label>
-        </div>
+        {# 形象与音色是**一对**, 不是两个独立选择 —— 见 live.py 的 LIVE_PRESETS。
+           搭配写在 option 的 data-* 上, 保存时直接取, 前端不硬编码任何形象 id。 #}
+        <label class="lv-field">
+          <span>{{ t('live.persona') }}</span>
+          <select id="lvPreset">
+            {% for p in presets %}
+            <option value="{{ p.id }}" data-person="{{ p.person }}"
+                    data-voice="{{ p.voice }}">{{ t('live.preset.' ~ p.id) }}</option>
+            {% endfor %}
+          </select>
+        </label>
         {# 上一版是预渲染的, 这里写着"换形象要整场重渲、等二十分钟"。改成实时
            生成之后那句话就不成立了, 但留着会让人不敢改 —— 现在存完下一句就换。 #}
         <p class="lv-warn" id="lvRecast" hidden>{{ t('live.recast_warn') }}</p>

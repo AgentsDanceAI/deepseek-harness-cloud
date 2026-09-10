@@ -36,6 +36,38 @@ from .accounts import resolve_user
 router = APIRouter(prefix="/api/live", tags=["live"])
 log = logging.getLogger("dhc.live")
 
+#: 形象与音色的**固定搭配**。控制台只给这五个, 不再是两个各选各的下拉。
+#:
+#: 上游 /config 返回的 persons(5) 与 voices(7) 是两个**互不相干**的列表, 组合出 35 种,
+#: 而设计过的只有这五种 —— 其余 30 种是意外, 最难受的是女性形象配上 yunjian/yunxi
+#: 这类男声, 一开口就穿帮。旧控制台两个下拉还互不联动: 换了形象音色留在原地, 于是
+#: 静默错配, 而界面毫无提示 (2026-09-10 创始人截图撞到: lin 的脸配着 xiaoya)。
+#:
+#: 这五对来自五个直播间 room.json 里当初存下的搭配, 不是我编的。
+LIVE_PRESETS = [
+    {"id": "default", "person": "source-v3-head", "voice": "xiaoya"},
+    {"id": "hao", "person": "hao", "voice": "yunxi"},
+    {"id": "chen", "person": "chen", "voice": "yunjian"},
+    {"id": "yue", "person": "yue", "voice": "hsiaochen"},
+    {"id": "lin", "person": "lin", "voice": "xiaoxiao"},
+]
+
+
+def preset_of(person: str, voice: str) -> dict:
+    """把一对 (形象, 音色) 收敛到固定搭配里。
+
+    先按整对精确匹配; 匹配不上就退而按形象找 (存量房间可能存着自由搭配的组合);
+    再不行给第一个 —— **绝不返回 None**, 上层拿它填下拉, 空值会让整个选择器瞎掉。
+    """
+    for p in LIVE_PRESETS:
+        if p["person"] == person and p["voice"] == voice:
+            return p
+    for p in LIVE_PRESETS:
+        if p["person"] == person:
+            return p
+    return LIVE_PRESETS[0]
+
+
 #: 切片可以缓存 (内容不可变), **播放列表绝对不行** —— 缓存住了播放器就永远看同一份
 #: 切片列表, 表现是"画面卡在那儿"而没有任何一处报错。GPU 侧已经回了 no-store,
 #: 这里再钉一次: 中间任何一层加了缓存都会复现这个 bug。

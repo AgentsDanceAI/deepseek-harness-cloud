@@ -486,7 +486,9 @@ def live_console_page(request: Request):
         return RedirectResponse("/login?next=/live/console", status_code=303)
     if not user.get("is_admin"):
         return RedirectResponse("/live", status_code=303)
-    return _render(request, "live_console.html", "live")
+    from .live import LIVE_PRESETS
+
+    return _render(request, "live_console.html", "live", presets=LIVE_PRESETS)
 
 
 @router.get("/apps")

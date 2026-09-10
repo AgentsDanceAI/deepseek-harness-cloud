@@ -5,10 +5,10 @@
  */
 (function () {
   var $ = function (id) { return document.getElementById(id); };
-  var name = $('lvName'), person = $('lvPerson'), voice = $('lvVoice');
+  var name = $('lvName'), preset = $('lvPreset');
   var script = $('lvScript'), counts = $('lvCounts'), say = $('lvSay');
   var recast = $('lvRecast');
-  var loaded = { person: '', voice: '' }, optionsFilled = false;
+  var loaded = { person: '', voice: '' }, presetInit = false;
   var pending = '';   // 'start' = 已经点了开播, 还在等上游真的出流
   var comment = $('lvComment'), mode = $('lvMode'), log = $('lvLog');
 
@@ -22,17 +22,39 @@
       var el = $(id); if (el) el.disabled = on;
     });
   }
+  /* 形象与音色是**一对**, 选项由服务端渲染 (见 live.py 的 LIVE_PRESETS), 搭配挂在
+     option 的 data-* 上。前端不认识任何形象 id —— 加形象只改后端那张表。 */
+  function pick() {
+    var o = preset.options[preset.selectedIndex];
+    return o ? { person: o.dataset.person || '', voice: o.dataset.voice || '' }
+             : { person: '', voice: '' };
+  }
+  /* 存量房间可能存着自由搭配的组合 (旧控制台两个下拉各选各的), 所以退让顺序要和
+     后端 preset_of 一致: 整对精确匹配 → 只按形象匹配 → 第一个。**绝不留空**, 空的
+     下拉会让保存把形象和音色一起清掉。 */
+  function selectPreset(p, v) {
+    var byPerson = -1;
+    for (var i = 0; i < preset.options.length; i++) {
+      var o = preset.options[i];
+      if (o.dataset.person === p && o.dataset.voice === v) { preset.selectedIndex = i; return; }
+      if (byPerson < 0 && o.dataset.person === p) byPerson = i;
+    }
+    preset.selectedIndex = byPerson >= 0 ? byPerson : 0;
+  }
+
   /* 换形象/音色的提示。原先写的是"全部话术都要重新渲染" —— 那是**上一版预渲染
      设计**的说法, 现在数字人是实时说的, 存下去下一句就换了, 没有重渲这回事。
      留着这条会让人以为改一下要等二十分钟, 于是不敢改。 */
   function markRecast() {
-    recast.hidden = !(loaded.person && (person.value !== loaded.person || voice.value !== loaded.voice));
+    var c = pick();
+    recast.hidden = !(loaded.person && (c.person !== loaded.person || c.voice !== loaded.voice));
   }
 
   function paint(d) {
     if (document.activeElement !== name) name.value = d.title || '';
     if (document.activeElement !== script) script.value = (d.lines || []).join('\n');
-    fillOptions(d);
+    // 只在首次落位 —— 之后 15 秒一次的刷新不能把没保存的改动顶回去。
+    if (!presetInit) { presetInit = true; selectPreset(d.person || '', d.voice || ''); }
     loaded = { person: d.person || '', voice: d.voice || '' };
     var n = (d.lines || []).length;
     counts.textContent = n === 0 ? '' : t(counts, 'fmt').replace('{n}', n);
@@ -72,35 +94,6 @@
     });
   }
 
-  function fillOptions(d) {
-    if (optionsFilled) {
-      if (!person.value) person.value = d.person || '';
-      if (!voice.value) voice.value = d.voice || '';
-      return;
-    }
-    optionsFilled = true;
-    fetch('/api/avatar/config', { credentials: 'same-origin' })
-      .then(function (r) { return r.ok ? r.json() : null; })
-      .then(function (c) {
-        if (!c) { optionsFilled = false; return; }
-        (c.persons || []).forEach(function (p) {
-          var id = typeof p === 'string' ? p : (p.id || p.name);
-          var o = document.createElement('option');
-          o.value = id; o.textContent = (typeof p === 'object' && p.name) ? p.name : id;
-          person.appendChild(o);
-        });
-        (c.voices || []).forEach(function (x) {
-          var o = document.createElement('option');
-          o.value = x.id; o.textContent = x.name || x.id;
-          voice.appendChild(o);
-        });
-        person.value = d.person || c.person_default || '';
-        voice.value = d.voice || c.voice_default || '';
-        loaded = { person: person.value, voice: voice.value };
-      })
-      .catch(function () { optionsFilled = false; });
-  }
-
   function refresh() {
     return fetch('/api/live/room', { credentials: 'same-origin' })
       .then(function (r) { return r.ok ? r.json() : null; })
@@ -113,7 +106,9 @@
     return fetch('/api/live/room', {
       method: 'PUT', credentials: 'same-origin',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title: name.value, person: person.value, voice: voice.value, lines: lines() }),
+      body: JSON.stringify({
+        title: name.value, person: pick().person, voice: pick().voice, lines: lines(),
+      }),
     }).then(function (r) {
       if (!r.ok) throw new Error('save');
       say.textContent = t(say, 'saved');
@@ -197,7 +192,7 @@
   // 开播前**先存** —— 否则播的是上一版, 而画面看起来一切正常, 只是说的还是旧词。
   $('lvStart').addEventListener('click', function () { save().then(function () { act('start', 'starting'); }); });
   $('lvStop').addEventListener('click', function () { pending = ''; act('stop', 'stopped'); });
-  [person, voice].forEach(function (el) { el.addEventListener('change', markRecast); });
+  preset.addEventListener('change', markRecast);
   script.addEventListener('input', function () {
     var n = lines().length;
     counts.textContent = n ? t(counts, 'dirty').replace('{n}', n) : '';
