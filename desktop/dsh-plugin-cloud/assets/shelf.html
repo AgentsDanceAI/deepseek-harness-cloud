@@ -40,7 +40,7 @@
   const uiOf = id => ui.get(id) ?? {}
   const setUi = (id, patch) => { ui.set(id, { ...uiOf(id), ...patch }); render() }
 
-  let latest = { docker: false, products: [] }
+  let latest = { docker: 'missing', products: [] }
 
   window.aiStoreShelf.onProgress(({ id, line }) => { setUi(id, { log: line }) })
 
@@ -85,7 +85,7 @@
     run.textContent = st.busy ? '启动中…' : (st.error ? '重试' : '在本机启动')
     // 没有 Docker 就不该点得动。横幅说着"暂时只能用云端", 按钮却照常可点,
     // 是在请用户去撞一堵墙 (2026-09-10 第一版就是这样, 老板一点三格全失败)。
-    run.disabled = st.busy || !runnable || !latest.docker
+    run.disabled = st.busy || !runnable || latest.docker !== 'ready'
     run.onclick = async () => {
       setUi(p.id, { busy: true, error: undefined })
       const out = await window.aiStoreShelf.start(p.id)
@@ -103,11 +103,14 @@
   async function refresh() {
     const out = await window.aiStoreShelf.list()
     latest = out
-    banner.hidden = out.docker && !out.error
+    banner.hidden = out.docker === 'ready' && !out.error
     if (out.error) banner.textContent = `目录拉不到：${out.error}`
-    else if (!out.docker) {
-      // 没装 Docker 不是错误状态 —— 云端那条路一直都在, 这里只说明少了什么。
-      banner.textContent = '这台机器上没有可用的 Docker，所以暂时只能用云端工作台。装好 Docker Desktop 并启动后，回到这里点一下刷新即可。'
+    // 「找不到」和「装了没开」要分开说 —— 合成一句"去装 Docker", 已经装了的人
+    // 只会觉得这软件在胡说 (2026-09-10 老板机器上装着 29.2.1, 货架说没有)。
+    else if (out.docker === 'missing') {
+      banner.textContent = '找不到 docker 命令，所以暂时只能用云端工作台。装好 Docker Desktop 后回到这里刷新即可。'
+    } else if (out.docker === 'daemon-down') {
+      banner.textContent = 'Docker 装了但没在运行 —— 先把 Docker Desktop 打开，这一页十几秒后会自己恢复。'
     }
     render()
   }

@@ -9,10 +9,10 @@
  * 占位符。
  */
 
-import { BrowserWindow, ipcMain, shell } from 'electron'
+import { app, BrowserWindow, ipcMain, shell } from 'electron'
 import { fileURLToPath } from 'node:url'
 import { fetchLocalCatalog, fetchLocalPlan, type LocalCatalogEntry } from './api.ts'
-import { dockerReady, freePort, pull, running, start, stop } from './local-runner.ts'
+import { dockerState, freePort, pull, running, start, stop, type DockerState } from './local-runner.ts'
 
 const IPC_CHANNELS = [
   'dsh-cloud:shelf-list',
@@ -65,9 +65,9 @@ export function openShelf(token: string): BrowserWindow {
   }
 
   ipcMain.handle('dsh-cloud:shelf-list', async (): Promise<{
-    docker: boolean, products: ShelfRow[], error?: string,
+    docker: DockerState, products: ShelfRow[], error?: string,
   }> => {
-    const docker = await dockerReady()
+    const docker = await dockerState()
     try {
       const products = await fetchLocalCatalog(token)
       const live = new Set((await running()).map(r => r.product))
@@ -90,8 +90,14 @@ export function openShelf(token: string): BrowserWindow {
     try {
       // Docker 先验, 再动别的: 否则用户看到的是一行"拉镜像 ghcr.io/..."然后
       // 一个 ENOENT, 而真正的原因是这台机器上根本没有 docker。
-      if (!await dockerReady()) {
-        return { ok: false, error: '这台机器上没有可用的 Docker，装好 Docker Desktop 并启动后再试' }
+      const state = await dockerState()
+      if (state !== 'ready') {
+        return {
+          ok: false,
+          error: state === 'missing'
+            ? '找不到 docker 命令，装好 Docker Desktop 再试'
+            : 'Docker 装了但没在运行，先把 Docker Desktop 打开',
+        }
       }
       const plan = await fetchLocalPlan(token, productId)
       if (plan.runnable !== 'ready') return { ok: false, error: plan.reason }
@@ -123,7 +129,28 @@ export function openShelf(token: string): BrowserWindow {
     return { ok: port !== undefined }
   })
 
+  // DeepSeek Harness 的主窗口是 cloudGate() **返回之后**才建的, 所以它天然盖在
+  // 货架上面 —— 「打开桌面版先看见货架」这句话就不成立了 (2026-09-10 实测: 前台
+  // 是 DSH, 货架在后面, 用户以为货架没打开)。
+  //
+  // 用**事件**而不是定时器: 等那扇窗真的建出来再把货架提上来。只认第一扇非货架
+  // 窗口, 认完就摘掉监听 —— 否则用户后面每开一个工作台窗口, 货架都要抢一次焦点。
+  const raiseShelf = (): void => {
+    if (window.isDestroyed()) return
+    window.moveTop()
+    window.focus()
+  }
+  const onWindowCreated = (_event: unknown, created: BrowserWindow): void => {
+    if (created === window) return
+    app.off('browser-window-created', onWindowCreated)
+    created.once('show', raiseShelf)
+    // 兜底: 有的窗口建出来时已经 show 过了, 'show' 不会再来一次。
+    setTimeout(raiseShelf, 3_000)
+  }
+  app.on('browser-window-created', onWindowCreated)
+
   window.on('closed', () => {
+    app.off('browser-window-created', onWindowCreated)
     for (const channel of IPC_CHANNELS) ipcMain.removeHandler(channel)
   })
   void window.loadFile(fileURLToPath(new URL('../build/cloud/shelf.html', import.meta.url)))
