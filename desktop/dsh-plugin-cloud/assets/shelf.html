@@ -32,68 +32,87 @@
 <script>
   const grid = document.getElementById('grid')
   const banner = document.getElementById('banner')
-  const logs = new Map()
 
-  window.aiStoreShelf.onProgress(({ id, line }) => {
-    logs.set(id, line)
-    const el = document.querySelector(`[data-log="${id}"]`)
-    if (el) el.textContent = line
-  })
+  /** 每一格的**临时**状态: 正在启动、上一次的错误、最近一行日志。
+   *  单独存一份是因为下面 15 秒一次的轮询会整片重画卡片 —— 状态放在 DOM 上,
+   *  用户点完看到一行错误, 十几秒后它自己消失, 看起来像"什么都没发生"。 */
+  const ui = new Map()
+  const uiOf = id => ui.get(id) ?? {}
+  const setUi = (id, patch) => { ui.set(id, { ...uiOf(id), ...patch }); render() }
+
+  let latest = { docker: false, products: [] }
+
+  window.aiStoreShelf.onProgress(({ id, line }) => { setUi(id, { log: line }) })
 
   function card(p) {
-    const el = document.createElement('div')
-    el.className = 'card'
+    const st = uiOf(p.id)
     const live = typeof p.port_local === 'number'
     // 「起不动」和「没买」是两件事: 11 个容器的栈, 买了通行证照样起不动。
-    const why = p.locked ? '要先买这一格的通行证' : (p.reason || (live ? `跑在 127.0.0.1:${p.port_local}` : '可以在本机跑'))
+    const runnable = p.runnable === 'ready' && !p.locked
+    const why = st.error
+      ? st.error
+      : p.locked ? '要先买这一格的通行证'
+      : p.reason ? p.reason
+      : live ? `跑在 127.0.0.1:${p.port_local}` : '可以在本机跑'
+
+    const el = document.createElement('div')
+    el.className = 'card'
     el.innerHTML = `
       <div class="name">${live ? '<span class="dot"></span> ' : ''}${p.name}</div>
-      <div class="why">${why}</div>
+      <div class="why"${st.error ? ' style="color:var(--bad)"' : ''}>${why}</div>
       <div class="row"></div>
-      <div class="log" data-log="${p.id}">${logs.get(p.id) ?? ''}</div>`
+      <div class="log">${st.log ?? ''}</div>`
     const row = el.querySelector('.row')
-    const runnable = p.runnable === 'ready' && !p.locked
+
     if (live) {
       const open = document.createElement('button')
       open.className = 'primary'; open.textContent = '打开'
       open.onclick = () => window.aiStoreShelf.open(p.id)
       const halt = document.createElement('button')
       halt.textContent = '停止'
-      halt.onclick = async () => { halt.disabled = true; await window.aiStoreShelf.stop(p.id); refresh() }
-      row.append(open, halt)
-    } else {
-      const run = document.createElement('button')
-      run.className = 'primary'
-      run.textContent = '在本机启动'
-      run.disabled = !runnable
-      run.onclick = async () => {
-        run.disabled = true
-        run.textContent = '启动中…'
-        const out = await window.aiStoreShelf.start(p.id)
-        if (!out.ok) {
-          el.querySelector('.why').textContent = out.error
-          run.textContent = '重试'
-          run.disabled = false
-          return
-        }
+      halt.onclick = async () => {
+        setUi(p.id, { busy: true })
+        await window.aiStoreShelf.stop(p.id)
+        ui.delete(p.id)
         refresh()
       }
-      row.append(run)
+      row.append(open, halt)
+      return el
     }
+
+    const run = document.createElement('button')
+    run.className = 'primary'
+    run.textContent = st.busy ? '启动中…' : (st.error ? '重试' : '在本机启动')
+    // 没有 Docker 就不该点得动。横幅说着"暂时只能用云端", 按钮却照常可点,
+    // 是在请用户去撞一堵墙 (2026-09-10 第一版就是这样, 老板一点三格全失败)。
+    run.disabled = st.busy || !runnable || !latest.docker
+    run.onclick = async () => {
+      setUi(p.id, { busy: true, error: undefined })
+      const out = await window.aiStoreShelf.start(p.id)
+      if (out.ok) { ui.delete(p.id); refresh(); return }
+      setUi(p.id, { busy: false, error: out.error })
+    }
+    row.append(run)
     return el
+  }
+
+  function render() {
+    grid.replaceChildren(...latest.products.map(card))
   }
 
   async function refresh() {
     const out = await window.aiStoreShelf.list()
+    latest = out
     banner.hidden = out.docker && !out.error
     if (out.error) banner.textContent = `目录拉不到：${out.error}`
     else if (!out.docker) {
       // 没装 Docker 不是错误状态 —— 云端那条路一直都在, 这里只说明少了什么。
-      banner.textContent = '这台机器上没有可用的 Docker，所以暂时只能用云端工作台。装好 Docker Desktop 再回来即可。'
+      banner.textContent = '这台机器上没有可用的 Docker，所以暂时只能用云端工作台。装好 Docker Desktop 并启动后，回到这里点一下刷新即可。'
     }
-    grid.replaceChildren(...out.products.map(card))
+    render()
   }
 
   refresh()
-  setInterval(refresh, 15000)
+  // 只在没有任何一格正在启动时轮询: 拉镜像要几分钟, 中途重画会打断日志与按钮状态。
+  setInterval(() => { if (![...ui.values()].some(s => s.busy)) refresh() }, 15000)
 </script>

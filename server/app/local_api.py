@@ -24,7 +24,7 @@ from dataclasses import asdict
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from . import config, products, work_access
+from . import apps_catalog, config, products, work_access
 from .accounts import resolve_user
 
 router = APIRouter(prefix="/api/local", tags=["local"])
@@ -108,7 +108,11 @@ def catalog(user: dict = Depends(resolve_user)):
         items.append(
             {
                 "id": p.id,
-                "name": p.name,
+                # 展示名以**货架目录**为准: 2026-09-09 那次改名 (DSH → DeepSeek
+                # Harness、pi → Pi Agent) 只落进了 apps_catalog, products.name
+                # 还是旧的。两处并存的结果是首页和桌面端货架叫法不一样 —— 而
+                # products.py 里给通行证取名时用的也是 apps_catalog, 这边跟它走。
+                "name": apps_catalog.name_of(p.id) or p.name,
                 "port": p.port,
                 "mem_mb": p.mem_mb,
                 "runnable": state,
@@ -132,7 +136,7 @@ def plan(product_id: str, user: dict = Depends(resolve_user)):
     state, why = _runnable(p)
     return {
         "product": p.id,
-        "name": p.name,
+        "name": apps_catalog.name_of(p.id) or p.name,
         "port": p.port,
         "ready_path": p.ready_path,
         "gateway": config.PUBLIC_BASE.rstrip("/"),

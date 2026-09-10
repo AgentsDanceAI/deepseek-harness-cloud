@@ -105,3 +105,23 @@ def test_catalog_lists_every_enabled_product(signed_in):
 
 def test_plan_requires_auth(client):
     assert client.get("/api/local/plan/codex").status_code in (401, 403)
+
+
+def test_display_name_follows_the_shelf_catalog(signed_in):
+    """展示名以 apps_catalog 为准, 不是 products.name。
+
+    2026-09-09 那次改名 (DSH → DeepSeek Harness、pi → Pi Agent) 只落进了
+    apps_catalog —— 于是首页写「DeepSeek Harness」, 桌面端货架写「DSH」, 同一个
+    产品两个叫法, 靠一张截图才发现。
+    """
+    from app import apps_catalog, products
+
+    body = signed_in.get("/api/local/catalog").json()
+    names = {p["id"]: p["name"] for p in body["products"]}
+    assert names.get("dsh") == "DeepSeek Harness"
+    assert names.get("pi") == "Pi Agent"
+    # 不是只钉这两个: 凡是货架目录里有的, 名字必须一致
+    for entry in apps_catalog.CATALOG:
+        if entry.id in names:
+            assert names[entry.id] == entry.name, f"{entry.id} 两处叫法不一致"
+    assert products.get("dsh").name != names["dsh"], "products.name 还是旧的, 这条用例才有意义"

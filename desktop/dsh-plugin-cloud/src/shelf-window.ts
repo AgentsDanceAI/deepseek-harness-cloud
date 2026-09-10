@@ -88,6 +88,11 @@ export function openShelf(token: string): BrowserWindow {
 
   ipcMain.handle('dsh-cloud:shelf-start', async (_event, productId: string) => {
     try {
+      // Docker 先验, 再动别的: 否则用户看到的是一行"拉镜像 ghcr.io/..."然后
+      // 一个 ENOENT, 而真正的原因是这台机器上根本没有 docker。
+      if (!await dockerReady()) {
+        return { ok: false, error: '这台机器上没有可用的 Docker，装好 Docker Desktop 并启动后再试' }
+      }
       const plan = await fetchLocalPlan(token, productId)
       if (plan.runnable !== 'ready') return { ok: false, error: plan.reason }
       const image = plan.containers.find(c => c.role === 'main')?.image_ref ?? ''
