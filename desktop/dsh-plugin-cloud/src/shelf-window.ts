@@ -15,6 +15,7 @@ import { fetchLocalCatalog, fetchLocalPlan, type LocalCatalogEntry } from './api
 import { dockerState, freePort, pull, running, start, stop, type DockerState } from './local-runner.ts'
 
 const IPC_CHANNELS = [
+  'dsh-cloud:shelf-boot-host',
   'dsh-cloud:shelf-list',
   'dsh-cloud:shelf-start',
   'dsh-cloud:shelf-stop',
@@ -40,7 +41,7 @@ function openWorkspace(url: string, title: string): void {
   void view.loadURL(url)
 }
 
-export function openShelf(token: string): BrowserWindow {
+export function openShelf(token: string, requestHost: () => void): BrowserWindow {
   const window = new BrowserWindow({
     width: 940,
     height: 700,
@@ -120,6 +121,14 @@ export function openShelf(token: string): BrowserWindow {
   ipcMain.handle('dsh-cloud:shelf-stop', async (_event, productId: string) => {
     await stop(productId)
     openPorts.delete(productId)
+    return { ok: true }
+  })
+
+  // 「DeepSeek Harness」那一格不是容器: 桌面版本来就是它的**原生**运行方式
+  // (任务在本机执行, 有完整文件系统)。点它 = 放行补丁里那个 await, 让 Host 起来。
+  // 跑成容器反而是降级 —— 那是云工作台的形态, 沙箱里的。
+  ipcMain.handle('dsh-cloud:shelf-boot-host', () => {
+    requestHost()
     return { ok: true }
   })
 
