@@ -80,3 +80,154 @@ def test_console_labels_are_translated(monkeypatch):
     html = _admin().get("/live/console").text
     for p in live.LIVE_PRESETS:
         assert f"live.preset.{p['id']}" not in html, f"live.preset.{p['id']} 没有翻译, 键名漏到页面上了"
+
+
+# ── 人设 (2026-09-10) ────────────────────────────────────────────────────────
+#
+# 在这之前直播这边只有形象和音色, 回评论用的是一条**没有身份**的通用提示词 ——
+# 换哪个形象她都是同一个没名字的人。而 1:1 通话页早就有五个有名有姓的人设
+# (avatar.js 的 PRESETS)。创始人 2026-09-10: "我每一次切形象·音色·人设, 你就给我
+# 切对应的人设"。
+
+def _i18n(lang: str = "zh") -> dict:
+    import json
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1] / "config" / "i18n"
+    return json.loads((root / f"{lang}.json").read_text("utf-8"))
+
+
+def test_每套搭配都要有名字和人设():
+    for p in live.LIVE_PRESETS:
+        for k in ("name", "trait", "persona"):
+            assert p.get(k), f"{p['id']} 缺 {k} —— 下拉里会显示成空的"
+        assert len(p["persona"]) > 8, f"{p['id']} 的人设太短, 起不到作用"
+
+
+def test_同一个形象在通话页和直播间必须是同一个名字():
+    """观众在通话里见到的是"初雪 · 温柔", 直播间也得是她。
+
+    两处各写各的话, 改了一处忘了另一处, 就变成两个人 —— 而这正是 2026-09-10
+    之前的状态: 直播间的下拉写的是音色名(chen · 云健沉稳), 通话页写的是人设名
+    (晨 · 沉稳)。
+    """
+    zh = _i18n("zh")
+    for p in live.LIVE_PRESETS:
+        key = "js.avatar.p." + p["id"]
+        assert key in zh, f"通话页没有 {p['id']} 这个形象, 两边的清单对不上"
+        assert zh[key] == f"{p['name']} · {p['trait']}", (
+            f"{p['id']} 两处名字不一致: 直播间 {p['name']} · {p['trait']}, "
+            f"通话页 {zh[key]}"
+        )
+
+
+def test_下拉标签中英成对且带上人设():
+    zh, en = _i18n("zh"), _i18n("en")
+    for p in live.LIVE_PRESETS:
+        key = "live.preset." + p["id"]
+        assert key in zh and key in en, f"{key} 中英没配齐"
+        assert p["name"] in zh[key], f"{key} 的中文标签里没有人设名 {p['name']}"
+    assert "人设" in zh["live.persona"], "字段名还写着「形象 · 音色」, 没提人设"
+
+
+def test_人设是加在底线前面_不是替换掉它():
+    """人设只管"怎么说话", 不管"能说什么"。
+
+    顺序反了(或者替换了)等于让人设去覆盖底线 —— 不编造价格库存、被问就承认是数字人
+    这些是要担责的东西, 必须由 _REPLY 兜着, 而且排在后面更靠近输出。
+    """
+    import asyncio
+    from unittest import mock
+
+    seen = {}
+
+    class _Resp:
+        status_code = 200
+
+        def json(self):
+            return {"choices": [{"message": {"content": "好的呀"}}]}
+
+        def raise_for_status(self):
+            return None
+
+    class _Client:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def post(self, url, json=None, headers=None):
+            seen["system"] = json["messages"][0]["content"]
+            return _Resp()
+
+    with mock.patch.object(live.config, "UPSTREAM_BASE_URL", "http://x/v1"), \
+         mock.patch.object(live.config, "UPSTREAM_API_KEY", "k"), \
+         mock.patch.object(live.httpx, "AsyncClient", lambda **kw: _Client()), \
+         mock.patch.object(live.credits, "spend", lambda *a, **kw: None):
+        asyncio.run(live._compose_reply("在吗", "u_1", person="chen"))
+
+    sys_prompt = seen["system"]
+    assert "你叫晨" in sys_prompt, "没带上人设"
+    assert live._REPLY in sys_prompt, "人设把底线替换掉了"
+    assert sys_prompt.index("你叫晨") < sys_prompt.index(live._REPLY), (
+        "人设排在底线后面 —— 越靠近输出约束越强, 顺序反了等于让人设压过底线"
+    )
+
+
+def test_没给形象时退回通用口径():
+    """取不到房间配置不该让她答不出来。"""
+    import asyncio
+    from unittest import mock
+
+    seen = {}
+
+    class _Resp:
+        status_code = 200
+
+        def json(self):
+            return {"choices": [{"message": {"content": "好"}}]}
+
+        def raise_for_status(self):
+            return None
+
+    class _Client:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def post(self, url, json=None, headers=None):
+            seen["system"] = json["messages"][0]["content"]
+            return _Resp()
+
+    with mock.patch.object(live.config, "UPSTREAM_BASE_URL", "http://x/v1"), \
+         mock.patch.object(live.config, "UPSTREAM_API_KEY", "k"), \
+         mock.patch.object(live.httpx, "AsyncClient", lambda **kw: _Client()), \
+         mock.patch.object(live.credits, "spend", lambda *a, **kw: None):
+        asyncio.run(live._compose_reply("在吗", "u_1", person=""))
+
+    assert seen["system"] == live._REPLY, "没给形象却硬塞了一个人设进去"
+
+
+def test_房间的形象要真的传到回评论那条路(monkeypatch):
+    """人设是靠 person 查出来的 —— 传不到就等于没有人设。
+
+    ⚠️ 这条是配合 test_live_comments 里的替身写的: 那个替身少一个参数时, 真实调用
+    是 TypeError, 而 _maybe_reply 一律吞异常(评论已经飘出去了), 表现成"她就是不接
+    话" —— 光看现象查不到根因。
+    """
+    import asyncio
+
+    from tests.test_live_comments import Upstream
+
+    up = Upstream(live_=True)
+    up.state["person"] = "chen"
+    up.install(monkeypatch, reply="好的")
+    monkeypatch.setattr(live, "_LAST_REPLY_AT", 0.0)
+
+    assert asyncio.run(live._maybe_reply("c_1", "在吗")) is True
+    assert up.person_seen == "chen", (
+        f"房间的形象没传到回评论那条路 (拿到 {up.person_seen!r}) —— 人设不会生效"
+    )

@@ -48,6 +48,7 @@ class Upstream:
     def __init__(self, live_=True, queued=0):
         self.state = {"live": live_, "queued": queued, "title": "t", "lines": []}
         self.said: list[str] = []
+        self.person_seen = None
 
     def install(self, monkeypatch, *, reply="好的，这个我记下了。"):
         async def fake_gpu(method, path, room, **kw):
@@ -56,8 +57,11 @@ class Upstream:
                 return {"ok": True}
             return dict(self.state)
 
-        async def fake_compose(comment, bill_to, device_id=""):
+        # 签名要跟真的一致 —— 少一个参数, 真实调用就是 TypeError, 而那条路径上
+        # 一律吞异常(评论已经飘出去了), 于是表现成"她就是不接话", 很难查。
+        async def fake_compose(comment, bill_to, device_id="", person=""):
             self.billed = bill_to
+            self.person_seen = person      # 房间的形象有没有传到 —— 人设靠它
             return reply
 
         monkeypatch.setattr(live, "_gpu", fake_gpu)

@@ -44,12 +44,32 @@ log = logging.getLogger("dhc.live")
 #: 静默错配, 而界面毫无提示 (2026-09-10 创始人截图撞到: lin 的脸配着 xiaoya)。
 #:
 #: 这五对来自五个直播间 room.json 里当初存下的搭配, 不是我编的。
+#: 一套搭配 = 形象 + 音色 + **人设**。三样绑死, 换一个就三样一起换。
+#:
+#: name/trait 沿用 1:1 通话页那五个 (avatar.js 的 PRESETS / i18n js.avatar.p.*) ——
+#: 同一个形象在通话里叫"初雪 · 温柔", 在直播间也得叫这个, 否则观众看到的是两个人。
+#: 在这之前直播这边只有形象和音色, 回评论用的是一条**没有身份**的通用提示词,
+#: 换哪个形象她都是同一个没名字的人 (创始人 2026-09-10 提)。
+#:
+#: ⚠️ persona 是**追加**在 _REPLY 前面的, 不替换它: 不编造价格库存、被问就承认是
+#:    数字人这些底线由 _REPLY 兜着, 而且排在后面(更靠近输出, 约束更强)。人设只管
+#:    "怎么说话", 不管"能说什么"。
 LIVE_PRESETS = [
-    {"id": "default", "person": "source-v3-head", "voice": "xiaoya"},
-    {"id": "hao", "person": "hao", "voice": "yunxi"},
-    {"id": "chen", "person": "chen", "voice": "yunjian"},
-    {"id": "yue", "person": "yue", "voice": "hsiaochen"},
-    {"id": "lin", "person": "lin", "voice": "xiaoxiao"},
+    {"id": "default", "person": "source-v3-head", "voice": "xiaoya",
+     "name": "初雪", "trait": "温柔",
+     "persona": "你叫初雪。说话温柔、慢一点，句子短，语气软但不腻。"},
+    {"id": "hao", "person": "hao", "voice": "yunxi",
+     "name": "皓", "trait": "阳光",
+     "persona": "你叫皓。说话阳光利落、有精神但不吵，偶尔带一点轻快的语气词。"},
+    {"id": "chen", "person": "chen", "voice": "yunjian",
+     "name": "晨", "trait": "沉稳",
+     "persona": "你叫晨。说话沉稳、有分寸，不夸张也不起哄，像个可靠的老手。"},
+    {"id": "yue", "person": "yue", "voice": "hsiaochen",
+     "name": "悦", "trait": "干练",
+     "persona": "你叫悦。说话干练直接，一句话说清楚，不绕弯子。"},
+    {"id": "lin", "person": "lin", "voice": "xiaoxiao",
+     "name": "林", "trait": "安静",
+     "persona": "你叫林。说话安静、克制，不抢话，答得实在。"},
 ]
 
 
@@ -371,12 +391,22 @@ def _claims(text: str) -> str:
     return m.group(0) if m else ""
 
 
-async def _compose_reply(comment: str, bill_to: str, device_id: str = "") -> str:
+async def _compose_reply(comment: str, bill_to: str, device_id: str = "",
+                         person: str = "") -> str:
     """让模型按 `_REPLY` 的口径回一句, 并把账记在 bill_to 头上。
 
     抽出来是因为**观众公屏和管理员插播走的是同一条路** —— 口径必须完全一致,
     否则"数字人会不会乱说话"这件事要审两遍。
+
+    person 给了就把那套搭配的人设加在前面 (见 LIVE_PRESETS)。
+    ⚠️ **加在前面, 不是替换**: _REPLY 排在后面兜底线(不编造价格库存、被问就承认是
+       数字人), 人设只管"怎么说话"。顺序反了等于让人设去覆盖底线。
     """
+    system = _REPLY
+    if person:
+        persona = (preset_of(person, "") or {}).get("persona") or ""
+        if persona:
+            system = persona + "\n" + _REPLY
     if not config.UPSTREAM_BASE_URL or not config.UPSTREAM_API_KEY:
         raise HTTPException(503, "upstream_not_configured")
     model_id = model_catalog.default_model()
@@ -388,7 +418,7 @@ async def _compose_reply(comment: str, bill_to: str, device_id: str = "") -> str
                 json={
                     "model": entry.get("upstream_model", model_id),
                     "messages": [
-                        {"role": "system", "content": _REPLY},
+                        {"role": "system", "content": system},
                         {"role": "user", "content": f"观众评论：{comment}"},
                     ],
                     # 一句话。放开了她会说成一段稿子, 而那要念上一分钟, 后面的
@@ -454,7 +484,15 @@ async def say(body: dict, user: dict = Depends(resolve_user)):
 
     spoken = text
     if mode == "chat":
-        spoken = await _compose_reply(text, user["id"], user.get("device_id", ""))
+        # 也带上当前形象的人设 —— 管理员插播和观众公屏是同一个直播间的同一个人,
+        # 口吻不一致观众听得出来。取不到房间配置就退回通用口径, 不能因此发不出去。
+        try:
+            cfg = await _gpu("GET", f"/rooms/{config.LIVE_ROOM}/status", config.LIVE_ROOM)
+            person = str(cfg.get("person") or "")
+        except Exception:
+            person = ""
+        spoken = await _compose_reply(text, user["id"], user.get("device_id", ""),
+                                      person=person)
 
     await _gpu("POST", f"/rooms/{config.LIVE_ROOM}/interject", config.LIVE_ROOM, json={"text": spoken[:600]})
     return JSONResponse({"ok": True, "comment": text, "spoken": spoken[:600], "mode": mode})
@@ -769,7 +807,7 @@ async def _maybe_reply(cid: str, text: str) -> bool:
         return False  # 她已经排到几十秒开外了
     _LAST_REPLY_AT = now  # 先占位再去调模型 —— 慢的那几秒里别放第二条进来
     try:
-        spoken = await _compose_reply(text, _bill_account())
+        spoken = await _compose_reply(text, _bill_account(), person=str(st.get("person") or ""))
         hit = _claims(spoken)
         if hit:
             # 不重试: 同一个提示词刚说错过一次, 再抽一次多半还是错, 而每抽一次都

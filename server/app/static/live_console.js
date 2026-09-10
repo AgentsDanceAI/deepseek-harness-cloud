@@ -101,7 +101,28 @@
       .catch(function () {});
   }
 
+  /* 换了搭配之后自己把播放接回来 —— 别让人去点"点一下开始播放"。
+   *
+   * 换搭配时上游是 stop+start(见 live_server 的 put_room): 播放列表被 rmtree 重建,
+   * 手里缓冲的切片全 404。播放器靠 since 认出"换了一场"并重建(见 live.js), 但那
+   * 是 15 秒一次的常规轮询, 中间这十几秒画面就是黑的, 而且第一句还要生成几秒。
+   * 所以这里主动催: 3 秒一次问到它真的换了场并出流为止。
+   * 自动播放不会被拒 —— 用户刚点过「保存」, 页面已经有过用户手势。 */
+  function resumeAfterRecast() {
+    var tries = 0;
+    (function tick() {
+      if (++tries > 20) return;                  // 一分钟还没回来就算了
+      setTimeout(function () {
+        if (window.LivePlayer) window.LivePlayer.refresh();
+        tick();
+      }, 3000);
+    })();
+  }
+
   function save() {
+    var was = { person: loaded.person, voice: loaded.voice };
+    var now = pick();
+    var recasting = !!(was.person && (now.person !== was.person || now.voice !== was.voice));
     busy(true);
     return fetch('/api/live/room', {
       method: 'PUT', credentials: 'same-origin',
@@ -113,7 +134,11 @@
       if (!r.ok) throw new Error('save');
       say.textContent = t(say, 'saved');
     }).catch(function () { say.textContent = t(say, 'failed'); })
-      .then(function () { busy(false); return refresh(); });
+      .then(function () {
+        busy(false);
+        if (recasting) resumeAfterRecast();
+        return refresh();
+      });
   }
 
   function act(a, word) {
