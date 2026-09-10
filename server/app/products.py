@@ -399,6 +399,13 @@ def _dify_stack() -> tuple[Sidecar, ...]:
         Sidecar(name="redis", image_ref="redis:6-alpine",
                 cmd=("redis-server", "--requirepass", _DIFY_REDIS_PASSWORD),
                 mounts=(("dify/redis", "/data"),)),
+# ⚠️ `DSH_CLOUD_TOKEN` 这个**变量名**同样不能跟着品牌改 (2026-09-09 老板问过)。
+#    它不只是名字: 上游 DeepSeek Harness 按 `DSH_` 前缀识别敏感变量, 会把它从
+#    agent 拉起的每一个子进程 (bash 工具、MCP server) 里抹掉。改成 AI_STORE_TOKEN
+#    等于让上游不再认它 —— 令牌会跟着传进每个子进程, 这是安全降级。
+#    何况它横跨: 本文件 11 处下发 · 5 个镜像里的读取 · **已发布的 npm 包**
+#    dsh-plugin-cloud · 用户 dsh 配置里已写死的 `apiKeyEnv:` 一行。
+#
 # ⚠️ 下面这些 @dshcloud.online **不是品牌串, 是账号名**, 换品牌时不能跟着改。
 # 这些账号早就注册在各产品自己的库里 (跟着用户的 NAS 卷走), 换个地址去登
 # 就是拿一个不存在的账号敲门 —— 表现是永远 401、页面永远停在「启动中」,
