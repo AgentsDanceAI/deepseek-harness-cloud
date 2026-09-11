@@ -11,9 +11,9 @@ This Policy explains how deepseek-harness-cloud (the site at https://aistore.bes
 | Item | Details |
 |---|---|
 | Legal entity | AgentsDance AI |
-| Privacy contact email | legal@agentsdance.ai |
-| General support | support@agentsdance.ai |
-| Security incident reports | security@agentsdance.ai |
+| Privacy contact email | {{privacy_email}} |
+| General support | {{support_email}} |
+| Security incident reports | {{security_email}} |
 
 ## 2. What Information We Collect
 
@@ -84,7 +84,7 @@ In addition, we may disclose information in the following circumstances: pursuan
 
 Our servers are located in **Singapore**, our operating entity is located in **China**, and the service providers listed above are spread across multiple jurisdictions. Your data is therefore transferred across borders.
 
-Safeguards: we sign contractual terms containing data protection obligations with each recipient; transmission uses TLS encryption throughout; and the scope of data visible to each service provider is limited according to the principle of minimum necessity. If you are located in the European Economic Area, the United Kingdom, or Switzerland, you may request a description of the applicable transfer mechanism from legal@agentsdance.ai.
+Safeguards: we sign contractual terms containing data protection obligations with each recipient; transmission uses TLS encryption throughout; and the scope of data visible to each service provider is limited according to the principle of minimum necessity. If you are located in the European Economic Area, the United Kingdom, or Switzerland, you may request a description of the applicable transfer mechanism from {{privacy_email}}.
 
 ## 6. Retention Periods
 
@@ -107,7 +107,7 @@ Once these periods expire, the data is deleted or irreversibly anonymized.
 Wherever you are located, you may exercise the following rights: **access, correction, deletion, export (portability), restriction of processing, objection to processing, and withdrawal of consent**.
 
 - Most of these can be done directly in the console (editing your profile, revoking device authorizations, closing your account);
-- For anything else, please send an email to legal@agentsdance.ai;
+- For anything else, please send an email to {{privacy_email}};
 - **We respond within 30 calendar days of receiving a request**; if a case is complex and requires an extension, we will explain the reason within that period.
 
 If you are located in the European Economic Area or the United Kingdom, you have the right to lodge a complaint with your local supervisory authority. If you are a California resident, you have the rights to know, delete, correct, and opt out of sale/sharing under the CCPA/CPRA — as stated above, **we do not sell personal information and do not share it for targeted advertising**. Exercising your rights will not result in discriminatory treatment.
@@ -120,7 +120,7 @@ Even so, no system can guarantee absolute security. **If a data breach occurs th
 
 ## 9. Minors
 
-This service is intended for users **aged 18 and over**. We do not knowingly collect personal information from anyone under 18. If you believe we have collected such information in error, please contact legal@agentsdance.ai and we will delete it.
+This service is intended for users **aged 18 and over**. We do not knowingly collect personal information from anyone under 18. If you believe we have collected such information in error, please contact {{privacy_email}} and we will delete it.
 
 ## 10. Cookies and Similar Technologies
 
@@ -142,9 +142,9 @@ A clarifying revision, effective immediately. Alibaba was already listed in the 
 
 ## 13. Contact Us
 
-Privacy matters: legal@agentsdance.ai
-General support: support@agentsdance.ai
-Security vulnerabilities: security@agentsdance.ai
+Privacy matters: {{privacy_email}}
+General support: {{support_email}}
+Security vulnerabilities: {{security_email}}
 
 All of the above addresses are handled by real people, with a first reply within 24 hours on business days.
 

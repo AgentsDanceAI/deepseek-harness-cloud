@@ -114,3 +114,63 @@ def test_github_login_survives(client, monkeypatch):
     """GitHub 登录是登录方式, 不是源码链接。"""
     monkeypatch.setattr(config, "SHOW_SOURCE_LINKS", False)
     assert "/api/auth/github/start" in client.get("/login").text
+
+
+# --- 法律文书里的联系方式 ------------------------------------------------------
+#
+# 三个地址原先写死在 legal/ 下 8 份 markdown 里。它们是**合规入口**不是文案:
+# 隐私政策那个收数据主体行权请求, AUP 那个收漏洞上报, 退款政策那个收退款申请 ——
+# 换域名时只能换, 不能删, 而且换完必须真的有人收信。
+
+LEGAL_DIR = Path(__file__).resolve().parents[2] / "legal"
+LEGAL_DOCS = ("terms", "privacy", "refund", "aup")
+
+
+@pytest.fixture()
+def real_legal(monkeypatch):
+    """默认测试环境挂的是空 legal 目录 (页面走"条款待发布"占位)。这几条要的是
+    真文书。"""
+    monkeypatch.setenv("DHC_LEGAL_DIR", str(LEGAL_DIR))
+
+
+@pytest.mark.parametrize("doc", LEGAL_DOCS)
+@pytest.mark.parametrize("lang", LANGS)
+def test_no_unfilled_token_reaches_a_reader(client, real_legal, doc, lang):
+    """占位符打错一个字, 用户读到的就是 `{{support_email}}` 本身 —— 页面照样 200,
+    而这是一份法律文书。"""
+    body = client.get(f"/legal/{doc}", headers={"accept-language": lang}).text
+    assert "{{" not in body, f"/legal/{doc} ({lang}) 有没替换的占位符"
+
+
+def test_every_token_in_the_documents_has_a_substitution():
+    """反方向: 文书里写了个没人认识的占位符, 上一条测的是渲染结果, 这条在源头拦。"""
+    import re
+
+    from app.webpages import _LEGAL_TOKENS
+
+    used = set()
+    for f in LEGAL_DIR.glob("*.md"):
+        used |= set(re.findall(r"\{\{[a-z_]+\}\}", f.read_text(encoding="utf-8")))
+    unknown = sorted(used - set(_LEGAL_TOKENS))
+    assert not unknown, f"legal/ 里用了没定义的占位符: {unknown}"
+
+
+@pytest.mark.parametrize("doc", LEGAL_DOCS)
+def test_changing_the_env_moves_every_address(client, real_legal, monkeypatch, doc):
+    """换域名要是一个 env 就够 —— 否则下次又得改 8 份法律文书, 而改文书正文
+    等于发布新版本条款。"""
+    monkeypatch.setattr(config, "LEGAL_SUPPORT_EMAIL", "support@example.test")
+    monkeypatch.setattr(config, "LEGAL_SECURITY_EMAIL", "security@example.test")
+    monkeypatch.setattr(config, "LEGAL_PRIVACY_EMAIL", "legal@example.test")
+    body = client.get(f"/legal/{doc}", headers={"accept-language": "zh"}).text
+    assert "@agentsdance.ai" not in body, f"/legal/{doc} 还留着旧域的地址"
+
+
+@pytest.mark.parametrize("doc", LEGAL_DOCS)
+def test_each_document_still_names_a_way_to_reach_us(client, real_legal, doc):
+    """ "隐藏品牌"最容易顺手把联系方式一起删掉。每篇文书都必须留至少一个能写信的
+    地址 —— 没有的话, 退款/行权/上报三条通道当场断, 而且不报任何错。"""
+    import re
+
+    body = client.get(f"/legal/{doc}", headers={"accept-language": "zh"}).text
+    assert re.search(r"[\w.+-]+@[\w-]+\.[\w.]+", body), f"/legal/{doc} 上一个联系方式都没有"

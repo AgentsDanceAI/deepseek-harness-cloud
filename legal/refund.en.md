@@ -49,7 +49,7 @@ Apart from the sections above, the following are not refundable:
 
 ## 6. How to apply
 
-Send an email to **support@agentsdance.ai** stating:
+Send an email to **{{support_email}}** stating:
 
 1. Your registered email address;
 2. The order number (available on the "Orders" page in the console);
@@ -63,4 +63,4 @@ If you disagree with the outcome, you may reply to the original email to request
 
 ---
 
-*Last updated: August 17, 2026 · Version 1.0 · Contact: support@agentsdance.ai*
+*Last updated: August 17, 2026 · Version 1.0 · Contact: {{support_email}}*

@@ -684,5 +684,17 @@ SHOW_SOURCE_LINKS = _env_bool("SHOW_SOURCE_LINKS", False)
 LEGAL_ENTITY_ZH = _env("LEGAL_ENTITY_ZH", "")
 LEGAL_ENTITY_EN = _env("LEGAL_ENTITY_EN", "")
 LEGAL_CONTACT_EMAIL = _env("LEGAL_CONTACT_EMAIL", "")
+
+# 法律文书正文里的三个联系方式。它们**不是文案, 是合规入口**: 隐私政策那个是
+# 数据主体行权的收件箱, AUP 那个是漏洞上报口, 退款政策那个是退款受理口 ——
+# 三者都必须真的有人收信, 所以只能"换", 不能"删"。
+#
+# 原先这三个地址写死在 legal/ 下的 8 份 markdown 里 (中英各四篇)。换一次域名
+# 要改 8 个文件, 而改法律文书正文 = 发布新版本条款; 挪到这里之后, 换域名是改
+# 环境变量, 文书一个字不动。默认值保持迁移前的原样, 所以不设 env 时渲染结果
+# 与从前**逐字节相同**。
+LEGAL_SUPPORT_EMAIL = _env("LEGAL_SUPPORT_EMAIL", "support@agentsdance.ai")
+LEGAL_SECURITY_EMAIL = _env("LEGAL_SECURITY_EMAIL", "security@agentsdance.ai")
+LEGAL_PRIVACY_EMAIL = _env("LEGAL_PRIVACY_EMAIL", "legal@agentsdance.ai")
 ICP_NUMBER = _env("ICP_NUMBER", "")  # e.g. 京ICP备XXXXXXXX号-X
 PSB_NUMBER = _env("PSB_NUMBER", "")  # e.g. 京公网安备XXXXXXXXXXXXX号
