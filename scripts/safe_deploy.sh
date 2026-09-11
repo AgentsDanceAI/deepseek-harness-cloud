@@ -29,6 +29,23 @@ PORT="${PORT:-8100}"
 [ -f "$COMPOSE" ] || { echo "!! 找不到 $COMPOSE (换机时用 COMPOSE= 指定)" >&2; exit 1; }
 [ -f "$ENVFILE" ] || { echo "!! 找不到 $ENVFILE" >&2; exit 1; }
 
+# --- 闸门 0: 树里没有冲突 ----------------------------------------------------
+# **不受 ALLOW_DIRTY 影响。** ALLOW_DIRTY 的本意是"带着别条线未提交的文件部署"
+# (见 memory deploy-when-prod-tree-diverged), 从没打算涵盖"带着别人的**冲突**部署"。
+# 2026-09-11 事故: 直播线在生产树里留下 5 个 UU 文件; 我这边 `git pull … | tail`
+# 把失败的退出码吞掉, 链条继续 ALLOW_DIRTY=1 部署, 带 `<<<<<<< HEAD` 的 live.py
+# 进了镜像 → SyntaxError → 容器 Restarting, 公网断约 3 分钟。冲突树永远建不出
+# 对的镜像, 所以这道闸没有覆盖开关。
+unmerged="$(git diff --name-only --diff-filter=U 2>/dev/null || true)"
+markers="$(grep -rlE '^(<<<<<<< |=======$|>>>>>>> )' server/app server/tests server/config deploy scripts 2>/dev/null || true)"
+if [ -n "$unmerged" ] || [ -n "$markers" ]; then
+  echo "!! 工作树有未解决的冲突, 拒绝部署 (冲突标记会原样进镜像, 服务起不来):" >&2
+  printf '%s\n' $unmerged $markers | sort -u | head -10 >&2
+  echo "   这不是你的改动就别动它 —— 通知留下冲突的那条线; 要紧急恢复线上, 从干净的" >&2
+  echo "   worktree 建镜像再 compose up --no-build (见 memory deploy-built-a-conflicted-tree)。" >&2
+  exit 1
+fi
+
 # --- 闸门 1: 工作树干净 ------------------------------------------------------
 # 镜像从工作树而非 HEAD 构建，因此默认拒绝未提交的受控文件改动。
 dirty="$(git status --porcelain 2>/dev/null | grep -v '^?? ' || true)"
