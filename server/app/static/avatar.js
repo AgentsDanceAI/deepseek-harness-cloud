@@ -46,6 +46,8 @@
     duplex: loadDuplex(), micOff: false,
     // 她最近说过的几句 —— 用来认出从音箱绕回来的她自己, 见 isEcho。
     herSaid: [], micTimer: null,
+    //: 上游有没有把待念的文字念完 (它的 idle 消息)。开麦要它和"画面停了"一起成立。
+    idle: true,
   };
 
   /* iPhone 没有标准 MediaSource — iOS 17.1+ 给的是同形的 ManagedMediaSource。
@@ -222,11 +224,33 @@
   /* 她不说话时露静止背景, 说话时才盖上视频层。不切的话最后一帧会僵在那儿。
      这里也是 speaking 翻转的**唯一**入口, 所以半双工的闸就挂在这条路上 ——
      挂在别处早晚会漏掉一条翻转路径。 */
+  /* 她说完没说完 —— 以及**什么时候把麦开回来**。
+   *
+   * ⚠️ "画面不动了"既是"她说完了", 也是"她两句之间在换气/上游卡了一下"。判据只有
+   *    400 毫秒(两拍), 所以后者很常见。原来一判定就立刻开麦, 于是**一次回答中间
+   *    麦克风要亮灭好几轮** —— 实测注入一句用户说话后:
+   *      `stop(8.02s) → start(10.18s) → stop(11.24s)`
+   *    中间那一秒的开麦, 就是老板说的"回复前总弹一下麦"。
+   *
+   * 猜一个防抖时长治不了本: 实测那次的句间空档是 1.56 秒, 想盖住它就得等两三秒,
+   * 而那两三秒是用户说完她的话之后**干等着不能开口**的时间。
+   * 上游其实给了准信: `idle` = "没有待念的文字了"。所以判据是**两个条件同时成立**:
+   *   画面停了(缓冲里也播完了) **且** 上游 idle(后面没有要念的了)。
+   * 少任何一个都可能是句间空档。这跟直播那边"idle 只代表文字队列空, 缓冲里还有
+   * 好几秒在播"是同一件事的两面 —— 藏图层要等画面停, 开麦要两个都等到。
+   */
+  function maybeReopenMic() {
+    if (st.duplex !== "half" || !st.ws) return;
+    if (st.speaking || !st.idle) return;
+    micGate(true);
+  }
+
   function showVideo(on) {
     if (on === st.speaking) return;
     st.speaking = on;
     if (on) paintVideo(); else $("#avVideo").style.opacity = "0";
-    if (st.duplex === "half") micGate(!on);
+    if (st.duplex !== "half") return;
+    if (on) micGate(false); else maybeReopenMic();
   }
 
   /* 露出视频层, 但**必须等它真的解出了一帧、且盒子已经按当前形象排好**。
@@ -294,16 +318,51 @@
   function herSpoke(text) {
     const v = normSaid(text);
     if (!v) return;
-    st.herSaid.push({ s: v, at: Date.now() });
+    // 原文也留着: 剥离之后要把**人话**交给模型, 而不是抹掉标点的那一版。
+    st.herSaid.push({ s: v, raw: String(text), at: Date.now() });
     while (st.herSaid.length > 6) st.herSaid.shift();
+  }
+
+  /* 听回来的这句里, **属于用户的那部分**。整句都是她的回声就返回空串。
+   *
+   * ⛔ 原来写成"双向包含就整句丢掉", 那是个能吃掉用户说话的 bug, 而且**恰好只在
+   *    全双工里发作** —— 那个模式麦克风全程开着, 用户插话时识别器收到的是
+   *    「她的半句 + 用户的话」拼在一起, `v.includes(h.s)` 成立, 于是**连用户那半句
+   *    一起丢**。表现就是"全双工她半天不回答"(其实是压根没听见, 用户只能再说一遍)。
+   * 正确的做法: 她说过的那段**剥掉**, 剩下的够长就当用户说的。
+   */
+  /* 把听回来的这句里**属于她自己的部分剥掉**, 剩下的就是用户说的; 整句都是她的
+   * 就返回空串。
+   *
+   * ⛔ 原来是"双向包含就整句丢掉"。那条**恰好只在全双工里发作**: 那个模式麦克风
+   *    全程开着, 用户插话时识别器收到的是「她的半句 + 用户的话」拼在一起,
+   *    `v.includes(h.s)` 成立, 于是**连用户那半句一起丢** —— 表现就是"全双工她半天
+   *    不回答"(其实是压根没听见, 用户只能再说一遍)。
+   * 匹配用抹掉标点的版本(识别器给的标点和我们发下去的从来对不上), 但**返回原文**,
+   * 因为剩下这段是要交给模型的。原文里找不到她那段(识别器听岔了)就整句放行 ——
+   * 宁可让她多答一句, 不能把用户说的吞掉。 */
+  function echoStrip(said) {
+    const raw = String(said || "");
+    let v = normSaid(raw);
+    if (!v) return "";
+    let out = raw;
+    const now = Date.now();
+    for (const h of st.herSaid) {
+      if (now - h.at >= ECHO_WINDOW_MS || !h.s) continue;
+      if (h.s.includes(v)) return "";                  // 整句都在她说过的话里 = 纯回声
+      if (v.includes(h.s)) {
+        v = v.split(h.s).join("");
+        if (h.raw && out.includes(h.raw)) out = out.split(h.raw).join(" ");
+      }
+    }
+    if (v.length < ECHO_MIN_CHARS) return "";
+    return out.trim() || raw;
   }
 
   function isEcho(said) {
     const v = normSaid(said);
     if (v.length < ECHO_MIN_CHARS) return false;
-    const now = Date.now();
-    return st.herSaid.some((h) =>
-      now - h.at < ECHO_WINDOW_MS && (h.s.includes(v) || v.includes(h.s)));
+    return !echoStrip(said);
   }
 
   /* 半双工的闸: 她说话时把识别器停掉, 说完再开。
@@ -415,6 +474,13 @@
         status(t("js.avatar.busy", "通道占线，稍后再试"), true); stopCall();
       } else if (m.type === "error") {
         status(m.message || t("js.avatar.error", "出错了"), true);
+      } else if (m.type === "idle") {
+        // 上游把待念的文字念完了。**但缓冲里可能还在播**, 所以这里只记一笔,
+        // 开不开麦交给 maybeReopenMic 去和"画面停没停"合并判断。
+        st.idle = true;
+        maybeReopenMic();
+      } else if (m.type === "begin") {
+        st.idle = false;                     // 又要出声了, 后面还有
       } else if (m.type === "ready") {
         // 上游接通了才开始听 —— 早于这一刻识别出来的话没地方发。
         status(t("js.avatar.listening", "说话吧，她在听"));
@@ -424,6 +490,7 @@
         const hi = t("js.avatar.hello", "喂，我在呢，你说。");
         say2log("her", hi);
         herSpoke(hi);
+        st.idle = false;   // 派了活, 后面一定还有声音
         ws.send(JSON.stringify({ type: "say", sid: ++st.sid, text: hi }));
       }
     };
@@ -450,9 +517,14 @@
       // 半双工里她还在说 = 这句多半是从音箱绕回来的她自己 (stop() 会把停之前
       // 听到的定稿吐出来)。丢掉, 别让她跟自己对话。
       if (st.duplex === "half" && st.speaking) return;
-      // 时序闸拦不住的那部分交给内容闸 (见 isEcho 上面那段)。
-      if (isEcho(said)) { console.info("[avatar] 丢掉绕回来的回声:", said); return; }
-      reply(said);
+      // 时序闸拦不住的那部分交给内容闸 (见 userPart 上面那段)。
+      // ⚠️ 用**剥离后**的结果判断, 而不是整句丢弃: 全双工里用户插话时, 识别器给的
+      //    是「她的半句 + 用户的话」, 整句丢掉等于用户白说了。
+      const mine = echoStrip(said);
+      if (!mine) { console.info("[avatar] 丢掉绕回来的回声:", said); return; }
+      // 交给模型的是**剥掉她那段之后**的话 —— 把她自己的句子当成用户说的喂回去,
+      // 她会对着自己的话接茬。
+      reply(mine);
     };
     // 识别器会自己停 (静默久了、或一次会话到点)。通话还在就重开 —— 不重开的
     // 表现是"聊着聊着她突然不理人了", 而页面上什么都没变。
@@ -469,6 +541,11 @@
      出声, 而且她说的已经是上一轮的答案了。 */
   async function reply(said) {
     if (!st.ws) return;
+    // **半双工: 从这一刻起就闭麦。**
+    // 原来闭麦是等"她开口"(showVideo(true))才做的, 而从用户说完到她出声有好几秒 ——
+    // 那几秒里麦还开着, 于是: 麦克风指示灯要多亮灭一轮, 还可能把这期间的房间声音
+    // 又识别成一句、并发起第二次回答。我们在这一刻已经决定要答了, 再听没有意义。
+    if (st.duplex === "half") micGate(false);
     // 她还在说就真的打断: 发 stop 并**重建 MSE** —— 只发 stop 的话半截 fMP4 会
     // 把 SourceBuffer 弄进错误态, 后面一句也播不出来。
     if (st.speaking) {
@@ -483,7 +560,7 @@
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ text: said, history: st.history.slice(0, -1) }),
     });
-    if (!r.ok || !r.body) { status(t("js.avatar.think_failed", "她没想出该说什么"), true); return; }
+    if (!r.ok || !r.body) { status(t("js.avatar.think_failed", "她没想出该说什么"), true); if (st.duplex === "half") micGate(true); return; }   // 没说成就把麦开回来
     const reader = r.body.getReader(), dec = new TextDecoder();
     let tail = "", whole = "";
     for (;;) {
@@ -503,10 +580,11 @@
         if (!st.ws) return;                   // 说到一半挂断了
         say2log("her", d.text);
         herSpoke(d.text);
+        st.idle = false;   // 派了活, 后面一定还有声音
         st.ws.send(JSON.stringify({ type: "say", sid: ++st.sid, text: d.text }));
       }
     }
-    if (!whole) { status(t("js.avatar.think_failed", "她没想出该说什么"), true); return; }
+    if (!whole) { status(t("js.avatar.think_failed", "她没想出该说什么"), true); if (st.duplex === "half") micGate(true); return; }   // 没说成就把麦开回来
     st.history.push({ role: "assistant", content: whole });
     if (st.history.length > 16) st.history.splice(0, st.history.length - 16);
   }
@@ -536,6 +614,7 @@
     st.history = [];
     st.herSaid = [];
     clearTimeout(st.micTimer); st.micTimer = null;
+    st.idle = true;
     if (st.timer) { clearInterval(st.timer); st.timer = null; }
     st.t0 = null; st.queue = [];
     $("#avCall").textContent = t("js.avatar.start", "开始通话");

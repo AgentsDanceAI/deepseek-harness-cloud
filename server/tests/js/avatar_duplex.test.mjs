@@ -79,7 +79,7 @@ function load(dom) {
   const patched = src.replace(
     /\}\)\(\);\s*$/,
     "  window.__test = { st, setDuplex, showVideo, listen, micGate, fill, loadBg, layout,\n"
-    + "                     herSpoke, isEcho, MIC_REOPEN_MS };\n})();\n"
+    + "                     herSpoke, isEcho, echoStrip, maybeReopenMic, MIC_REOPEN_MS };\n})();\n"
   );
   assert.notEqual(patched, src, "没能挂上测试钩子 —— IIFE 尾部形状变了");
   const fn = new Function(
@@ -260,6 +260,71 @@ check("回声闸: 记的句数有上限, 不会一直涨", () => {
   assert.ok(api.st.herSaid.length <= 6,
     "她说过的话无上限地攒着 —— 长通话会把内存和比对成本一起拖大");
   assert.equal(api.isEcho("这是第29句话说得挺长的"), true, "最近说的那句反而没留住");
+});
+
+/* 下面两条钉的是"回复前总弹一下麦"(创始人 2026-09-11 报)。
+   实测注入一句用户说话后的麦克风动作: stop(8.02s) → **start(10.18s)** → stop(11.24s)
+   —— 中间那一秒的开麦, 是她两句之间的空档被当成了"她说完了"。 */
+await checkAsync("半双工: 她两句之间的空档不能把麦弹开", async () => {
+  const dom = makeDom();
+  const api = load(dom);
+  api.st.ws = {};
+  api.listen();
+  api.st.idle = false;                 // 上游还有待念的文字
+  api.showVideo(true);                 // 她开口
+  assert.equal(dom.ear.running, false);
+  api.showVideo(false);                // 画面停了一下(换气 / 上游卡一下)
+  await sleep(api.MIC_REOPEN_MS + 250);
+  assert.equal(dom.ear.running, false,
+    "句间空档就把麦开回来了 —— 观众看到的是麦克风指示灯亮灭一轮, 而她根本没说完");
+  api.showVideo(true);                 // 她接着说下一句
+  assert.equal(dom.ear.running, false);
+});
+
+await checkAsync("半双工: 画面停 + 上游 idle, 两个都到了才开麦", async () => {
+  const dom = makeDom();
+  const api = load(dom);
+  api.st.ws = {};
+  api.listen();
+  api.st.idle = false;
+  api.showVideo(true);
+  api.showVideo(false);                // 画面先停
+  await sleep(api.MIC_REOPEN_MS + 250);
+  assert.equal(dom.ear.running, false, "上游还没说完就开麦了");
+  api.st.idle = true;                  // 上游: 待念的念完了
+  api.maybeReopenMic();
+  await sleep(api.MIC_REOPEN_MS + 250);
+  assert.equal(dom.ear.running, true, "两个条件都到了还不开麦 —— 她就此不理人");
+});
+
+/* 这条钉的是"全双工回答慢"(同日报)。根子不是模型慢(实测第一句文本 1.84 秒就到),
+   而是用户插话被当成回声整句丢掉了 —— 她压根没听见, 用户只能再说一遍。 */
+check("回声闸: 用户插话被拼在她的话里, 不能连用户那半句一起丢", () => {
+  const dom = makeDom();
+  const probe = sayProbe(dom);
+  const api = load(dom);
+  api.st.ws = {};
+  api.listen();
+  api.herSpoke("我平时就看看书、刷刷视频");
+  api.st.speaking = false;
+  dom.ear.onresult({ results: [[{ transcript: "我平时就看看书、刷刷视频 那你喜欢什么电影" }]] });
+  assert.equal(probe.hit, true,
+    "用户插话被当成回声整句丢了 —— 全双工下她就再也不回答, 用户只能重说");
+  assert.ok(probe.said.indexOf("电影") >= 0, "剥离之后把用户那半句也弄没了");
+  assert.ok(probe.said.indexOf("刷刷视频") < 0,
+    "她自己的话没剥掉就喂回模型 —— 她会对着自己说过的话接茬");
+});
+
+check("回声闸: 原文里找不到她那段就整句放行 (识别器听岔了)", () => {
+  const dom = makeDom();
+  const probe = sayProbe(dom);
+  const api = load(dom);
+  api.st.ws = {};
+  api.listen();
+  api.herSpoke("今天天气不错");
+  api.st.speaking = false;
+  dom.ear.onresult({ results: [[{ transcript: "你觉得明天会下雨吗" }]] });
+  assert.equal(probe.hit, true, "跟她说过的话没关系的一句被拦了");
 });
 
 check("全双工: 她说话时照样听 (能打断)", () => {
