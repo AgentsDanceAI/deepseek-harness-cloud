@@ -165,6 +165,8 @@ These Terms are governed by the laws of the People's Republic of China (excludin
 
 15.4 You may not assign your rights or obligations under these Terms without our written consent.
 
+15.5 Third-party product names, logos and trademarks mentioned or shown in the Service belong to their respective owners; we refer to them only to identify those products and what they do (nominative use). The Service is provided independently by the Operator, which has no affiliation with, sponsorship from, or endorsement by any of those owners.
+
 ---
 
 *Last updated: August 19, 2026 · Version 1.2 (this revision changes only the price table in section 5.2. Pro moves from $20 to $50 per month and its monthly credits from 2,000 to 5,000; the other tiers are unchanged. Per section 5.2, a price change does not affect a period you have already purchased that has not yet expired.)*
