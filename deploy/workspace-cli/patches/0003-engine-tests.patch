@@ -1,0 +1,206 @@
+diff --git a/tests/unit/cli-engine-adapter.test.ts b/tests/unit/cli-engine-adapter.test.ts
+new file mode 100644
+index 0000000..498bb8b
+--- /dev/null
++++ b/tests/unit/cli-engine-adapter.test.ts
+@@ -0,0 +1,69 @@
++/**
++ * 第三个引擎的适配层。钉的是**上游 CLI 的 wire 格式**。
++ *
++ * 这些样本是从真 CLI 抓的原样输出 (claude 2.1.193 / codex exec --json), 不是照
++ * 文档编的。CLI 改格式时这里会**静默失配** —— 症状是"发了消息没反应", 没有
++ * 任何报错, 查起来毫无线索。所以宁可让测试先红。
++ */
++
++import { describe, expect, it } from "vitest";
++import { claudeSpec, codexSpec } from "../../server/cli/cli-adapter.js";
++
++describe("claude 适配", () => {
++	it("从 system/init 认出 session id（用于 --resume）", () => {
++		const line = JSON.stringify({ type: "system", subtype: "init", session_id: "s-1", cwd: "/x" });
++		expect(claudeSpec.feed(line)).toEqual([{ t: "session", id: "s-1" }]);
++	});
++
++	it("text_delta 出流式增量", () => {
++		const line = JSON.stringify({
++			type: "stream_event",
++			event: { type: "content_block_delta", delta: { type: "text_delta", text: "你好" } },
++		});
++		expect(claudeSpec.feed(line)).toEqual([{ t: "delta", text: "你好" }]);
++	});
++
++	it("result 带出用量（缓存命中单列）", () => {
++		const line = JSON.stringify({
++			type: "result",
++			usage: { input_tokens: 10, output_tokens: 3, cache_read_input_tokens: 7 },
++		});
++		expect(claudeSpec.feed(line)).toEqual([{ t: "done", usage: { input: 10, output: 3, cacheRead: 7 } }]);
++	});
++
++	it("认不出的行原样透传成 raw，不丢掉", () => {
++		// 丢掉的症状是"发了消息没反应", 而 raw 至少能在调试面板里看见。
++		expect(claudeSpec.feed('{"type":"brand_new_thing"}')[0]!.t).toBe("raw");
++		expect(claudeSpec.feed("这不是 JSON")[0]!.t).toBe("raw");
++	});
++
++	it("argv 带 --model，且 resume 时接上 --resume", () => {
++		const a = claudeSpec.argv("hi", "s-9", "claude-sonnet-5");
++		expect(a).toContain("--model");
++		expect(a[a.indexOf("--model") + 1]).toBe("claude-sonnet-5");
++		expect(a[a.indexOf("--resume") + 1]).toBe("s-9");
++	});
++});
++
++describe("codex 适配", () => {
++	it("thread.started 就是会话 id", () => {
++		expect(codexSpec.feed(JSON.stringify({ type: "thread.started", thread_id: "th-1" }))).toEqual([
++			{ t: "session", id: "th-1" },
++		]);
++	});
++
++	it("正文走 text 而不是 delta —— 它没有流式增量", () => {
++		// 走 delta 的话前端会画光标动画, 而那边其实一次性给完, 看起来像卡住。
++		const line = JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "好了" } });
++		expect(codexSpec.feed(line)).toEqual([{ t: "text", text: "好了" }]);
++	});
++
++	it("-m 是按次指定的（dsh 引擎换模型要重启运行时，这里不用）", () => {
++		const a = codexSpec.argv("hi", null, "gpt-5.6-luna");
++		expect(a[a.indexOf("-m") + 1]).toBe("gpt-5.6-luna");
++	});
++
++	it("turn.failed 出 error，不当成正常结束", () => {
++		expect(codexSpec.feed(JSON.stringify({ type: "turn.failed" }))[0]!.t).toBe("error");
++	});
++});
+diff --git a/tests/unit/cli-engine-sessions.test.ts b/tests/unit/cli-engine-sessions.test.ts
+new file mode 100644
+index 0000000..01d792e
+--- /dev/null
++++ b/tests/unit/cli-engine-sessions.test.ts
+@@ -0,0 +1,125 @@
++/**
++ * 会话列表与回放 —— 读的是**别人的磁盘格式**。
++ *
++ * claude / codex 换了目录布局或行格式, 这里会静默失效: 列表变空、回放变空,
++ * 页面一切正常, 看起来像"这个项目就是没有历史"。踩过一次 (macOS 的 /tmp 软链
++ * 让目录名对不上, 列表永远空且不报错)。所以用真文件跑。
++ */
++
++import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
++import { tmpdir } from "node:os";
++import { join } from "node:path";
++import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
++
++let home: string;
++let work: string;
++
++beforeEach(() => {
++	home = mkdtempSync(join(tmpdir(), "cli-home-"));
++	work = mkdtempSync(join(tmpdir(), "cli-work-"));
++	vi.doMock("node:os", async () => {
++		const real = await vi.importActual<typeof import("node:os")>("node:os");
++		return { ...real, homedir: () => home };
++	});
++});
++afterEach(() => {
++	vi.resetModules();
++	vi.doUnmock("node:os");
++});
++
++/** 真实 claude 行的形状 (实测): 对话行夹在一堆内部记账行中间。 */
++function writeClaudeSession(realWork: string, id: string, lines: unknown[]): void {
++	const dir = join(home, ".claude", "projects", realWork.replace(/[/.]/g, "-"));
++	mkdirSync(dir, { recursive: true });
++	writeFileSync(join(dir, `${id}.jsonl`), lines.map((l) => JSON.stringify(l)).join("\n"), "utf8");
++}
++
++const userLine = (text: string) => ({ type: "user", message: { role: "user", content: [{ type: "text", text }] } });
++const asstLine = (text: string) => ({ type: "assistant", message: { role: "assistant", content: [{ type: "text", text }] } });
++
++describe("claude 会话", () => {
++	it("列表带出标题与条数，跳过内部记账行", async () => {
++		const { listClaudeSessions } = await import("../../server/cli/sessions.js");
++		const { realpathSync } = await import("node:fs");
++		writeClaudeSession(realpathSync(work), "s-1", [
++			{ type: "queue-operation" },              // 内部行, 不该计入
++			userLine("第一句"),
++			{ type: "attachment" },                   // 同上
++			asstLine("回答"),
++			{ type: "last-prompt" },
++		]);
++		const out = listClaudeSessions(work);
++		expect(out).toHaveLength(1);
++		expect(out[0]!.path).toBe("s-1");
++		expect(out[0]!.firstMessage).toBe("第一句");
++		expect(out[0]!.messageCount).toBe(2);        // 只数 user/assistant
++	});
++
++	it("回放只出对话内容，内部行一条不出", async () => {
++		const { replayClaudeSession } = await import("../../server/cli/sessions.js");
++		const { realpathSync } = await import("node:fs");
++		writeClaudeSession(realpathSync(work), "s-2", [
++			// **内部记账行也带正文**: 它们在真文件里就是有 content 的 (attachment
++			// 带附件内容、last-prompt 带上一条提示词)。第一版这里写的是空对象,
++			// 于是"没有 content 就跳过"那条兜底替类型判断挡住了 —— 把 type 判断
++			// 整条拆掉, 测试照样全过。断言必须落在**只能靠 type 区分**的数据上。
++			{ type: "file-history-snapshot", message: { role: "user", content: [{ type: "text", text: "快照噪音" }] } },
++			userLine("问"),
++			asstLine("答"),
++			{ type: "last-prompt", message: { role: "user", content: [{ type: "text", text: "提示词噪音" }] } },
++		]);
++		const msgs = replayClaudeSession(work, "s-2");
++		expect(msgs.map((m) => m.role)).toEqual(["user", "assistant"]);
++		expect(msgs.map((m) => (m.content[0] as { text: string }).text)).toEqual(["问", "答"]);
++		expect(msgs).toHaveLength(2);
++	});
++
++	it("会话不存在时返回空而不是抛", async () => {
++		const { replayClaudeSession } = await import("../../server/cli/sessions.js");
++		expect(replayClaudeSession(work, "没有这个")).toEqual([]);
++	});
++
++	it("坏行不会毁掉整个会话", async () => {
++		// 一行半截 JSON 就让整段历史消失, 是最难查的那种。
++		const { replayClaudeSession } = await import("../../server/cli/sessions.js");
++		const { realpathSync } = await import("node:fs");
++		const dir = join(home, ".claude", "projects", realpathSync(work).replace(/[/.]/g, "-"));
++		mkdirSync(dir, { recursive: true });
++		writeFileSync(join(dir, "s-3.jsonl"), [JSON.stringify(userLine("好行")), "{半截", JSON.stringify(asstLine("也好"))].join("\n"), "utf8");
++		expect(replayClaudeSession(work, "s-3")).toHaveLength(2);
++	});
++});
++
++describe("codex 会话", () => {
++	/** codex 按日期摊开存, 只能靠第一行 session_meta 里的 cwd 认项目。 */
++	function writeCodexSession(id: string, cwd: string, first: string): void {
++		const dir = join(home, ".codex", "sessions", "2026", "09", "11");
++		mkdirSync(dir, { recursive: true });
++		writeFileSync(
++			join(dir, `rollout-2026-09-11T00-00-00-${id}.jsonl`),
++			[
++				JSON.stringify({ type: "session_meta", payload: { id, cwd } }),
++				JSON.stringify({ payload: { role: "user", content: [{ type: "text", text: first }] } }),
++				JSON.stringify({ payload: { role: "assistant", content: [{ type: "text", text: "回答" }] } }),
++			].join("\n"),
++			"utf8",
++		);
++	}
++
++	it("只列出属于这个项目的会话", async () => {
++		const { listCodexSessions } = await import("../../server/cli/sessions.js");
++		const { realpathSync } = await import("node:fs");
++		const real = realpathSync(work);
++		writeCodexSession("th-mine", real, "我的会话");
++		writeCodexSession("th-other", "/somewhere/else", "别人的会话");
++		const out = listCodexSessions(work);
++		expect(out).toHaveLength(1);
++		expect(out[0]!.path).toBe("th-mine");
++		expect(out[0]!.firstMessage).toBe("我的会话");
++	});
++
++	it("目录不存在时返回空", async () => {
++		const { listCodexSessions } = await import("../../server/cli/sessions.js");
++		expect(listCodexSessions("/no/such/dir")).toEqual([]);
++	});
++});

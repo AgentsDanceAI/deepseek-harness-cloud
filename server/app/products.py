@@ -1463,6 +1463,21 @@ _AGENTUI_SLOTS = {
 }
 
 
+def _cli_slot_image() -> str:
+    """claude-code / codex 两格用哪个外壳。
+
+    默认仍是自研的 agentui (线上就是它, 好好的)。`USE_CLI_WORKSPACE=1` 切到
+    pi-web-ui + 第三个引擎那份 —— 切之前镜像得先构建推送, 否则容器拉不起来。
+    """
+    return config.CLI_WORKSPACE_IMAGE_REF if config.USE_CLI_WORKSPACE else config.AGENTUI_IMAGE_REF
+
+
+def _cli_slot_port() -> int:
+    """两个外壳端口不同: agentui 8080, pi-web-ui 8787。**别写死** —— 端口对不上
+    的症状是容器起来了、就绪探针一直超时, 而日志里一切正常。"""
+    return config.CLI_WORKSPACE_PORT if config.USE_CLI_WORKSPACE else AGENTUI_PORT
+
+
 def _agentui_boot(product_id: str) -> str:
     """把 NAS 挂载点交给 agent 用户 -> 种掉各 CLI 的首跑向导 -> 起服务。
 
@@ -2215,9 +2230,9 @@ def registry() -> dict[str, Product]:
         "claude-code": Product(
             id="claude-code",
             name="Claude Code",
-            image=config.AGENTUI_IMAGE_REF,
-            image_ref=config.AGENTUI_IMAGE_REF,
-            port=AGENTUI_PORT,
+            image=_cli_slot_image(),
+            image_ref=_cli_slot_image(),
+            port=_cli_slot_port(),
             mem_mb=config.CODECLI_MEM_LIMIT_MB,
             cpus=config.CODECLI_CPUS,
             domain=config.CLAUDE_CODE_DOMAIN,
@@ -2233,9 +2248,9 @@ def registry() -> dict[str, Product]:
         "codex": Product(
             id="codex",
             name="Codex",
-            image=config.AGENTUI_IMAGE_REF,
-            image_ref=config.AGENTUI_IMAGE_REF,
-            port=AGENTUI_PORT,
+            image=_cli_slot_image(),
+            image_ref=_cli_slot_image(),
+            port=_cli_slot_port(),
             mem_mb=config.CODECLI_MEM_LIMIT_MB,
             cpus=config.CODECLI_CPUS,
             domain=config.CODEX_DOMAIN,
@@ -3229,6 +3244,28 @@ def env_for(product_id: str, token: str, secret: str = "") -> dict[str, str]:
             "PI_WEB_HOST": "0.0.0.0",
             "PI_WEB_CWD": "/workspace",
             "PI_WEB_DATA_DIR": "/root/.pi-web",
+        }
+    if product_id in _AGENTUI_SLOTS and config.USE_CLI_WORKSPACE:
+        # pi-web-ui + 第三个引擎那份外壳 (见 deploy/workspace-cli)。
+        # 它自己认 DSH_GATEWAY_BASE / DSH_CLOUD_TOKEN 去接网关并拉在售目录
+        # (server/cli/gateway.ts), 所以**不用**在这里给 ANTHROPIC_* —— 那是
+        # agentui 那条路的接法, 两套混着给, 谁生效说不清。
+        cli, _ = _AGENTUI_SLOTS[product_id]
+        domain = config.CLAUDE_CODE_DOMAIN if product_id == "claude-code" else config.CODEX_DOMAIN
+        return {
+            "HOME": "/root",
+            "PI_WEB_ENGINE": cli,
+            "PI_WEB_HOST": "0.0.0.0",
+            "PI_WEB_CWD": "/workspace",
+            "PI_WEB_DATA_DIR": "/root/.pi-web",
+            # 受管实例: 升级与插件市场由我们控制, 界面不提供 (server/managed.ts)。
+            "PI_WEB_MANAGED": "1",
+            # WebSocket 同源校验比对 Origin 与 Host 的主机名**和端口** —— 反代进来
+            # 是 Origin=https://<域>、Host=<域>, 不放行的话页面能开而对话一直重连
+            # (pi 那格踩过, 它 README 里明写的坑)。
+            "PI_WEB_ALLOW_ORIGINS": f"https://{domain}" if domain else "",
+            "DSH_GATEWAY_BASE": gateway,
+            "DSH_CLOUD_TOKEN": token,
         }
     if product_id in _AGENTUI_SLOTS:
         cli, enabled = _AGENTUI_SLOTS[product_id]

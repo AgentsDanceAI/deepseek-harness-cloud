@@ -1,0 +1,1084 @@
+diff --git a/server/cli/cli-adapter.ts b/server/cli/cli-adapter.ts
+new file mode 100644
+index 0000000..64c55e0
+--- /dev/null
++++ b/server/cli/cli-adapter.ts
+@@ -0,0 +1,159 @@
++/**
++ * cli-adapter.ts —— 把 CLI 的 JSON 行归一成同一套事件。
++ *
++ * 这一层是**从 AI Store 的自研工作台移植过来的** (deploy/workspace-agentui/
++ * app/adapters.py)。那边的注释写着"每个 schema 都是实测抓出来的, 不是照文档
++ * 写的" —— 所以这里照抄形状, 不重新猜。
++ *
++ * 与 dsh 引擎的区别: DSH 的 SDK 是个库, 要另搭一个 JSON-RPC 运行时壳
++ * (server/dsh/runtime/, 973 行); claude 与 codex 本来就往 stdout 吐 JSON,
++ * 直接 spawn 就行。
++ */
++
++export type CliEvent =
++	| { t: "session"; id: string }
++	| { t: "delta"; text: string }
++	| { t: "text"; text: string }
++	| { t: "thinking"; text: string }
++	| { t: "tool"; id: string; name: string; input: unknown }
++	| { t: "tool_end"; id: string; ok: boolean; output: string }
++	| { t: "done"; usage: { input: number; output: number; cacheRead: number } }
++	| { t: "error"; message: string }
++	| { t: "raw"; line: string };
++
++export interface CliSpec {
++	readonly id: "claude" | "codex";
++	readonly name: string;
++	/** 起一轮对话的 argv。resume 为空表示新会话。 */
++	argv(prompt: string, resume: string | null, model: string): string[];
++	/** prompt 走 stdin 还是 argv。 */
++	readonly stdinPrompt: boolean;
++	stdinPayload(prompt: string): string | null;
++	feed(line: string): CliEvent[];
++}
++
++const num = (v: unknown): number => (typeof v === "number" ? v : 0);
++
++/** Claude Code: 双向 stream-json, 三个里最完整的一个。 */
++export const claudeSpec: CliSpec = {
++	id: "claude",
++	name: "Claude Code",
++	stdinPrompt: true,
++	argv(_prompt, resume, model) {
++		const a = [
++			"--print",
++			"--input-format", "stream-json",
++			"--output-format", "stream-json",
++			"--include-partial-messages",
++			"--verbose",
++			"--dangerously-skip-permissions",
++		];
++		if (model) a.push("--model", model);
++		if (resume) a.push("--resume", resume);
++		return a;
++	},
++	stdinPayload(prompt) {
++		return (
++			JSON.stringify({
++				type: "user",
++				message: { role: "user", content: [{ type: "text", text: prompt }] },
++			}) + "\n"
++		);
++	},
++	feed(line) {
++		let e: Record<string, any>;
++		try {
++			e = JSON.parse(line);
++		} catch {
++			return [{ t: "raw", line }];
++		}
++		if (e.type === "system" && e.subtype === "init") return [{ t: "session", id: String(e.session_id ?? "") }];
++		if (e.type === "stream_event") {
++			const ev = e.event ?? {};
++			const d = ev.delta;
++			if (d?.type === "text_delta") return [{ t: "delta", text: String(d.text ?? "") }];
++			if (d?.type === "thinking_delta") return [{ t: "thinking", text: String(d.thinking ?? "") }];
++			// 工具调用: content_block_start 带 tool_use。**必须出事件** —— 一轮里
++			// 如果全是工具活动 (模型先派 Explore 子智能体再回答), 界面上一个字都
++			// 不动, 看着就是卡死。实测踩过: 真模型问"读一下 fib.py", 它先起子
++			// 智能体探索, 界面停在「正在思考」二十多秒, 其实一直在干活。
++			const cb = ev.content_block;
++			if (ev.type === "content_block_start" && cb?.type === "tool_use") {
++				return [{ t: "tool", id: String(cb.id ?? ""), name: String(cb.name ?? "?"), input: cb.input }];
++			}
++			return [];
++		}
++		// **不收 type=\"assistant\" 的整段正文**: 开着 --include-partial-messages 时
++		// 它与 text_delta 是同一份内容的两种给法, 两个都收正文会翻倍。
++		// 实测 (走 AI Store 网关): claude-sonnet-5 两边都是「你好世界」;
++		// gpt-5.6-luna 的 assistant 行甚至是「你好世界你好世界」(分两条给)。
++		if (e.type === "result") {
++			const u = e.usage ?? {};
++			return [
++				{
++					t: "done",
++					usage: {
++						input: num(u.input_tokens),
++						output: num(u.output_tokens),
++						cacheRead: num(u.cache_read_input_tokens),
++					},
++				},
++			];
++		}
++		return [{ t: "raw", line }];
++	},
++};
++
++/** Codex: `codex exec --json`, 单向 JSONL。**没有流式增量** —— 正文是一整段
++ *  item.completed 给的, 所以走 "text" 而不是 "delta"。 */
++export const codexSpec: CliSpec = {
++	id: "codex",
++	name: "Codex",
++	stdinPrompt: false,
++	argv(prompt, resume, model) {
++		const a = ["exec", "--json", "--skip-git-repo-check", "--sandbox", "danger-full-access"];
++		if (model) a.push("-m", model);          // 按次指定 —— dsh 引擎做不到这点
++		if (resume) a.push("resume", resume);
++		a.push(prompt);
++		return a;
++	},
++	stdinPayload() {
++		return null;
++	},
++	feed(line) {
++		let e: Record<string, any>;
++		try {
++			e = JSON.parse(line);
++		} catch {
++			return [{ t: "raw", line }];
++		}
++		if (e.type === "thread.started") return [{ t: "session", id: String(e.thread_id ?? "") }];
++		if (e.type === "item.completed") {
++			const it = e.item ?? {};
++			if (it.type === "agent_message") return [{ t: "text", text: String(it.text ?? "") }];
++			if (it.type === "reasoning") return [{ t: "thinking", text: String(it.text ?? "") }];
++			if (["command_execution", "file_change", "tool_call"].includes(it.type)) {
++				return [{ t: "tool", id: String(it.id ?? ""), name: String(it.type), input: it }];
++			}
++		}
++		if (e.type === "turn.completed") {
++			const u = e.usage ?? {};
++			return [
++				{
++					t: "done",
++					usage: {
++						input: num(u.input_tokens),
++						output: num(u.output_tokens),
++						cacheRead: num(u.cached_input_tokens),
++					},
++				},
++			];
++		}
++		if (e.type === "turn.failed" || e.type === "error") {
++			return [{ t: "error", message: JSON.stringify(e).slice(0, 400) }];
++		}
++		return [{ t: "raw", line }];
++	},
++};
++
++export const SPECS: Record<string, CliSpec> = { claude: claudeSpec, codex: codexSpec };
+diff --git a/server/cli/cli-agent-service.ts b/server/cli/cli-agent-service.ts
+new file mode 100644
+index 0000000..8e57609
+--- /dev/null
++++ b/server/cli/cli-agent-service.ts
+@@ -0,0 +1,86 @@
++/**
++ * cli-agent-service.ts —— 第三个引擎的连接管理器 (PI_WEB_ENGINE=claude|codex)。
++ *
++ * EngineService 只有十六个必需方法, 它管的是**连接**, 不是会话本身 ——
++ * 真正的面在 attach() 返回的 DispatchSession 上 (见 cli-session.ts)。
++ *
++ * 骨架阶段: 每个 clientId 一个会话, 不做静默期 (quiesce) 的排队语义 ——
++ * 那是给"服务端要重启但别掐断用户"用的, 等这条路确定要走再补。
++ */
++
++import type { EngineService } from "../index.js";
++import type { ServerMessage } from "../protocol.js";
++import { CliSession } from "./cli-session.js";
++
++export class CliAgentService implements EngineService {
++	private readonly clients = new Map<string, CliSession>();
++	private sockets = 0;
++	private quiesced = false;
++	private quiescedSince: number | undefined;
++
++	constructor(
++		private readonly cwd: string,
++		private readonly engine: string,
++		private readonly version: string,
++	) {}
++
++	async attach(clientId: string, send: (msg: ServerMessage) => void): Promise<CliSession> {
++		let cs = this.clients.get(clientId);
++		if (!cs) {
++			cs = new CliSession(clientId, this.cwd, this.engine, send);
++			this.clients.set(clientId, cs);
++		}
++		// 首屏: 先把快照推过去, 否则前端停在空白等状态。
++		cs.snapshot();
++		// **型号要在第一轮对话之前就定下来。** 前端是等面板打开才发 list_models 的,
++		// 而用户完全可能一上来就发消息 —— 那时 this.model 还是空, 等于没给 --model,
++		// 于是落到 CLI 自己的默认型号, 而网关只放行在售目录, 结果是一发就 404。
++		// 拉目录是异步的, 不挡 attach; 拉完会自己再推一次快照。
++		void cs.listModels();
++		return cs;
++	}
++
++	detach(clientId: string, _send: (msg: ServerMessage) => void): void {
++		this.clients.delete(clientId);
++	}
++
++	get(clientId: string): CliSession | undefined {
++		return this.clients.get(clientId);
++	}
++
++	async disposeAll(): Promise<void> {
++		for (const cs of this.clients.values()) await cs.abort();
++		this.clients.clear();
++	}
++
++	noteSocketOpen(): void { this.sockets++; }
++	noteSocketClose(): void { this.sockets = Math.max(0, this.sockets - 1); }
++	isQuiesced(): boolean { return this.quiesced; }
++	quiesce(): void { this.quiesced = true; this.quiescedSince = Date.now(); }
++	unquiesce(): void { this.quiesced = false; this.quiescedSince = undefined; }
++	quiesceInfo(): { quiesced: boolean; quiescedSince?: number } {
++		return this.quiescedSince === undefined
++			? { quiesced: this.quiesced }
++			: { quiesced: this.quiesced, quiescedSince: this.quiescedSince };
++	}
++
++	serviceStatus() {
++		return {
++			pid: process.pid,
++			version: this.version,
++			cwd: this.cwd,
++			quiesced: this.quiesced,
++			...(this.quiescedSince === undefined ? {} : { quiescedSince: this.quiescedSince }),
++			connectedClients: this.sockets,
++			activeConversations: this.activeConversations(),
++			pendingMessages: 0,
++		};
++	}
++
++	activeConversations(): number { return this.clients.size; }
++	pendingMessages(): number { return 0; }
++	applyPluginAgentTools(): void {}
++	applyPluginCommandCatalog(): void {}
++	refreshBackgroundServers(): void {}
++	async setLocale(_clientId: string, _locale: string): Promise<void> {}
++}
+diff --git a/server/cli/cli-session.ts b/server/cli/cli-session.ts
+new file mode 100644
+index 0000000..f389ca0
+--- /dev/null
++++ b/server/cli/cli-session.ts
+@@ -0,0 +1,442 @@
++/**
++ * cli-session.ts —— 第三个引擎的会话对象 (PI_WEB_ENGINE=claude|codex)。
++ *
++ * **这是一个能走路的骨架, 不是完整引擎。** 只把聊天那一条链路接通:
++ * attach → 首屏快照 → prompt → 流式增量 → 结束。DispatchSession 另外六十多个
++ * 方法目前是**按接口签名自动生成的空实现** —— 由 server/index.ts 里导出的
++ * `DispatchSession` 接口逐条对出来的, 所以漏掉一个 TypeScript 当场报错,
++ * 不会等到用户点了才抛。
++ *
++ * 目的只有一个: 让一段**真实的 Claude Code / Codex 对话**在 pi-web-ui 的界面里
++ * 跑出来, 看一眼观感对不对, 再决定要不要补完剩下的。
++ *
++ * 与 dsh 引擎的关键差别 (见 docs/dsh-engine.md):
++ *   · dsh 换模型要重启运行时 (model 在 initialize 就固定了);
++ *     claude/codex 是**按次指定** (`--model` / `-m`), 所以这里换模型不重启。
++ *   · dsh 要另搭 973 行 JSON-RPC 运行时壳; 这两个 CLI 直接 spawn 就有 JSON。
++ */
++
++import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
++import { randomUUID } from "node:crypto";
++import type { DispatchSession, TerminalManagerLike } from "../index.js";
++import type {
++	CommandDef,
++	PromptAttachment,
++	ServerMessage,
++	UiMessage,
++	UiState,
++	UiSubagentTemplate,
++} from "../protocol.js";
++import { SPECS, type CliSpec, type CliEvent } from "./cli-adapter.js";
++import { childEnv, codexConfigToml, gatewayConfigured, listCatalog } from "./gateway.js";
++import { claudeProjectDir, listClaudeSessions, listCodexSessions, replayClaudeSession } from "./sessions.js";
++import { FilesService } from "../files-service.js";
++import { existsSync, mkdirSync, rmSync, statSync, writeFileSync } from "node:fs";
++import { resolve } from "node:path";
++import { loadCommands, saveCommandsFile, TerminalManager } from "../terminals.js";
++import { homedir } from "node:os";
++import { join } from "node:path";
++
++type Send = (msg: ServerMessage) => void;
++
++export class CliSession implements DispatchSession {
++	cwd: string;
++	private readonly spec: CliSpec;
++	private readonly send: Send;
++	private readonly clientId: string;
++	private child: ChildProcessWithoutNullStreams | null = null;
++	private resume: string | null = null;
++	private model = "";
++	private messages: UiMessage[] = [];
++	private streaming: UiMessage | null = null;
++	private rev = 0;
++	private seq = 0;
++	private conversationId = randomUUID();
++	private usage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
++	// 文件树 / 预览 / 补全 / SCM 与终端**都不是引擎的事** —— 它们是工作区的事。
++	// 所以直接用项目自己的实现 (server/files-service.ts / server/terminals.ts),
++	// dsh 引擎也是这么接的; 各写一份必然漂, 而且这两块和 agent 无关。
++	private readonly files: FilesService;
++	private readonly terminals: TerminalManager;
++	private disposed = false;
++	private lang = "en";
++
++	constructor(clientId: string, cwd: string, engine: string, send: Send) {
++		this.clientId = clientId;
++		this.cwd = cwd;
++		this.send = send;
++		const spec = SPECS[engine];
++		if (!spec) throw new Error(`unknown CLI engine: ${engine}`);
++		this.spec = spec;
++		this.files = new FilesService({
++			emit: (msg) => this.send(msg),
++			isDisposed: () => this.disposed,
++			getCwd: () => this.cwd,
++			getActiveCwd: () => this.cwd,
++		});
++		this.terminals = new TerminalManager((msg) => this.send(msg), cwd, () => "en");
++	}
++
++	// ---- 真逻辑 ---------------------------------------------------------
++
++	/** 首屏快照。UiState 四十个字段, 骨架只填对话需要的那些, 其余给空。 */
++	snapshot(): void {
++		this.send({ type: "snapshot", state: this.state() });
++	}
++
++	private state(): UiState {
++		return {
++			clientId: this.clientId,
++			cwd: this.cwd,
++			sessionId: this.resume ?? "",
++			conversationId: this.conversationId,
++			rev: ++this.rev,
++			messages: this.messages,
++			streamingMessage: this.streaming,
++			isStreaming: this.child !== null,
++			model: this.model ? { id: this.model, name: this.model, provider: this.spec.name, vision: false } : null,
++			thinkingLevel: "off",
++			availableThinkingLevels: ["off"],
++			queue: { steering: [], followUp: [] },
++			tools: [],
++			version: 0,
++			piConfigured: true,
++			piAgentInstalled: true,
++			stats: {
++				totalMessages: this.messages.length,
++				tokens: { ...this.usage, total: this.usage.input + this.usage.output },
++				cost: 0,
++				contextUsage: { tokens: null, contextWindow: 128000, percent: null },
++			},
++		};
++	}
++
++	async prompt(text: string, _attachments?: unknown[], _queue?: boolean): Promise<void> {
++		if (this.child) return;                       // 骨架: 一次一轮, 不排队
++		this.messages.push({
++			id: `u-${Date.now()}-${this.seq++}`,
++			role: "user",
++			content: [{ type: "text", text }],
++			timestamp: Date.now(),
++		});
++		this.streaming = { id: `a-${Date.now()}-${this.seq++}`, role: "assistant", content: [], timestamp: Date.now() };
++		this.snapshot();
++
++		const argv = this.spec.argv(text, this.resume, this.model);
++		// codex 的 base_url/wire_api 只能从 config.toml 读, 给不了 env —— 每轮
++		// 重写一次, 因为型号是按次可换的, 而 config 里钉着当前这个。
++		if (this.spec.id === "codex" && gatewayConfigured()) {
++			try {
++				const dir = join(homedir(), ".codex");
++				mkdirSync(dir, { recursive: true });
++				writeFileSync(join(dir, "config.toml"), codexConfigToml(this.model), "utf8");
++			} catch (e) {
++				console.error("[codex] 写 config.toml 失败:", e);
++			}
++		}
++		const child = spawn(this.spec.id, argv, { cwd: this.cwd, env: childEnv(this.spec.id, this.model) });
++		this.child = child;
++		if (this.spec.stdinPrompt) {
++			const payload = this.spec.stdinPayload(text);
++			if (payload) child.stdin.write(payload);
++			child.stdin.end();
++		}
++
++		let buf = "";
++		child.stdout.on("data", (chunk: Buffer) => {
++			buf += chunk.toString("utf8");
++			let nl: number;
++			while ((nl = buf.indexOf("\n")) >= 0) {
++				const line = buf.slice(0, nl).trim();
++				buf = buf.slice(nl + 1);
++				if (line) for (const ev of this.spec.feed(line)) this.onEvent(ev);
++			}
++		});
++		// stderr 不丢: CLI 起不来时 (没装 / 没登录) 这里是唯一线索。
++		child.stderr.on("data", (c: Buffer) => console.error(`[${this.spec.id}]`, c.toString("utf8").trim()));
++		await new Promise<void>((done) => {
++			child.on("close", (code) => {
++				this.child = null;
++				if (this.streaming && this.streaming.content.length) this.messages.push(this.streaming);
++				else if (code !== 0) {
++					this.messages.push({
++						id: `a-${Date.now()}-${this.seq++}`, role: "assistant", content: [],
++						errorMessage: `${this.spec.name} 退出码 ${code}`, timestamp: Date.now(),
++					});
++				}
++				this.streaming = null;
++				this.snapshot();
++				done();
++			});
++			child.on("error", (e) => {
++				this.child = null; this.streaming = null;
++				this.messages.push({
++					id: `a-${Date.now()}-${this.seq++}`, role: "assistant", content: [],
++					errorMessage: `起不来 ${this.spec.id}: ${e.message}`, timestamp: Date.now(),
++				});
++				this.snapshot(); done();
++			});
++		});
++	}
++
++	private onEvent(ev: CliEvent): void {
++		if (ev.t === "session") { this.resume = ev.id; return; }
++		if (ev.t === "delta" || ev.t === "text") {
++			if (!this.streaming) return;
++			const last = this.streaming.content[this.streaming.content.length - 1] as { type: string; text?: string } | undefined;
++			if (last && last.type === "text") last.text = (last.text ?? "") + ev.text;
++			else this.streaming.content.push({ type: "text", text: ev.text });
++			// **别用 as never 糊过去。** 第一版就是这么写的 (只带 text), 而真实帧要
++			// messageId / usage / assistantMessageEvent —— 前端读 .assistantMessageEvent.type
++			// 时拿到 undefined, 整页白屏。绕开编译器的那一处, 正好就是炸的那一处。
++			this.send({
++				type: "message_delta",
++				conversationId: this.conversationId,
++				seq: this.seq++,
++				messageId: this.streaming.id,
++				usage: null,
++				assistantMessageEvent: { type: "text_delta", contentIndex: this.streaming.content.length - 1, delta: ev.text },
++			});
++			return;
++		}
++		if (ev.t === "tool") {
++			// 先按一行文本给, 让用户看见"它在干活"。渲染成真正的工具卡片要连
++			// toolResult 一起配对 (dsh 引擎为此写了 301 行), 那是下一步。
++			if (!this.streaming) return;
++			this.streaming.content.push({ type: "text", text: `\n[工具] ${ev.name}\n` });
++			this.send({
++				type: "message_delta",
++				conversationId: this.conversationId,
++				seq: this.seq++,
++				messageId: this.streaming.id,
++				usage: null,
++				assistantMessageEvent: { type: "text_delta", contentIndex: this.streaming.content.length - 1, delta: `\n[工具] ${ev.name}\n` },
++			});
++			return;
++		}
++		if (ev.t === "done") {
++			this.usage.input += ev.usage.input;
++			this.usage.output += ev.usage.output;
++			this.usage.cacheRead += ev.usage.cacheRead;
++		}
++	}
++
++	async abort(): Promise<void> {
++		this.child?.kill("SIGTERM");
++		this.child = null;
++		this.streaming = null;
++		this.snapshot();
++	}
++
++	async newChat(): Promise<void> {
++		this.resume = null;
++		this.messages = [];
++		this.streaming = null;
++		this.conversationId = randomUUID();
++		this.snapshot();
++	}
++
++	/** 型号列表。骨架先给一个 —— 真接的时候从 AI Store 网关的在售目录灌进来
++	 *  (products.py 的 _pi_boot 已经在给 pi 那一格这么做了)。 */
++	async listModels(): Promise<void> {
++		const models = await listCatalog();
++		// 没配网关时列表是空的 —— 那说明这是本机开发, CLI 用它自己的登录态, 型号
++		// 由 CLI 自己定, 我们不该假装能选。
++		//
++		// **默认型号按槽位钉死, 不取目录第一个。** 目录第一个是 deepseek-v4-flash,
++		// 实测它走 anthropic 面对短提示返回**空内容** (message_start → message_delta
++		// (end_turn) → message_stop, 没有任何 content_block_delta), CLI 于是自己补
++		// 一句"你上轮没有可见输出"再试一次, 还是空 —— 用户看到的是界面一直转。
++		// 这两个默认值与 AI Store 产品侧一致 (products.py 的 _codecli_model)。
++		const preferred = this.spec.id === "claude" ? "claude-sonnet-5" : "gpt-5.6-luna";
++		if (models.length && !this.model) {
++			this.model = models.some((m) => m.id === preferred) ? preferred : models[0]!.id;
++		}
++		this.send({ type: "models", models });
++		this.snapshot();
++	}
++
++	async setModel(modelId: string): Promise<void> {
++		// 按次指定, 不重启任何东西 —— dsh 引擎在这点上要重启运行时。
++		this.model = modelId;
++		this.snapshot();
++	}
++
++	// ---- 以下为按接口自动生成的空实现 (其余) ---- ---------------------------
++	// ---- 以下这批**故意保持空实现**, 不是没做完 ------------------------
++	//
++	// 判据只有一条: **这个引擎里它没有对应的东西**, 不是"以后再说"。
++	// 会话/终端/文件/Git/模型这些有对应物的, 都已经接上了 (见上面)。
++	//
++	// 供应商密钥 / 型号配置 (setProviderApiKey · addProviderKey · saveModelConfig
++	// · fetchModelsList · cloneProvider …): pi-web-ui 原本允许用户在设置面板里
++	// 填各家 provider 的 key。**在 AI Store 里这条路必须是死的** —— 产品承诺是
++	// "不用申请任何 API Key", 密钥托管在服务端、按积分计费; 让用户填自己的 key
++	// 等于绕过网关也绕过计费, 而界面上看不出任何异常。
++	// 型号列表由 listModels 从网关在售目录拉 (见 gateway.ts), 不由用户配。
++	//
++	// installPiAgent / checkUpdate / dsh 补丁: 托管环境里升级是我们重建镜像的事,
++	// 不是用户点一下的事 (同 products.py 给 pi 那格设 PI_OFFLINE 的理由)。
++	//
++	// 目标/审查 (setGoal · startGoalWizard …): dsh 引擎也没做 (docs/dsh-engine.md
++	// 里列在"简化实现"那栏)。它依赖 agent 侧的多轮自审, claude/codex 的 CLI 面
++	// 给不了这个语义 —— 硬做出来只能是个假的。
++
++
++	removeQueued(_kind: "steer" | "followUp", _text: string): void {  }
++	/** 终端里跑着的东西由 TerminalManager 管, 中止就是杀它。 */
++	async abortBash(): Promise<void> {
++		await this.abort();
++	}
++	/** 重试上一条 —— 错误卡上那个「重试」按钮走这里。把最后一条用户消息连同它
++	 *  之后的助手回复一起丢掉再重发, 否则重试一次列表里就多一份重复的提问。 */
++	async retryLast(): Promise<void> {
++		const i = this.messages.map((m) => m.role).lastIndexOf("user");
++		if (i < 0) return;
++		const text = (this.messages[i]!.content[0] as { text?: string } | undefined)?.text ?? "";
++		this.messages = this.messages.slice(0, i);
++		if (text) await this.prompt(text);
++	}
++	async killBackgroundServer(_port?: number, _taskId?: string): Promise<boolean> { return false; }
++	async killAllBackgroundServers(): Promise<string[]> { return []; }
++	async listBgServers(): Promise<void> {  }
++	async editMessage(_messageId: string, _text: string, _attachments?: PromptAttachment[]): Promise<void> {  }
++	/** 在在售目录里轮换到下一个型号。快捷键走这里, 与下拉选择是同一个状态。 */
++	async cycleModel(): Promise<void> {
++		const models = await listCatalog();
++		if (!models.length) return;
++		const i = models.findIndex((m) => m.id === this.model);
++		await this.setModel(models[(i + 1) % models.length]!.id);
++	}
++	cycleThinking(): void {  }
++	flushSnapshot(_forceFull?: boolean): void {
++		this.snapshot();
++	}
++	async pushSlashCommands(): Promise<void> {  }
++	async refreshSessions(): Promise<void> {
++		// codex 的会话按日期摊开存, 跟 cwd 没有对应关系 —— 靠逐个读第一行的
++		// session_meta.payload.cwd 认项目 (见 sessions.ts)。
++		const sessions = this.spec.id === "claude" ? listClaudeSessions(this.cwd) : listCodexSessions(this.cwd);
++		this.send({ type: "sessions", sessions });
++	}
++	async pushProjects(): Promise<void> {  }
++	async removeProject(_path: string): Promise<void> {  }
++	/** 删的是 CLI 自己的会话文件 —— 那是唯一一份, 删了终端里也看不到了。
++	 *  只删当前引擎目录下的那一个, 且路径由 sessionId 拼出来, 不接受外部传入的
++	 *  绝对路径 (那是任意文件删除)。 */
++	async deleteSession(path: string): Promise<void> {
++		if (this.spec.id !== "claude" || !/^[\w-]+$/.test(path)) return;
++		try {
++			rmSync(join(claudeProjectDir(this.cwd), `${path}.jsonl`), { force: true });
++		} catch (e) {
++			this.emitNotice("error", `删除会话失败：${String(e)}`, `Failed to delete session: ${String(e)}`);
++		}
++		await this.refreshSessions();
++	}
++	async renameSession(_path: string, _name: string): Promise<void> {  }
++	async renameConversation(_id: string, _name: string): Promise<void> {  }
++	async dismissConversation(_id: string, _withFinishedSubagents?: boolean, _force?: boolean): Promise<void> {  }
++	async dismissFinishedSubagents(_parentId?: string): Promise<void> {  }
++	async switchSession(path: string): Promise<void> {
++		// path 就是 sessionId —— 直接喂给下一轮的 --resume, 同时把历史翻出来
++		// 铺到界面上 (replayClaudeSession)。不回放的话界面从空白开始, 而 CLI 那边
++		// 其实记得上下文 —— 用户看到的是"它把刚才说的忘了", 实际没忘, 更糊涂。
++		this.resume = path;
++		this.streaming = null;
++		this.conversationId = randomUUID();
++		this.messages = this.spec.id === "claude" ? replayClaudeSession(this.cwd, path) : [];
++		if (!this.messages.length) {
++			// codex 的回放还没做 (它的行格式与 claude 不同, 见 sessions.ts),
++			// 所以这里要说清楚"界面空不等于上下文丢了"。
++			this.emitNotice("info", "已接上这个会话，上下文在 CLI 侧保留", "Resumed; context is kept on the CLI side");
++		}
++		this.snapshot();
++	}
++	async switchConversation(_id: string): Promise<void> {  }
++	async listFiles(path?: string): Promise<void> { await this.files.listFiles(path); }
++	async searchFiles(query: string, reqId: number): Promise<void> { await this.files.searchFiles(query, reqId); }
++	async searchSessions(_query: string, _reqId: number): Promise<void> {  }
++	async readFile(path: string): Promise<void> { await this.files.readFile(path); }
++	async writeFile(path: string, text: string): Promise<void> { await this.files.writeFile(path, text); }
++	async uploadFile(dirPath: string, name: string, data: string): Promise<void> { await this.files.uploadFile(dirPath, name, data); }
++	setThinking(_level: string): void {  }
++	async setCwd(path: string): Promise<void> {
++		const abs = resolve(path);
++		if (!existsSync(abs) || !statSync(abs).isDirectory()) {
++			this.emitNotice("error", `切换工作目录失败：目录不存在：${path}`, `Cannot switch: no such directory: ${path}`);
++			return;
++		}
++		this.cwd = abs;
++		// 换了项目就等于换了上下文 —— 续聊 id 必须丢掉, 否则下一轮会拿着上一个
++		// 项目的会话接着聊, 而界面上显示的是新项目。
++		this.resume = null;
++		await this.listFiles(undefined);
++		this.snapshot();
++	}
++	async completePath(path: string): Promise<void> { await this.files.completePath(path); }
++	async makeDir(path: string): Promise<void> { await this.files.makeDir(path); }
++	async checkUpdate(): Promise<void> {  }
++	async checkUpdatesAll(_force?: boolean): Promise<void> {  }
++	resolveDialog(_id: number, _value: string | boolean | null): void {  }
++	async installPiAgent(): Promise<void> {  }
++	async setProviderApiKey(_provider: string, _apiKey: string): Promise<void> {  }
++	async clearProviderApiKey(_provider: string): Promise<void> {  }
++	async listModelsConfig(): Promise<void> {  }
++	async reloadModelsConfig(): Promise<void> {  }
++	async saveModelConfig(_providerId: string, _config: unknown): Promise<void> {  }
++	async deleteModelConfig(_providerId: string): Promise<void> {  }
++	async listProviders(): Promise<void> {  }
++	listProviderKeys(): void {  }
++	async addProviderKey(_provider: string, _apiKey: string, _name?: string): Promise<void> {  }
++	async activateProviderKey(_provider: string, _keyName: string): Promise<void> {  }
++	async removeProviderKey(_provider: string, _keyName: string): Promise<void> {  }
++	async fetchModelsList(_reqId: number, _baseUrl: string, _apiKey?: string, _authHeader?: boolean, _api?: string): Promise<void> {  }
++	async refreshProviderModels(_providerId: string, _reqId: number): Promise<void> {  }
++	async cloneProvider(_provider: string, _reqId: number): Promise<void> {  }
++	getTerminalManager(_conversationId?: string): TerminalManagerLike | undefined { return this.terminals; }
++	getTerminalCwd(_conversationId?: string): string { return this.cwd; }
++	async listCommands(): Promise<void> {
++		const { commands, path } = await loadCommands(this.cwd);
++		this.send({ type: "commands", commands, path });
++	}
++	async saveCommands(commands: CommandDef[]): Promise<void> {
++		const { path, error } = await saveCommandsFile(this.cwd, commands);
++		if (error) this.emitNotice("error", error, error);
++		else await this.listCommands();
++		void path;
++	}
++	async clearGoal(): Promise<void> {  }
++	pushSettings(): void {  }
++	async reloadExtensions(): Promise<void> {  }
++	async listDshPatches(): Promise<void> {  }
++	async rescanDshPatches(): Promise<void> {  }
++	async savePreset(_name: string): Promise<void> {  }
++	async applyPreset(_name: string): Promise<void> {  }
++	async deletePreset(_name: string): Promise<void> {  }
++	async saveSubagentTemplate(_template: UiSubagentTemplate): Promise<void> {  }
++	getLang(): string {
++		return this.lang;
++	}
++	async setLocale(locale: string): Promise<void> {
++		this.lang = locale.trim().toLowerCase().startsWith("zh") ? "zh" : "en";
++	}
++	async deleteSubagentTemplate(_name: string): Promise<void> {  }
++	emitNotice(level: "info" | "warning" | "error", text: string, textEn?: string): void {
++		this.send({ type: "notice", level, text, textEn });
++	}
++	activeConversations(): number {
++		return this.child ? 1 : 0;
++	}
++	pendingMessages(): number {
++		return this.child ? 1 : 0;
++	}
++
++	// 下面五个的签名是多行的, 生成脚本的正则没吃到, 由编译器点名后手工补上。
++	async scmQuery(kind: "status" | "history" | "filediff" | "commit", reqId: number, opts?: { path?: string; hash?: string }): Promise<void> {
++		await this.files.scmQuery(kind, reqId, opts);
++	}
++	async setGoal(_goal: string, _opts?: { reviewModel?: string; maxRounds?: number; locked?: boolean }): Promise<void> {}
++	async startGoalWizard(_text: string, _opts?: { wizardModel?: string; maxRounds?: number; locked?: boolean }): Promise<void> {}
++	async setGoalPrefs(_opts?: { reviewModel?: string; maxRounds?: number; locked?: boolean }): Promise<void> {}
++	async setSettings(_partial: Record<string, unknown>): Promise<void> {}
++}
+diff --git a/server/cli/gateway.ts b/server/cli/gateway.ts
+new file mode 100644
+index 0000000..871a828
+--- /dev/null
++++ b/server/cli/gateway.ts
+@@ -0,0 +1,93 @@
++/**
++ * gateway.ts —— 接 AI Store 的模型网关。
++ *
++ * 这是「免 Key」那条铁律在这个引擎里的落点: 用户不自购任何 API Key, 密钥托管在
++ * 服务端, CLI 通过我们的网关调模型, 按积分计费。所以:
++ *   · 给子进程注入的是**网关地址 + 该用户的工作台令牌**, 不是厂商密钥;
++ *   · 型号列表来自网关的在售目录 —— 网关只放行目录里的型号, 前端列别的等于
++ *     给用户一个点了就 404 的选项。
++ *
++ * 两个 env 与 AI Store 其它工作台同名 (见 dhc 仓 products.py env_for):
++ *   DSH_GATEWAY_BASE  站点根, 例如 https://aistore.best
++ *   DSH_CLOUD_TOKEN   该用户该实例的工作台令牌 (每次建实例都会换)
++ * 没配就退回"用 CLI 自己的登录态", 本机开发照样能跑。
++ */
++
++import type { ModelInfo } from "../protocol.js";
++
++export const GATEWAY_BASE = (process.env.DSH_GATEWAY_BASE ?? "").replace(/\/+$/, "");
++export const GATEWAY_TOKEN = process.env.DSH_CLOUD_TOKEN ?? "";
++export const gatewayConfigured = (): boolean => Boolean(GATEWAY_BASE && GATEWAY_TOKEN);
++
++/**
++ * 子进程要带的环境变量。
++ *
++ * claude 走 anthropic 面, codex 走 responses 面 —— 两条路的 base_url 不一样,
++ * 这在 AI Store 侧已经踩清楚了 (codex 0.151 起不认 chat 面, 只能 responses)。
++ *
++ * **ANTHROPIC_SMALL_FAST_MODEL 必须一起给**: 不设的话 claude 的后台任务会去要
++ * haiku, 而网关只放行在售目录, 那个名字不在里面 —— 症状是主对话正常、后台
++ * 静默 404。
++ */
++export function childEnv(cli: "claude" | "codex", model: string): NodeJS.ProcessEnv {
++	const env: NodeJS.ProcessEnv = { ...process.env };
++	if (!gatewayConfigured()) return env;
++	if (cli === "claude") {
++		env.ANTHROPIC_BASE_URL = `${GATEWAY_BASE}/llm/anthropic`;
++		env.ANTHROPIC_AUTH_TOKEN = GATEWAY_TOKEN;
++		if (model) {
++			env.ANTHROPIC_MODEL = model;
++			env.ANTHROPIC_SMALL_FAST_MODEL = model;
++		}
++		// 有 ANTHROPIC_API_KEY 时 CLI 会优先用它 —— 那是用户自己的厂商密钥,
++		// 会绕过我们的计费。托管环境里一律不带。
++		delete env.ANTHROPIC_API_KEY;
++	} else {
++		// codex 的 base_url / wire_api 在 ~/.codex/config.toml 里 (见 writeCodexConfig),
++		// 这里只给密钥 —— config.toml 的 env_key 指的就是它。
++		env.OPENAI_API_KEY = GATEWAY_TOKEN;
++	}
++	return env;
++}
++
++/** 在售目录 → 前端的型号列表。拉不到就返回空, 不抛 —— 网关抖一下不该让整个
++ *  界面变成错误页 (同 AI Store 自研工作台的 credits 那条口径)。 */
++export async function listCatalog(): Promise<ModelInfo[]> {
++	if (!gatewayConfigured()) return [];
++	try {
++		const r = await fetch(`${GATEWAY_BASE}/llm/v1/models`, {
++			headers: { authorization: `Bearer ${GATEWAY_TOKEN}` },
++		});
++		if (!r.ok) return [];
++		const body = (await r.json()) as { data?: Array<Record<string, unknown>> };
++		return (body.data ?? []).map((m) => ({
++			id: String(m.id ?? ""),
++			name: String(m.display_name ?? m.id ?? ""),
++			provider: "AI Store",
++			// 能力口径跟着网关走; 缺字段时按"支持"算 —— 列出来点了不行, 好过
++			// 有能力却不给选。真实能力在 AI Store 侧的 model_capabilities.json,
++			// 那份是实测出来的。
++			reasoning: m.reasoning !== false,
++			vision: m.vision === true,
++		})).filter((m) => m.id);
++	} catch {
++		return [];
++	}
++}
++
++/** codex 的 config.toml。**每次开机重写**: 里面有该用户的网关令牌, 而令牌每次
++ *  建实例都会换, 沿用旧的必然 401。 */
++export function codexConfigToml(model: string): string {
++	return [
++		`model = "${model}"`,
++		'model_provider = "aistore"',
++		"",
++		"[model_providers.aistore]",
++		'name = "AI Store"',
++		`base_url = "${GATEWAY_BASE}/llm/v1"`,
++		'env_key = "OPENAI_API_KEY"',
++		// codex 0.151 起不认 chat 面, 只能 responses。
++		'wire_api = "responses"',
++		"",
++	].join("\n");
++}
+diff --git a/server/cli/sessions.ts b/server/cli/sessions.ts
+new file mode 100644
+index 0000000..dfbfb59
+--- /dev/null
++++ b/server/cli/sessions.ts
+@@ -0,0 +1,212 @@
++/**
++ * sessions.ts —— 从 CLI 自己的会话存储里读历史（列表 + 回放）。
++ *
++ * 两个 CLI 的目录布局与行格式都是**实测出来的**, 不是照文档写的:
++ *   claude  ~/.claude/projects/<cwd 的 / 与 . 换成 ->/<sessionId>.jsonl
++ *           行里 type=user / assistant, 正文在 message.content 的 block 数组里;
++ *           中间夹着 queue-operation / attachment / file-history-snapshot /
++ *           last-prompt 这些内部行, 一律跳过。
++ *   codex   ~/.codex/sessions/<年>/<月>/<日>/rollout-<时间>-<id>.jsonl
++ *           第一行 type=session_meta, payload 里有 cwd 与 id —— **按 cwd 筛项目
++ *           只能靠它**, 因为目录是按日期分的, 跟项目没有对应关系。
++ *
++ * **我们不另建一套会话存储。** CLI 自己就是事实来源 —— 另存一份的话, 用户在
++ * 终端里直接敲 claude/codex 产生的会话在网页上看不见, 而两边指的是同一个目录。
++ */
++
++import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
++import { homedir } from "node:os";
++import { join } from "node:path";
++import type { SessionSummary, UiMessage } from "../protocol.js";
++
++/** 读前 N 字节就够: 标题在最前面, 而会话文件可以几十 MB。 */
++const HEAD_BYTES = 65536;
++/** 回放的上限。一个跑了一天的会话能有几千条, 全塞给前端只会把页面卡死;
++ *  取最后 N 条 —— 人回到一个会话时看的是尾巴, 不是开头。 */
++const REPLAY_MAX = 200;
++
++export function claudeProjectDir(cwd: string): string {
++	// **必须先 realpath。** macOS 上 /tmp 是指向 /private/tmp 的软链: claude 按
++	// 进程真实 cwd 建目录 (`-private-tmp-x`), 而传进来的是 /tmp/x, 算出来是
++	// `-tmp-x` —— 目录不存在, 列表**永远空且不报错**。踩过一次。
++	let real = cwd;
++	try {
++		real = realpathSync(cwd);
++	} catch {
++		/* 目录没了就按原样算, 下面 existsSync 还会兜一层 */
++	}
++	return join(homedir(), ".claude", "projects", real.replace(/[/.]/g, "-"));
++}
++
++function readLines(file: string, bytes?: number): string[] {
++	try {
++		const raw = readFileSync(file, "utf8");
++		return (bytes ? raw.slice(0, bytes) : raw).split("\n").filter((l) => l.trim());
++	} catch {
++		return [];
++	}
++}
++
++function parse(line: string): Record<string, any> | null {
++	try {
++		return JSON.parse(line) as Record<string, any>;
++	} catch {
++		return null;                       // 半行 / 非 JSON —— 一行坏数据不该毁掉整个列表
++	}
++}
++
++/** block 数组 → 纯文本, 用于列表上那行标题。 */
++function blocksText(content: unknown): string {
++	if (typeof content === "string") return content;
++	if (!Array.isArray(content)) return "";
++	return content
++		.filter((c: any) => c?.type === "text" && typeof c.text === "string")
++		.map((c: any) => c.text)
++		.join("")
++		.trim();
++}
++
++// --- claude ----------------------------------------------------------------
++
++function claudeSummary(file: string, id: string, modified: number): SessionSummary {
++	let first = "";
++	let count = 0;
++	for (const line of readLines(file, HEAD_BYTES)) {
++		const e = parse(line);
++		if (!e) continue;
++		if (e.type !== "user" && e.type !== "assistant") continue;
++		count++;
++		if (!first && e.type === "user") first = blocksText(e.message?.content).slice(0, 120);
++	}
++	return { path: id, firstMessage: first || "(无标题)", messageCount: count, modified, source: "tui" };
++}
++
++export function listClaudeSessions(cwd: string): SessionSummary[] {
++	const dir = claudeProjectDir(cwd);
++	if (!existsSync(dir)) return [];
++	const out: SessionSummary[] = [];
++	for (const name of readdirSync(dir)) {
++		if (!name.endsWith(".jsonl")) continue;
++		const file = join(dir, name);
++		try {
++			out.push(claudeSummary(file, name.replace(/\.jsonl$/, ""), statSync(file).mtimeMs));
++		} catch {
++			/* 读不到就跳过这一个, 别让整张列表消失 */
++		}
++	}
++	return out.sort((a, b) => b.modified - a.modified);
++}
++
++// --- codex -----------------------------------------------------------------
++
++/** codex 的会话按日期摊开存, 跟 cwd 没有对应关系 —— 只能逐个读第一行的
++ *  session_meta.payload.cwd 来认。为此**只读第一行**, 不整文件读。 */
++function codexFiles(): string[] {
++	const root = join(homedir(), ".codex", "sessions");
++	if (!existsSync(root)) return [];
++	const out: string[] = [];
++	const walk = (dir: string, depth: number): void => {
++		if (depth > 4) return;                 // 年/月/日/文件, 再深就不是它的布局了
++		let names: string[] = [];
++		try {
++			names = readdirSync(dir);
++		} catch {
++			return;
++		}
++		for (const n of names) {
++			const p = join(dir, n);
++			try {
++				if (statSync(p).isDirectory()) walk(p, depth + 1);
++				else if (n.endsWith(".jsonl")) out.push(p);
++			} catch {
++				/* 跳过 */
++			}
++		}
++	};
++	walk(root, 0);
++	return out;
++}
++
++export function listCodexSessions(cwd: string): SessionSummary[] {
++	let real = cwd;
++	try {
++		real = realpathSync(cwd);
++	} catch {
++		/* 同上 */
++	}
++	const out: SessionSummary[] = [];
++	for (const file of codexFiles()) {
++		const head = readLines(file, HEAD_BYTES);
++		const meta = head.length ? parse(head[0]!) : null;
++		if (meta?.type !== "session_meta") continue;
++		const payload = meta.payload ?? {};
++		if (payload.cwd !== real && payload.cwd !== cwd) continue;   // 不是这个项目的
++		const id = String(payload.id ?? "");
++		if (!id) continue;
++		let first = "";
++		let count = 0;
++		for (const line of head.slice(1)) {
++			const e = parse(line);
++			if (!e) continue;
++			// response_item 里带 role 的那种才是对话; 其余是内部记账。
++			const item = e.payload ?? e;
++			const role = item?.role ?? item?.message?.role;
++			if (role !== "user" && role !== "assistant") continue;
++			count++;
++			if (!first && role === "user") first = blocksText(item.content ?? item.message?.content).slice(0, 120);
++		}
++		let modified = 0;
++		try {
++			modified = statSync(file).mtimeMs;
++		} catch {
++			continue;
++		}
++		out.push({ path: id, firstMessage: first || "(无标题)", messageCount: count, modified, source: "tui" });
++	}
++	return out.sort((a, b) => b.modified - a.modified);
++}
++
++// --- 回放 -------------------------------------------------------------------
++
++/** 把 claude 的 JSONL 翻成界面上的消息。
++ *
++ * 只认 type=user / assistant 两种行 —— 中间夹着的 queue-operation、attachment、
++ * file-history-snapshot、last-prompt 都是 CLI 的内部记账, 翻出来是噪音。
++ * 工具调用块暂时按文本摘要给: 真正渲染成工具卡片要连 toolResult 一起配对,
++ * 那是另一摊 (dsh 引擎为此写了 301 行的 dsh-serialize.ts)。
++ */
++export function replayClaudeSession(cwd: string, sessionId: string): UiMessage[] {
++	const file = join(claudeProjectDir(cwd), `${sessionId}.jsonl`);
++	if (!existsSync(file)) return [];
++	const msgs: UiMessage[] = [];
++	let seq = 0;
++	for (const line of readLines(file)) {
++		const e = parse(line);
++		if (!e || (e.type !== "user" && e.type !== "assistant")) continue;
++		const content = e.message?.content;
++		const blocks: UiMessage["content"] = [];
++		if (typeof content === "string") {
++			if (content.trim()) blocks.push({ type: "text", text: content });
++		} else if (Array.isArray(content)) {
++			for (const c of content as any[]) {
++				if (c?.type === "text" && typeof c.text === "string" && c.text.trim()) {
++					blocks.push({ type: "text", text: c.text });
++				} else if (c?.type === "thinking" && typeof c.thinking === "string") {
++					blocks.push({ type: "thinking", text: c.thinking });
++				} else if (c?.type === "tool_use") {
++					blocks.push({ type: "text", text: `[工具] ${String(c.name ?? "")}` });
++				}
++			}
++		}
++		if (!blocks.length) continue;
++		const ts = Date.parse(e.timestamp ?? "") || Date.now();
++		msgs.push({
++			id: `${e.type === "user" ? "u" : "a"}-replay-${seq++}`,
++			role: e.type,
++			content: blocks,
++			timestamp: ts,
++		});
++	}
++	// 取尾巴: 人回到一个会话时看的是最近发生了什么。
++	return msgs.length > REPLAY_MAX ? msgs.slice(-REPLAY_MAX) : msgs;
++}
+diff --git a/server/index.ts b/server/index.ts
+index 7186abf..1305230 100644
+--- a/server/index.ts
++++ b/server/index.ts
+@@ -217,7 +217,12 @@ if (AUTH_TOKEN) {
+ }
+ 
+ /** 引擎选择：PI_WEB_ENGINE=pi|dsh（默认 pi）。重启生效。 */
+-const ENGINE: "pi" | "dsh" = process.env.PI_WEB_ENGINE === "dsh" ? "dsh" : "pi";
++const RAW_ENGINE = process.env.PI_WEB_ENGINE ?? "pi";
++const ENGINE: "pi" | "dsh" | "claude" | "codex" =
++	RAW_ENGINE === "dsh" || RAW_ENGINE === "claude" || RAW_ENGINE === "codex" ? RAW_ENGINE : "pi";
++/** 左上角品牌显示的名字。pi / dsh 留空 —— 前端回落到它自己原本的名字, 上游
++ *  两个引擎的观感一个字都不动。 */
++const ENGINE_NAME = ENGINE === "claude" ? "Claude Code" : ENGINE === "codex" ? "Codex" : "";
+ 
+ /** PI_WEB_MANAGED=1: this instance is updated by whoever deploys it. */
+ const MANAGED = isManaged();
+@@ -567,6 +572,7 @@ const heartbeatTimer = setInterval(() => {
+ // 引擎分发：PI_WEB_ENGINE=dsh 时使用 DeepSeek Harness 引擎（server/dsh/），
+ // 默认 pi 引擎。同一 wire 协议，前端无感知（ready/health 携带 engine 字段）。
+ import { DshAgentService } from "./dsh/dsh-agent-service.js";
++import { CliAgentService } from "./cli/cli-agent-service.js";
+ 
+ /** dispatch 表所需的方法契约（pi 的 ClientSession 与 dsh 的 DshClientSession
+  *  都结构兼容；dsh 引擎对不支持的功能做简化实现）。 */
+@@ -763,7 +769,9 @@ export interface EngineService {
+ }
+ 
+ const service: EngineService =
+-	ENGINE === "dsh"
++	ENGINE === "claude" || ENGINE === "codex"
++	? new CliAgentService(CWD, ENGINE, VERSION)
++	: ENGINE === "dsh"
+ 		? new DshAgentService(CWD, join(DATA_DIR, "client-state.json"), DATA_DIR, getAgentDir())
+ 		: new AgentService(
+ 				CWD,
+@@ -1315,6 +1323,7 @@ wss.on("connection", (ws) => {
+ 						serverVersion: VERSION,
+ 						protocolVersion: PROTOCOL_VERSION,
+ 						engine: ENGINE,
++						...(ENGINE_NAME ? { engineName: ENGINE_NAME } : {}),
+ 						// This package's own version. `serverVersion` is the pi SDK's,
+ 						// and the client used to learn ours from the update check —
+ 						// which a managed instance never runs.
+diff --git a/server/protocol.ts b/server/protocol.ts
+index 536423e..a231578 100644
+--- a/server/protocol.ts
++++ b/server/protocol.ts
+@@ -1217,6 +1217,12 @@ export type ServerMessage =
+ 			serverVersion: string;
+ 			/** 引擎标识（pi | dsh）—— 前端据此显示引擎徽标（只读展示）。 */
+ 			engine?: string;
++			/** 引擎的显示名, 例如 "Claude Code" / "Codex" —— 左上角那块品牌用它。
++			 *  名字跟着**引擎定义**走, 不在前端硬编码一张 id→名字的映射表: 加引擎时
++			 *  只改一处, 而映射表放前端的话必然有人只加了引擎忘了加名字。
++			 *  **加可选字段不必 bump PROTOCOL_VERSION** —— 老前端忽略它; 新前端连到
++			 *  老服务端时字段缺省, 回落到原来的名字。两个方向都不会坏。 */
++			engineName?: string;
+ 			/** Wire-protocol version (server/protocol-version.ts). The client
+ 			 *  compares it against its own copy — a mismatch means the page was
+ 			 *  loaded before an app update and must be refreshed. */
