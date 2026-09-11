@@ -8,7 +8,9 @@
     {% if (not has_mac_arm64 or not has_win_x64) and hosted_site %}
     {# 自部署没有安装包时不摆一堆说明, 也不摆禁用按钮 —— 直接把按钮指向官方站点,
        点了就能拿到签名包。老板 2026-08-26: "把按钮底层链接换成官网的就行"。 #}
-    <p class="muted" style="background:#fff7ed;border:1px solid #fed7aa;border-radius:10px;padding:12px 14px">
+    {# 原先是内联写死的米色 (#fff7ed/#fed7aa) —— 全站换深底之后它变成浅底配
+       --muted 的浅字, 正好读不出来。改用告警色令牌, 跟着调色板走。 #}
+    <p class="small" style="background:var(--warn-weak);border:1px solid var(--warn);color:var(--warn);border-radius:10px;padding:12px 14px">
       {{ t("download.selfhost_notice") }}
     </p>
     {% endif %}

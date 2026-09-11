@@ -1,63 +1,43 @@
-/* deepseek-harness-cloud design system.
-   Kinship with the upstream desktop site (dshdesktop.cn): brand blue #2663c9,
-   blue-tinted near-white ground, 10px radius, quiet borders, Noto Sans SC.
-   Tokens on :root; dark via prefers-color-scheme redefining tokens only. */
+/* AI Store design system —— 全站一个深蓝底, 不再有明暗两套。
+
+   2026-09-11 老板: "解决方案啥的还是白色底啊, 都改成主页那种蓝色底吧"。
+   在那之前站点有**两副长相**: 默认浅色, 跟随系统偏好切一套近黑的深色。首页
+   hero 是硬编码的深蓝 (#0b1c38), 于是浅色模式下首页深蓝、其余页纯白, 断成两截;
+   而我自己浏览器是深色模式, 从头到尾只见过深色那一版, 一直没看见这个断层。
+
+   现在只留一套: 底色就是 hero 那个 #0b1c38, hero 与其下的内容连成一片。
+   色阶关系沿用原来那套深色 (它已经在全站跑过, 各组件都验过), 只把色相挪到海军蓝。
+   brand blue #2663c9 在深底上太闷, 用原深色方案里的 #4d84e0。 */
 
 :root {
-  --bg: #f6fbff;
-  --bg-soft: #eef4fb;
-  --card: #ffffff;
-  --fg: #151b24;
-  --muted: #5c6673;
-  --faint: #8a94a1;
-  --border: #e3e8ef;
-  --border-strong: #cfd8e3;
-  --brand: #2663c9;
-  --brand-strong: #1d52ad;
-  --brand-weak: #e9f0fb;
+  color-scheme: dark;              /* 表单控件/滚动条跟着变深, 否则白条很扎眼 */
+  --bg: #0b1c38;                   /* = .hero-dark 的底, 两者必须一致 */
+  --bg-soft: #0e2342;
+  --card: #12294b;
+  --fg: #eef3fb;                   /* = .hero-dark 的字色 */
+  --muted: #9db0cd;
+  --faint: #7286a6;
+  --border: #1d3559;
+  --border-strong: #2e4a78;
+  --brand: #4d84e0;
+  --brand-strong: #6b9aec;
+  --brand-weak: rgba(77, 132, 224, .16);
   --brand-fg: #ffffff;
-  --ok: #178a50;
-  --ok-weak: #e5f5ec;
-  --warn: #b57c0a;
-  --warn-weak: #fdf3dd;
-  --danger: #d3232f;
-  --danger-weak: #fdeaea;
-  --shadow-sm: 0 1px 2px rgba(21, 27, 36, .05);
-  --shadow-md: 0 2px 6px rgba(21, 27, 36, .05), 0 12px 32px -12px rgba(21, 27, 36, .14);
-  --shadow-screen: 0 1px 2px rgba(21, 27, 36, .1), 0 32px 80px -24px rgba(21, 27, 36, .38);
+  --ok: #4fd39a;                   /* = hero 瓦片上那盏绿灯 */
+  --ok-weak: rgba(79, 211, 154, .14);
+  --warn: #d9a441;
+  --warn-weak: rgba(217, 164, 65, .14);
+  --danger: #ef5f66;
+  --danger-weak: rgba(239, 95, 102, .14);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, .3);
+  --shadow-md: 0 2px 6px rgba(0, 0, 0, .3), 0 12px 32px -12px rgba(0, 0, 0, .5);
+  --shadow-screen: 0 1px 2px rgba(0, 0, 0, .4), 0 32px 80px -24px rgba(0, 0, 0, .7);
   --radius: 10px;
   --radius-lg: 16px;
-  --nav-bg: rgba(246, 251, 255, .82);
+  --nav-bg: rgba(11, 28, 56, .82);
   --font: "Noto Sans SC", -apple-system, BlinkMacSystemFont, "PingFang SC",
           "Microsoft YaHei", "Segoe UI", system-ui, sans-serif;
   --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #0e1319;
-    --bg-soft: #121924;
-    --card: #161e29;
-    --fg: #e7ecf3;
-    --muted: #9aa6b4;
-    --faint: #6e7a88;
-    --border: #232d3a;
-    --border-strong: #31405e;
-    --brand: #4d84e0;
-    --brand-strong: #6b9aec;
-    --brand-weak: rgba(77, 132, 224, .14);
-    --brand-fg: #ffffff;
-    --ok: #3fbf7f;
-    --ok-weak: rgba(63, 191, 127, .12);
-    --warn: #d9a441;
-    --warn-weak: rgba(217, 164, 65, .12);
-    --danger: #ef5f66;
-    --danger-weak: rgba(239, 95, 102, .12);
-    --shadow-sm: 0 1px 2px rgba(0, 0, 0, .3);
-    --shadow-md: 0 2px 6px rgba(0, 0, 0, .3), 0 12px 32px -12px rgba(0, 0, 0, .5);
-    --shadow-screen: 0 1px 2px rgba(0, 0, 0, .4), 0 32px 80px -24px rgba(0, 0, 0, .7);
-    --nav-bg: rgba(14, 19, 25, .82);
-  }
 }
 
 /* ---------- base ---------- */
@@ -789,7 +769,10 @@ form .btn-block { margin-top: 16px; }
   border: 0; border-radius: 999px; padding: 8px 18px; background: none; cursor: pointer;
   color: var(--muted); font: 500 14px var(--font);
 }
-.period-switch button[aria-pressed="true"] { background: var(--fg); color: #fff; }
+/* 选中态原先是 `background: var(--fg); color: #fff` —— 深底方案里 --fg 是近白,
+   于是白底白字, 月付/年付这个开关直接读不出来。这个洞在原来的"跟随系统深色"
+   里就已经在了, 只是没人用深色模式打开过定价页; 现在全站只有深底, 必须修。 */
+.period-switch button[aria-pressed="true"] { background: var(--brand); color: var(--brand-fg); }
 .save-badge { color: var(--ok); font-weight: 600; font-size: 13px; margin-left: 6px; }
 
 .price-was { color: var(--faint); text-decoration: line-through; font-size: 17px; font-weight: 500; margin-left: 6px; }
@@ -1307,4 +1290,22 @@ td.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size
 .hero-fit .hero-dark-inner.hero-center {
   min-height: calc(100vh - 64px);
   display: flex; flex-direction: column; justify-content: center; width: 100%;
+  /* **gap 必须归零。** 上面那条 .hero-dark-inner 是给两列栅格写的, 带 gap:40px;
+     这里把它改成单列 flex 之后, 那 40px 变成**每两块之间各加一次** —— 五块就是
+     160px, 叠在每块自己的 margin-top 之上。首屏因此比内容高出整整 160px,
+     在 588px 高的视口上永远差一截装不下, 得往下滚才看得全。 */
+  gap: 0;
+}
+
+/* 矮屏 (笔记本 + 浏览器工具栏, 可用高度常只有 520 左右) 上把间距压一档。
+   首屏从 y=64 起算 —— 顶栏是占位的不是浮在上面, 所以能用的是 100vh-64,
+   在 588px 高的窗口上只有 523px, 而常规间距下内容要 578px。差的这 55px
+   全在留白里, 字号和瓦片一个都不用动。
+   .hero-dark 是 overflow:hidden, 超出的部分**被裁掉而不是能滚** —— 所以这里
+   不是"挤一点更好看", 是不挤就真的看不到最后那行。 */
+@media (max-height: 680px) {
+  .hero-fit .hero-dark-inner.hero-center { padding-top: 24px; padding-bottom: 20px; }
+  .hero-fit .hero-apps { margin-top: 18px; }
+  .hero-fit .hero-actions-sub { margin-top: 16px; }
+  .hero-fit .hero-checks { margin-top: 10px; }
 }
