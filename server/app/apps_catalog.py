@@ -160,6 +160,49 @@ CATALOG: tuple[AppEntry, ...] = (
 # fmt: on
 
 
+#: 货架的类目划分 (老板 2026-09-11 定)。**故意做成独立的一张表, 而不是给
+#: AppEntry 加一个 category 字段** —— CATALOG 那 16 行是数字人那条线正在改的
+#: 地方 (他们直接在生产树上干活, 一度领先 origin/main 十七个提交), 往每一行里
+#: 塞字段必然和他们撞在同一行上。分在两处, 两边各改各的, 合并时零冲突。
+#:
+#: 划类的那条线是**产出物是不是一个能替你干活的角色**:
+#:   数字员工 = 开箱即用的角色 (AutoGen Studio 是"自己组建一支队伍", 仍是角色);
+#:   智能体开发 = 你拿来搭东西的东西, 产出是给别人用的应用, 不是员工。
+#: 顺序即展示顺序; 类名文案在 i18n 的 apps.cat.<key>。
+CATEGORIES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("coding", ("claude-code", "codex", "pi")),
+    ("work", ("dsh", "openmanus", "openclaw", "hermes")),
+    ("staff", ("agents-team", "openmausbot", "autogen")),
+    ("dev", ("dify", "langchain")),
+    ("design", ("open-design", "comfyui")),
+    ("avatar", ("live", "avatar")),
+)
+
+
+def grouped(apps: list[dict]) -> list[tuple[str, list[dict]]]:
+    """把 entries_with_status() 的结果按类目分组。
+
+    **组内保持传进来的顺序** —— 那是按使用时长排好的 (见 entries_with_status,
+    老板 2026-09-06 定的"让用得多的排前面")。分组只改大块的次序, 不该顺手把那条
+    规矩在组内也一起废掉。
+
+    **没归类的产品不丢, 挂在最后一组 (key 为空, 不渲染标题)。** 目录里加了新格却
+    忘了归类时, 它照样出现在货架上; 若是按"认不出就跳过"写, 新产品会从货架上
+    静默消失, 而页面一切正常 —— 那种错没人会发现。完整性由 test_catalog_categories
+    在 CI 上盯, 不靠运行时兜。
+    """
+    of = {i: key for key, ids in CATEGORIES for i in ids}
+    buckets: dict[str, list[dict]] = {key: [] for key, _ in CATEGORIES}
+    rest: list[dict] = []
+    for a in apps:
+        key = of.get(a["id"])
+        (buckets[key] if key else rest).append(a)
+    out = [(k, buckets[k]) for k, _ in CATEGORIES if buckets[k]]
+    if rest:
+        out.append(("", rest))
+    return out
+
+
 def name_of(app_id: str) -> str:
     """目录里这一格叫什么。加锁与售卖认的是**目录条目**, 不是工作台产品 —— 数字人
     就没有工作台 (它住在主站的 /avatar), 但它同样是这十六格之一, 同样可以上锁。"""

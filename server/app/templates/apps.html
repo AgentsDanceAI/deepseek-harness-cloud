@@ -14,11 +14,23 @@
 
 <section class="section" style="padding-top:0">
   <div class="container">
-    <div class="grid-4 apps-grid">
-      {% for app in apps %}
-      {% include "_app_card.html" %}
-      {% endfor %}
+    {# 六类分组 (老板 2026-09-11)。组内顺序不动 —— 那是按使用时长排的。
+       key 为空的那组是"还没归类"的兜底, 不渲染标题但照样出卡: 忘了归类的新产品
+       宁可没标题, 也不能从货架上消失。 #}
+    {% for cat, group in app_groups %}
+    <div class="apps-cat" {% if cat %}id="{{ cat }}"{% endif %}
+         {% if not loop.first %}style="margin-top:44px"{% endif %}>
+      {% if cat %}
+      <h2 class="apps-cat-title">{{ t("apps.cat." ~ cat) }}</h2>
+      <p class="apps-cat-desc muted small">{{ t("apps.cat." ~ cat ~ "_desc") }}</p>
+      {% endif %}
+      <div class="grid-4 apps-grid" style="margin-top:16px">
+        {% for app in group %}
+        {% include "_app_card.html" %}
+        {% endfor %}
+      </div>
     </div>
+    {% endfor %}
 
     {% if not apps_clickable %}
     {# 自部署且没配官方托管地址: 云工作台在本实例不可用, 卡片全部只作陈列。

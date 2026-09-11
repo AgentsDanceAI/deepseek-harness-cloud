@@ -1031,6 +1031,17 @@ form .btn-block { margin-top: 16px; }
 .works-empty h3 { margin-top: 12px; font-size: 17px; font-weight: 650; color: var(--fg); }
 .works-empty p { margin: 6px 0 18px; font-size: 13.5px; }
 
+/* ---------- 货架的类目分组 (六类, 2026-09-11) ---------- */
+.nav-sep { height: 1px; background: var(--border); margin: 6px 10px; }
+.apps-cat-title { font-size: 19px; font-weight: 650; letter-spacing: -.2px; }
+.apps-cat-desc { margin-top: 4px; }
+/* 一类只有两格时, 让它们保持和四格那几类同宽 —— 否则 grid-4 会把两张卡拉成
+   两倍宽, 同一页上卡片大小不一致, 看着像出了错。 */
+.apps-cat .apps-grid > * { min-width: 0; }
+@media (min-width: 901px) {
+  .apps-cat .apps-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+
 /* ---------- GitHub star badge ----------
    Sits beside the wordmark, reads as metadata rather than as a control. Only
    rendered when the repo is publicly visible (see app/github_stars.py). */
