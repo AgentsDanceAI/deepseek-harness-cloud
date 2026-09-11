@@ -58,9 +58,10 @@ function makeDom() {
     fetch: (url, opt) => {
       calls.push({ url, method: (opt && opt.method) || "GET", body: opt && opt.body });
       let data = {};
-      if (url === "/api/live/room" && (!opt || !opt.method)) data = server;
-      else if (url === "/api/live/generate") data = gen;
-      else if (url === "/api/live/room") {                 // PUT = 保存
+      const path = String(url).split("?")[0];               // 多间之后每个调用都带 ?room=
+      if (path === "/api/live/room" && (!opt || !opt.method)) data = server;
+      else if (path === "/api/live/generate") data = gen;
+      else if (path === "/api/live/room") {                 // PUT = 保存
         const b = JSON.parse(opt.body);
         server.title = b.title; server.lines = b.lines;
         data = { ok: true };

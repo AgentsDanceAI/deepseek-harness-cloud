@@ -229,9 +229,9 @@ def test_房间的形象要真的传到回评论那条路(monkeypatch):
     up = Upstream(live_=True)
     up.state["person"] = "chen"
     up.install(monkeypatch, reply="好的")
-    monkeypatch.setattr(live, "_LAST_REPLY_AT", 0.0)
+    monkeypatch.setattr(live, "_LAST_REPLY_AT", {})  # 多间之后按房间记冷却
 
-    assert asyncio.run(live._maybe_reply("c_1", "在吗")) is True
+    assert asyncio.run(live._maybe_reply("c_1", "在吗", live.rooms()[0])) is True
     assert up.person_seen == "chen", f"房间的形象没传到回评论那条路 (拿到 {up.person_seen!r}) —— 人设不会生效"
 
 

@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}{{ t('live.title') }} · AI Store{% endblock %}
+{% block head %}
+<link rel="stylesheet" href="/static/live.css?v={{ asset_v }}">
+{% endblock %}
+{% block content %}
+<section class="section">
+  <div class="container">
+    <div class="lv-head">
+      <h1 class="lv-title">{{ t('live.title') }}</h1>
+      {% if user and user.is_admin %}
+      <a class="lv-adminlink" href="/live/console">{{ t('live.console') }} →</a>
+      {% endif %}
+    </div>
+    <p class="lv-sub">{{ t('live.rooms_sub') }}</p>
+
+    {# 卡片由 live_rooms.js 填 —— 状态要挨个问 GPU 节点, 让页面等在上游身上,
+       上游一抖整页就白着。先把壳渲出来, 状态到了再点亮。 #}
+    <div class="lv-roomgrid" id="lvRooms"
+         data-live="{{ t('live.online') }}"
+         data-off="{{ t('live.offline') }}"
+         data-watch="{{ t('live.watch') }}"
+         data-empty="{{ t('live.rooms_empty') }}">
+      {% for r in rooms %}
+      <a class="lv-roomcard is-loading" href="/live/{{ r }}" data-room="{{ r }}">
+        <span class="lv-roomname">{{ r }}</span>
+        <span class="lv-roomstate"></span>
+      </a>
+      {% endfor %}
+    </div>
+    <div class="lv-note">{{ t('live.note') }}</div>
+  </div>
+</section>
+<script src="/static/live_rooms.js?v={{ asset_v }}" defer></script>
+{% endblock %}

@@ -9,6 +9,13 @@
  *     否则播放器停在最后一帧, 而**看上去和"主播不说话"一模一样**。
  */
 window.LivePlayer = (function () {
+
+  /* 当前是哪一间。写在 badge 的 data-room 上 —— 这一页所有传给后端的字符串都
+     从这里取, 不从 URL 现解: URL 是浏览器给的, 而这个是服务端渲染进来的。 */
+  function room() {
+    var b = document.getElementById('lvBadge');
+    return (b && b.dataset.room) || '';
+  }
   var v = document.getElementById('lvVideo');
   var msg = document.getElementById('lvMsg');
   var badge = document.getElementById('lvBadge');
@@ -98,6 +105,7 @@ window.LivePlayer = (function () {
         credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          room: room(),
           kind: kind,
           secs: secs || 0,
           lag: lag(),                       // 出事时观众落后直播边缘多少
@@ -276,7 +284,7 @@ window.LivePlayer = (function () {
   }
 
   function refresh() {
-    return fetch('/api/live/status', { credentials: 'same-origin' })
+    return fetch('/api/live/status?room=' + encodeURIComponent(room()), { credentials: 'same-origin' })
       .then(function (r) { return r.json(); })
       .then(function (d) {
         online(!!d.live);

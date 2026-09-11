@@ -84,18 +84,21 @@ def test_the_live_page_may_load_blob_media_but_gets_no_extra_openings():
     """
     from fastapi.testclient import TestClient
 
+    from app import live as _live
     from app.main import app
     from tests._signup import signup
 
     with TestClient(app) as c:
         signup(c, "live-csp@example.com")  # 未登录会 303 走掉, 那是张没有 CSP 的空响应
-        # **每一个真的放视频的页面都要查**, 不能只查一个 URL。
-        # 2026-09-09 直播曾短暂拆成多间, 播放页变成 /live/{room}, 而 CSP 那边是
+        # **每一个真的放视频的页面都要查**, 不能只查 /live。
+        # 2026-09-09 直播拆成多间, 播放页变成 /live/{room}, 而 CSP 那边还是
         # `path in (...)` 的精确匹配 —— 新页面当场失去 media-src, 而 Safari 原生
         # 放 HLS 不走 MediaSource, 所以**在 Mac 上一切正常**, 只有 Chrome 黑屏。
-        # 多间撤掉了, 但判定改成了前缀 (见 security_headers._needs_blob_media),
-        # 所以这里连一个不存在的子路径一起查: 哪天再加页面, 它是绿的。
-        pages = {u: c.get(u) for u in ("/live", "/live/console")}
+        # 这条测试当时红了, 那是它唯一一次机会。
+        pages = {"/live": c.get("/live")}
+        for r in _live.rooms():
+            pages[f"/live/{r}"] = c.get(f"/live/{r}")
+        pages["/live/console"] = c.get("/live/console")
         home = c.get("/")
 
     for url, resp in pages.items():
@@ -203,7 +206,14 @@ def test_each_page_has_every_element_its_javascript_reaches_for():
 
     # 正则健全性只对**并集**判一次: 观看页的播放器统共就用四个 id, 按页卡阈值会
     # 把"这一页本来就简单"误判成"正则失效"。
-    assert len(ids_in("live.js") | ids_in("live_console.js")) >= 15, "正则大概过时了"
+    _all = (
+        ids_in("live.js")
+        | ids_in("live_console.js")
+        | ids_in("live_rooms.js")
+        | ids_in("live_chat.js")
+        | ids_in("live_captions.js")
+    )
+    assert len(_all) >= 15, "正则大概过时了"
 
     admin_mail = "live-ids@example.com"
     old = list(cfg.ADMIN_EMAILS)
@@ -211,14 +221,20 @@ def test_each_page_has_every_element_its_javascript_reaches_for():
     try:
         with TestClient(app) as c:
             signup(c, admin_mail)
-            # /live 又是播放页了 (2026-09-09 撤掉多直播间)。但弹幕与字幕那两个
-            # 脚本是更早的提交加的, **不在撤回范围内**, 所以它们仍然在这一页上。
+            # 2026-09-09 拆成多间: /live 变成列表页 (只有 live_rooms.js),
+            # 播放器搬到 /live/{room}。这张表漂了正是这条测试要防的东西 ——
+            # 上一次它就是这么红的。
+            from app import live as _live
+
+            first = _live.rooms()[0]
+            # 单间时 /live 会 303 进播放页 (回滚成单间的方式就是只配一间),
+            # 那时它没有列表, 自然也没有 live_rooms.js。
             pages = {
-                "/live": (["live.js", "live_chat.js", "live_captions.js"], set()),
+                f"/live/{first}": (["live.js", "live_chat.js", "live_captions.js"], set()),
                 # live_chat.js 干两件事: 弹幕渲染 + 观众发言框。控制台只要前者 ——
-                # 管理员那一栏是自己的"互动"面板, 不是观众公屏。这三个 id 在控制台上
-                # **故意**没有, 脚本里也各自 if 兜住了。例外要写下来, 否则下次真漂了
-                # 没人知道; 例外名单自己也有守卫 (那些 id 真有了就该删掉这一条)。
+                # 管理员那一栏是自己的"互动"面板 (能选复读/问答), 不是观众公屏。
+                # 这三个 id 在控制台上**故意**没有, 脚本里也各自 if 兜住了。
+                # 列在这里而不是放宽整条规则: 例外要写下来, 否则下次真漂了没人知道。
                 "/live/console": (
                     ["live.js", "live_chat.js", "live_captions.js", "live_console.js"],
                     {"lvSayBox", "lvSayBtn", "lvSayHint"},
@@ -231,11 +247,12 @@ def test_each_page_has_every_element_its_javascript_reaches_for():
                     want |= ids_in(js)
                 missing = [i for i in sorted(want - optional) if f'id="{i}"' not in html]
                 assert not missing, f"{url} 的 JS 找这些 id, 模板里没有: {missing}"
-                # 例外名单自己也要有守卫: 哪天那些 id 真出现了, 名单就该删掉这一条,
-                # 否则它会静静地把一个真的漂移放过去。
                 stale = [i for i in sorted(optional) if f'id="{i}"' in html]
                 assert not stale, f"{url} 的例外名单过期了, 这些 id 其实有: {stale}"
-                assert "/static/hls.min.js" in html, f"{url} 少了 hls.js"
+                # hls.js 只有**真的放视频**的页面才需要。列表页没有播放器,
+                # 硬要求它带上等于逼着每个页面都加载一个 400KB 的解码库。
+                if "live.js" in scripts:
+                    assert "/static/hls.min.js" in html, f"{url} 少了 hls.js"
                 for js in scripts:
                     assert f"/static/{js}" in html, f"{url} 少了 {js}"
     finally:

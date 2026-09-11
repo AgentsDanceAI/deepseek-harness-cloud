@@ -15,16 +15,32 @@
             data-disabled="{{ t('live.disabled') }}"
             data-reconnect="{{ t('live.reconnecting') }}"
             data-unsupported="{{ t('live.unsupported') }}"
+            data-room="{{ room }}"
             data-mute="{{ t('live.mute') }}"
             data-unmute="{{ t('live.unmute') }}"
             data-tapplay="{{ t('live.tap_play') }}"
             data-remuted="{{ t('live.remuted') }}">{{ t('live.offline') }}</span>
+      {# 只有一间时 /live 直接进播放页, "全部直播间"这个词就不成立 #}
+      {% if rooms and rooms|length > 1 %}
+      <a class="lv-adminlink" href="/live">← {{ t('live.all_rooms') }}</a>
+      {% else %}
       <a class="lv-adminlink" href="/live">← {{ t('live.title') }}</a>
+      {% endif %}
     </div>
     <p class="lv-sub">{{ t('live.console_sub') }}</p>
 
     <div class="lv-grid">
       <div class="lv-console" id="lvConsole">
+        {# 先选哪一间, 再改它 —— 五间共用一套表单, 切换时整块重载。 #}
+        <label class="lv-field">
+          <span>{{ t('live.which_room') }}</span>
+          <select id="lvRoomPick">
+            {% for r in rooms %}
+            <option value="{{ r }}"{% if r == room %} selected{% endif %}>{{ r }}</option>
+            {% endfor %}
+          </select>
+        </label>
+
         <label class="lv-field">
           <span>{{ t('live.room_title') }}</span>
           {# 名称既是直播间的名字, 也是生成话术的题目 —— 所以生成按钮就贴在它旁边。 #}
@@ -71,6 +87,7 @@
              data-need_title="{{ t('live.need_title') }}"
              data-starting="{{ t('live.starting') }}"
              data-start_slow="{{ t('live.start_slow') }}"
+             data-too_many="{{ t('live.too_many') }}"
              data-stopped="{{ t('live.stopped') }}"
              data-failed="{{ t('live.failed') }}"></div>
       </div>

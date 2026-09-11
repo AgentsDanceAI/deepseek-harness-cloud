@@ -9,6 +9,13 @@
  *  2. 飘完就删。DOM 里只留在飞的那几条 —— 挂着几百个绝对定位的元素, 手机上会卡。
  */
 window.LiveChat = (function () {
+
+  /* 当前是哪一间。写在 badge 的 data-room 上 —— 这一页所有传给后端的字符串都
+     从这里取, 不从 URL 现解: URL 是浏览器给的, 而这个是服务端渲染进来的。 */
+  function room() {
+    var b = document.getElementById('lvBadge');
+    return (b && b.dataset.room) || '';
+  }
   var stage = document.getElementById('lvVideo');
   stage = stage && stage.parentNode;
   var box = document.getElementById('lvDanmu');
@@ -38,7 +45,7 @@ window.LiveChat = (function () {
   }
 
   function pull() {
-    return fetch('/api/live/comments?since=' + encodeURIComponent(since), { credentials: 'same-origin' })
+    return fetch('/api/live/comments?room=' + encodeURIComponent(room()) + '&since=' + encodeURIComponent(since), { credentials: 'same-origin' })
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (d) {
         if (!d || !d.items) return;
@@ -59,7 +66,7 @@ window.LiveChat = (function () {
     fetch('/api/live/comment', {
       method: 'POST', credentials: 'same-origin',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: text }),
+      body: JSON.stringify({ room: room(), text: text }),
     }).then(function (r) {
       if (r.status === 401) { hint.textContent = t('needlogin'); return null; }
       if (r.status === 429) { hint.textContent = t('toofast'); return null; }
@@ -84,7 +91,7 @@ window.LiveChat = (function () {
 
   // 起步时不把历史全部倒出来 —— 一进直播间被几十条糊满屏是灾难。
   // 只从"现在"开始收。
-  fetch('/api/live/comments?limit=1', { credentials: 'same-origin' })
+  fetch('/api/live/comments?limit=1&room=' + encodeURIComponent(room()), { credentials: 'same-origin' })
     .then(function (r) { return r.ok ? r.json() : null; })
     .then(function (d) { if (d) since = d.now || 0; })
     .catch(function () {})

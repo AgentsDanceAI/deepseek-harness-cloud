@@ -21,6 +21,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 import time
@@ -147,6 +148,33 @@ def _enabled() -> bool:
     return bool(config.LIVE_GPU_URL)
 
 
+def rooms() -> list[str]:
+    """有哪几间。顺序即页面顺序; 去重但保序。
+
+    LIVE_ROOM 永远在列表里 —— 单间时代的配置不该因为升级就 404。
+    """
+    out: list[str] = []
+    for r in (config.LIVE_ROOMS or "").split(","):
+        r = r.strip()
+        if r and r not in out:
+            out.append(r)
+    if config.LIVE_ROOM and config.LIVE_ROOM not in out:
+        out.insert(0, config.LIVE_ROOM)
+    return out or ["official"]
+
+
+def _room(name: str | None) -> str:
+    """把浏览器给的房间名换成一个**确实存在**的房间, 否则 404。
+
+    这是唯一一处把外部字符串变成房间名的地方。放行任意字符串 = 任人拼出别的
+    上游接口来 (那些接口是带令牌的)。
+    """
+    r = (name or "").strip() or config.LIVE_ROOM
+    if r not in rooms():
+        raise HTTPException(404, "no_such_room")
+    return r
+
+
 def _require_admin(user: dict) -> None:
     """控制台是管理员专用 (老板 2026-09-08 定)。
 
@@ -180,11 +208,14 @@ async def _gpu(method: str, path: str, room: str, **kw):
 
 
 @router.get("/status")
-async def status():
-    """直播间状态。未登录也给 —— 首页/目录要靠它决定卡片亮不亮。"""
+async def status(room: str = ""):
+    """某一间的状态。未登录也给 —— 首页/目录要靠它决定卡片亮不亮。"""
     if not _enabled():
         return JSONResponse({"enabled": False, "live": False})
-    room = config.LIVE_ROOM
+    try:
+        room = _room(room)
+    except HTTPException:
+        return JSONResponse({"enabled": True, "live": False, "error": "no_such_room"})
     try:
         r = await _upstream().get(
             f"{config.LIVE_GPU_URL}/rooms/{room}/status", params={"token": _sign(room)}, timeout=8
@@ -195,7 +226,7 @@ async def status():
         # 直播间挂了不该让整页报错 —— 卡片显示"未开播"就够了。
         log.warning("取直播状态失败: %s", e)
         return JSONResponse({"enabled": True, "live": False, "error": "unreachable"})
-    _sample_rate(d)  # 顺手算产出速率, 掉出实时会记一条
+    _sample_rate(d, room)  # 顺手算产出速率, 掉出实时会记一条
     return JSONResponse(
         {
             "enabled": True,
@@ -242,10 +273,9 @@ async def hls(room: str, name: str):
         raise HTTPException(400, "bad_name")
     if not room.replace("-", "").replace("_", "").isalnum():
         raise HTTPException(400, "bad_room")
-    # 全站只有官方间这一间, 别的名字一律不给 —— 这是一条把浏览器给的字符串拼进
-    # 上游路径的路, 不钉死就是任人拿我们当探测器去摸 GPU 节点上有什么。
-    if room != config.LIVE_ROOM:
-        raise HTTPException(404, "no_such_room")
+    # 只放行名单里的房间 —— 这是一条把浏览器给的字符串拼进上游路径的路,
+    # 不钉死就是任人拿我们当探测器去摸 GPU 节点上有什么。
+    room = _room(room)
     url = f"{config.LIVE_GPU_URL}/hls/{room}/{name}"
     is_list = name.endswith(".m3u8")
     hdrs = {"Cache-Control": "no-store" if is_list else "public, max-age=60"}
@@ -285,21 +315,21 @@ async def hls(room: str, name: str):
 
 # ── 控制台: 只能操作自己那一间 ────────────────────────────────────────────
 @router.get("/room")
-async def get_room(user: dict = Depends(resolve_user)):
-    """直播间配置: 话术、形象、音色、逐句渲染状态、在播与否。"""
+async def get_room(room: str = "", user: dict = Depends(resolve_user)):
+    """某一间的配置: 话术、形象、音色、在播与否。"""
     if not _enabled():
         raise HTTPException(404, "live_disabled")
     _require_admin(user)
-    room = config.LIVE_ROOM
+    room = _room(room)
     d = await _gpu("GET", f"/rooms/{room}/status", room)
-    _sample_rate(d)
+    _sample_rate(d, room)
     d["room"] = room
     d["hls"] = f"/api/live/hls/{room}/index.m3u8"
     # 实测产出速率, **诊断用, 不画在界面上**。低于 1.0 就是生产比消费慢, 缓冲开多大
     # 都会被抽干。这一版本来在控制台上显示过一行, 创始人 2026-09-10 撤掉了 —— 控制台
     # 是给人看的产品界面, 工程内部指标摆上去只会让人问"这是什么"。要看就查这个接口
     # 或 live_incidents 表(产出侧的 slow/recovered 事件)。
-    d["rate"] = _rate_now()
+    d["rate"] = _rate_now(room)
     return JSONResponse(d)
 
 
@@ -310,7 +340,7 @@ async def put_room(body: dict, user: dict = Depends(resolve_user)):
     if not _enabled():
         raise HTTPException(404, "live_disabled")
     _require_admin(user)
-    room = config.LIVE_ROOM
+    room = _room(body.get("room"))
     payload = {}
     for k in ("person", "voice", "title"):
         if k in body:
@@ -323,16 +353,88 @@ async def put_room(body: dict, user: dict = Depends(resolve_user)):
 
 
 @router.post("/room/{action}")
-async def act(action: str, user: dict = Depends(resolve_user)):
-    """start / stop。"""
+async def act(action: str, room: str = "", user: dict = Depends(resolve_user)):
+    """start / stop 某一间。"""
     # 实时形态下没有"渲染"这一步了 —— 话术存下去下一轮就当场生成。
     if action not in ("start", "stop"):
         raise HTTPException(404, "unknown_action")
     if not _enabled():
         raise HTTPException(404, "live_disabled")
     _require_admin(user)
-    room = config.LIVE_ROOM
+    room = _room(room)
+    if action == "start":
+        busy = [r for r in await _live_rooms() if r != room]
+        if len(busy) >= config.LIVE_MAX_CONCURRENT:
+            # **不排队, 直接拦。** 排队的语义是"等一会儿就轮到你", 但这里等不来 ——
+            # 在播的那几间不会自己结束。而硬开的后果不是这一间卡, 是**所有人一起
+            # 掉帧**: 三路已经吃掉那张卡 97% 的串行吞吐。
+            # 把在播的房间名回给前端, 管理员才知道该去关哪一间。
+            raise HTTPException(
+                409,
+                {"error": "too_many_live", "max": config.LIVE_MAX_CONCURRENT, "live": busy},
+            )
     return JSONResponse(await _gpu("POST", f"/rooms/{room}/{action}", room))
+
+
+#: 「哪几间在播」的缓存。开播那一步要先数一遍, 而每数一次就是 N 次上游调用;
+#: 列表页也要用同一份。两秒足够 —— 开播/停播是人手点的, 不是每秒都在变。
+_LIVE_CACHE: dict[str, object] = {"at": 0.0, "data": None}
+_LIVE_TTL = 2.0
+
+
+async def _room_status(room: str) -> dict:
+    """一间的状态, 拿不到就当没开播 —— 上游抖一下不该让整页报错。"""
+    try:
+        return await _gpu("GET", f"/rooms/{room}/status", room)
+    except HTTPException:
+        return {"live": False, "error": "unreachable"}
+
+
+async def _all_status() -> dict[str, dict]:
+    now = time.time()
+    cached = _LIVE_CACHE["data"]
+    if cached is not None and now - float(_LIVE_CACHE["at"]) < _LIVE_TTL:
+        return cached  # type: ignore[return-value]
+    names = rooms()
+    got = await asyncio.gather(*(_room_status(r) for r in names))
+    # strict=True 恒成立: gather 对每个输入返回恰好一个结果, 两者长度必然相等。
+    # 写出来是为了把这个不变量钉住 —— 哪天改成别的收集方式而长度对不上, 这里
+    # 会当场抛, 而不是**静默丢掉最后几个房间**。
+    data = dict(zip(names, got, strict=True))
+    _LIVE_CACHE["at"], _LIVE_CACHE["data"] = now, data
+    return data
+
+
+async def _live_rooms() -> list[str]:
+    return [r for r, st in (await _all_status()).items() if st.get("live")]
+
+
+@router.get("/rooms")
+async def list_rooms():
+    """有哪几间、各自在不在播。**公开** —— 开播了谁都能看, 列表当然也谁都能看。
+
+    只回展示需要的字段: 名称、形象、在播与否。话术全文、队列深度、错误细节一律
+    不带出去 (这条路没有鉴权)。
+    """
+    if not _enabled():
+        return JSONResponse({"enabled": False, "rooms": [], "max": 0})
+    st = await _all_status()
+    return JSONResponse(
+        {
+            "enabled": True,
+            "max": config.LIVE_MAX_CONCURRENT,
+            "rooms": [
+                {
+                    "id": r,
+                    "title": str((st.get(r) or {}).get("title") or ""),
+                    "person": str((st.get(r) or {}).get("person") or ""),
+                    "live": bool((st.get(r) or {}).get("live")),
+                    "hls": f"/api/live/hls/{r}/index.m3u8",
+                }
+                for r in rooms()
+            ],
+        }
+    )
 
 
 #: 生成话术的系统提示。**每一句都会被读出来** —— 所以任何书面格式(编号、列表、
@@ -545,6 +647,7 @@ async def _compose_reply(comment: str, bill_to: str, device_id: str = "", person
 
 @router.post("/say")
 async def say(body: dict, user: dict = Depends(resolve_user)):
+    # room 从请求体里来 (与 put_room 一致), 而不是查询串 —— 这条是 POST。
     """把一条评论送进直播间。
 
     两种模式, 与 LiveTalking 的文本驱动同形:
@@ -557,6 +660,7 @@ async def say(body: dict, user: dict = Depends(resolve_user)):
     if not _enabled():
         raise HTTPException(404, "live_disabled")
     _require_admin(user)
+    room = _room(body.get("room"))
     text = str(body.get("text", "")).strip()[:600]
     if not text:
         raise HTTPException(400, "empty_text")
@@ -567,14 +671,14 @@ async def say(body: dict, user: dict = Depends(resolve_user)):
         # 也带上当前形象的人设 —— 管理员插播和观众公屏是同一个直播间的同一个人,
         # 口吻不一致观众听得出来。取不到房间配置就退回通用口径, 不能因此发不出去。
         try:
-            cfg = await _gpu("GET", f"/rooms/{config.LIVE_ROOM}/status", config.LIVE_ROOM)
+            cfg = await _gpu("GET", f"/rooms/{room}/status", room)
             person = str(cfg.get("person") or "")
         except Exception:
             person = ""
         spoken = await _compose_reply(text, user["id"], user.get("device_id", ""), person=person)
 
-    await _gpu("POST", f"/rooms/{config.LIVE_ROOM}/interject", config.LIVE_ROOM, json={"text": spoken[:600]})
-    return JSONResponse({"ok": True, "comment": text, "spoken": spoken[:600], "mode": mode})
+    await _gpu("POST", f"/rooms/{room}/interject", room, json={"text": spoken[:600]})
+    return JSONResponse({"ok": True, "room": room, "comment": text, "spoken": spoken[:600], "mode": mode})
 
 
 # ── 公屏 (2026-09-09) ────────────────────────────────────────────────────
@@ -587,7 +691,9 @@ async def say(body: dict, user: dict = Depends(resolve_user)):
 #      所以上游队列深了就只飘屏不开口。
 #   3. **观众永远拿不到 echo 模式** —— echo 是把文字原样念出去, 等于任何人都能
 #      让她说任何话。观众只能走 chat, 由 `_REPLY` 那套口径过一道。
-_LAST_REPLY_AT = 0.0
+#: 按房间算冷却 —— 全局一份的话, 甲间刚回过一条, 乙间就得干等 12 秒, 而两间各有
+#: 各的观众, 凭什么互相挡。
+_LAST_REPLY_AT: dict[str, float] = {}
 
 
 def _bill_account() -> str:
@@ -635,9 +741,18 @@ _INCIDENT_KINDS = {
 
 
 def _record(
-    kind: str, side: str, *, secs: float = 0.0, lag: float = 0.0, detail: str = "", user_id: str = ""
+    kind: str,
+    side: str,
+    *,
+    room: str = "",
+    secs: float = 0.0,
+    lag: float = 0.0,
+    detail: str = "",
+    user_id: str = "",
 ) -> None:
-    """记一条直播事件。**绝不能把主流程带崩** —— 观测坏了不该拖垮播放。"""
+    """记一条直播事件。**绝不能把主流程带崩** —— 观测坏了不该拖垮播放。
+
+    room 留空 = 默认那间 (单间时代的调用都不带)。"""
     try:
         with db.tx() as conn:
             conn.execute(
@@ -646,7 +761,7 @@ def _record(
                 "VALUES (?,?,?,?,?,?,?,?,?)",
                 (
                     security.new_id("li_"),
-                    config.LIVE_ROOM,
+                    room or config.LIVE_ROOM,
                     kind,
                     side,
                     user_id,
@@ -662,7 +777,17 @@ def _record(
 
 #: 产出速率采样。这一层本来就在轮询上游状态, 顺手拿 edge(直播边缘的视频秒数)算,
 #: 所以**不用改 GPU 侧, 也就不用中断播出**。
-_RATE: dict = {"pts": [], "slow": False}
+_RATES: dict[str, dict] = {}
+
+
+def _rate_state(room: str = "") -> dict:
+    """某一间的采样窗。按房间分 —— 全局一份的话, 甲间换场把乙间的采样清掉, 或者两间的
+    edge 交错着进同一个窗, 算出来的速率是两间的混合, 谁都不对。"""
+    return _RATES.setdefault(room or config.LIVE_ROOM, {"pts": [], "slow": False})
+
+
+#: 默认那间的采样窗 —— 与 _rate_state() 是同一个 dict; 单间时代的测试直接摸它。
+_RATE: dict = _rate_state()
 _RATE_WINDOW = 150.0  # 采样保留多久
 #: ⚠️ 跨度不够长不判定。节流让产出变成锯齿(句内出片, 句间空 5~8 秒), 短窗会把稳态
 #: 1.000× 读成 0.79× 或 1.4× —— 2026-09-10 我就被这个骗过一次, 拿 45 秒的窗得出过
@@ -672,9 +797,9 @@ _RATE_BAD = 0.95  # 低于这个算掉出实时
 _RATE_OK = 0.99  # 回到这个才算恢复 (留迟滞, 免得在边界反复报)
 
 
-def _rate_now() -> float:
+def _rate_now(room: str = "") -> float:
     """当前窗口内的实测产出速率; 采样不够就回 0 (界面上显示成"测量中")。"""
-    pts = _RATE["pts"]
+    pts = _rate_state(room)["pts"]
     if len(pts) < 2:
         return 0.0
     span = pts[-1][0] - pts[0][0]
@@ -683,14 +808,15 @@ def _rate_now() -> float:
     return round((pts[-1][1] - pts[0][1]) / span, 3)
 
 
-def _sample_rate(d: dict) -> None:
+def _sample_rate(d: dict, room: str = "") -> None:
     """从上游状态里顺手算产出速率, 掉出实时/恢复各记一条。
 
     只记**状态转换**, 不是每次采样都写库 —— 否则表会被正常运行时的噪声填满,
     而真正要回答的问题是"什么时候开始掉的"。
     """
     try:
-        pts = _RATE["pts"]
+        R = _rate_state(room)
+        pts = R["pts"]
         if not d.get("live"):
             pts.clear()
             return
@@ -700,7 +826,7 @@ def _sample_rate(d: dict) -> None:
         now = time.time()
         if pts and edge < pts[-1][1]:  # 换场了: 时间轴从 0 重来, 之前的采样作废
             pts.clear()
-            _RATE["slow"] = False
+            R["slow"] = False
         pts.append((now, edge))
         while pts and now - pts[0][0] > _RATE_WINDOW:
             pts.pop(0)
@@ -710,13 +836,13 @@ def _sample_rate(d: dict) -> None:
         if span < _RATE_MIN_SPAN:
             return
         rate = (pts[-1][1] - pts[0][1]) / span
-        if not _RATE["slow"] and rate < _RATE_BAD:
-            _RATE["slow"] = True
-            _record("slow", "server", secs=span, detail=f"产出 {rate:.3f}x")
+        if not R["slow"] and rate < _RATE_BAD:
+            R["slow"] = True
+            _record("slow", "server", room=room, secs=span, detail=f"产出 {rate:.3f}x")
             log.warning("直播产出掉出实时: %.3fx (%.0f 秒窗)", rate, span)
-        elif _RATE["slow"] and rate >= _RATE_OK:
-            _RATE["slow"] = False
-            _record("recovered", "server", secs=span, detail=f"产出 {rate:.3f}x")
+        elif R["slow"] and rate >= _RATE_OK:
+            R["slow"] = False
+            _record("recovered", "server", room=room, secs=span, detail=f"产出 {rate:.3f}x")
             log.info("直播产出恢复: %.3fx", rate)
     except Exception as e:
         log.warning("产出速率采样失败: %s", e)
@@ -725,12 +851,13 @@ def _sample_rate(d: dict) -> None:
 #: 字幕的服务端缓存。观众各自轮询的话, 一百个人就是每秒几十次打到 GPU 上 ——
 #: 而所有人看的是同一场直播, 同一份内容。缓存两秒: 比切片时长 (1 秒) 长一点,
 #: 短到察觉不出延迟。
-_CAP_CACHE: dict[str, object] = {"at": 0.0, "data": None}
+#: 按房间存 —— 全局一份的话, 甲间的字幕会被乙间的覆盖掉。
+_CAP_CACHE: dict[str, dict] = {}
 _CAP_TTL = 2.0
 
 
 @router.get("/captions")
-async def captions():
+async def captions(room: str = ""):
     """她刚才说了什么。**公开** —— 字幕是给观众看的。
 
     只回文本, 不回 kind 之外的任何东西: 这条路没有鉴权, 别把上游状态 (队列深度、
@@ -738,16 +865,20 @@ async def captions():
     """
     if not _enabled():
         raise HTTPException(404, "live_disabled")
+    room = _room(room)
     now = time.time()
-    if _CAP_CACHE["data"] is not None and now - float(_CAP_CACHE["at"]) < _CAP_TTL:
-        return JSONResponse(_CAP_CACHE["data"])
+    hit = _CAP_CACHE.get(room)
+    if hit is not None and now - float(hit["at"]) < _CAP_TTL:
+        return JSONResponse(hit["data"])
     try:
-        st = await _gpu("GET", f"/rooms/{config.LIVE_ROOM}/status", config.LIVE_ROOM)
+        st = await _room_status(room)
+        if st.get("error"):
+            raise HTTPException(502, "upstream_unreachable")
     except HTTPException:
         # 上游够不着不该让字幕层报错 —— 观众看到的是画面还在、字幕停住, 那比
         # 整块红字好。
         return JSONResponse({"live": False, "lines": []})
-    _sample_rate(st)  # 字幕是三秒一问的, 采样主要靠这里
+    _sample_rate(st, room)  # 字幕是三秒一问的, 采样主要靠这里
     lines = [
         {
             "t": float(x.get("t") or 0),
@@ -768,7 +899,7 @@ async def captions():
         "edge": float(st.get("edge") or 0.0),
         "lines": lines[-12:],
     }
-    _CAP_CACHE["at"], _CAP_CACHE["data"] = now, data
+    _CAP_CACHE[room] = {"at": now, "data": data}
     return JSONResponse(data)
 
 
@@ -785,6 +916,7 @@ async def report(body: dict, user: dict = Depends(resolve_user)):
     """
     if not _enabled():
         raise HTTPException(404, "live_disabled")
+    room = _room(body.get("room"))
     kind = str(body.get("kind", ""))[:32]
     if kind not in _INCIDENT_KINDS or kind in ("slow", "recovered"):
         # slow/recovered 是产出侧自己算的, 不接受客户端声称
@@ -802,6 +934,7 @@ async def report(body: dict, user: dict = Depends(resolve_user)):
     _record(
         kind,
         "viewer",
+        room=room,
         secs=_num("secs"),
         lag=_num("lag"),
         detail=str(body.get("detail", ""))[:200],
@@ -811,18 +944,19 @@ async def report(body: dict, user: dict = Depends(resolve_user)):
 
 
 @router.get("/incidents")
-async def incidents(hours: float = 6.0, limit: int = 200, user: dict = Depends(resolve_user)):
+async def incidents(hours: float = 6.0, limit: int = 200, room: str = "", user: dict = Depends(resolve_user)):
     """最近发生过什么。回答的是"什么时候开始出问题的"。
 
     不回 user_id —— 要的是"卡了多少次", 不是"谁卡了"。
     """
     if not _enabled():
         raise HTTPException(404, "live_disabled")
+    room = _room(room)
     since = time.time() - max(0.1, min(float(hours or 6), 24 * 14)) * 3600
     rows = db.query(
         "SELECT kind, side, secs, lag, detail, created FROM live_incidents "
         "WHERE room=? AND created>? ORDER BY created DESC LIMIT ?",
-        (config.LIVE_ROOM, since, max(1, min(int(limit or 200), 1000))),
+        (room, since, max(1, min(int(limit or 200), 1000))),
     )
     items = [
         {
@@ -842,17 +976,18 @@ async def incidents(hours: float = 6.0, limit: int = 200, user: dict = Depends(r
 
 
 @router.get("/comments")
-async def comments(since: float = 0.0, limit: int = 40):
+async def comments(since: float = 0.0, limit: int = 40, room: str = ""):
     """公屏。**公开** —— 没登录也看得见, 否则路人打开直播间是一片死寂。
 
     只回没被藏起来的。since 是上一次拿到的最后一条的时间戳, 用来只取增量。
     """
     if not _enabled():
         raise HTTPException(404, "live_disabled")
+    room = _room(room)
     rows = db.query(
         "SELECT id, nick, text, created, replied FROM live_comments "
         "WHERE room=? AND hidden=0 AND created>? ORDER BY created DESC LIMIT ?",
-        (config.LIVE_ROOM, float(since or 0), max(1, min(int(limit or 40), 100))),
+        (room, float(since or 0), max(1, min(int(limit or 40), 100))),
     )
     items = [
         {
@@ -876,6 +1011,7 @@ async def comment(body: dict, user: dict = Depends(resolve_user)):
     """
     if not _enabled():
         raise HTTPException(404, "live_disabled")
+    room = _room(body.get("room"))
     text = str(body.get("text", "")).strip()[: config.LIVE_COMMENT_MAX_LEN]
     if not text:
         raise HTTPException(400, "empty_text")
@@ -888,32 +1024,35 @@ async def comment(body: dict, user: dict = Depends(resolve_user)):
         conn.execute(
             "INSERT INTO live_comments (id, room, user_id, nick, text, replied, hidden, created) "
             "VALUES (?,?,?,?,?,?,?,?)",
-            (cid, config.LIVE_ROOM, user["id"], _nick(user), text, 0, 0, now),
+            (cid, room, user["id"], _nick(user), text, 0, 0, now),
         )
 
-    replied = await _maybe_reply(cid, text)
-    return JSONResponse({"ok": True, "id": cid, "nick": _nick(user), "t": now, "replied": replied})
+    replied = await _maybe_reply(cid, text, room)
+    return JSONResponse(
+        {"ok": True, "id": cid, "room": room, "nick": _nick(user), "t": now, "replied": replied}
+    )
 
 
-async def _maybe_reply(cid: str, text: str) -> bool:
+async def _maybe_reply(cid: str, text: str, room: str) -> bool:
     """够不够格让她开口。飘屏是免费的, 开口不是 —— 三道闸都过了才回。
 
     任何一道没过都**不是错误**: 评论已经飘出去了, 她只是这一条没接话。所以这里
     一律吞掉异常, 绝不让"回答失败"变成"评论发不出去"。
     """
-    global _LAST_REPLY_AT
     now = time.time()
-    if now - _LAST_REPLY_AT < config.LIVE_REPLY_COOLDOWN_S:
+    if now - _LAST_REPLY_AT.get(room, 0.0) < config.LIVE_REPLY_COOLDOWN_S:
         return False
     try:
-        st = await _gpu("GET", f"/rooms/{config.LIVE_ROOM}/status", config.LIVE_ROOM)
+        st = await _room_status(room)
+        if st.get("error"):
+            return False
     except HTTPException:
         return False
     if not st.get("live"):
         return False  # 没开播就没人听, 别白花钱
     if int(st.get("queued") or 0) >= config.LIVE_REPLY_MAX_QUEUE:
         return False  # 她已经排到几十秒开外了
-    _LAST_REPLY_AT = now  # 先占位再去调模型 —— 慢的那几秒里别放第二条进来
+    _LAST_REPLY_AT[room] = now  # 先占位再去调模型 —— 慢的那几秒里别放第二条进来
     try:
         spoken = await _compose_reply(text, _bill_account(), person=str(st.get("person") or ""))
         hit = _claims(spoken)
@@ -922,9 +1061,9 @@ async def _maybe_reply(cid: str, text: str) -> bool:
             # 在花钱, 观众还在等。直接换成安全的那句。
             log.warning("[live] 自动回评命中禁词 %r, 已换成安全兜底: %s", hit, spoken[:60])
             spoken = _SAFE_FALLBACK
-        await _gpu("POST", f"/rooms/{config.LIVE_ROOM}/interject", config.LIVE_ROOM, json={"text": spoken})
+        await _gpu("POST", f"/rooms/{room}/interject", room, json={"text": spoken})
     except Exception as e:  # noqa: BLE001
-        _LAST_REPLY_AT = 0.0  # 没说成就把位子让出来
+        _LAST_REPLY_AT[room] = 0.0  # 没说成就把位子让出来
         log.warning("[live] 自动回评失败: %s", type(e).__name__)
         return False
     with db.tx() as conn:
@@ -933,11 +1072,12 @@ async def _maybe_reply(cid: str, text: str) -> bool:
 
 
 @router.post("/comment/{cid}/hide")
-async def hide_comment(cid: str, user: dict = Depends(resolve_user)):
+async def hide_comment(cid: str, room: str = "", user: dict = Depends(resolve_user)):
     """管理员把一条公屏藏起来。软删 —— 记录留着, UGC 的处置要留痕。"""
     if not _enabled():
         raise HTTPException(404, "live_disabled")
     _require_admin(user)
+    room = _room(room)
     with db.tx() as conn:
-        conn.execute("UPDATE live_comments SET hidden=1 WHERE id=? AND room=?", (cid, config.LIVE_ROOM))
+        conn.execute("UPDATE live_comments SET hidden=1 WHERE id=? AND room=?", (cid, room))
     return JSONResponse({"ok": True})
