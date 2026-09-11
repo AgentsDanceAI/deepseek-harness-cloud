@@ -736,6 +736,21 @@ LEGAL_DOCS = {
 }
 
 
+#: 文书正文里的占位符 -> 真地址。**在转 HTML 之前替换**, 这样 `**{{support_email}}**`
+#: 还能正常加粗; 放到后面就得处理转义, 白白多一层出错的地方。
+_LEGAL_TOKENS = {
+    "{{support_email}}": lambda: config.LEGAL_SUPPORT_EMAIL,
+    "{{security_email}}": lambda: config.LEGAL_SECURITY_EMAIL,
+    "{{privacy_email}}": lambda: config.LEGAL_PRIVACY_EMAIL,
+}
+
+
+def _fill_legal_tokens(text: str) -> str:
+    for token, value in _LEGAL_TOKENS.items():
+        text = text.replace(token, value())
+    return text
+
+
 @router.get("/legal/{doc}")
 def legal_page(request: Request, doc: str):
     if doc not in LEGAL_DOCS:
@@ -754,7 +769,7 @@ def legal_page(request: Request, doc: str):
     pending = True
     try:
         if path.is_file():
-            body_html = markdown_to_html(path.read_text(encoding="utf-8"))
+            body_html = markdown_to_html(_fill_legal_tokens(path.read_text(encoding="utf-8")))
             pending = False
     except Exception:
         body_html, pending = "", True

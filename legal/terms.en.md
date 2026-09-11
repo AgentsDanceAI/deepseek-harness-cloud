@@ -11,9 +11,9 @@ These Terms are the agreement between you and the Operator regarding deepseek-ha
 | Item | Details |
 |---|---|
 | Legal entity | AgentsDance AI |
-| Service and billing support | support@agentsdance.ai |
-| Legal and privacy | legal@agentsdance.ai |
-| Security vulnerability reports | security@agentsdance.ai |
+| Service and billing support | {{support_email}} |
+| Legal and privacy | {{privacy_email}} |
+| Security vulnerability reports | {{security_email}} |
 
 All of the mailboxes above are handled by real people, with a first reply within 24 hours on business days.
 
@@ -31,7 +31,7 @@ Built on the open-source project DeepSeek Harness (MIT License), the Service pro
 
 3.1 You must be at least 18 years old to register. If you register on behalf of a company, you represent that you have obtained the appropriate authorization from that company.
 
-3.2 You are responsible for all activity under your account and must safeguard your login credentials and device authorization tokens. If you discover unauthorized use, notify security@agentsdance.ai immediately.
+3.2 You are responsible for all activity under your account and must safeguard your login credentials and device authorization tokens. If you discover unauthorized use, notify {{security_email}} immediately.
 
 3.3 We may suspend or terminate your account if you violate these Terms or the Acceptable Use Policy in Section 8; see Section 6 for details.
 
@@ -98,7 +98,7 @@ The complete refund policy is available at https://aistore.best/legal/refund . I
 
 6.5 Apart from the situations above, credits and machine hours that have been granted are non-refundable once used. Unused quota does not carry over to the next period and cannot be cashed out or transferred.
 
-Send refund requests to support@agentsdance.ai; we will reply within 5 business days. Approved refunds are returned by Waffo Pancake through the original payment method, and the time to arrive depends on your card issuer.
+Send refund requests to {{support_email}}; we will reply within 5 business days. Approved refunds are returned by Waffo Pancake through the original payment method, and the time to arrive depends on your card issuer.
 
 ## 7. Your Content and Limits on Our Use
 
