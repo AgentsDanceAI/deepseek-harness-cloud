@@ -4,7 +4,7 @@
 <section class="section">
   <div class="container">
     <span class="eyebrow">{{ t("resources.eyebrow") }}</span>
-    <h1 class="section-title">{{ t("resources.h1") }}</h1>
+    <h1 class="section-title">{{ t("resources.h1") if show_source else t("resources.h1_plain") }}</h1>
 
     <div id="quickstart" class="card feature" style="margin-top:32px">
       <h2>{{ t("resources.qs.title") }}</h2>
@@ -16,6 +16,7 @@
       <a class="btn btn-primary" href="/login" style="margin-top:14px">{{ t("resources.qs.cta") }}</a>
     </div>
 
+    {% if show_source %}
     <div id="selfhost" class="card feature" style="margin-top:20px">
       <h2>{{ t("home.oss.selfhost") }}</h2>
       <p>
@@ -44,6 +45,7 @@ docker compose -f deploy/selfhost/docker-compose.yml up -d</code></pre>
       <a class="btn btn-ghost" href="https://github.com/AgentsDanceAI/deepseek-harness-cloud"
          rel="noopener" target="_blank" style="margin-top:14px">{{ t("home.oss.repo") }}</a>
     </div>
+    {% endif %}
 
     <div class="card feature" style="margin-top:20px">
       <h2>{{ t("resources.download.title") }}</h2>

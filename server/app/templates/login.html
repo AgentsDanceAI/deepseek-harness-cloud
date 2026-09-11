@@ -2,7 +2,7 @@
 {% block title %}{{ t("login.title") }}{% endblock %}
 {% block head %}<script src="/static/hero-waves.js?v={{ asset_v }}" defer></script>{% endblock %}
 {% block content %}
-{# Split layout after the AgentsDance reference: value proposition on a dark
+{# Split layout: value proposition on a dark
    panel, the form alone on the right. The panel runs our ripple canvas, so the
    brand's one strong visual carries into sign-in instead of a blank slab. #}
 <section class="auth-split">
@@ -39,10 +39,12 @@
           <span class="tick"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 13 4 4L19 7"/></svg></span>
           <div><b>{{ t("login.point.cloud_title") }}</b><span>{{ t("login.point.cloud_desc", hours=(work_free_minutes // 60)) }}</span></div>
         </div>
+        {% if show_source %}
         <div class="auth-point">
           <span class="tick"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 13 4 4L19 7"/></svg></span>
           <div><b>{{ t("login.point.oss_title") }}</b><span>{{ t("login.point.oss_desc") }}</span></div>
         </div>
+        {% endif %}
       </div>
     </div>
 

@@ -58,7 +58,9 @@
       <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 13 4 4L19 7"/></svg>{{ t("home.check.products", live=live_count) }}</span>
       <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 13 4 4L19 7"/></svg>{{ t("home.check.free_hours", hours=(work_free_minutes // 60)) }}</span>
       <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 13 4 4L19 7"/></svg>{{ t("home.check.nokey") }}</span>
+      {% if show_source %}
       <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 13 4 4L19 7"/></svg>{{ t("home.check.oss") }}</span>
+      {% endif %}
     </div>
 
   </div>
@@ -173,8 +175,12 @@
         <p>
           {{ t("home.two.local_body") }}
         </p>
-        <a class="btn btn-ghost" rel="noopener" target="_blank"
+        {# 本机货架已经做进桌面版, 这条 CTA 原先指仓库 README 的锚点 —— 露出
+           关掉后指下载页, 用户拿到的是同一件东西, 而不是一条死链。 #}
+        <a class="btn btn-ghost"
+           {% if show_source %}rel="noopener" target="_blank"
            href="https://github.com/AgentsDanceAI/deepseek-harness-cloud#run-the-workspaces-on-your-own-machine"
+           {% else %}href="/download"{% endif %}
            style="margin-top:14px">{{ t("home.two.local_cta") }}</a>
       </div>
       {% endif %}
@@ -190,7 +196,8 @@
   </div>
 </section>
 
-{# ============ 开源 ============ #}
+{# ============ 开源 (见 config.SHOW_SOURCE_LINKS) ============ #}
+{% if show_source %}
 <section class="section">
   <div class="container center">
     <h2 class="section-title">{{ t("home.oss.title") }}</h2>
@@ -209,4 +216,5 @@
     </p>
   </div>
 </section>
+{% endif %}
 {% endblock %}

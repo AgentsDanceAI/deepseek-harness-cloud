@@ -721,14 +721,29 @@ def test_workspace_pass_reaches_the_payment_provider():
 def test_landing_shows_the_local_workspace_path(client, monkeypatch):
     """主页要把「工作台搬到自己机器上」那条路摆出来 —— README 里有, 主页一直没有。
 
-    钉的是**入口存在**, 不是文案: 那张卡的 CTA 指向 README 的对应小节, 而 i18n
-    键写错时 t() 返回空串, 页面照样 200 —— 所以顺带断言标题不是空的。
+    钉的是**入口存在**, 不是文案: i18n 键写错时 t() 返回空串, 页面照样 200 ——
+    所以顺带断言标题不是空的。
+
+    **认那张卡本身, 不认它的链接。** 原先这里断言的是 README 锚点, 而这张卡讲的
+    是本机算力, 一个字都没提开源 —— 源码露出一关 (SHOW_SOURCE_LINKS), CTA 改指
+    下载页, 这条断言当场红, 可卡片明明还在。反过来更糟: 隔壁那条"自部署实例要
+    把卡收起来"的断言也只认锚点, 露出一关它就恒绿, 从此什么也测不到。
     """
     from app import config, i18n
 
     monkeypatch.setattr(config, "WORK_ENABLED", True)
-    body = client.get("/").text
-    assert "#run-the-workspaces-on-your-own-machine" in body, "主页没有本机工作台入口"
+    title = i18n.t("zh", "home.two.local_title")
+
+    monkeypatch.setattr(config, "SHOW_SOURCE_LINKS", True)
+    body = client.get("/", headers={"accept-language": "zh"}).text
+    assert title in body, "主页没有本机工作台入口"
+    assert "#run-the-workspaces-on-your-own-machine" in body
+
+    monkeypatch.setattr(config, "SHOW_SOURCE_LINKS", False)
+    body = client.get("/", headers={"accept-language": "zh"}).text
+    assert title in body, "源码露出一关, 整张本机卡也跟着没了 —— 它讲的不是开源"
+    assert "#run-the-workspaces-on-your-own-machine" not in body
+
     for key in ("home.two.local_title", "home.two.local_body", "home.two.local_cta"):
         for lang in ("zh", "en"):
             assert i18n.t(lang, key), f"{key} 缺 {lang} 译文, 卡片会渲染成空白"
@@ -736,8 +751,8 @@ def test_landing_shows_the_local_workspace_path(client, monkeypatch):
 
 def test_landing_hides_the_local_path_on_selfhost(client, monkeypatch):
     """自部署实例没有"托管网关"这个前提, 那张卡整张都不成立, 跟云卡一起收起来。"""
-    from app import config
+    from app import config, i18n
 
     monkeypatch.setattr(config, "WORK_ENABLED", False)
-    body = client.get("/").text
-    assert "#run-the-workspaces-on-your-own-machine" not in body
+    body = client.get("/", headers={"accept-language": "zh"}).text
+    assert i18n.t("zh", "home.two.local_title") not in body
