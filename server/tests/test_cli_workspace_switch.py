@@ -58,6 +58,16 @@ def test_flag_switches_image_port_env_and_boot_together(slot):
     assert "uvicorn" not in boot, "还在用 agentui 那份 Python 启动命令"
 
 
+def test_root_container_lets_claude_skip_permissions(slot):
+    """容器以 root 跑, 而引擎拿 --dangerously-skip-permissions 起 claude ——
+    Claude Code 2.1.x 对 root 一律拒: `cannot be used with root/sudo privileges`。
+    2026-09-11 切到 r2 后生产实测: claude-code 那格发什么都没回音, 退出码 1。
+    IS_SANDBOX=1 是它给容器留的口子; 我们的 pod 本来就在 gVisor 里。
+    钉在**容器 env** 上: 引擎子进程与 [终端] 都是 ...process.env 展开的。"""
+    _, env = slot(True)
+    assert env.get("IS_SANDBOX") == "1", "少了它, claude-code 那格的对话面板在 root 容器里是废的"
+
+
 def test_new_shell_is_not_given_the_old_shell_s_wiring(slot):
     """**两套接法不能混给。** 新外壳自己拿 DSH_GATEWAY_BASE 去接网关
     (server/cli/gateway.ts); 再给一份 ANTHROPIC_* 的话, 谁生效说不清 ——

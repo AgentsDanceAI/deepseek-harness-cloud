@@ -3292,6 +3292,16 @@ def env_for(product_id: str, token: str, secret: str = "") -> dict[str, str]:
             "PI_WEB_ALLOW_ORIGINS": f"https://{domain}" if domain else "",
             "DSH_GATEWAY_BASE": gateway,
             "DSH_CLOUD_TOKEN": token,
+            # 容器以 root 跑 (要写 NAS), 引擎又是拿 --dangerously-skip-permissions
+            # 起 claude 的 —— Claude Code 2.1.x 对 root 一律拒绝这个开关:
+            #   --dangerously-skip-permissions cannot be used with root/sudo privileges
+            # 2026-09-11 切到 r2 后在生产 pod 上实测到, 症状是 claude-code 那格
+            # 对话面板发什么都没回音 (退出码 1, 界面只留一条"退出码 1")。
+            # IS_SANDBOX=1 是 Claude Code 自己给容器环境留的口子 (它按这个跳过
+            # root 检查); 我们的 pod 本来就在 gVisor 沙箱里, 名副其实。
+            # 放在容器 env 而不是镜像里: childEnv/terminalEnv 都是 ...process.env
+            # 展开的, 引擎子进程与 [终端] 里的 claude 一并拿到; 不用重建镜像。
+            "IS_SANDBOX": "1",
         }
     if product_id in _AGENTUI_SLOTS:
         cli, enabled = _AGENTUI_SLOTS[product_id]
