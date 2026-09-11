@@ -8,10 +8,8 @@
   <div class="hero-grid" aria-hidden="true"></div>
   <div class="hero-dots" aria-hidden="true"></div>
   <div class="container hero-dark-inner hero-center">
-    <div class="hero-badge-dark" style="margin-inline:auto">
-      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.5 19a4.5 4.5 0 1 0-.9-8.9 6 6 0 1 0-11.1 3.4"/><path d="M6 19h11.5"/></svg>
-      {{ t("home.badge", n=app_count) }}
-    </div>
+    {# 「N 个产品 · 全部已上线」那枚徽章去掉了 (老板 2026-09-11)。它说的事下面
+       那行勾里已经有一遍, 而首屏本来就差一点装不下 —— 它占的正是差的那一点。 #}
     <h1>{{ t("home.h1", n=app_count) }}</h1>
     {# 一段话走完"承诺 -> 证据": 前半句说这事对你意味着什么, 后半句给具体是哪些
        产品、怎么计费、要不要自己搞 Key。拆成两块排版上更抓眼, 但读起来是两段
