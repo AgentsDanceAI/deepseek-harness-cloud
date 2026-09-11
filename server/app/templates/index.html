@@ -143,8 +143,11 @@
   </div>
 </section>
 
-{# ============ 三种用法 (云 / 本机工作台 / 桌面端) ============ #}
-<section class="section">
+{# ============ 三种用法 (云 / 本机工作台 / 桌面端) ============
+   这一段同时承接了原先「产品 › 怎么用」那个菜单项许诺的东西 (云端 / 桌面 /
+   免 Key / 联网搜索) —— 菜单里那一行已经去掉 (老板 2026-09-11: "怎么用这个
+   不放这, 直接放在首页"), 所以免 Key 与联网搜索这两条得在这儿说到。 #}
+<section id="usage" class="section">
   <div class="container">
     <span class="eyebrow">{{ t("home.two.eyebrow") }}</span>
     <h2 class="section-title">{{ t("home.two.title") }}</h2>
@@ -190,6 +193,35 @@
         </p>
         <a class="btn btn-ghost" href="/download" style="margin-top:14px">{{ t("home.two.desktop_cta") }}</a>
       </div>
+    </div>
+    <p class="usage-base muted small">{{ t("home.two.base") }}</p>
+  </div>
+</section>
+
+{# ============ 六类工具各自怎么用 ============
+   紧挨着"三种用法"下面 (老板 2026-09-11)。上面那段讲**在哪跑**, 这段讲
+   **每一类打开之后干什么** —— 两个不同的轴, 不是同一件事说两遍。
+
+   产品名从 app_groups 渲染, **不写死**: 写死的话下架一个产品或改个名, 这里
+   就开始说假话, 而没有任何东西会报错 (同样的漂移这仓里已经出过好几次)。
+   没归类的那组 (cat 为空) 在这儿跳过 —— 它没有类名也没有用法文案; 货架上
+   仍然出卡, 不会丢。 #}
+<section class="section section-alt">
+  <div class="container">
+    <div class="center">
+      <span class="eyebrow">{{ t("home.cats.eyebrow") }}</span>
+      <h2 class="section-title">{{ t("home.cats.title") }}</h2>
+      <p class="section-lede">{{ t("home.cats.lede") }}</p>
+    </div>
+    <div class="grid grid-3 cat-grid" style="margin-top:30px">
+      {% for cat, group in app_groups %}{% if cat %}
+      <a class="card feature cat-card" href="/apps#{{ cat }}">
+        <h3>{{ t("apps.cat." ~ cat) }}</h3>
+        <p class="cat-use">{{ t("home.cat." ~ cat ~ "_use") }}</p>
+        <p class="cat-members muted small">{{ group | map(attribute="name") | join(" · ") }}</p>
+        <span class="cat-cta">{{ t("home.cats.cta") }}</span>
+      </a>
+      {% endif %}{% endfor %}
     </div>
   </div>
 </section>

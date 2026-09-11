@@ -1031,6 +1031,19 @@ form .btn-block { margin-top: 16px; }
 .works-empty h3 { margin-top: 12px; font-size: 17px; font-weight: 650; color: var(--fg); }
 .works-empty p { margin: 6px 0 18px; font-size: 13.5px; }
 
+/* ---------- 首页: 六类工具各自怎么用 ---------- */
+.usage-base { margin-top: 20px; text-align: center; max-width: 760px; margin-inline: auto; line-height: 1.8; }
+.cat-card { display: flex; flex-direction: column; color: inherit; }
+.cat-card:hover { border-color: var(--border-strong); color: inherit; }
+.cat-card h3 { font-size: 17px; font-weight: 650; }
+.cat-use { color: var(--muted); font-size: 14px; line-height: 1.7; margin-top: 8px; }
+/* 成员名单**贴着卡底**: 六张卡的用法长短不一, 不推到底的话名单会各停在各的高度,
+   一排看过去像没对齐。 */
+.cat-members { margin-top: auto; padding-top: 14px; }
+.cat-cta { color: var(--brand); font-size: 13.5px; font-weight: 600; margin-top: 10px; }
+@media (max-width: 900px) { .cat-grid { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 620px) { .cat-grid { grid-template-columns: 1fr; } }
+
 /* ---------- 货架的类目分组 (六类, 2026-09-11) ---------- */
 .nav-sep { height: 1px; background: var(--border); margin: 6px 10px; }
 .apps-cat-title { font-size: 19px; font-weight: 650; letter-spacing: -.2px; }
