@@ -28,7 +28,8 @@ from check_image_visibility import ghcr_refs, probe  # noqa: E402
 
 #: 代码里写死的 ghcr 引用至少有这么多。低于它说明探针范围塌了 (比如 registry()
 #: 空了、或者引用都挪进了 env), 这条用例会静默变成"零覆盖的绿"。
-_FLOOR = 5
+#: 2026-09-11 从 5 提到 6: 工作台外壳开关的**另一侧** (workspace-cli) 也纳入了扫描。
+_FLOOR = 6
 
 
 def test_hardcoded_images_are_anonymously_pullable():

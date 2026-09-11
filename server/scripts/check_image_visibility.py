@@ -30,6 +30,19 @@ ACCEPT = ",".join(
 )
 
 
+def _switchable_refs() -> set[str]:
+    """开关**另一侧**的镜像 —— registry() 只反映当前这一侧。
+
+    claude-code / codex 两格的外壳由 USE_CLI_WORKSPACE 选 (agentui 或 pi-web-ui
+    那份 CLI 外壳)。没翻开关时另一侧的镜像在 registry() 里根本不出现, 于是"包忘了
+    设公开"这件事要等到翻开关当天、集群拉不动才暴露 —— 而翻开关只是改一行 env,
+    改的人不会想到顺手查一遍可见性。两侧一起钉住。
+    """
+    from app import config
+
+    return {config.CLI_WORKSPACE_IMAGE_REF, config.AGENTUI_IMAGE_REF}
+
+
 def ghcr_refs() -> list[str]:
     """当前配置下, 目录引用到的**我们自己的** ghcr 镜像。
 
@@ -46,6 +59,7 @@ def ghcr_refs() -> list[str]:
         for ref in (p.image_ref or p.image, *(sc.image_ref for sc in p.sidecars)):
             if ref and ref.startswith("ghcr.io/"):
                 out.add(ref)
+    out.update(r for r in _switchable_refs() if r and r.startswith("ghcr.io/"))
     return sorted(out)
 
 
