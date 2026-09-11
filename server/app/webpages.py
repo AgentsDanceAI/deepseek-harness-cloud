@@ -438,6 +438,18 @@ def activate_page(request: Request, code: str = ""):
 
 @router.get("/product")
 def product_page(request: Request):
+    """**站内没有任何链接指向这一页 —— 这是故意的, 不是漏了。**
+
+    2026-09-11: 「怎么用」从产品菜单里撤掉, 内容搬到首页 (#usage 那一段加它下面
+    的六类)。老板拍板"就让它孤着, 等以后再说" —— 所以既没删也没跳转, 直链仍然
+    打得开。
+
+    代价是明摆着的: 它那四段 (云端工作台/桌面/网关/联网搜索) 与首页那两段内容
+    重叠, 早晚会漂 —— 改了首页忘了改这里, 过阵子两边说的就不是一回事。看到这页
+    觉得"是不是忘删了"的人, 答案是没忘; 要动它先问老板。
+    连带 nav.p.cloud / desktop / search / gateway / overview 五个 i18n 键也悬空,
+    等这页的去留定了一起清。
+    """
     return _render(request, "product.html", "product")
 
 
