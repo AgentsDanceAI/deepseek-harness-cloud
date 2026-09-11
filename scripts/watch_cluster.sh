@@ -115,11 +115,21 @@ read -r pip pnode <<<"$($KUBECTL get pods -n "${WORK_NS:-dsh}" \
   --field-selector=status.phase=Running -o custom-columns=IP:.status.podIP,N:.spec.nodeName \
   --no-headers 2>/dev/null | awk -v me="$me" '$2 != me {print; exit}')"
 if [ -n "${pip:-}" ]; then
-  if timeout 6 bash -c "cat </dev/null >/dev/tcp/$pip/8080" 2>/dev/null \
-     || ping -c1 -W2 "$pip" >/dev/null 2>&1; then
+  # **多打几个包再下结论。** 这条链路是跨云的 WireGuard 隧道 (两端在不同云厂商),
+  # 实测丢包 5% —— 一个包的探针就是每次约 5% 概率误报。2026-09-10 到 09-11 一天
+  # 之内为此发了五封"跨节点 Pod 网络不通", 而节点全程 Ready、flannel 握手正常、
+  # 金丝雀 Pod 三天零重启: 一次都不是真的。
+  #
+  # 误报比漏报更难收拾: 半夜每隔几小时来一封狼来了, 真断的那次就没人看了。
+  # 五个包里只要回来一个就算通 —— 真断线是 100% 丢, 这个判据照样立刻红。
+  #
+  # 金丝雀是 `busybox sleep infinity`, **不监听任何端口**, 所以不试 TCP:
+  # 留着一个永远失败的第一分支, 读的人会以为那才是主判据。
+  if ping -c5 -i 0.3 -W2 "$pip" >/dev/null 2>&1; then
     note "跨节点 Pod 网络通 ($pip @ $pnode)"
   else
-    PROBLEMS+=("跨节点 Pod 网络不通: 够不着 $pip (在 $pnode 上)
+    loss="$(ping -c20 -i 0.2 -W2 "$pip" 2>/dev/null | grep -oE '[0-9]+% packet loss' | head -1)"
+    PROBLEMS+=("跨节点 Pod 网络不通: 够不着 $pip (在 $pnode 上, 复测 ${loss:-全丢})
     节点会一直显示 Ready, kubectl 全绿。查 flannel: 两端都要 node-external-ip,
     且 wireguard 的 UDP 端口两边安全组都得放行 (见 deploy/k8s-node/README.md)")
   fi
