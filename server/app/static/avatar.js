@@ -376,6 +376,7 @@
 
   function micGate(on) {
     const ear = st.ear;
+    const was = st.micOff;          // 之前是关着的吗
     st.micOff = !on;
     clearTimeout(st.micTimer);
     st.micTimer = null;
@@ -389,7 +390,10 @@
       }, MIC_REOPEN_MS);
       turnHint(t("js.avatar.listening", "说话吧，她在听"));
     } else {
-      try { ear.stop(); } catch { /* 已停 */ }
+      // 已经关着就别再喊一次。她一段回答里会说好几句, 每句开头都会走到这里 ——
+      // 实测一次回答喊了 4 次 stop。重复 stop 本身无害(指示灯跟的是真实采集状态),
+      // 但它让日志读起来像"麦在反复开关", 排查时会被这个假象带偏。
+      if (!was) { try { ear.stop(); } catch { /* 已停 */ } }
       turnHint(t("js.avatar.her_turn", "她在说…（说完再开口）"));
     }
   }
