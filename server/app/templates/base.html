@@ -172,8 +172,18 @@
         <a href="https://beian.mps.gov.cn" rel="noopener" target="_blank">{{ psb_number }}</a>
       {% endif %}
     </div>
-    <p class="footer-disclaimer">
-      {{ t("footer.disclaimer") }}</p>
+    {# 原先这里印着"本产品基于开源 DeepSeek Harness (MIT 协议) 构建…"。去掉了
+       (老板 2026-09-11: "不准确吧, 感觉也没有必要")。三条理由, 每条都成立:
+       · **不准确**: 站点现在是 16 格货架, DeepSeek Harness 只是其中一格,
+         ComfyUI / Dify / Claude Code 这些和它没关系;
+       · **不必要**: MIT 的条件句是"in all copies or substantial portions of
+         the Software" —— 义务挂在**分发软件副本**上。桌面包确实再分发了
+         deepseek-harness, 那份义务由随包走的 legal/THIRD_PARTY_NOTICES.md 履行;
+         网站是托管服务, 不分发副本, MIT 对页脚没有要求。我先前把这两件事混成
+         一件, 拿它当理由挡了好几次, 是错的;
+       · **不一致**: 货架上摆着 12 个第三方产品名, 页脚只声明了 DeepSeek 一个 ——
+         单点一个反而暗示其余十一个是我们的。
+       商标声明改到条款 15.5, 一条覆盖全部。 #}
   </div>
 </footer>
 {% endif %}

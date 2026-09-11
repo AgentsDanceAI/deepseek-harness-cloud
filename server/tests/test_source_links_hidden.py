@@ -30,6 +30,7 @@ from app import config  # noqa: E402
 from app.main import app  # noqa: E402
 
 I18N = Path(__file__).resolve().parent.parent / "config" / "i18n"
+ROOT_DIR = Path(__file__).resolve().parents[2]
 
 #: 关掉露出之后, 任何一个公开页面上都不该再出现这些。
 FORBIDDEN = ("github.com/AgentsDanceAI", "star-badge")
@@ -113,12 +114,32 @@ def test_flipping_it_back_on_restores_the_section(client, monkeypatch):
     assert "git clone" in client.get("/resources").text
 
 
-@pytest.mark.parametrize("on", (True, False))
-def test_licence_notice_survives(client, monkeypatch, on):
-    """MIT / 商标声明不是宣传, 是许可义务 —— 两个方向都必须在。"""
-    monkeypatch.setattr(config, "SHOW_SOURCE_LINKS", on)
-    body = client.get("/", headers={"accept-language": "zh"}).text
-    assert "MIT" in body and "DeepSeek" in body, f"SHOW_SOURCE_LINKS={on} 时页脚声明没了"
+def test_the_mit_notice_lives_where_the_obligation_actually_is():
+    """MIT 的义务挂在**分发软件副本**上, 不在网站上。
+
+    条件句原文: "The above copyright notice and this permission notice shall be
+    included in all copies or substantial portions of the Software." 桌面包确实
+    再分发了 deepseek-harness 与 deepseek-harness-desktop, 那份义务由随包走的
+    legal/THIRD_PARTY_NOTICES.md 履行; 网站是托管服务, 不分发副本。
+
+    这条测试原先断言的是**页脚**上有 MIT 字样 —— 那是照着我一个错的前提写的
+    (我把"随包的声明文件"和"网页页脚"混成了一件事, 还拿它挡过好几次改动)。
+    页脚那句 2026-09-11 已去掉 (它还说站点"基于 DeepSeek Harness 构建", 而站点
+    现在是 16 格货架)。真正该钉住的是这里。
+    """
+    notices = (ROOT_DIR / "legal" / "THIRD_PARTY_NOTICES.md").read_text(encoding="utf-8")
+    assert notices.count("MIT License") >= 2, "随桌面包分发的 MIT 许可全文没了 —— 这是许可违约"
+    assert "shall be included in all" in notices, "MIT 的条件句被删了"
+    assert "deepseek-harness" in notices, "没说清再分发的是哪个项目"
+    assert "not affiliated" in notices or "无隶属" in notices, "商标免责没了"
+
+
+def test_the_site_disclaims_every_third_party_mark_not_just_one(client, real_legal):
+    """货架上摆着十几个第三方产品名。页脚原先只声明 DeepSeek 一个 —— 单点一个
+    反而暗示其余的是我们的。现在由条款 15.5 一条覆盖全部。"""
+    body = client.get("/legal/terms", headers={"accept-language": "zh"}).text
+    assert "第三方产品名称" in body and "指示性使用" in body, "条款里的通用商标条款没了"
+    assert "隶属" in body, "无隶属/背书声明没了"
 
 
 def test_github_login_survives(client, monkeypatch):
