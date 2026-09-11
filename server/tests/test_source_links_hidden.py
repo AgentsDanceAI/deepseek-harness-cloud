@@ -48,8 +48,18 @@ OSS_KEYS = (
     "resources.oss.body",
     "pricing.team.selfhost_h3",
     "pricing.team.selfhost_note",
-    "solutions.enterprise.title",
+)
+
+#: 「私有部署」2026-09-11 重新露出 —— 它讲的是"装进你自己的边界", 与代码开不开源
+#: 无关, 所以**不**跟着 SHOW_SOURCE_LINKS 走。但它的老文案整段是靠"开源代码"讲的,
+#: 所以改写之后要钉住: 这几条文案里不许再出现"开源 / open source"。
+PRIVATE_DEPLOY_KEYS = (
+    "nav.s.enterprise",
     "nav.s.enterprise_desc",
+    "solutions.enterprise.title",
+    "solutions.enterprise.body",
+    "solutions.enterprise.cta",
+    "solutions.lede",
 )
 
 PUBLIC_PAGES = (
@@ -239,3 +249,25 @@ def test_no_brand_name_anywhere_on_a_public_page(client, monkeypatch, path, lang
     seen = visible_text(client.get(path, headers={"accept-language": lang}).text).lower()
     assert "agentsdance" not in seen, f"{path} ({lang}) 页面上读得到 AgentsDance"
     assert "灵舞" not in seen, f"{path} ({lang}) 页面上读得到中文全称"
+
+
+@pytest.mark.parametrize("lang", LANGS)
+def test_private_deployment_copy_never_mentions_open_source(lang):
+    """私有部署这块是**重新露出**的, 不受 SHOW_SOURCE_LINKS 保护 —— 所以它的
+    文案本身必须干净。老文案原话是"代码开源。把它部署到你自己的服务器…",
+    照抄回来就等于把刚收起来的话从另一个入口放回站上。"""
+    cat = json.loads((I18N / f"{lang}.json").read_text())
+    dirty = {k: cat[k] for k in PRIVATE_DEPLOY_KEYS if re.search(r"开源|open.?source", cat.get(k, ""), re.I)}
+    assert not dirty, f"私有部署文案里还留着开源字样: {dirty}"
+
+
+def test_private_deployment_is_reachable(client, monkeypatch):
+    """导航里那条和 /solutions 上那张卡必须同时在 —— 只留一个就是"有入口没落点"
+    或者"有内容没人找得到"。"""
+    monkeypatch.setattr(config, "SHOW_SOURCE_LINKS", False)
+    nav = client.get("/", headers={"accept-language": "zh"}).text
+    page = client.get("/solutions", headers={"accept-language": "zh"}).text
+    cat = json.loads((I18N / "zh.json").read_text())
+    assert "/solutions#enterprise" in nav, "导航里没有私有部署入口"
+    assert cat["solutions.enterprise.title"] in page, "/solutions 上没有私有部署那张卡"
+    assert 'id="enterprise"' in page and 'id="contact"' in page, "锚点缺失, 导航点过去会落空"

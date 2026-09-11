@@ -9,12 +9,9 @@
     <span class="eyebrow">{{ t("nav.solutions") }}</span>
     <h1 class="section-title">{{ t("solutions.h1") }}</h1>
     <p class="section-lede">
-      {# 原文是"前两种决定系统装在哪, 后两种决定额度怎么买 …… 自部署一套" ——
-         企业部署那张卡收起来之后就只剩三种, 这句话当场对不上。 #}
-      {{ t("solutions.lede") if show_source else t("solutions.lede_plain") }}
+      {{ t("solutions.lede") }}
     </p>
 
-    {% if show_source %}
     <div id="enterprise" class="card feature" style="margin-top:32px">
       <span class="eyebrow">{{ t("nav.s.enterprise") }}</span>
       <h2>{{ t("solutions.enterprise.title") }}</h2>
@@ -27,9 +24,8 @@
         <li>{{ t("solutions.enterprise.li3") }}</li>
         <li>{{ t("solutions.enterprise.li4") }}</li>
       </ul>
-      <a class="btn btn-ghost" href="/resources#selfhost" style="margin-top:16px">{{ t("home.oss.selfhost") }}</a>
+      <a class="btn btn-ghost" href="#contact" style="margin-top:16px">{{ t("solutions.enterprise.cta") }}</a>
     </div>
-    {% endif %}
 
     <div id="teams" class="card feature" style="margin-top:20px">
       <span class="eyebrow">{{ t("nav.s.teams") }}</span>
@@ -76,7 +72,7 @@
   </div>
 </section>
 
-<section class="section section-alt">
+<section id="contact" class="section section-alt">
   <div class="container center">
     <h2 class="section-title">{{ t("solutions.contact.title") }}</h2>
     <p class="section-lede">{{ t("solutions.contact.lede") }}</p>
