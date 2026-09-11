@@ -5,6 +5,11 @@
 
 两个外壳的端口不同 (agentui 8080 / pi-web-ui 8787), env 更是两套完全不同的 ——
 混着给的症状是容器起来了、页面能开, 而对话一直连不上或者每一发都 401。
+
+**这条测试第一版漏了启动脚本, 于是真切换时当场炸了** (2026-09-11): 镜像/端口/env
+三样都换了, boot_script 还返回 agentui 那份 Python 启动命令, pod 起来、init 全过、
+2/2 Running 了几十秒, 然后 app 容器 exitCode 127 (`sh: exec: uvicorn: not found`)。
+所以下面按"**四样必须一起换**"来钉, 不是三样。
 """
 
 from __future__ import annotations
@@ -35,17 +40,22 @@ def test_default_is_the_shell_that_is_live_today(slot):
     # agentui 那条路靠 ANTHROPIC_* 接网关
     assert env["ANTHROPIC_BASE_URL"].endswith("/llm/anthropic")
     assert "PI_WEB_ENGINE" not in env
+    assert "uvicorn" in products.boot_script("codex"), "默认那条的启动脚本被改坏了"
 
 
-def test_flag_switches_image_port_and_env_together(slot):
-    """三样必须一起换。端口对不上的症状是容器起来了、就绪探针一直超时, 而日志
-    里一切正常 —— 最难查的那种。"""
+def test_flag_switches_image_port_env_and_boot_together(slot):
+    """**四样必须一起换**: 镜像 / 端口 / env / 启动脚本。
+    端口对不上 → 容器起来了但就绪探针一直超时; 启动脚本不换 → exitCode 127,
+    而两者在 kubectl 第一眼看到的都是 Running。"""
     p, env = slot(True)
     assert "workspace-cli" in p.image
     assert p.image == p.image_ref, "image 与 image_ref 必须同源, 否则拉的和记的不是一个"
     assert p.port == config.CLI_WORKSPACE_PORT == 8787
     assert env["PI_WEB_ENGINE"] == "codex"
     assert env["DSH_GATEWAY_BASE"] and env["DSH_CLOUD_TOKEN"] == "TOK"
+    boot = products.boot_script("codex")
+    assert "node dist/server/index.js" in boot, "启动脚本没跟着换 —— 会 exitCode 127"
+    assert "uvicorn" not in boot, "还在用 agentui 那份 Python 启动命令"
 
 
 def test_new_shell_is_not_given_the_old_shell_s_wiring(slot):

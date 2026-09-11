@@ -1472,6 +1472,28 @@ def _cli_slot_image() -> str:
     return config.CLI_WORKSPACE_IMAGE_REF if config.USE_CLI_WORKSPACE else config.AGENTUI_IMAGE_REF
 
 
+def _cli_slot_boot() -> str:
+    """两个外壳的启动方式完全不同, **启动脚本也必须跟着开关走**。
+
+    agentui 是 Python (`exec uvicorn app.main:app`), pi-web-ui 是 Node
+    (`exec node dist/server/index.js`)。只换镜像不换脚本的症状是: pod 起来、
+    init 容器全过、2/2 Running 了几十秒, 然后 app 容器 **exitCode 127**
+    (`sh: exec: uvicorn: not found`) —— 而 kubectl 第一眼看到的是 Running。
+    2026-09-11 切换时就是这么炸的: 镜像/端口/env 三样都换了, 漏了这第四样。
+
+    pi-web-ui 那格 (_pi_boot) 的开机三件事这里也要做: /workspace 建成 git 仓库
+    (Git 面板要有仓库才有东西看), 目录属主交给运行用户。**不写任何配置文件** ——
+    codex 的 config.toml 由引擎自己按用户令牌写 (server/cli/gateway.ts)。
+    """
+    return (
+        "set -e\n"
+        "mkdir -p /workspace /root/.pi-web\n"
+        "cd /workspace && (git rev-parse --git-dir >/dev/null 2>&1 || git init -q) || true\n"
+        "cd /srv\n"
+        "exec node dist/server/index.js\n"
+    )
+
+
 def _cli_slot_port() -> int:
     """两个外壳端口不同: agentui 8080, pi-web-ui 8787。**别写死** —— 端口对不上
     的症状是容器起来了、就绪探针一直超时, 而日志里一切正常。"""
@@ -3104,6 +3126,10 @@ _BOOTS = {
 
 
 def boot_script(product_id: str) -> str:
+    # claude-code / codex 两格的启动方式跟着外壳开关走 —— 见 _cli_slot_boot 里
+    # 那段 exitCode 127 的教训。
+    if product_id in _AGENTUI_SLOTS and config.USE_CLI_WORKSPACE:
+        return _cli_slot_boot()
     builder = _BOOTS.get(product_id)
     if builder is None:
         raise ValueError(f"unknown product {product_id!r}")
