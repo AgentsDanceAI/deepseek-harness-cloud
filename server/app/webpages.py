@@ -62,6 +62,9 @@ def _ctx(request: Request, page: str, **extra) -> dict:
         "psb_number": config.PSB_NUMBER,
         "legal_entity_zh": config.LEGAL_ENTITY_ZH,
         "legal_contact_email": config.LEGAL_CONTACT_EMAIL,
+        # 站点讲不讲"代码开源"、露不露仓库链接 (见 config.SHOW_SOURCE_LINKS)。
+        # 法务声明不看这个开关。
+        "show_source": config.SHOW_SOURCE_LINKS,
         "year": time.localtime().tm_year,
         "asset_v": ASSET_V,
         **_i18n_ctx(request),
@@ -155,6 +158,10 @@ def _i18n_ctx(request: Request) -> dict:
 
 def _stars_ctx() -> dict:
     """Star badge inputs. Absent until the repo is public — see github_stars."""
+    # 露出关掉时**连问都不问上游** —— 不是拿到数再在模板里藏, 那样每次渲染
+    # 仍旧对 api.github.com 发一次请求, 而这个开关的意思正是"别再提这个仓库"。
+    if not config.SHOW_SOURCE_LINKS:
+        return {"github_stars": None, "github_stars_text": None, "github_repo_url": ""}
     try:
         from . import github_stars
 

@@ -671,6 +671,15 @@ DOWNLOAD_COUNT_BASE = _env_int("DOWNLOAD_COUNT_BASE", 0)
 # --- admin ------------------------------------------------------------------
 ADMIN_EMAILS = [e.strip().lower() for e in _env("ADMIN_EMAILS").split(",") if e.strip()]
 
+# --- 源码/开源露出 ----------------------------------------------------------
+# 关掉之后, 站点不再讲"我们的代码开源"、不再露仓库链接与自部署指引。
+#
+# **关的是营销文案与外链, 不是法务声明。** 页脚那句 MIT/商标声明
+# (footer.disclaimer) 与 legal/THIRD_PARTY_NOTICES.md 是 MIT 再分发的**前提
+# 条件**, 不受这个开关影响, 也不许顺手一起收掉 —— 那不是宣传, 是许可义务。
+# GitHub **登录**同理不受影响: 那是登录方式, 不是源码链接。
+SHOW_SOURCE_LINKS = _env_bool("SHOW_SOURCE_LINKS", False)
+
 # --- legal entity (rendered into legal pages; replace with your company) ----
 LEGAL_ENTITY_ZH = _env("LEGAL_ENTITY_ZH", "")
 LEGAL_ENTITY_EN = _env("LEGAL_ENTITY_EN", "")
