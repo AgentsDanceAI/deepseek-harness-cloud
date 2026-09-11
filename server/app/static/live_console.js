@@ -9,6 +9,16 @@
   var script = $('lvScript'), counts = $('lvCounts'), say = $('lvSay');
   var recast = $('lvRecast');
   var loaded = { person: '', voice: '' }, presetInit = false;
+  /* 哪些框有**还没保存的改动**。15 秒一次的刷新不能把它们顶回去。
+   *
+   * ⛔ 原来只拿 `document.activeElement` 当判据, 焦点一离开就失效 —— 实际撞到的是
+   *    这条(创始人 2026-09-11 发现标题和话术对不上):
+   *      在标题框输入新主题 → 点「生成话术」(焦点落到按钮上) → 15 秒内的刷新把标题
+   *      **无声**顶回服务端那份旧的 → 点保存 = 旧标题 + 新话术。
+   *    同一个洞还有更糟的一面: 生成出来的话术若 15 秒内没保存、光标又不在文本框里,
+   *    **生成的结果本身也会被顶掉**, 页面上什么都不说。
+   * 形象下拉早就用 presetInit 防住了同一件事, 这两个框只是没跟上。 */
+  var dirty = { name: false, script: false };
   var pending = '';   // 'start' = 已经点了开播, 还在等上游真的出流
   var comment = $('lvComment'), mode = $('lvMode'), log = $('lvLog');
 
@@ -51,8 +61,10 @@
   }
 
   function paint(d) {
-    if (document.activeElement !== name) name.value = d.title || '';
-    if (document.activeElement !== script) script.value = (d.lines || []).join('\n');
+    if (!dirty.name && document.activeElement !== name) name.value = d.title || '';
+    if (!dirty.script && document.activeElement !== script) {
+      script.value = (d.lines || []).join('\n');
+    }
     // 只在首次落位 —— 之后 15 秒一次的刷新不能把没保存的改动顶回去。
     if (!presetInit) { presetInit = true; selectPreset(d.person || '', d.voice || ''); }
     loaded = { person: d.person || '', voice: d.voice || '' };
@@ -121,6 +133,7 @@
 
   function save() {
     var was = { person: loaded.person, voice: loaded.voice };
+    dirty.name = false; dirty.script = false;   // 这一版要存进去了, 之后刷新可以顶
     var now = pick();
     var recasting = !!(was.person && (now.person !== was.person || now.voice !== was.voice));
     busy(true);
@@ -179,6 +192,8 @@
     }).then(function (r) { if (!r.ok) throw new Error('gen'); return r.json(); })
       .then(function (d) {
         // 只填进框里, **不保存** —— 让人先看一眼。存不存由他按"保存"。
+        // 标脏: 否则下一次 15 秒刷新就把刚生成的这版顶掉, 而且一声不吭。
+        dirty.script = true;
         script.value = (d.lines || []).join('\n');
         var n = lines().length;
         counts.textContent = n ? t(counts, 'dirty').replace('{n}', n) : '';
@@ -212,6 +227,7 @@
   comment.addEventListener('keydown', function (e) {
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); send(); }
   });
+  name.addEventListener('input', function () { dirty.name = true; });
   $('lvGen').addEventListener('click', generate);
   $('lvSave').addEventListener('click', function () { save(); });
   // 开播前**先存** —— 否则播的是上一版, 而画面看起来一切正常, 只是说的还是旧词。
@@ -219,6 +235,7 @@
   $('lvStop').addEventListener('click', function () { pending = ''; act('stop', 'stopped'); });
   preset.addEventListener('change', markRecast);
   script.addEventListener('input', function () {
+    dirty.script = true;
     var n = lines().length;
     counts.textContent = n ? t(counts, 'dirty').replace('{n}', n) : '';
   });
