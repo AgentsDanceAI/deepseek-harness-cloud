@@ -258,15 +258,20 @@ def test_no_brand_name_anywhere_on_a_public_page(client, monkeypatch, path, lang
     **大小写不敏感**: 第一版只比了 `AgentsDance`, 而漏掉的那两处是
     `support@agentsdance.ai` 里的小写, 测试当场是绿的。
 
-    **联系邮箱必须在这里显式灌成带品牌的地址。** 默认测试环境里
+    **联系邮箱必须在这里显式灌上**, 而且要灌**生产上那个真值**。默认测试环境里
     `LEGAL_CONTACT_EMAIL` 是空串, 于是 `{{ legal_contact_email }}` 渲染成空 ——
-    把 /download 那行改回"显示地址"做变异验证时, 测试照样全绿。测试环境比生产
+    把 /download 那行改回"显示地址"做变异验证时, 测试照样全绿; 测试环境比生产
     少一个配置, 这条断言就等于没写。
+
+    2026-09-11 起页脚**有意**把这个地址当正文印出来 (版权归属那行要给权利人一个
+    联系口)。所以这里不再灌旧域的地址来反证"地址不该出现" —— 那个前提已经变了。
+    现在钉的是: 在生产那套配置下, 页面上读不到旧品牌。地址本身跟着配置走, 配到
+    哪个域就显示哪个域。
     """
     monkeypatch.setattr(config, "SHOW_SOURCE_LINKS", False)
     monkeypatch.setattr(config, "LEGAL_ENTITY_ZH", "AI Store")
     monkeypatch.setattr(config, "LEGAL_ENTITY_EN", "AI Store")
-    monkeypatch.setattr(config, "LEGAL_CONTACT_EMAIL", "support@agentsdance.ai")
+    monkeypatch.setattr(config, "LEGAL_CONTACT_EMAIL", "support@aistore.best")
     seen = visible_text(client.get(path, headers={"accept-language": lang}).text).lower()
     assert "agentsdance" not in seen, f"{path} ({lang}) 页面上读得到 AgentsDance"
     assert "灵舞" not in seen, f"{path} ({lang}) 页面上读得到中文全称"
@@ -292,3 +297,13 @@ def test_private_deployment_is_reachable(client, monkeypatch):
     assert "/solutions#enterprise" in nav, "导航里没有私有部署入口"
     assert cat["solutions.enterprise.title"] in page, "/solutions 上没有私有部署那张卡"
     assert 'id="enterprise"' in page and 'id="contact"' in page, "锚点缺失, 导航点过去会落空"
+
+
+@pytest.mark.parametrize("lang", LANGS)
+def test_the_footer_names_the_rights_holders_and_a_way_to_reach_us(client, monkeypatch, lang):
+    """货架上摆着十几个第三方产品名。页脚那行要说清归属, 并留一个权利人找得到的
+    联系口 —— 老板 2026-09-11 点名要的。地址跟着 LEGAL_CONTACT_EMAIL 走, 不写死:
+    写死的话换域名那天它就成了一个没人收信的地址, 而页面一切正常。"""
+    monkeypatch.setattr(config, "LEGAL_CONTACT_EMAIL", "rights@example.test")
+    body = client.get("/", headers={"accept-language": lang}).text
+    assert "rights@example.test" in body, "页脚没把联系地址渲染出来"

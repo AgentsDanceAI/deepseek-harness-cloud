@@ -920,10 +920,13 @@ form .btn-block { margin-top: 16px; }
 
 /* ---------- pricing cards (structure mirrors the AgentsDance reference so
    entitlements and copy stay portable between the two products) ---------- */
+/* plus / pro / max 那枚牌子。原先是 2.5px 的 --fg 描边 + --fg 文字 —— 浅底方案里
+   那是近黑的粗框, 换成深蓝底之后 --fg 变成近白, 于是成了一圈扎眼的白框。
+   改用主色, 与「订阅 Pro」那个主按钮同一个蓝 (老板 2026-09-11)。 */
 .tier-pill {
-  display: inline-block; padding: 2px 9px; border: 2.5px solid var(--fg);
+  display: inline-block; padding: 3px 11px; border: 1.5px solid var(--brand);
   border-radius: 9px; font-size: 13px; font-weight: 800; letter-spacing: .3px;
-  color: var(--fg); text-transform: lowercase;
+  color: var(--brand); background: var(--brand-weak); text-transform: lowercase;
 }
 .tier-plain { font-size: 17px; font-weight: 700; color: var(--faint); }
 .tier-tagline { margin-top: 9px; color: var(--faint); font-size: 12.5px; line-height: 1.5; min-height: 38px; }
@@ -1045,6 +1048,9 @@ form .btn-block { margin-top: 16px; }
 @media (max-width: 620px) { .cat-grid { grid-template-columns: 1fr; } }
 
 /* ---------- 货架的类目分组 (六类, 2026-09-11) ---------- */
+/* 版权归属那行: 与 © 同一行放不下, 单独占一行, 比 © 再淡一档。 */
+.footer-legal { flex-wrap: wrap; }
+.footer-rights { flex-basis: 100%; color: var(--faint); font-size: 12.5px; line-height: 1.7; }
 .nav-sep { height: 1px; background: var(--border); margin: 6px 10px; }
 .apps-cat-title { font-size: 19px; font-weight: 650; letter-spacing: -.2px; }
 .apps-cat-desc { margin-top: 4px; }
