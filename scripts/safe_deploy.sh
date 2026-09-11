@@ -55,6 +55,35 @@ if [ -n "$dirty" ] && [ "${ALLOW_DIRTY:-0}" != "1" ]; then
   echo "   确知要带上可 ALLOW_DIRTY=1 覆盖。" >&2
   exit 1
 fi
+# --- 闸门 1.5: 半途的 merge / 冲突标记, ALLOW_DIRTY 也挡 ---------------------
+# 2026-09-12 事故: 工作树停在未解完的 merge 上, `server/app/live.py` 里带着
+# `<<<<<<< HEAD` 被打进镜像 —— create_app 当场 SyntaxError, **整站**(不只是直播)
+# 重启循环, 外面看到的是接口超时。
+#
+# 闸门 1 本该拦住它, 但我们**每次部署都带 ALLOW_DIRTY=1** —— 因为工作树里长期躺着
+# 别条线未提交的 docs 改动, 而那些进不了镜像。于是这个全有全无的开关把"无害的脏"
+# 和"致命的脏"一起放行了。
+#
+# 这一道只管两件 ALLOW_DIRTY **不该**能覆盖的事:
+#   · 仓库处于未完成的 merge/rebase(有 U 状态的路径);
+#   · 任何**会进镜像**的文件里有冲突标记。
+# 判据只看进镜像的那几个目录 —— docs 里有冲突不该拦住部署。
+unmerged="$(git diff --name-only --diff-filter=U 2>/dev/null || true)"
+if [ -n "$unmerged" ]; then
+  echo "!! 仓库停在未完成的 merge 上, 拒绝部署 (ALLOW_DIRTY 不覆盖这条):" >&2
+  echo "$unmerged" | head -10 >&2
+  echo "   先把 merge 解完 (或 git merge --abort) 再部署。" >&2
+  exit 1
+fi
+marked="$(git ls-files server release 2>/dev/null \
+          | xargs -r grep -l -E '^(<{7}|={7}|>{7})( |$)' 2>/dev/null || true)"
+if [ -n "$marked" ]; then
+  echo "!! 下面这些文件会被打进镜像, 而里面有 merge 冲突标记 (ALLOW_DIRTY 不覆盖这条):" >&2
+  echo "$marked" | head -10 >&2
+  echo "   2026-09-12 就是这么把整站搞成重启循环的。" >&2
+  exit 1
+fi
+
 revision="$(git rev-parse --verify HEAD^{commit})"
 
 # --- 闸门 2: 部署前基线 ------------------------------------------------------
