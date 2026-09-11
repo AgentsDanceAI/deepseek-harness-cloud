@@ -2,7 +2,7 @@
 
 **Version 1.1 · Effective date: August 28, 2026** (a clarifying revision, effective immediately; Version 1.0 applied from August 17, 2026)
 
-This Policy explains how deepseek-harness-cloud (the site at https://aistore.best , hereinafter "this service") collects, uses, shares, and protects your personal information.
+This Policy explains how {{service_name}} (the site at https://aistore.best , hereinafter "this service") collects, uses, shares, and protects your personal information.
 
 ---
 
@@ -10,7 +10,7 @@ This Policy explains how deepseek-harness-cloud (the site at https://aistore.bes
 
 | Item | Details |
 |---|---|
-| Legal entity | AgentsDance AI |
+| Operator | {{legal_entity}} |
 | Privacy contact email | {{privacy_email}} |
 | General support | {{support_email}} |
 | Security incident reports | {{security_email}} |

@@ -2,7 +2,7 @@
 
 **版本 1.1 · 生效日期：2026 年 8 月 28 日**（本版本为澄清性修订，即时生效；版本 1.0 自 2026 年 8 月 17 日起适用）
 
-本政策说明 deepseek-harness-cloud（站点 https://aistore.best ，下称「本服务」）如何收集、使用、共享与保护您的个人信息。
+本政策说明 {{service_name}}（站点 https://aistore.best ，下称「本服务」）如何收集、使用、共享与保护您的个人信息。
 
 ---
 
@@ -10,7 +10,7 @@
 
 | 项目 | 内容 |
 |---|---|
-| 法律实体 | AgentsDance AI |
+| 运营方 | {{legal_entity}} |
 | 隐私事务联系邮箱 | {{privacy_email}} |
 | 一般支持 | {{support_email}} |
 | 安全事件报告 | {{security_email}} |

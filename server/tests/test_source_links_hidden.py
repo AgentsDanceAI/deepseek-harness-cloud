@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -174,3 +175,67 @@ def test_each_document_still_names_a_way_to_reach_us(client, real_legal, doc):
 
     body = client.get(f"/legal/{doc}", headers={"accept-language": "zh"}).text
     assert re.search(r"[\w.+-]+@[\w-]+\.[\w.]+", body), f"/legal/{doc} 上一个联系方式都没有"
+
+
+# --- 运营方与服务名 ------------------------------------------------------------
+
+
+@pytest.mark.parametrize("doc", LEGAL_DOCS)
+@pytest.mark.parametrize("lang", LANGS)
+def test_operator_name_comes_from_config_not_the_document(client, real_legal, monkeypatch, doc, lang):
+    """运营方名原先写死在四篇文书里 (`| 法律实体 | AgentsDance AI |`)。改一次品牌
+    要动四份法律文件, 而改文书正文 = 发布新版本条款。"""
+    monkeypatch.setattr(config, "LEGAL_ENTITY_ZH", "某运营方")
+    monkeypatch.setattr(config, "LEGAL_ENTITY_EN", "Some Operator")
+    body = client.get(f"/legal/{doc}", headers={"accept-language": lang}).text
+    assert "AgentsDance" not in body, f"/legal/{doc} ({lang}) 还写死着旧主体名"
+
+
+def test_english_pages_use_the_english_entity(client, monkeypatch):
+    """LEGAL_ENTITY_EN 配了却从来没人读 —— 英文页脚一直显示中文那份。"""
+    monkeypatch.setattr(config, "LEGAL_ENTITY_ZH", "中文署名")
+    monkeypatch.setattr(config, "LEGAL_ENTITY_EN", "English Operator")
+    assert "English Operator" in client.get("/", headers={"accept-language": "en"}).text
+    assert "中文署名" in client.get("/", headers={"accept-language": "zh"}).text
+
+
+@pytest.mark.parametrize("doc", LEGAL_DOCS)
+@pytest.mark.parametrize("lang", LANGS)
+def test_documents_do_not_call_the_service_by_its_repo_name(client, real_legal, doc, lang):
+    """四篇文书的第一句原先写的是仓库名 `deepseek-harness-cloud` —— 没有一个用户
+    见过这个名字, 而合同里"本服务"这个定义项就锚在它上面。"""
+    body = client.get(f"/legal/{doc}", headers={"accept-language": lang}).text
+    assert "deepseek-harness-cloud" not in body, f"/legal/{doc} ({lang}) 还在用仓库名当服务名"
+
+
+def visible_text(html: str) -> str:
+    """把标签剥掉, 只留读者真能看见的字。
+
+    量的是**看得见的正文**, 不是源码: `mailto:` 的 href 里仍然有地址 (不然"联系
+    我们"这个按钮就只是个死链), 而老板要的是页面上读不到。两者是不同的东西,
+    断言要落在后者上。
+    """
+    return re.sub(r"<[^>]*>", " ", re.sub(r"(?is)<(script|style)\b.*?</\1>", " ", html))
+
+
+@pytest.mark.parametrize("path", PUBLIC_PAGES)
+@pytest.mark.parametrize("lang", LANGS)
+def test_no_brand_name_anywhere_on_a_public_page(client, monkeypatch, path, lang):
+    """老板两次说过: AgentsDance 这四个字不许再出现在页面上, 全称也不行。
+
+    **页脚在每一页上**, 所以这条要逐页测 —— 一处漏掉就是全站漏掉。
+    **大小写不敏感**: 第一版只比了 `AgentsDance`, 而漏掉的那两处是
+    `support@agentsdance.ai` 里的小写, 测试当场是绿的。
+
+    **联系邮箱必须在这里显式灌成带品牌的地址。** 默认测试环境里
+    `LEGAL_CONTACT_EMAIL` 是空串, 于是 `{{ legal_contact_email }}` 渲染成空 ——
+    把 /download 那行改回"显示地址"做变异验证时, 测试照样全绿。测试环境比生产
+    少一个配置, 这条断言就等于没写。
+    """
+    monkeypatch.setattr(config, "SHOW_SOURCE_LINKS", False)
+    monkeypatch.setattr(config, "LEGAL_ENTITY_ZH", "AI Store")
+    monkeypatch.setattr(config, "LEGAL_ENTITY_EN", "AI Store")
+    monkeypatch.setattr(config, "LEGAL_CONTACT_EMAIL", "support@agentsdance.ai")
+    seen = visible_text(client.get(path, headers={"accept-language": lang}).text).lower()
+    assert "agentsdance" not in seen, f"{path} ({lang}) 页面上读得到 AgentsDance"
+    assert "灵舞" not in seen, f"{path} ({lang}) 页面上读得到中文全称"
