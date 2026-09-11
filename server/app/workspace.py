@@ -1166,7 +1166,10 @@ async def favicon():
     return FileResponse(
         _pwa_path("icon-192.png"),
         media_type="image/png",
-        headers={"cache-control": "public, max-age=86400"},
+        # 一小时, 不是一天。浏览器按**源**缓存 favicon 而且常常无视 URL 上的
+        # ?v= —— 换了 logo 之后标签页上还挂着旧图, 用户只能靠硬刷。缩短这里
+        # 至少让它一小时内自己回正。
+        headers={"cache-control": "public, max-age=3600"},
     )
 
 

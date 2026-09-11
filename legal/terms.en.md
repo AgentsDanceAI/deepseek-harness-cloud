@@ -1,6 +1,6 @@
 # Terms of Service
 
-**Version 1.2 · Effective date: August 19, 2026**
+**Version 1.3 · Effective date: September 11, 2026** (a clarifying revision, effective immediately; version 1.2 applied from August 19, 2026)
 
 These Terms are the agreement between you and the Operator regarding {{service_name}} (the "Service", at https://aistore.best). By registering an account, downloading a client, or using the Service, you confirm that you have read and agree to these Terms. If you do not agree, please do not use the Service.
 
@@ -19,11 +19,15 @@ All of the mailboxes above are handled by real people, with a first reply within
 
 ## 2. Service Description
 
-Built on the open-source project DeepSeek Harness (MIT License), the Service provides a hosted account, quota, and model gateway, and consists of three parts:
+The Service is a hosted shelf of AI products: we package a range of AI agents and tools into workspaces that work out of the box, with one account, one balance and a shared model gateway behind them. You can use it in three ways:
 
-1. **Cloud Harness**: a cloud agent workspace usable directly in the browser, with each user running in a dedicated container;
-2. **Desktop Harness**: macOS and Windows clients, where tasks run on your own machine;
-3. **Unified model gateway**: we purchase from and call upstream model providers on your behalf, so you do not need to obtain your own API key.
+1. **Cloud workspace**: usable directly in the browser, with each user running in a dedicated container;
+2. **Local workspace**: one command pulls a workspace onto your own machine, where the compute is yours while the account, gateway and billing stay hosted by us;
+3. **Desktop client**: native macOS and Windows applications, where tasks run on your own machine.
+
+The **unified model gateway** purchases from and calls upstream model providers on your behalf, so you do not need to obtain your own API key. Some products (the digital human, for example) are not delivered as workspaces and are used directly on pages of this site.
+
+Which products are on the shelf, the categories they fall under and whether each is available are as shown live at https://aistore.best/apps ; we may add, update or withdraw products.
 
 **The Service is operated independently by us. We have no affiliation, agency, or partnership relationship with DeepSeek (杭州深度求索人工智能基础技术研究有限公司), and the Service is not its official product.** "DeepSeek" and "DeepSeek Harness" belong to their respective rights holders.
 
@@ -169,4 +173,4 @@ These Terms are governed by the laws of the People's Republic of China (excludin
 
 ---
 
-*Last updated: August 19, 2026 · Version 1.2 (this revision changes only the price table in section 5.2. Pro moves from $20 to $50 per month and its monthly credits from 2,000 to 5,000; the other tiers are unchanged. Per section 5.2, a price change does not affect a period you have already purchased that has not yet expired.)*
+*Last updated: September 11, 2026 · Version 1.3 (this revision rewrites only section 2, Service Description, so that it matches what the Service actually is: the previous three-part description — Cloud Harness, Desktop Harness and the unified model gateway — is replaced by the shelf plus three ways to use it, with the product list stated as whatever the site shows live. Section 15.5 adds a general notice about third-party names and trademarks. **No right, obligation, price or refund rule is changed by this revision**; per section 12 it is a clarifying revision and takes effect immediately.)*

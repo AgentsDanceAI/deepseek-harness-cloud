@@ -114,9 +114,12 @@
           </div>
 
           {% if free %}
-            <a class="btn btn-ghost btn-block" href="/login">{{ _t("pricing.plan.start_free") }}</a>
+            <a class="btn btn-primary btn-block" href="/login">{{ _t("pricing.plan.start_free") }}</a>
           {% else %}
-            <button class="btn {% if tier == 'pro' %}btn-primary{% else %}btn-ghost{% endif %} btn-block buy-btn"
+            {# 四档统一实心 (老板 2026-09-11)。原先只有 pro 实心、其余描边,
+               深蓝底上描边按钮几乎看不出是个按钮。推荐哪一档由上面那枚「推荐」
+               角标说, 不靠按钮轻重来暗示。 #}
+            <button class="btn btn-primary btn-block buy-btn"
                     data-item-monthly="plan:{{ tier }}:monthly" data-item-yearly="plan:{{ tier }}:yearly"
                     type="button">{{ _t("pricing.plan.subscribe", name=t.name) }}</button>
           {% endif %}
