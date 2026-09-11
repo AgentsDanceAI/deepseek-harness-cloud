@@ -75,6 +75,13 @@ def test_in_page_anchors_exist():
     """href="/pricing#team" must land on something."""
     ids = set()
     hrefs = set()
+    # /apps 的类目锚点是 `id="{{ cat }}"` —— 动态的, 正则扫不到。key 的出处只有
+    # 一处 (apps_catalog.CATEGORIES), 从那儿取, 而不是把这条检查放宽。
+    # **它们真的出现在页面上**由 test_catalog_categories 那边真渲染一次来证,
+    # 这里只负责"链接指向的锚点有人定义"。
+    from app import apps_catalog
+
+    ids |= {k for k, _ in apps_catalog.CATEGORIES}
     for p in TEMPLATES:
         src = p.read_text()
         ids |= set(re.findall(r'id="([a-zA-Z0-9_-]+)"', src))

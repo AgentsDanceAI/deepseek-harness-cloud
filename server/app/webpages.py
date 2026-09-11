@@ -394,6 +394,9 @@ def _apps_ctx(user: dict | None = None) -> dict:
         target = hosted.rstrip("/") if hosted else None
     return {
         "apps": apps,
+        # 按类目分好的同一批卡 (老板 2026-09-11 定的六类)。/apps 用它分组渲染,
+        # 主页 hero 仍用平铺的 apps —— 那儿是一屏 16 格的瓦片墙, 不分组。
+        "app_groups": apps_catalog.grouped(apps),
         # h1 上那个数字**必须**由货架算出来。写死的话, 加一个产品或下架一个,
         # 首页最大那行字就当场变成假话, 而没有任何测试会红。
         "app_count": len(apps),
