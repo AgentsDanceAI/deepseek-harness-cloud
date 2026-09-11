@@ -2,7 +2,7 @@
 
 **Version 1.0 · Effective date: August 17, 2026**
 
-This Policy is an integral part of the [Terms of Service](/legal/terms). It applies to every form of deepseek-harness-cloud: the cloud workspace, the desktop client, and the model gateway.
+This Policy is an integral part of the [Terms of Service](/legal/terms). It applies to every form of {{service_name}}: the cloud workspace, the desktop client, and the model gateway.
 
 This service can execute code, access networks, and read and write files. The greater the capability, the more clearly the boundaries have to be written down.
 

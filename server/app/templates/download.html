@@ -87,7 +87,8 @@
       <p>{{ t("download.tip_signing") }}</p>
     </details>
 
-    <p class="muted small" style="margin-top:26px">{{ t("download.help") }} <a href="mailto:{{ legal_contact_email }}">{{ legal_contact_email }}</a></p>
+    {# 地址不再当正文印出来 (老板: 主页去掉) —— 链接照旧可点, 写信这条路没断。 #}
+    <p class="muted small" style="margin-top:26px"><a href="mailto:{{ legal_contact_email }}">{{ t("download.help") }}</a></p>
   </div>
 </section>
 {% endblock %}

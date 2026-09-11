@@ -53,6 +53,7 @@ def _ctx(request: Request, page: str, **extra) -> dict:
         user = None
 
     _cur_ctx = _currency_ctx(request)
+    _i18n = _i18n_ctx(request)
     ctx = {
         "request": request,
         "page": page,
@@ -60,14 +61,16 @@ def _ctx(request: Request, page: str, **extra) -> dict:
         "public_base": config.PUBLIC_BASE,
         "icp_number": config.ICP_NUMBER,
         "psb_number": config.PSB_NUMBER,
-        "legal_entity_zh": config.LEGAL_ENTITY_ZH,
         "legal_contact_email": config.LEGAL_CONTACT_EMAIL,
+        # 页脚与文书末尾印的运营方 —— 中英两份不一样, 原先两边都用 zh 那个,
+        # 于是英文页也显示中文署名 (LEGAL_ENTITY_EN 配了却从来没人读)。
+        "legal_entity": legal_entity(_i18n["lang"]),
         # 站点讲不讲"代码开源"、露不露仓库链接 (见 config.SHOW_SOURCE_LINKS)。
         # 法务声明不看这个开关。
         "show_source": config.SHOW_SOURCE_LINKS,
         "year": time.localtime().tm_year,
         "asset_v": ASSET_V,
-        **_i18n_ctx(request),
+        **_i18n,
         **_cur_ctx,
         # Templates link to /dl/<key>; these flags only say whether a build
         # exists, so a platform with no artifact is shown as unavailable rather
@@ -736,18 +739,33 @@ LEGAL_DOCS = {
 }
 
 
-#: 文书正文里的占位符 -> 真地址。**在转 HTML 之前替换**, 这样 `**{{support_email}}**`
+#: 文书正文里的占位符 -> 真值。**在转 HTML 之前替换**, 这样 `**{{support_email}}**`
 #: 还能正常加粗; 放到后面就得处理转义, 白白多一层出错的地方。
+#:
+#: 每个值都是 `lang -> str`: 运营方名中英两份不一样, 其余三个地址与服务名两语
+#: 共用。写成统一形状是为了别在这里分叉出两条替换路径。
 _LEGAL_TOKENS = {
-    "{{support_email}}": lambda: config.LEGAL_SUPPORT_EMAIL,
-    "{{security_email}}": lambda: config.LEGAL_SECURITY_EMAIL,
-    "{{privacy_email}}": lambda: config.LEGAL_PRIVACY_EMAIL,
+    "{{support_email}}": lambda lang: config.LEGAL_SUPPORT_EMAIL,
+    "{{security_email}}": lambda lang: config.LEGAL_SECURITY_EMAIL,
+    "{{privacy_email}}": lambda lang: config.LEGAL_PRIVACY_EMAIL,
+    "{{service_name}}": lambda lang: config.SERVICE_NAME,
+    "{{legal_entity}}": lambda lang: legal_entity(lang),
 }
 
 
-def _fill_legal_tokens(text: str) -> str:
+def legal_entity(lang: str) -> str:
+    """文书与页脚上印的运营方。另一语没单独配就退回有值的那份 —— 宁可两边一致,
+    也别让页面出现一个空白的署名行。"""
+    from . import i18n
+
+    if lang != i18n.DEFAULT:
+        return config.LEGAL_ENTITY_EN or config.LEGAL_ENTITY_ZH
+    return config.LEGAL_ENTITY_ZH or config.LEGAL_ENTITY_EN
+
+
+def _fill_legal_tokens(text: str, lang: str) -> str:
     for token, value in _LEGAL_TOKENS.items():
-        text = text.replace(token, value())
+        text = text.replace(token, value(lang))
     return text
 
 
@@ -769,7 +787,7 @@ def legal_page(request: Request, doc: str):
     pending = True
     try:
         if path.is_file():
-            body_html = markdown_to_html(_fill_legal_tokens(path.read_text(encoding="utf-8")))
+            body_html = markdown_to_html(_fill_legal_tokens(path.read_text(encoding="utf-8"), lang))
             pending = False
     except Exception:
         body_html, pending = "", True

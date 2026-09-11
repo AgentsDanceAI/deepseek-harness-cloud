@@ -696,5 +696,10 @@ LEGAL_CONTACT_EMAIL = _env("LEGAL_CONTACT_EMAIL", "")
 LEGAL_SUPPORT_EMAIL = _env("LEGAL_SUPPORT_EMAIL", "support@agentsdance.ai")
 LEGAL_SECURITY_EMAIL = _env("LEGAL_SECURITY_EMAIL", "security@agentsdance.ai")
 LEGAL_PRIVACY_EMAIL = _env("LEGAL_PRIVACY_EMAIL", "legal@agentsdance.ai")
+
+#: 法律文书里管这个服务叫什么。原先四篇文书的第一句写的是**仓库名**
+#: `deepseek-harness-cloud` —— 没有一个用户见过这个名字, 而合同里"本服务"这个
+#: 定义项就锚在它上面。
+SERVICE_NAME = _env("SERVICE_NAME", "AI Store")
 ICP_NUMBER = _env("ICP_NUMBER", "")  # e.g. 京ICP备XXXXXXXX号-X
 PSB_NUMBER = _env("PSB_NUMBER", "")  # e.g. 京公网安备XXXXXXXXXXXXX号

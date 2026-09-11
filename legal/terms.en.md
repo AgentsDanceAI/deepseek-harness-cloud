@@ -2,7 +2,7 @@
 
 **Version 1.2 · Effective date: August 19, 2026**
 
-These Terms are the agreement between you and the Operator regarding deepseek-harness-cloud (the "Service", at https://aistore.best). By registering an account, downloading a client, or using the Service, you confirm that you have read and agree to these Terms. If you do not agree, please do not use the Service.
+These Terms are the agreement between you and the Operator regarding {{service_name}} (the "Service", at https://aistore.best). By registering an account, downloading a client, or using the Service, you confirm that you have read and agree to these Terms. If you do not agree, please do not use the Service.
 
 ---
 
@@ -10,7 +10,7 @@ These Terms are the agreement between you and the Operator regarding deepseek-ha
 
 | Item | Details |
 |---|---|
-| Legal entity | AgentsDance AI |
+| Operator | {{legal_entity}} |
 | Service and billing support | {{support_email}} |
 | Legal and privacy | {{privacy_email}} |
 | Security vulnerability reports | {{security_email}} |

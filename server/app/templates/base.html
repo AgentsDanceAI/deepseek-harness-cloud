@@ -158,13 +158,11 @@
         <a href="/legal/refund">{{ t("common.refund") }}</a>
         <a href="/legal/aup">{{ t("common.aup") }}</a>
       </div>
-      <div class="footer-col">
-        <h4>{{ t("footer.contact") }}</h4>
-        <a href="mailto:{{ legal_contact_email }}">{{ legal_contact_email }}</a>
-      </div>
+      {# 「联系」这一列原先在每页页脚印着运营方邮箱。去掉它 —— 联系方式仍然在
+         四篇法律文书末尾, 而那四篇就在左边一列里链着, 一次点击可达。 #}
     </div>
     <div class="footer-legal muted">
-      <span>© {{ year }} {{ legal_entity_zh }}</span>
+      <span>© {{ year }} {{ legal_entity }}</span>
       {% if icp_number %}
         <a href="https://beian.miit.gov.cn" rel="noopener" target="_blank">{{ icp_number }}</a>
       {% endif %}
