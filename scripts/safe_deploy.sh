@@ -32,12 +32,23 @@ PORT="${PORT:-8100}"
 # --- 闸门 0: 树里没有冲突 ----------------------------------------------------
 # **不受 ALLOW_DIRTY 影响。** ALLOW_DIRTY 的本意是"带着别条线未提交的文件部署"
 # (见 memory deploy-when-prod-tree-diverged), 从没打算涵盖"带着别人的**冲突**部署"。
-# 2026-09-11 事故: 直播线在生产树里留下 5 个 UU 文件; 我这边 `git pull … | tail`
-# 把失败的退出码吞掉, 链条继续 ALLOW_DIRTY=1 部署, 带 `<<<<<<< HEAD` 的 live.py
-# 进了镜像 → SyntaxError → 容器 Restarting, 公网断约 3 分钟。冲突树永远建不出
-# 对的镜像, 所以这道闸没有覆盖开关。
+#
+# 两次事故, 形状一模一样:
+#  · 2026-09-11: 直播线在生产树里留下 5 个 UU 文件; 部署链条里 `git pull … | tail`
+#    把失败的退出码吞掉, 继续 ALLOW_DIRTY=1 部署, 带 `<<<<<<< HEAD` 的 live.py 进了
+#    镜像 → SyntaxError → 容器 Restarting, 公网断约 3 分钟。
+#  · 2026-09-12: 另一个会话在这个**共享 checkout** 里 `git revert --no-commit` 解到
+#    一半, 同样被一次 ALLOW_DIRTY 部署烤进镜像 → 整站(不只直播)重启循环约 6 分钟。
+# 冲突树永远建不出对的镜像, 所以这道闸没有覆盖开关。
+#
+# ⚠️ 这道闸拦得住"冲突标记", 拦不住"能 import 但语义没完成"(比如 revert 解了一半)。
+#    根治是让构建只认**已提交的 revision**(git archive HEAD / 临时 worktree),
+#    工作树永远只当编辑区 —— 那样 ALLOW_DIRTY 可以整个退役。还没做。
 unmerged="$(git diff --name-only --diff-filter=U 2>/dev/null || true)"
-markers="$(grep -rlE '^(<<<<<<< |=======$|>>>>>>> )' server/app server/tests server/config deploy scripts 2>/dev/null || true)"
+# 只扫**跟踪文件**(grep -r 会扫到未跟踪的垃圾和 .venv), 范围取两处的并集:
+# server/ release/ 进镜像; deploy/ scripts/ 不进镜像, 但那里有冲突部署本身就会崩。
+markers="$(git ls-files server release deploy scripts 2>/dev/null \
+           | xargs -r grep -lE '^(<{7}|={7}|>{7})( |$)' 2>/dev/null || true)"
 if [ -n "$unmerged" ] || [ -n "$markers" ]; then
   echo "!! 工作树有未解决的冲突, 拒绝部署 (冲突标记会原样进镜像, 服务起不来):" >&2
   printf '%s\n' $unmerged $markers | sort -u | head -10 >&2
@@ -55,35 +66,6 @@ if [ -n "$dirty" ] && [ "${ALLOW_DIRTY:-0}" != "1" ]; then
   echo "   确知要带上可 ALLOW_DIRTY=1 覆盖。" >&2
   exit 1
 fi
-# --- 闸门 1.5: 半途的 merge / 冲突标记, ALLOW_DIRTY 也挡 ---------------------
-# 2026-09-12 事故: 工作树停在未解完的 merge 上, `server/app/live.py` 里带着
-# `<<<<<<< HEAD` 被打进镜像 —— create_app 当场 SyntaxError, **整站**(不只是直播)
-# 重启循环, 外面看到的是接口超时。
-#
-# 闸门 1 本该拦住它, 但我们**每次部署都带 ALLOW_DIRTY=1** —— 因为工作树里长期躺着
-# 别条线未提交的 docs 改动, 而那些进不了镜像。于是这个全有全无的开关把"无害的脏"
-# 和"致命的脏"一起放行了。
-#
-# 这一道只管两件 ALLOW_DIRTY **不该**能覆盖的事:
-#   · 仓库处于未完成的 merge/rebase(有 U 状态的路径);
-#   · 任何**会进镜像**的文件里有冲突标记。
-# 判据只看进镜像的那几个目录 —— docs 里有冲突不该拦住部署。
-unmerged="$(git diff --name-only --diff-filter=U 2>/dev/null || true)"
-if [ -n "$unmerged" ]; then
-  echo "!! 仓库停在未完成的 merge 上, 拒绝部署 (ALLOW_DIRTY 不覆盖这条):" >&2
-  echo "$unmerged" | head -10 >&2
-  echo "   先把 merge 解完 (或 git merge --abort) 再部署。" >&2
-  exit 1
-fi
-marked="$(git ls-files server release 2>/dev/null \
-          | xargs -r grep -l -E '^(<{7}|={7}|>{7})( |$)' 2>/dev/null || true)"
-if [ -n "$marked" ]; then
-  echo "!! 下面这些文件会被打进镜像, 而里面有 merge 冲突标记 (ALLOW_DIRTY 不覆盖这条):" >&2
-  echo "$marked" | head -10 >&2
-  echo "   2026-09-12 就是这么把整站搞成重启循环的。" >&2
-  exit 1
-fi
-
 revision="$(git rev-parse --verify HEAD^{commit})"
 
 # --- 闸门 2: 部署前基线 ------------------------------------------------------
