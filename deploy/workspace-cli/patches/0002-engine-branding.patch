@@ -1,0 +1,378 @@
+diff --git a/locales/de.json b/locales/de.json
+index 04196d6..1c750ba 100644
+--- a/locales/de.json
++++ b/locales/de.json
+@@ -100,7 +100,7 @@
+     "foldersNotSupported": "Ordner können nicht direkt hereingezogen werden – bitte öffnen und Dateien einzeln auswählen",
+     "placeholderStreaming": "Der Agent arbeitet … Enter zum Dazwischensenden, oder „Warteschlange“, um nach Abschluss der Antwort zu senden",
+     "placeholderStreamingQueued": "Der Agent arbeitet… Enter oder „Einreihen“ — wird nach der Antwort gesendet (diese Engine kann nicht vordrängeln)",
+-    "placeholderIdle": "Nachricht an pi senden – Enter zum Senden, / für Befehle",
++    "placeholderIdle": "Nachricht an {name} senden – Enter zum Senden, / für Befehle",
+     "placeholderConnecting": "Verbindung zum Server wird hergestellt…",
+     "stopAgent": "Agent anhalten",
+     "stop": "Stopp",
+diff --git a/locales/es.json b/locales/es.json
+index 348503b..155c647 100644
+--- a/locales/es.json
++++ b/locales/es.json
+@@ -100,7 +100,7 @@
+     "foldersNotSupported": "No se admite arrastrar carpetas directamente; ábralas y seleccione los archivos",
+     "placeholderStreaming": "El agente está trabajando… pulse Enter para interrumpir y enviar, o «En cola» para enviar al terminar la respuesta",
+     "placeholderStreamingQueued": "El agente está trabajando… pulsa Enter o «Encolar» — se envía al terminar la respuesta (este motor no permite colarse)",
+-    "placeholderIdle": "Envíe un mensaje a pi — Enter para enviar, / para ver los comandos",
++    "placeholderIdle": "Envíe un mensaje a {name} — Enter para enviar, / para ver los comandos",
+     "placeholderConnecting": "Conectando con el servidor…",
+     "stopAgent": "Detener el agente",
+     "stop": "Detener",
+diff --git a/locales/fr.json b/locales/fr.json
+index 32f6c36..2baef95 100644
+--- a/locales/fr.json
++++ b/locales/fr.json
+@@ -100,7 +100,7 @@
+     "foldersNotSupported": "Vous ne pouvez pas déposer un dossier directement — ouvrez-le et choisissez des fichiers",
+     "placeholderStreaming": "L'agent travaille… Entrée pour intervenir, ou « File d'attente » pour envoyer après la réponse",
+     "placeholderStreamingQueued": "L'agent travaille… Entrée ou « File d'attente » — envoyé après la réponse (ce moteur ne permet pas de doubler)",
+-    "placeholderIdle": "Envoyez un message à pi — Entrée pour envoyer, / pour les commandes",
++    "placeholderIdle": "Envoyez un message à {name} — Entrée pour envoyer, / pour les commandes",
+     "placeholderConnecting": "Connexion au serveur en cours…",
+     "stopAgent": "Arrêter l'agent",
+     "stop": "Arrêter",
+diff --git a/locales/it.json b/locales/it.json
+index 02a4940..d4aa540 100644
+--- a/locales/it.json
++++ b/locales/it.json
+@@ -100,7 +100,7 @@
+     "foldersNotSupported": "Le cartelle non possono essere trascinate direttamente — espandi e seleziona i file",
+     "placeholderStreaming": "L'agente sta lavorando… premi Invio per intervenire, o clicca Accoda per inviare al termine della risposta",
+     "placeholderStreamingQueued": "L'agente sta lavorando… Invio o «Accoda» — inviato dopo la risposta (questo motore non permette di intromettersi)",
+-    "placeholderIdle": "Scrivi a pi — Invio per inviare, / per i comandi",
++    "placeholderIdle": "Scrivi a {name} — Invio per inviare, / per i comandi",
+     "placeholderConnecting": "Connessione al server…",
+     "stopAgent": "Ferma l'agente",
+     "stop": "Ferma",
+diff --git a/locales/ja.json b/locales/ja.json
+index 47f3ecd..dc08b9c 100644
+--- a/locales/ja.json
++++ b/locales/ja.json
+@@ -100,7 +100,7 @@
+     "foldersNotSupported": "フォルダーの直接ドラッグには対応していません。展開してファイルを選択してください",
+     "placeholderStreaming": "エージェントが作業中です…Enter で割り込んで送信、「キュー」に追加すると回答終了後に送信されます",
+     "placeholderStreamingQueued": "エージェントが作業中… Enter か「キュー」で、回答終了後に送信されます（このエンジンは割り込み不可）",
+-    "placeholderIdle": "pi にメッセージを送信します — Enter で送信、/ でコマンドを表示します",
++    "placeholderIdle": "{name} にメッセージを送信します — Enter で送信、/ でコマンドを表示します",
+     "placeholderConnecting": "サーバーに接続中です…",
+     "stopAgent": "エージェントを停止します",
+     "stop": "停止",
+diff --git a/locales/ko.json b/locales/ko.json
+index a09a6a7..3cc8a5c 100644
+--- a/locales/ko.json
++++ b/locales/ko.json
+@@ -100,7 +100,7 @@
+     "foldersNotSupported": "폴더를 직접 드래그하는 건 지원하지 않아요. 폴더를 펼쳐서 파일을 선택해 주세요",
+     "placeholderStreaming": "에이전트가 작업 중이에요… Enter를 누르면 끼어들어 전송하고, 「대기」를 누르면 답변이 끝난 뒤에 전송돼요",
+     "placeholderStreamingQueued": "에이전트가 작업 중… Enter 또는 \"대기열\"로 답변이 끝난 뒤 전송됩니다 (이 엔진은 새치기 불가)",
+-    "placeholderIdle": "pi에게 메시지를 보내요 — Enter로 전송, /로 명령을 봐요",
++    "placeholderIdle": "{name}에게 메시지를 보내요 — Enter로 전송, /로 명령을 봐요",
+     "placeholderConnecting": "서버에 연결하는 중이에요…",
+     "stopAgent": "에이전트를 멈춰요",
+     "stop": "중지",
+diff --git a/locales/pt.json b/locales/pt.json
+index a2d6467..0310d08 100644
+--- a/locales/pt.json
++++ b/locales/pt.json
+@@ -100,7 +100,7 @@
+     "foldersNotSupported": "Não é possível arrastar pastas; expanda e selecione os arquivos",
+     "placeholderStreaming": "O agente está trabalhando… Enter envia interrompendo, ou use \"Enfileirar\" para enviar após a resposta terminar",
+     "placeholderStreamingQueued": "O agente está trabalhando… Enter ou «Enfileirar» — enviado após a resposta (este motor não permite furar fila)",
+-    "placeholderIdle": "Envie uma mensagem ao pi — Enter envia, / mostra os comandos",
++    "placeholderIdle": "Envie uma mensagem ao {name} — Enter envia, / mostra os comandos",
+     "placeholderConnecting": "Conectando ao servidor…",
+     "stopAgent": "Parar o agente",
+     "stop": "Parar",
+diff --git a/locales/ru.json b/locales/ru.json
+index 1d4ee67..47e1258 100644
+--- a/locales/ru.json
++++ b/locales/ru.json
+@@ -100,7 +100,7 @@
+     "foldersNotSupported": "Папки нельзя перетаскивать напрямую, откройте их и выберите файлы",
+     "placeholderStreaming": "Агент работает… Enter — отправить с прерыванием, или нажмите «В очередь», чтобы отправить после завершения ответа",
+     "placeholderStreamingQueued": "Агент работает… Enter или «В очередь» — отправится после ответа (этот движок не умеет вклиниваться)",
+-    "placeholderIdle": "Отправьте сообщение pi — Enter для отправки, / для просмотра команд",
++    "placeholderIdle": "Отправьте сообщение {name} — Enter для отправки, / для просмотра команд",
+     "placeholderConnecting": "Подключение к серверу…",
+     "stopAgent": "Остановить агента",
+     "stop": "Остановить",
+diff --git a/web/src/App.tsx b/web/src/App.tsx
+index 9f1f54b..65f1829 100644
+--- a/web/src/App.tsx
++++ b/web/src/App.tsx
+@@ -1,3 +1,4 @@
++import { AssistantNameContext } from "./assistant-name.js";
+ import {
+ 	lazy,
+ 	Suspense,
+@@ -192,8 +193,13 @@ export function App() {
+ 	const projectTitle = useProjectTitle();
+ 	useEffect(() => {
+ 		const name = projectTitle ? projectNameFromCwd(cwd) : "";
+-		document.title = name ? `${name} — pi-web-ui` : t("docTitle");
+-	}, [cwd, projectTitle, t]);
++		// 标签页标题也跟着引擎走 —— 开着一堆标签页时, 上面写 pi-web-ui 分不出
++		// 哪个是 Codex 哪个是 Claude Code。
++		const brand = chat.engineName ?? "pi-web-ui";
++		document.title = name ? `${name} — ${brand}` : brand;
++		// engineName 必须在依赖里: 它是 ready 到达时才有的, 漏了的话首屏那次
++		// effect 用的是 undefined, 之后再也不重跑 —— 标题永远停在 pi-web-ui。
++	}, [cwd, projectTitle, t, chat.engineName]);
+ 	const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
+ 	const [previewFile, setPreviewFile] = useState<PreviewFile | null>(null);
+ 	/** Full-window file drag in progress (issue #19) — shows the app-wide
+@@ -631,10 +637,13 @@ export function App() {
+ 	}, [chat.terminals.length, createShell, view]);
+ 
+ 	return (
+-		// Whole window is a drop target (issue #19): dragover highlights + any
+-		// drop attaches. The plain preventDefault used to merely stop the browser
+-		// navigating away; children with their own handlers (input bar / edit
+-		// composer) call stopPropagation and keep priority.
++		// 助手显示名一路发下去 (品牌 / 角色名 / 输入框占位)。为一个字符串给
++		// Message、CollapsedMessage 加 prop 不划算 —— 它们是 memo 的。
++		<AssistantNameContext.Provider value={chat.engineName ?? "pi"}>
++		{/* Whole window is a drop target (issue #19): dragover highlights + any
++		    drop attaches. The plain preventDefault used to merely stop the browser
++		    navigating away; children with their own handlers (input bar / edit
++		    composer) call stopPropagation and keep priority. */}
+ 		<div
+ 			className="app"
+ 			onDragOver={(e) => {
+@@ -877,5 +886,6 @@ export function App() {
+ 				}}
+ 			/>
+ 		</div>
++		</AssistantNameContext.Provider>
+ 	);
+ }
+diff --git a/web/src/app-globals.ts b/web/src/app-globals.ts
+index d9d3d5a..909bb48 100644
+--- a/web/src/app-globals.ts
++++ b/web/src/app-globals.ts
+@@ -139,9 +139,14 @@ export function useAppField<K extends keyof AppGlobals>(key: K): AppGlobals[K] {
+ 	);
+ }
+ 
+-/** 当前是否 DSH 引擎（最常用的那个判断：DSH 缺一堆 pi 才有的能力）。 */
++/** 当前是否 DSH 引擎（最常用的那个判断：DSH 缺一堆 pi 才有的能力）。
++ *
++ * **判据是"不是 pi", 不是"等于 dsh"。** 它真正想问的是"这个引擎缺不缺 pi 才有
++ * 的能力" —— claude / codex 两个引擎同样缺 (无 mid-run steering 等), 按名字
++ * 判死一个的话, 新引擎上去就会拿到一个说了不算的「插队」按钮。 */
+ export function useIsDsh(): boolean {
+-	return useAppField("engine") === "dsh";
++	const engine = useAppField("engine");
++	return Boolean(engine) && engine !== "pi";
+ }
+ 
+ /** 实例是否受管（PI_WEB_MANAGED=1）。 */
+diff --git a/web/src/assistant-name.ts b/web/src/assistant-name.ts
+new file mode 100644
+index 0000000..d5054a1
+--- /dev/null
++++ b/web/src/assistant-name.ts
+@@ -0,0 +1,21 @@
++/**
++ * 助手在界面上叫什么。
++ *
++ * 原先界面各处写死 "pi"：左上角品牌、标签页标题、消息上的角色名、输入框占位。
++ * 接了 Claude Code / Codex 之后这些字全不对 —— 用户对着一个写着 pi 的界面在跟
++ * Codex 说话。
++ *
++ * 名字由服务端在 `ready` 里给 (engineName, 见 server/index.ts)，**跟着引擎定义
++ * 走**；这里只负责把它送到那几个叶子组件, 免得为一个字符串一路钻 prop ——
++ * Message / CollapsedMessage 都是 memo 的, 多一个 prop 会影响它们的比较。
++ *
++ * 缺省 "pi"：上游的 pi / dsh 两个引擎观感一个字不变。
++ */
++
++import { createContext, useContext } from "react";
++
++export const AssistantNameContext = createContext<string>("pi");
++
++export function useAssistantName(): string {
++	return useContext(AssistantNameContext);
++}
+diff --git a/web/src/components/ChatInput.tsx b/web/src/components/ChatInput.tsx
+index 1e56aa1..1c79ad5 100644
+--- a/web/src/components/ChatInput.tsx
++++ b/web/src/components/ChatInput.tsx
+@@ -1,3 +1,4 @@
++import { useAssistantName } from "../assistant-name.js";
+ import { memo, useEffect, useRef, useState } from "react";
+ import { FiList, FiSquare, FiPaperclip, FiArrowUp, FiGrid } from "react-icons/fi";
+ import type { ModelInfo, ProviderKeyInfo, SlashCommandInfo, UiMessage, UiState } from "../types";
+@@ -92,6 +93,7 @@ export const ChatInput = memo(function ChatInput({
+ 	/** DSH 无 mid-run steering（isStreaming 时 prompt 全部走 followUp，
+ 	 *  见 server/dsh/dsh-agent-service.ts）—— 只渲染「排队」半段，不摆一个说了不算的「插队」。 */
+ 	const isDsh = useIsDsh();
++	const assistantName = useAssistantName();
+ 	const { locale } = useI18n();
+ 	/** 打开模板库（对话中途也可随时取用提示词模板）。 */
+ 	const { openPicker } = useTemplates();
+@@ -741,7 +743,7 @@ export const ChatInput = memo(function ChatInput({
+ 								? isDsh
+ 									? t("placeholderStreamingQueued")
+ 									: t("placeholderStreaming")
+-								: t("placeholderIdle")
++								: t("placeholderIdle", { name: assistantName })
+ 							: t("placeholderConnecting")
+ 					}
+ 					disabled={!connected}
+diff --git a/web/src/components/CollapsedMessage.tsx b/web/src/components/CollapsedMessage.tsx
+index 6958d9c..cf86e3e 100644
+--- a/web/src/components/CollapsedMessage.tsx
++++ b/web/src/components/CollapsedMessage.tsx
+@@ -1,3 +1,4 @@
++import { useAssistantName } from "../assistant-name.js";
+ import { memo } from "react";
+ import { FiChevronRight } from "react-icons/fi";
+ import type { UiMessage } from "../types";
+@@ -19,6 +20,7 @@ interface CollapsedMessageProps {
+  */
+ export const CollapsedMessage = memo(function CollapsedMessage({ message, onExpand }: CollapsedMessageProps) {
+ 	const t = useT();
++	const assistantName = useAssistantName();
+ 
+ 	// Plain-text preview (first text block, first line, ~90 chars — no Markdown).
+ 	let preview = "";
+@@ -77,7 +79,7 @@ export const CollapsedMessage = memo(function CollapsedMessage({ message, onExpa
+ 			}}
+ 		>
+ 			<span className={`msg-collapsed-role role-${message.role}`}>
+-				{message.role === "custom" && message.customType === "file" ? t("attachment") : roleLabel(message.role, t)}
++				{message.role === "custom" && message.customType === "file" ? t("attachment") : roleLabel(message.role, t, assistantName)}
+ 			</span>
+ 			<span className="msg-collapsed-body">
+ 				{preview && <span className="msg-collapsed-preview">{preview}</span>}
+diff --git a/web/src/components/Message.tsx b/web/src/components/Message.tsx
+index b267519..d196986 100644
+--- a/web/src/components/Message.tsx
++++ b/web/src/components/Message.tsx
+@@ -1,3 +1,4 @@
++import { useAssistantName } from "../assistant-name.js";
+ import { memo, useState } from "react";
+ import {
+ 	FiArchive,
+@@ -158,6 +159,7 @@ export const Message = memo(function Message({
+ 	autoExpand,
+ }: MessageProps) {
+ 	const t = useT();
++	const assistantName = useAssistantName();
+ 	// Inline edit-and-re-ask editor (user messages only).
+ 	const [editing, setEditing] = useState(false);
+ 	const [draft, setDraft] = useState("");
+@@ -311,7 +313,7 @@ export const Message = memo(function Message({
+ 								: message.customType === "file"
+ 									? t("attachment")
+ 									: `${t("plugin")} · ${message.customType ?? t("unknown")}`
+-						: roleLabel(message.role, t)}
++						: roleLabel(message.role, t, assistantName)}
+ 				</span>
+ 				{message.model && <span className="msg-model">{message.model}</span>}
+ 				{message.timestamp && <span className="msg-time">{formatTime(message.timestamp)}</span>}
+@@ -932,12 +934,14 @@ function Block({
+ 	return null;
+ }
+ 
+-export function roleLabel(role: string, t: Translate): string {
++export function roleLabel(role: string, t: Translate, assistantName?: string): string {
+ 	switch (role) {
+ 		case "user":
+ 			return t("role.user");
+ 		case "assistant":
+-			return t("role.assistant");
++			// 接了别的引擎时这里该是那个引擎的名字 —— 界面写着 Codex, 消息上却
++			// 标着 PI, 是同一个东西两个名字。没给就照旧。
++			return assistantName ?? t("role.assistant");
+ 		case "toolResult":
+ 			return t("role.tool");
+ 		case "bashExecution":
+diff --git a/web/src/components/TopBar.tsx b/web/src/components/TopBar.tsx
+index d0e4149..d5c5081 100644
+--- a/web/src/components/TopBar.tsx
++++ b/web/src/components/TopBar.tsx
+@@ -317,8 +317,11 @@ export function TopBar({
+ 				<button type="button" className="panel-toggle" title={t("openHistory")} onClick={() => onOpenPanel("left")}>
+ 					<FiMenu />
+ 				</button>
+-				<span className="brand-logo">π</span>
+-				<span className="brand-name">pi-web-ui</span>
++				{/* 品牌跟着引擎走：接 Claude Code / Codex 时左上角就该是那个名字，
++				    再挂一个 π 会让人以为跑的是 pi。服务端没给名字（pi / dsh）时
++				    原样不动。 */}
++				<span className="brand-logo">{chat.engineName ? chat.engineName.charAt(0) : "π"}</span>
++				<span className="brand-name">{chat.engineName ?? "pi-web-ui"}</span>
+ 				<span className={`conn-dot ${connClass}`} title={connLabel} />
+ 				<span className="conn-label">{connLabel}</span>
+ 			</div>
+diff --git a/web/src/i18n.tsx b/web/src/i18n.tsx
+index 6a5f4fc..bd09463 100644
+--- a/web/src/i18n.tsx
++++ b/web/src/i18n.tsx
+@@ -117,7 +117,7 @@ export const zh = {
+ 	foldersNotSupported: "不支持直接拖入文件夹，请展开后选择文件",
+ 	placeholderStreaming: "智能体正在工作中…回车插队发送，或点「排队」等回答结束后发送",
+ 	placeholderStreamingQueued: "智能体正在工作中…回车或点「排队」，回答完全结束后发送（本引擎不支持插队）",
+-	placeholderIdle: "给 pi 发送消息 — Enter 发送，/ 查看命令",
++	placeholderIdle: "给 {name} 发送消息 — Enter 发送，/ 查看命令",
+ 	placeholderConnecting: "正在连接服务器…",
+ 	stopAgent: "停止智能体",
+ 	stop: "停止",
+@@ -1178,7 +1178,7 @@ const en: Record<keyof typeof zh, string> = {
+ 	placeholderStreaming: "The agent is working… press Enter to steer, or click Queue to send after the reply finishes",
+ 	placeholderStreamingQueued:
+ 		"The agent is working… press Enter or click Queue — delivered after the reply finishes (this engine cannot steer)",
+-	placeholderIdle: "Message pi — Enter to send, / for commands",
++	placeholderIdle: "Message {name} — Enter to send, / for commands",
+ 	placeholderConnecting: "Connecting to server…",
+ 	stopAgent: "Stop agent",
+ 	stop: "Stop",
+diff --git a/web/src/use-chat.ts b/web/src/use-chat.ts
+index b54b530..4556852 100644
+--- a/web/src/use-chat.ts
++++ b/web/src/use-chat.ts
+@@ -95,8 +95,11 @@ export interface ChatState {
+ 	toolStatuses: Map<string, ToolStatus>;
+ 	notices: Notice[];
+ 	serverVersion?: string;
+-	/** 引擎标识（pi | dsh）—— ready 消息携带，底栏显示徽标。 */
++	/** 引擎标识（pi | dsh | claude | codex）—— ready 消息携带，底栏显示徽标。 */
+ 	engine?: string;
++	/** 引擎的显示名（"Claude Code" / "Codex"）。服务端给什么就显示什么；缺省时
++	 *  左上角回落到 pi-web-ui 原本的名字。 */
++	engineName?: string;
+ 	/** PI_WEB_MANAGED=1 on the server: updates and plugin installs come from
+ 	 *  whoever deploys this instance, so the interface does not offer them.
+ 	 *  The server refuses those messages regardless (server/managed.ts). */
+@@ -255,6 +258,7 @@ type Action =
+ 			serverVersion: string;
+ 			protocolVersion?: number;
+ 			engine?: string;
++			engineName?: string;
+ 			appVersion?: string;
+ 			managed?: boolean;
+ 			tabs?: string[];
+@@ -509,6 +513,7 @@ function reducer(state: ChatState, action: Action): ChatState {
+ 				...state,
+ 				serverVersion: action.serverVersion,
+ 				engine: action.engine,
++				engineName: action.engineName,
+ 				appVersion: action.appVersion,
+ 				managed: action.managed === true,
+ 				tabs: action.tabs,
+@@ -995,6 +1000,7 @@ export function useChat() {
+ 						serverVersion: msg.serverVersion,
+ 						protocolVersion: msg.protocolVersion,
+ 						engine: msg.engine,
++						engineName: msg.engineName,
+ 						appVersion: msg.appVersion,
+ 						managed: msg.managed,
+ 						tabs: msg.tabs,

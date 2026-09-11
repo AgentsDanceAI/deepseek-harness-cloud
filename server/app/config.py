@@ -506,6 +506,17 @@ CLOUDCLI_IMAGE_REF = _env("CLOUDCLI_IMAGE_REF", "ghcr.io/agentsdancepro/cloudcli
 # CloudCLI —— 别人的界面里挂着别人的引流入口, 而积分这个核心机制在里面没有位置。
 AGENTUI_IMAGE_REF = _env("AGENTUI_IMAGE_REF", "ghcr.io/agentsdancepro/agentui:0.2.2")
 
+# claude-code / codex 两格的**另一种外壳**: 社区的 pi-web-ui 加上我们写的第三个
+# 引擎 (见 deploy/workspace-cli)。功能比自研 agentui 全 (文件树/Git 面板/设置/
+# 多对话), 代价是 fork 上游要跟着同步。
+#
+# **默认关着。** 打开之前镜像得先构建并推上去 (deploy/workspace-cli/build.sh),
+# 否则两格当场拉不到镜像 —— 而它们现在是好的。切换只动这一个变量, 回滚同理。
+USE_CLI_WORKSPACE = _env_bool("USE_CLI_WORKSPACE", False)
+CLI_WORKSPACE_IMAGE_REF = _env("CLI_WORKSPACE_IMAGE_REF", "ghcr.io/agentsdancepro/workspace-cli:0.77.0-r1")
+#: pi-web-ui 监听 8787 (与 pi 那格同一个外壳, 同一个端口)。
+CLI_WORKSPACE_PORT = 8787
+
 # --- 数字人 (实时口型视频通话) ----------------------------------------------
 # 与其它产品**不同**: 它不起每用户容器, 而是转发到我们自己的 GPU 节点 (那张 L20
 # 上跑着 SoulX-FlashHead), 三路并发满了排队。所以计费也不一样 —— 其它产品收的是

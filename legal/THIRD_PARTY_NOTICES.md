@@ -56,6 +56,35 @@ The AI Store desktop application is built upon and redistributes the following M
 > OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 > SOFTWARE.
 
+### 1.3 pi-web-ui
+
+云端「Claude Code」「Codex」两个工作台的网页外壳基于本项目构建：我们在它之上
+新增了一个引擎 (`PI_WEB_ENGINE=claude|codex`)，让它驱动 Claude Code / Codex 两个
+命令行工具。改动以补丁形式保存在 `deploy/workspace-cli/patches/`，上游代码本身
+未被再分发修改版以外的形式变更。
+
+> MIT License
+>
+> Copyright (c) 2026 xing-shuyin
+>
+> Permission is hereby granted, free of charge, to any person obtaining a copy
+> of this software and associated documentation files (the "Software"), to deal
+> in the Software without restriction, including without limitation the rights
+> to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+> copies of the Software, and to permit persons to whom the Software is
+> furnished to do so, subject to the following conditions:
+>
+> The above copyright notice and this permission notice shall be included in all
+> copies or substantial portions of the Software.
+>
+> THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+> IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+> FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+> AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+> LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+> OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+> SOFTWARE.
+
 ## 2. Trademark Notice / 商标声明
 
 "DeepSeek"及相关标识为其权利人的商标，上述 MIT 开源许可**不包含任何商标授权**。AI Store 由 AgentsDance AI 独立开发与运营，**与 DeepSeek 不存在隶属、合作、赞助或背书关系**；本产品名称与品牌中对开源项目名的提及仅用于说明来源（nominative use）。

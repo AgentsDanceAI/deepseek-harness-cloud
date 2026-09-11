@@ -1,0 +1,6 @@
+{
+  "repository": "https://github.com/xing-shuyin/pi-web-ui.git",
+  "commit": "87521b1",
+  "version": "0.77.0",
+  "_comment": "上游钉在具体提交上, 不跟 tag 也不跟分支 —— 补丁是对着这个提交做的, 上游一动补丁就可能打不上, 而那时构建应当**失败**而不是悄悄产出一个没打上补丁的镜像。升级流程: 改这里 -> 重跑 build.sh -> 补丁打不上就在本机变基重出, 别在 CI 里 --force。"
+}
