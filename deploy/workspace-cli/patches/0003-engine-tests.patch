@@ -1,9 +1,130 @@
+diff --git a/tests/cli-engine-brand-test.mjs b/tests/cli-engine-brand-test.mjs
+new file mode 100644
+index 0000000..3bae3f9
+--- /dev/null
++++ b/tests/cli-engine-brand-test.mjs
+@@ -0,0 +1,103 @@
++/**
++ * 第三个引擎的两件「开机就该对」的事 —— 都必须**真起一次 server** 才测得出。
++ *
++ *   1. 首页发出去的 HTML 里就带着引擎名 (标题 + window.__PI_ENGINE_NAME__)。
++ *      不带的话左上角先画「π pi-web-ui」, WebSocket 的 ready 帧到了才跳成
++ *      「C Claude Code」—— 用户第一眼看到的是另一个产品名一闪而过。
++ *      **这条非得真发一次请求**: 我第一版在 catch-all 里做了烧字, 单测全绿,
++ *      而 `/` 根本走不到那里 —— express.static 的 index 选项默认会把
++ *      index.html 直接发掉。深链接生效、首页不生效, 只有 curl 一下看得见。
++ *   2. codex 的 config.toml 开机就写好, 不等对话面板先跑一轮 —— 否则用户开完
++ *      工作台直接进 [终端] 敲 codex, 它去问用户要 OpenAI 的登录。
++ *
++ * 外加一条反向的: 上游引擎 (pi) 发出去的 HTML 必须与磁盘上的文件**逐字节相同**。
++ */
++import { portUp, freePort } from "./lib/port-utils.mjs";
++import { fileURLToPath } from "node:url";
++import { execSync, spawn } from "node:child_process";
++import { mkdtempSync, readFileSync, existsSync } from "node:fs";
++import { tmpdir } from "node:os";
++import { join } from "node:path";
++import { setTimeout as sleep } from "node:timers/promises";
++
++const REPO_ROOT = fileURLToPath(new globalThis.URL("../", import.meta.url));
++const GW = "https://aistore.best";
++
++let failures = 0;
++const check = (name, ok, extra = "") => {
++	console.log(`${ok ? "✓" : "✗"} ${name}${extra ? " — " + extra : ""}`);
++	if (!ok) failures++;
++};
++
++try {
++	execSync("npm run build", { cwd: REPO_ROOT, stdio: "ignore" });
++} catch {
++	console.error("build failed");
++	process.exit(1);
++}
++
++/** 起一个 server, 跑 fn, 收尾。HOME 指到临时目录 —— 这个测试会写 ~/.codex。 */
++async function withServer(port, env, fn) {
++	try {
++		await freePort(port);
++	} catch {}
++	await sleep(300);
++	const home = mkdtempSync(join(tmpdir(), "pi-brand-home-"));
++	const srv = spawn("node", ["dist/server/index.js"], {
++		cwd: REPO_ROOT,
++		env: { ...process.env, HOME: home, USERPROFILE: home, PI_WEB_PORT: String(port), ...env },
++		stdio: ["ignore", "ignore", "ignore"],
++	});
++	try {
++		for (let i = 0; i < 80 && !(await portUp(port)); i++) await sleep(250);
++		if (!(await portUp(port))) throw new Error(`server 起不来 (:${port})`);
++		await fn({ home, base: `http://127.0.0.1:${port}` });
++	} finally {
++		srv.kill("SIGKILL");
++		await sleep(200);
++	}
++}
++
++const DIST_INDEX = join(REPO_ROOT, "web", "dist", "index.html");
++
++try {
++	await withServer(
++		8907,
++		{ PI_WEB_ENGINE: "codex", DSH_GATEWAY_BASE: GW, DSH_CLOUD_TOKEN: "tok-test" },
++		async ({ home, base }) => {
++			const root = await (await fetch(`${base}/`)).text();
++			check("首页标题就是引擎名", root.includes("<title>Codex</title>"), root.slice(0, 400));
++			check("首页不再出现 pi-web-ui", !root.includes("pi-web-ui"));
++			check("首帧回落值发下去了", root.includes('window.__PI_ENGINE_NAME__="Codex"'));
++			check("在 </head> 之前", root.indexOf("__PI_ENGINE_NAME__") < root.indexOf("</head>"));
++
++			const deep = await (await fetch(`${base}/whatever/deep`)).text();
++			check("深链接同样带名字", deep.includes('window.__PI_ENGINE_NAME__="Codex"'));
++
++			const icon = await fetch(`${base}/favicon.svg`);
++			check("静态资源照常发 (index:false 没有伤到 static)", icon.status === 200);
++
++			const toml = join(home, ".codex", "config.toml");
++			check("开机就写好了 codex 的 config.toml", existsSync(toml));
++			if (existsSync(toml)) {
++				const body = readFileSync(toml, "utf8");
++				check("指向我们的网关", body.includes(`base_url = "${GW}/llm/v1"`), body);
++				// codex 0.151 起不认 chat 面。
++				check("wire_api 是 responses", body.includes('wire_api = "responses"'));
++			}
++		},
++	);
++
++	// 反向: 上游引擎一个字节都不许变。
++	await withServer(8908, { PI_WEB_ENGINE: "pi" }, async ({ home, base }) => {
++		const root = await (await fetch(`${base}/`)).text();
++		check("pi 引擎: 与磁盘上的 index.html 逐字节相同", root === readFileSync(DIST_INDEX, "utf8"));
++		check("pi 引擎: 不塞任何全局变量", !root.includes("__PI_ENGINE_NAME__"));
++		check("pi 引擎: 不写 codex 的 config.toml", !existsSync(join(home, ".codex", "config.toml")));
++	});
++} catch (e) {
++	check("测试跑完", false, String(e));
++}
++
++console.log(failures ? `\n${failures} 条失败` : "\n全部通过");
++process.exit(failures ? 1 : 0);
+diff --git a/tests/run-smoke.mjs b/tests/run-smoke.mjs
+index a37615a..57a508e 100644
+--- a/tests/run-smoke.mjs
++++ b/tests/run-smoke.mjs
+@@ -27,6 +27,7 @@ const WIN32_KNOWN_ENV_FAIL = new Set(["terminal-smoke-test", "restart-handoff-te
+ 
+ const ALL = [
+ 	"clear-provider-key-test",
++	"cli-engine-brand-test",
+ 	"conv-cross-project-test",
+ 	"conv-cwd-test",
+ 	"project-model-key-test",
 diff --git a/tests/unit/cli-engine-adapter.test.ts b/tests/unit/cli-engine-adapter.test.ts
 new file mode 100644
-index 0000000..498bb8b
+index 0000000..573052e
 --- /dev/null
 +++ b/tests/unit/cli-engine-adapter.test.ts
-@@ -0,0 +1,69 @@
+@@ -0,0 +1,107 @@
 +/**
 + * 第三个引擎的适配层。钉的是**上游 CLI 的 wire 格式**。
 + *
@@ -71,6 +192,44 @@ index 0000000..498bb8b
 +
 +	it("turn.failed 出 error，不当成正常结束", () => {
 +		expect(codexSpec.feed(JSON.stringify({ type: "turn.failed" }))[0]!.t).toBe("error");
++	});
++});
++
++describe("codex 的错误不许被丢掉", () => {
++	it("item.completed 里 type=error 的那种也出 error 事件", () => {
++		// 实测抓的原文 (走 AI Store 网关, -m claude-fable-5)。
++		const line = JSON.stringify({
++			type: "item.completed",
++			item: {
++				id: "item_0",
++				type: "error",
++				message: "Model metadata for `claude-fable-5` not found. Defaulting to fallback metadata; this can degrade performance and cause issues.",
++			},
++		});
++		expect(codexSpec.feed(line)).toEqual([
++			{ t: "error", message: expect.stringContaining("Model metadata for `claude-fable-5` not found") },
++		]);
++	});
++
++	it("turn.failed 照旧出 error", () => {
++		const line = JSON.stringify({ type: "turn.failed", error: { message: "boom" } });
++		expect(codexSpec.feed(line)[0]!.t).toBe("error");
++	});
++});
++
++describe("子进程的 stdin 必须关掉", () => {
++	/**
++	 * codex 的 prompt 走 argv 而不是 stdin —— 但它**照样读 stdin**, 开口第一句
++	 * 就是 `Reading additional input from stdin...`, 不给 EOF 就一直等。
++	 *
++	 * 这条钉的是 spec 的形状 (codex 不走 stdin), 真正"有没有关"那条在
++	 * tests/cli-engine-stdin-test.mjs 里用真子进程验 —— 只钉这里的话, 把
++	 * child.stdin.end() 删掉照样全绿, 而用户那边是"正在思考"转到天荒地老。
++	 */
++	it("codex 的 prompt 走 argv, 不走 stdin", () => {
++		expect(codexSpec.stdinPrompt).toBe(false);
++		expect(codexSpec.stdinPayload("hi")).toBeNull();
++		expect(codexSpec.argv("说句话", null, "gpt-5.6-luna")).toContain("说句话");
 +	});
 +});
 diff --git a/tests/unit/cli-engine-sessions.test.ts b/tests/unit/cli-engine-sessions.test.ts
@@ -203,4 +362,279 @@ index 0000000..01d792e
 +		const { listCodexSessions } = await import("../../server/cli/sessions.js");
 +		expect(listCodexSessions("/no/such/dir")).toEqual([]);
 +	});
++});
+diff --git a/tests/unit/cli-engine-wiring.test.ts b/tests/unit/cli-engine-wiring.test.ts
+new file mode 100644
+index 0000000..9f233ca
+--- /dev/null
++++ b/tests/unit/cli-engine-wiring.test.ts
+@@ -0,0 +1,269 @@
++/**
++ * 第三个引擎的两条「界面之外」的接线。
++ *
++ * 两条都属于**页面看着完全正常、功能却是废的**那一类, 所以要钉死:
++ *   1. 终端里的 claude / codex 有没有网关接线 —— 没有的话对话是通的、终端里
++ *      `claude` 张口就是 `Not logged in`;
++ *   2. 首帧 HTML 里有没有引擎名 —— 没有的话左上角先闪一下 pi-web-ui 再被盖掉。
++ *
++ * 两条的共同要求: **没配网关时 (上游自己跑) 一个字节都不许变。**
++ */
++
++import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
++import { brandIndexHtml } from "../../server/cli/branding.js";
++
++type Snap = { messages?: Array<{ errorMessage?: string; content?: Array<{ text?: string }> }> };
++
++const GW = "https://aistore.best";
++const TOK = "tok-abc";
++
++/** gateway.ts 在**模块加载时**就读了 env (GATEWAY_BASE / GATEWAY_TOKEN 是常量),
++ *  所以要先把 env 摆好再重新加载一份 —— 直接改 process.env 是不生效的。 */
++async function loadGateway(env: Record<string, string | undefined>) {
++	for (const [k, v] of Object.entries(env)) {
++		if (v === undefined) delete process.env[k];
++		else process.env[k] = v;
++	}
++	vi.resetModules();
++	return await import("../../server/cli/gateway.js");
++}
++
++describe("终端的网关接线", () => {
++	let saved: NodeJS.ProcessEnv;
++	beforeEach(() => {
++		saved = { ...process.env };
++	});
++	afterEach(() => {
++		process.env = saved;
++	});
++
++	it("接了网关: claude 与 codex 两套都给, 用户不用再登录一次", async () => {
++		const { terminalEnv, DEFAULT_MODEL } = await loadGateway({
++			DSH_GATEWAY_BASE: GW,
++			DSH_CLOUD_TOKEN: TOK,
++		});
++		const env = terminalEnv({ PATH: "/usr/bin" });
++
++		expect(env.ANTHROPIC_BASE_URL).toBe(`${GW}/llm/anthropic`);
++		expect(env.ANTHROPIC_AUTH_TOKEN).toBe(TOK);
++		// 不钉型号的话 CLI 用厂商自己的默认名, 而网关只放行在售目录 —— 每次 404。
++		expect(env.ANTHROPIC_MODEL).toBe(DEFAULT_MODEL.claude);
++		// 不设它的话后台任务去要 haiku, 主对话正常而后台静默 404。
++		expect(env.ANTHROPIC_SMALL_FAST_MODEL).toBe(DEFAULT_MODEL.claude);
++		// codex 的 base_url 在 config.toml 里, env 只给密钥。
++		expect(env.OPENAI_API_KEY).toBe(TOK);
++		expect(env.PATH).toBe("/usr/bin");
++	});
++
++	it("用户自己的厂商密钥要摘掉 —— 留着会绕过计费", async () => {
++		const { terminalEnv } = await loadGateway({ DSH_GATEWAY_BASE: GW, DSH_CLOUD_TOKEN: TOK });
++		const env = terminalEnv({ ANTHROPIC_API_KEY: "sk-用户自己的" });
++		expect(env.ANTHROPIC_API_KEY).toBeUndefined();
++	});
++
++	it("没配网关 (上游自己跑): 原样返回, 一个变量都不加", async () => {
++		const { terminalEnv } = await loadGateway({
++			DSH_GATEWAY_BASE: undefined,
++			DSH_CLOUD_TOKEN: undefined,
++		});
++		const base = { PATH: "/usr/bin", ANTHROPIC_API_KEY: "sk-用户自己的" };
++		const env = terminalEnv(base);
++		expect(env).toEqual(base);
++		// 本机开发就是靠用户自己的登录态跑的, 摘掉他的 key 等于把他的 CLI 弄坏。
++		expect(env.ANTHROPIC_API_KEY).toBe("sk-用户自己的");
++	});
++});
++
++describe("首帧就带上引擎名", () => {
++	const RAW =
++		'<!doctype html>\n<html lang="zh-CN">\n\t<head>\n\t\t<title>pi-web-ui — pi 编码智能体</title>\n\t</head>\n\t<body></body>\n</html>\n';
++
++	it("标题换成引擎名, 并把名字塞给首帧", () => {
++		const out = brandIndexHtml(RAW, "Claude Code");
++		expect(out).toContain("<title>Claude Code</title>");
++		expect(out).not.toContain("pi-web-ui");
++		expect(out).toContain('window.__PI_ENGINE_NAME__="Claude Code"');
++		// 必须在 </head> 之前 —— 放到 body 里就晚于首帧那次渲染了。
++		expect(out.indexOf("__PI_ENGINE_NAME__")).toBeLessThan(out.indexOf("</head>"));
++	});
++
++	it("名字里的 </script> 关不掉这个标签", () => {
++		const out = brandIndexHtml(RAW, "</script><script>alert(1)</script>");
++		expect(out).not.toContain("<script>alert(1)</script>");
++		expect(out).toContain("\\u003c/script>");
++	});
++
++	it("上游两个引擎 (没名字): 原样返回, 一个字节不动", () => {
++		expect(brandIndexHtml(RAW, "")).toBe(RAW);
++	});
++});
++
++/**
++ * 上面钉的是 terminalEnv 这个函数本身。这一条钉的是**终端真的用上了它** ——
++ * 两者不是一回事: 把 shellEnv 改回 `...process.env`, 上面那几条照样全绿, 而
++ * 用户在终端里敲 claude 照样要登录。所以这里起一个真 PTY 去问它。
++ */
++describe("终端里真的能看到那几个变量", () => {
++	it("PTY 里 echo 得出网关地址", async () => {
++		process.env.DSH_GATEWAY_BASE = GW;
++		process.env.DSH_CLOUD_TOKEN = TOK;
++		vi.resetModules();
++		const { TerminalManager } = await import("../../server/terminals.js");
++		const { mkdtempSync } = await import("node:fs");
++		const { tmpdir } = await import("node:os");
++		const { join } = await import("node:path");
++
++		const cwd = mkdtempSync(join(tmpdir(), "pi-term-env-"));
++		const mgr = new TerminalManager(() => {}, cwd);
++		expect(mgr.create("t-env", cwd, 80, 24, cwd)).not.toBeNull();
++		try {
++			mgr.input("t-env", "echo GW=$ANTHROPIC_BASE_URL\r");
++			const deadline = Date.now() + 15_000;
++			let out = "";
++			while (Date.now() < deadline) {
++				out = mgr.read("t-env", 0, 200_000)?.data ?? "";
++				// 回显里也有这串字面量, 所以要等**展开后**的那一行。
++				if (out.includes(`GW=${GW}/llm/anthropic`)) break;
++				await new Promise((r) => setTimeout(r, 100));
++			}
++			expect(out).toContain(`GW=${GW}/llm/anthropic`);
++		} finally {
++			mgr.kill("t-env");
++		}
++	}, 30_000);
++});
++
++/**
++ * 子进程的 stdin 必须关掉 —— 用一个**假 CLI** 验, 不花钱也不碰网络。
++ *
++ * 假 codex 的第一件事是 `cat > /dev/null`: 读到 EOF 才往下走。引擎不关 stdin
++ * 的话它就永远卡在那儿 —— 与真 codex 的 `Reading additional input from
++ * stdin...` 同一个形状 (2026-09-11 老板实拍: "正在思考"转到天荒地老)。
++ */
++describe("引擎必须关掉子进程的 stdin", () => {
++	it("prompt 一轮能跑完并拿到正文", async () => {
++		const { mkdtempSync, writeFileSync, chmodSync } = await import("node:fs");
++		const { tmpdir } = await import("node:os");
++		const { join } = await import("node:path");
++		const { CliSession } = await import("../../server/cli/cli-session.js");
++
++		const bin = mkdtempSync(join(tmpdir(), "pi-fakecli-"));
++		const cwd = mkdtempSync(join(tmpdir(), "pi-fakecwd-"));
++		const fake = join(bin, "codex");
++		writeFileSync(
++			fake,
++			[
++				"#!/bin/sh",
++				"cat > /dev/null", // 没有 EOF 就卡死在这里
++				'echo \'{"type":"thread.started","thread_id":"t1"}\'',
++				'echo \'{"type":"item.completed","item":{"type":"agent_message","text":"喵"}}\'',
++				'echo \'{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":1}}\'',
++				"",
++			].join("\n"),
++			"utf8",
++		);
++		chmodSync(fake, 0o755);
++
++		const savedPath = process.env.PATH;
++		process.env.PATH = `${bin}:${savedPath}`;
++		try {
++			let last: Snap | null = null;
++			const session = new CliSession("c1", cwd, "codex", (msg: { type: string; state?: unknown }) => {
++				if (msg.type === "snapshot") last = msg.state as Snap;
++			});
++			// 不关 stdin 的话这里永远不返回 —— 用例会超时, 而那正是线上的症状。
++			await session.prompt("说句话");
++			const texts = ((last as Snap | null)?.messages ?? []).flatMap((m) =>
++				(m.content ?? []).map((c) => c.text ?? ""),
++			);
++			expect(texts.join("")).toContain("喵");
++		} finally {
++			process.env.PATH = savedPath;
++		}
++	}, 20_000);
++});
++
++/**
++ * 「转圈停了、页面上什么也没多出来」那一类。两条都是**退出码 0** 的:
++ * CLI 认为自己正常结束, 只是没吐正文。原来这两种都被静静吞掉。
++ */
++describe("没有正文的那一轮也要留下话", () => {
++	async function runFake(lines: string[]) {
++		const { mkdtempSync, writeFileSync, chmodSync } = await import("node:fs");
++		const { tmpdir } = await import("node:os");
++		const { join } = await import("node:path");
++		const { CliSession } = await import("../../server/cli/cli-session.js");
++
++		const bin = mkdtempSync(join(tmpdir(), "pi-fakecli-"));
++		const cwd = mkdtempSync(join(tmpdir(), "pi-fakecwd-"));
++		const fake = join(bin, "codex");
++		writeFileSync(fake, ["#!/bin/sh", "cat > /dev/null", ...lines, "exit 0", ""].join("\n"), "utf8");
++		chmodSync(fake, 0o755);
++
++		const savedPath = process.env.PATH;
++		process.env.PATH = `${bin}:${savedPath}`;
++		const notices: string[] = [];
++		let last: Snap | null = null;
++		try {
++			const session = new CliSession(
++				"c1",
++				cwd,
++				"codex",
++				(msg: { type: string; state?: unknown; text?: string }) => {
++					if (msg.type === "snapshot") last = msg.state as Snap;
++					if (msg.type === "notice") notices.push(String(msg.text ?? ""));
++				},
++			);
++			await session.prompt("说句话");
++		} finally {
++			process.env.PATH = savedPath;
++		}
++		return { notices, messages: (last as Snap | null)?.messages ?? [] };
++	}
++
++	it("CLI 自己报的错要弹出来, 并且当成这一轮的结论", async () => {
++		const { notices, messages } = await runFake([
++			`echo '{"type":"item.completed","item":{"type":"error","message":"Model metadata for x not found"}}'`,
++		]);
++		expect(notices.join("")).toContain("Model metadata");
++		expect(messages.at(-1)?.errorMessage).toContain("Model metadata");
++	}, 20_000);
++
++	it("什么都没吐又退出 0: 也要说一句, 别让页面空着", async () => {
++		const { messages } = await runFake([`echo '{"type":"turn.completed","usage":{}}'`]);
++		expect(messages.at(-1)?.errorMessage).toContain("没有任何输出");
++	}, 20_000);
++
++	it("用户自己按停的那一轮不算故障, 不留错误条", async () => {
++		const { mkdtempSync, writeFileSync, chmodSync } = await import("node:fs");
++		const { tmpdir } = await import("node:os");
++		const { join } = await import("node:path");
++		const { CliSession } = await import("../../server/cli/cli-session.js");
++
++		const bin = mkdtempSync(join(tmpdir(), "pi-fakecli-"));
++		const cwd = mkdtempSync(join(tmpdir(), "pi-fakecwd-"));
++		const fake = join(bin, "codex");
++		// 一句话不说, 就耗着 —— 等着被 abort。**exec** 很关键: 不 exec 的话
++		// SIGTERM 只打到 sh, 被孤儿化的 sleep 还攥着 stdout 管道, 于是 close
++		// 事件要等它自己睡完才来 (node 的 close 等的是全部 stdio 关闭, 不是进程退出)。
++		writeFileSync(fake, ["#!/bin/sh", "cat > /dev/null", "exec sleep 30", ""].join("\n"), "utf8");
++		chmodSync(fake, 0o755);
++
++		const savedPath = process.env.PATH;
++		process.env.PATH = `${bin}:${savedPath}`;
++		let last: Snap | null = null;
++		try {
++			const session = new CliSession("c1", cwd, "codex", (msg: { type: string; state?: unknown }) => {
++				if (msg.type === "snapshot") last = msg.state as Snap;
++			});
++			const turn = session.prompt("说句话");
++			await new Promise((r) => setTimeout(r, 400));
++			await session.abort();
++			await turn;
++		} finally {
++			process.env.PATH = savedPath;
++		}
++		const errs = ((last as Snap | null)?.messages ?? []).map((m) => m.errorMessage).filter(Boolean);
++		expect(errs).toEqual([]);
++	}, 20_000);
 +});

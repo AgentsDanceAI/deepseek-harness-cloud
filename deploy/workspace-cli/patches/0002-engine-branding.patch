@@ -103,15 +103,16 @@ index 1d4ee67..47e1258 100644
      "stopAgent": "Остановить агента",
      "stop": "Остановить",
 diff --git a/web/src/App.tsx b/web/src/App.tsx
-index 9f1f54b..65f1829 100644
+index 9f1f54b..28f1447 100644
 --- a/web/src/App.tsx
 +++ b/web/src/App.tsx
-@@ -1,3 +1,4 @@
+@@ -1,3 +1,5 @@
 +import { AssistantNameContext } from "./assistant-name.js";
++import { BOOT_ENGINE_NAME } from "./boot-engine-name.js";
  import {
  	lazy,
  	Suspense,
-@@ -192,8 +193,13 @@ export function App() {
+@@ -192,8 +194,13 @@ export function App() {
  	const projectTitle = useProjectTitle();
  	useEffect(() => {
  		const name = projectTitle ? projectNameFromCwd(cwd) : "";
@@ -119,7 +120,7 @@ index 9f1f54b..65f1829 100644
 -	}, [cwd, projectTitle, t]);
 +		// 标签页标题也跟着引擎走 —— 开着一堆标签页时, 上面写 pi-web-ui 分不出
 +		// 哪个是 Codex 哪个是 Claude Code。
-+		const brand = chat.engineName ?? "pi-web-ui";
++		const brand = chat.engineName ?? BOOT_ENGINE_NAME ?? "pi-web-ui";
 +		document.title = name ? `${name} — ${brand}` : brand;
 +		// engineName 必须在依赖里: 它是 ready 到达时才有的, 漏了的话首屏那次
 +		// effect 用的是 undefined, 之后再也不重跑 —— 标题永远停在 pi-web-ui。
@@ -127,7 +128,7 @@ index 9f1f54b..65f1829 100644
  	const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
  	const [previewFile, setPreviewFile] = useState<PreviewFile | null>(null);
  	/** Full-window file drag in progress (issue #19) — shows the app-wide
-@@ -631,10 +637,13 @@ export function App() {
+@@ -631,10 +638,13 @@ export function App() {
  	}, [chat.terminals.length, createShell, view]);
  
  	return (
@@ -137,7 +138,7 @@ index 9f1f54b..65f1829 100644
 -		// composer) call stopPropagation and keep priority.
 +		// 助手显示名一路发下去 (品牌 / 角色名 / 输入框占位)。为一个字符串给
 +		// Message、CollapsedMessage 加 prop 不划算 —— 它们是 memo 的。
-+		<AssistantNameContext.Provider value={chat.engineName ?? "pi"}>
++		<AssistantNameContext.Provider value={chat.engineName ?? BOOT_ENGINE_NAME ?? "pi"}>
 +		{/* Whole window is a drop target (issue #19): dragover highlights + any
 +		    drop attaches. The plain preventDefault used to merely stop the browser
 +		    navigating away; children with their own handlers (input bar / edit
@@ -145,7 +146,7 @@ index 9f1f54b..65f1829 100644
  		<div
  			className="app"
  			onDragOver={(e) => {
-@@ -877,5 +886,6 @@ export function App() {
+@@ -877,5 +887,6 @@ export function App() {
  				}}
  			/>
  		</div>
@@ -200,6 +201,35 @@ index 0000000..d5054a1
 +export function useAssistantName(): string {
 +	return useContext(AssistantNameContext);
 +}
+diff --git a/web/src/boot-engine-name.ts b/web/src/boot-engine-name.ts
+new file mode 100644
+index 0000000..1ce9410
+--- /dev/null
++++ b/web/src/boot-engine-name.ts
+@@ -0,0 +1,23 @@
++/**
++ * 首帧就知道自己叫什么。
++ *
++ * 引擎名走 `ready` 帧, 而 ready 是 WebSocket 连上之后的事 —— 在那之前左上角
++ * 先画「π pi-web-ui」, 连上才跳成「C Claude Code」。用户第一眼看到的是一个
++ * 别的产品名闪一下再被盖掉 (老板 2026-09-11: "先出现 pi-web-ui, 再叠加的
++ * claude code, 合适吗")。
++ *
++ * 所以服务端把名字烧进发出去的 HTML (server/index.ts 的 brandedIndexHtml),
++ * 这里读出来当**首帧回落值**。ready 到了照样以 chat.engineName 为准 —— 这只是
++ * 把"还不知道"的那一小段填上。
++ *
++ * 上游自己跑 (pi / dsh) 时服务端不烧, 这里是 undefined, 一切照旧。
++ */
++
++declare global {
++	interface Window {
++		__PI_ENGINE_NAME__?: string;
++	}
++}
++
++export const BOOT_ENGINE_NAME: string | undefined =
++	typeof window !== "undefined" && window.__PI_ENGINE_NAME__ ? window.__PI_ENGINE_NAME__ : undefined;
 diff --git a/web/src/components/ChatInput.tsx b/web/src/components/ChatInput.tsx
 index 1e56aa1..1c79ad5 100644
 --- a/web/src/components/ChatInput.tsx
@@ -296,10 +326,23 @@ index b267519..d196986 100644
  			return t("role.tool");
  		case "bashExecution":
 diff --git a/web/src/components/TopBar.tsx b/web/src/components/TopBar.tsx
-index d0e4149..d5c5081 100644
+index d0e4149..d5c541f 100644
 --- a/web/src/components/TopBar.tsx
 +++ b/web/src/components/TopBar.tsx
-@@ -317,8 +317,11 @@ export function TopBar({
+@@ -1,3 +1,4 @@
++import { BOOT_ENGINE_NAME } from "../boot-engine-name.js";
+ import { useState } from "react";
+ import {
+ 	FiDownload,
+@@ -311,14 +312,21 @@ export function TopBar({
+ 		</>
+ 	);
+ 
++	const brandName = chat.engineName ?? BOOT_ENGINE_NAME;
++
+ 	return (
+ 		<header className="topbar">
+ 			<div className="brand">
  				<button type="button" className="panel-toggle" title={t("openHistory")} onClick={() => onOpenPanel("left")}>
  					<FiMenu />
  				</button>
@@ -307,9 +350,11 @@ index d0e4149..d5c5081 100644
 -				<span className="brand-name">pi-web-ui</span>
 +				{/* 品牌跟着引擎走：接 Claude Code / Codex 时左上角就该是那个名字，
 +				    再挂一个 π 会让人以为跑的是 pi。服务端没给名字（pi / dsh）时
-+				    原样不动。 */}
-+				<span className="brand-logo">{chat.engineName ? chat.engineName.charAt(0) : "π"}</span>
-+				<span className="brand-name">{chat.engineName ?? "pi-web-ui"}</span>
++				    原样不动。
++				    BOOT_ENGINE_NAME 是**首帧**的回落：engineName 要等 ready 帧，
++				    不垫这一层的话左上角先闪一下 pi-web-ui 再被盖掉。 */}
++				<span className="brand-logo">{brandName ? brandName.charAt(0) : "π"}</span>
++				<span className="brand-name">{brandName ?? "pi-web-ui"}</span>
  				<span className={`conn-dot ${connClass}`} title={connLabel} />
  				<span className="conn-label">{connLabel}</span>
  			</div>

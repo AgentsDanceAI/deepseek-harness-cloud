@@ -15,7 +15,10 @@ cd "$(dirname "$0")"
 REPO=$(python3 -c "import json;print(json.load(open('upstream.json'))['repository'])")
 COMMIT=$(python3 -c "import json;print(json.load(open('upstream.json'))['commit'])")
 IMAGE="${IMAGE:-ghcr.io/agentsdancepro/workspace-cli}"
-TAG="${TAG:-$(python3 -c "import json;print(json.load(open('upstream.json'))['version'])")-r1}"
+# 标签 = <上游版本>-r<修订号>。**补丁改了就把 upstream.json 的 revision +1** ——
+# 同一个标签重推, 已经拉过那层的节点不会再拉 (imagePullPolicy 不是 Always),
+# 结果是有的节点跑新的有的跑旧的, 而两边都"正常"。
+TAG="${TAG:-$(python3 -c "import json;d=json.load(open('upstream.json'));print(f\"{d['version']}-r{d['revision']}\")")}"
 
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT

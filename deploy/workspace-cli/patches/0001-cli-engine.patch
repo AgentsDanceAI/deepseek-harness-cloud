@@ -1,9 +1,48 @@
+diff --git a/server/cli/branding.ts b/server/cli/branding.ts
+new file mode 100644
+index 0000000..657c260
+--- /dev/null
++++ b/server/cli/branding.ts
+@@ -0,0 +1,33 @@
++/**
++ * branding.ts —— 把引擎名烧进发出去的 HTML。
++ *
++ * 为什么不能只靠 `ready` 帧: engineName 是 WebSocket 连上之后才到的, 在那之前
++ * 前端已经画完第一帧了 —— 左上角先出「π pi-web-ui」, 连上再跳成「C Claude
++ * Code」, 标签页标题同理。用户第一眼看到的是**另一个产品名**闪一下再被盖掉
++ * (老板 2026-09-11: "左上角先出现 pi-web-ui, 再叠加的 claude code, 合适吗")。
++ *
++ * 这份是纯函数, 好让它能被直接钉住 —— server/index.ts 只管读文件和缓存。
++ */
++
++/** HTML 文本节点里的转义。名字来自我们自己的白名单, 但它是拼进 HTML 的, 按
++ *  不可信处理不花钱。 */
++function escapeHtml(s: string): string {
++	return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
++}
++
++/**
++ * 把 `<title>` 换成引擎名, 并在 `</head>` 前塞一行 `window.__PI_ENGINE_NAME__`
++ * (前端的首帧回落值, 见 web/src/boot-engine-name.ts)。
++ *
++ * engineName 为空 (pi / dsh 两个上游引擎) 时**原样返回** —— 上游发出去的字节
++ * 一个都不该变。
++ */
++export function brandIndexHtml(raw: string, engineName: string): string {
++	if (!engineName) return raw;
++	// JSON.stringify 管引号和反斜杠, `<` 再转一手 —— 否则名字里一个 </script>
++	// 就能提前关掉这个标签。
++	const literal = JSON.stringify(engineName).replace(/</g, "\\u003c");
++	return raw
++		.replace(/<title>[^<]*<\/title>/, `<title>${escapeHtml(engineName)}</title>`)
++		.replace("</head>", `\t\t<script>window.__PI_ENGINE_NAME__=${literal}</script>\n\t</head>`);
++}
 diff --git a/server/cli/cli-adapter.ts b/server/cli/cli-adapter.ts
 new file mode 100644
-index 0000000..64c55e0
+index 0000000..94088bc
 --- /dev/null
 +++ b/server/cli/cli-adapter.ts
-@@ -0,0 +1,159 @@
+@@ -0,0 +1,164 @@
 +/**
 + * cli-adapter.ts —— 把 CLI 的 JSON 行归一成同一套事件。
 + *
@@ -141,6 +180,11 @@ index 0000000..64c55e0
 +			if (["command_execution", "file_change", "tool_call"].includes(it.type)) {
 +				return [{ t: "tool", id: String(it.id ?? ""), name: String(it.type), input: it }];
 +			}
++			// codex 把一部分错误当成**一个 item** 发, 不走 turn.failed。实测抓到的
++			// 一条: `Model metadata for \`claude-fable-5\` not found. Defaulting to
++			// fallback metadata; …` —— 原来这里没接, 于是它掉进最后那个 raw 里,
++			// 被彻底丢掉: 型号不对的那一轮界面上一句话都没有。
++			if (it.type === "error") return [{ t: "error", message: String(it.message ?? JSON.stringify(it).slice(0, 400)) }];
 +		}
 +		if (e.type === "turn.completed") {
 +			const u = e.usage ?? {};
@@ -257,10 +301,10 @@ index 0000000..8e57609
 +}
 diff --git a/server/cli/cli-session.ts b/server/cli/cli-session.ts
 new file mode 100644
-index 0000000..f389ca0
+index 0000000..5fb6305
 --- /dev/null
 +++ b/server/cli/cli-session.ts
-@@ -0,0 +1,442 @@
+@@ -0,0 +1,460 @@
 +/**
 + * cli-session.ts —— 第三个引擎的会话对象 (PI_WEB_ENGINE=claude|codex)。
 + *
@@ -291,13 +335,12 @@ index 0000000..f389ca0
 +	UiSubagentTemplate,
 +} from "../protocol.js";
 +import { SPECS, type CliSpec, type CliEvent } from "./cli-adapter.js";
-+import { childEnv, codexConfigToml, gatewayConfigured, listCatalog } from "./gateway.js";
++import { DEFAULT_MODEL, childEnv, listCatalog, writeCodexConfig } from "./gateway.js";
 +import { claudeProjectDir, listClaudeSessions, listCodexSessions, replayClaudeSession } from "./sessions.js";
 +import { FilesService } from "../files-service.js";
-+import { existsSync, mkdirSync, rmSync, statSync, writeFileSync } from "node:fs";
++import { existsSync, rmSync, statSync } from "node:fs";
 +import { resolve } from "node:path";
 +import { loadCommands, saveCommandsFile, TerminalManager } from "../terminals.js";
-+import { homedir } from "node:os";
 +import { join } from "node:path";
 +
 +type Send = (msg: ServerMessage) => void;
@@ -321,6 +364,10 @@ index 0000000..f389ca0
 +	// dsh 引擎也是这么接的; 各写一份必然漂, 而且这两块和 agent 无关。
 +	private readonly files: FilesService;
 +	private readonly terminals: TerminalManager;
++	/** 本轮 CLI 自己报过的最后一条错。没有正文时拿它当结论。 */
++	private lastError: string | null = null;
++	/** 这一轮是用户自己按停的。**按停不是故障** —— 别给他报一条"退出码 143"。 */
++	private aborted = false;
 +	private disposed = false;
 +	private lang = "en";
 +
@@ -376,6 +423,7 @@ index 0000000..f389ca0
 +
 +	async prompt(text: string, _attachments?: unknown[], _queue?: boolean): Promise<void> {
 +		if (this.child) return;                       // 骨架: 一次一轮, 不排队
++		this.aborted = false;
 +		this.messages.push({
 +			id: `u-${Date.now()}-${this.seq++}`,
 +			role: "user",
@@ -388,22 +436,20 @@ index 0000000..f389ca0
 +		const argv = this.spec.argv(text, this.resume, this.model);
 +		// codex 的 base_url/wire_api 只能从 config.toml 读, 给不了 env —— 每轮
 +		// 重写一次, 因为型号是按次可换的, 而 config 里钉着当前这个。
-+		if (this.spec.id === "codex" && gatewayConfigured()) {
-+			try {
-+				const dir = join(homedir(), ".codex");
-+				mkdirSync(dir, { recursive: true });
-+				writeFileSync(join(dir, "config.toml"), codexConfigToml(this.model), "utf8");
-+			} catch (e) {
-+				console.error("[codex] 写 config.toml 失败:", e);
-+			}
-+		}
++		// (开机时也写过一次, 为的是终端里的 codex —— 见 gateway.writeCodexConfig。)
++		if (this.spec.id === "codex") writeCodexConfig(this.model);
 +		const child = spawn(this.spec.id, argv, { cwd: this.cwd, env: childEnv(this.spec.id, this.model) });
 +		this.child = child;
 +		if (this.spec.stdinPrompt) {
 +			const payload = this.spec.stdinPayload(text);
 +			if (payload) child.stdin.write(payload);
-+			child.stdin.end();
 +		}
++		// **stdin 一定要关**, 不管这一轮的 prompt 走 stdin 还是走 argv。
++		// codex 的 exec 开头一句就是 `Reading additional input from stdin...` ——
++		// 不给它 EOF 它就一直等: 界面上"正在思考"转到天荒地老, 一个字节的输出
++		// 都没有, 进程也不退, 日志里同样什么都没有。2026-09-11 老板实拍到的就是
++		// 这个。原来只在 stdinPrompt 那条分支里关, 于是只有 claude 那格是对的。
++		child.stdin.end();
 +
 +		let buf = "";
 +		child.stdout.on("data", (chunk: Buffer) => {
@@ -421,12 +467,19 @@ index 0000000..f389ca0
 +			child.on("close", (code) => {
 +				this.child = null;
 +				if (this.streaming && this.streaming.content.length) this.messages.push(this.streaming);
-+				else if (code !== 0) {
++				else if (!this.aborted) {
++					// **一个字都没出的那一轮也得留下话。** 原来只在退出码非零时才
++					// 报, 而"退出码 0 + 零输出"是真实存在的一类 (型号走不通那条面
++					// 时就这样) —— 用户看到转圈停了、页面上什么也没多出来。
 +					this.messages.push({
 +						id: `a-${Date.now()}-${this.seq++}`, role: "assistant", content: [],
-+						errorMessage: `${this.spec.name} 退出码 ${code}`, timestamp: Date.now(),
++						errorMessage: this.lastError ?? (code === 0
++							? `${this.spec.name} 本轮没有任何输出`
++							: `${this.spec.name} 退出码 ${code}`),
++						timestamp: Date.now(),
 +					});
 +				}
++				this.lastError = null;
 +				this.streaming = null;
 +				this.snapshot();
 +				done();
@@ -477,6 +530,14 @@ index 0000000..f389ca0
 +			});
 +			return;
 +		}
++		if (ev.t === "error") {
++			// CLI 自己报的错 (codex 的 turn.failed, 以及 item 里 type=error 的那种)。
++			// 原来这个分支**根本不存在** —— 事件生成出来就被丢掉了, 症状是"什么
++			// 都没发生"。立刻弹给用户; 同时记下来, 这一轮最终没有正文时拿它当结论。
++			this.lastError = ev.message;
++			this.emitNotice("error", `${this.spec.name}: ${ev.message}`, `${this.spec.name}: ${ev.message}`);
++			return;
++		}
 +		if (ev.t === "done") {
 +			this.usage.input += ev.usage.input;
 +			this.usage.output += ev.usage.output;
@@ -485,6 +546,7 @@ index 0000000..f389ca0
 +	}
 +
 +	async abort(): Promise<void> {
++		this.aborted = true;
 +		this.child?.kill("SIGTERM");
 +		this.child = null;
 +		this.streaming = null;
@@ -511,7 +573,7 @@ index 0000000..f389ca0
 +		// (end_turn) → message_stop, 没有任何 content_block_delta), CLI 于是自己补
 +		// 一句"你上轮没有可见输出"再试一次, 还是空 —— 用户看到的是界面一直转。
 +		// 这两个默认值与 AI Store 产品侧一致 (products.py 的 _codecli_model)。
-+		const preferred = this.spec.id === "claude" ? "claude-sonnet-5" : "gpt-5.6-luna";
++		const preferred = DEFAULT_MODEL[this.spec.id];
 +		if (models.length && !this.model) {
 +			this.model = models.some((m) => m.id === preferred) ? preferred : models[0]!.id;
 +		}
@@ -705,10 +767,10 @@ index 0000000..f389ca0
 +}
 diff --git a/server/cli/gateway.ts b/server/cli/gateway.ts
 new file mode 100644
-index 0000000..871a828
+index 0000000..ad6ae64
 --- /dev/null
 +++ b/server/cli/gateway.ts
-@@ -0,0 +1,93 @@
+@@ -0,0 +1,150 @@
 +/**
 + * gateway.ts —— 接 AI Store 的模型网关。
 + *
@@ -723,6 +785,10 @@ index 0000000..871a828
 + *   DSH_CLOUD_TOKEN   该用户该实例的工作台令牌 (每次建实例都会换)
 + * 没配就退回"用 CLI 自己的登录态", 本机开发照样能跑。
 + */
++
++import { mkdirSync, writeFileSync } from "node:fs";
++import { homedir } from "node:os";
++import { join } from "node:path";
 +
 +import type { ModelInfo } from "../protocol.js";
 +
@@ -801,6 +867,59 @@ index 0000000..871a828
 +		'wire_api = "responses"',
 +		"",
 +	].join("\n");
++}
++
++/** 两格各自的默认型号。
++ *
++ * **不取在售目录的第一个** —— 那是 deepseek-v4-flash, 实测走 anthropic 面对短
++ * 提示返回空内容, 界面一直转 (见 cli-session.listModels 那段)。与 AI Store 产品
++ * 侧一致 (dhc 仓 products.py 的 _codecli_model)。
++ */
++export const DEFAULT_MODEL: Record<"claude" | "codex", string> = {
++	claude: "claude-sonnet-5",
++	codex: "gpt-5.6-luna",
++};
++
++/**
++ * [终端] 页里那两个 CLI 的网关接线。
++ *
++ * 引擎的子进程走 childEnv(); **终端是另一条路** —— 用户在终端敲 `claude`,
++ * 那是 node-pty 起的 shell, 继承的是服务进程的 env, 而服务进程的 env 里只有
++ * DSH_GATEWAY_BASE / DSH_CLOUD_TOKEN 两个 (dhc 仓 products.py 的 env_for 故意
++ * 只给这两个: 接线由这里一处说了算)。于是同一个界面上, 对话是通的、终端里
++ * `claude` 张口就是 `Not logged in · Please run /login` —— 一半登录了一半没有。
++ *
++ * **两个 CLI 的都给**: 这一格默认哪个引擎, 不该限制用户在终端里敲哪个。
++ */
++export function terminalEnv(base: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
++	if (!gatewayConfigured()) return base;
++	const env: NodeJS.ProcessEnv = { ...base };
++	env.ANTHROPIC_BASE_URL = `${GATEWAY_BASE}/llm/anthropic`;
++	env.ANTHROPIC_AUTH_TOKEN = GATEWAY_TOKEN;
++	env.ANTHROPIC_MODEL = DEFAULT_MODEL.claude;
++	env.ANTHROPIC_SMALL_FAST_MODEL = DEFAULT_MODEL.claude;
++	// 同 childEnv: 有它时 CLI 优先用它, 那是用户自己的厂商密钥, 会绕过计费。
++	delete env.ANTHROPIC_API_KEY;
++	env.OPENAI_API_KEY = GATEWAY_TOKEN;
++	return env;
++}
++
++/**
++ * 把 codex 的 config.toml 写到位。
++ *
++ * codex 的 base_url / wire_api 给不了 env, 只能从 config.toml 读。两处要写:
++ * 开机一次 (**终端里的 codex 在用户打开对话面板之前就该能用**), 以及每轮对话
++ * 前一次 (型号是按次可换的, config 里钉着当前那个)。
++ */
++export function writeCodexConfig(model: string = DEFAULT_MODEL.codex): void {
++	if (!gatewayConfigured()) return;
++	try {
++		const dir = join(homedir(), ".codex");
++		mkdirSync(dir, { recursive: true });
++		writeFileSync(join(dir, "config.toml"), codexConfigToml(model), "utf8");
++	} catch (e) {
++		console.error("[codex] 写 config.toml 失败:", e);
++	}
 +}
 diff --git a/server/cli/sessions.ts b/server/cli/sessions.ts
 new file mode 100644
@@ -1021,10 +1140,10 @@ index 0000000..dfbfb59
 +	return msgs.length > REPLAY_MAX ? msgs.slice(-REPLAY_MAX) : msgs;
 +}
 diff --git a/server/index.ts b/server/index.ts
-index 7186abf..1305230 100644
+index 7186abf..0f6fda1 100644
 --- a/server/index.ts
 +++ b/server/index.ts
-@@ -217,7 +217,12 @@ if (AUTH_TOKEN) {
+@@ -217,7 +217,17 @@ if (AUTH_TOKEN) {
  }
  
  /** 引擎选择：PI_WEB_ENGINE=pi|dsh（默认 pi）。重启生效。 */
@@ -1035,18 +1154,78 @@ index 7186abf..1305230 100644
 +/** 左上角品牌显示的名字。pi / dsh 留空 —— 前端回落到它自己原本的名字, 上游
 + *  两个引擎的观感一个字都不动。 */
 +const ENGINE_NAME = ENGINE === "claude" ? "Claude Code" : ENGINE === "codex" ? "Codex" : "";
++
++// codex 的 config.toml 开机就写到位。只在 prompt() 里写的话, 用户开完工作台
++// 直接进 [终端] 敲 codex —— 对话面板还没连过, config 还不存在, 它就去问用户要
++// OpenAI 的登录。**终端不该等对话面板先跑一轮**。
++if (ENGINE === "claude" || ENGINE === "codex") writeCodexConfig();
  
  /** PI_WEB_MANAGED=1: this instance is updated by whoever deploys it. */
  const MANAGED = isManaged();
-@@ -567,6 +572,7 @@ const heartbeatTimer = setInterval(() => {
+@@ -415,6 +425,23 @@ app.get("/plugins/:id/client/*", (req, res) => {
+ });
+ /** Set in the env of the replacement child spawned by a self-update restart. */
+ const RESTART_CHILD_ENV = "PI_WEB_RESTART_CHILD";
++
++/** 烧好品牌名的 index.html (读一次存下来)。引擎没名字 (pi / dsh) 时返回 null,
++ *  调用方原样 sendFile —— 上游那两个引擎发出去的字节一个都不变。
++ *
++ *  读不出来也返回 null: 自更新正在替换包目录时 index.html 会短暂不存在, 那条
++ *  路上原来的 sendFile 回调会答 503, 别在这里把它变成一个崩掉的请求。*/
++let brandedHtml: string | null | undefined;
++function brandedIndexHtml(file: string, engineName: string): string | null {
++	if (brandedHtml !== undefined) return brandedHtml;
++	if (!engineName) return (brandedHtml = null);
++	try {
++		return (brandedHtml = brandIndexHtml(readFileSync(file, "utf8"), engineName));
++	} catch {
++		return (brandedHtml = null);
++	}
++}
++
+ const webDist = join(pkgRoot, "web", "dist");
+ if (existsSync(webDist)) {
+ 	// gzip/deflate 响应压缩：前端 bundle ~1MB，局域网/反代场景传输量降到 ~1/4；
+@@ -422,6 +449,10 @@ if (existsSync(webDist)) {
+ 	app.use(compression());
+ 	app.use(
+ 		express.static(webDist, {
++			// **`/` 不走这里**: 默认的 index 选项会让 static 直接把 index.html 发
++			// 出去, 于是下面 catch-all 里"把引擎名烧进首帧"那步对首页根本不生效
++			// (对 /work 这种深链接却生效) —— 实测踩到: 标题还是 pi-web-ui。
++			index: false,
+ 			// Vite 产物文件名带内容 hash，可永久强缓存——业务发版后 hash 变化自然失效，
+ 			// index.html 由下方 catch-all 处理（sendFile 不走这里）
+ 			setHeaders(res, filePath) {
+@@ -449,6 +480,17 @@ if (existsSync(webDist)) {
+ 		next();
+ 	});
+ 	app.get(/^\/(?!api\/|ws).*/, (_req, res) => {
++		// 品牌名烧进首帧。engineName 走 ready 帧, 那是 WebSocket 连上之后的事 ——
++		// 在那之前左上角先画出「π pi-web-ui」, 连上才跳成「C Claude Code」。用户
++		// 看到的是一个别的产品名一闪而过, 再被盖掉。标题同理 (原样是写死的 pi)。
++		const html = brandedIndexHtml(join(webDist, "index.html"), ENGINE_NAME);
++		if (html !== null) {
++			// index.html 不能强缓存 (assets 才带 hash), 而且烧进去的名字要跟着
++			// 实例的引擎走 —— 换一格开的就是另一个名字。
++			res.setHeader("Cache-Control", "no-cache");
++			res.type("html").send(html);
++			return;
++		}
+ 		// Callback form: a failed stat here (npm i -g is mid-replacement of the
+ 		// package dir) responds 503 instead of crashing the request pipeline
+ 		// with an unhandled ENOENT stack trace.
+@@ -567,6 +609,9 @@ const heartbeatTimer = setInterval(() => {
  // 引擎分发：PI_WEB_ENGINE=dsh 时使用 DeepSeek Harness 引擎（server/dsh/），
  // 默认 pi 引擎。同一 wire 协议，前端无感知（ready/health 携带 engine 字段）。
  import { DshAgentService } from "./dsh/dsh-agent-service.js";
++import { brandIndexHtml } from "./cli/branding.js";
++import { writeCodexConfig } from "./cli/gateway.js";
 +import { CliAgentService } from "./cli/cli-agent-service.js";
  
  /** dispatch 表所需的方法契约（pi 的 ClientSession 与 dsh 的 DshClientSession
   *  都结构兼容；dsh 引擎对不支持的功能做简化实现）。 */
-@@ -763,7 +769,9 @@ export interface EngineService {
+@@ -763,7 +808,9 @@ export interface EngineService {
  }
  
  const service: EngineService =
@@ -1057,7 +1236,7 @@ index 7186abf..1305230 100644
  		? new DshAgentService(CWD, join(DATA_DIR, "client-state.json"), DATA_DIR, getAgentDir())
  		: new AgentService(
  				CWD,
-@@ -1315,6 +1323,7 @@ wss.on("connection", (ws) => {
+@@ -1315,6 +1362,7 @@ wss.on("connection", (ws) => {
  						serverVersion: VERSION,
  						protocolVersion: PROTOCOL_VERSION,
  						engine: ENGINE,
@@ -1082,3 +1261,32 @@ index 536423e..a231578 100644
  			/** Wire-protocol version (server/protocol-version.ts). The client
  			 *  compares it against its own copy — a mismatch means the page was
  			 *  loaded before an app update and must be refreshed. */
+diff --git a/server/terminals.ts b/server/terminals.ts
+index 7b1faf0..60b20f3 100644
+--- a/server/terminals.ts
++++ b/server/terminals.ts
+@@ -22,6 +22,7 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+ // module itself for details).
+ import "./patch-node-pty.js";
+ import { spawn, type IPty } from "node-pty";
++import { terminalEnv } from "./cli/gateway.js";
+ import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent";
+ import { Type } from "typebox";
+ import type { CommandDef, ServerMessage, TerminalInfo } from "./protocol.js";
+@@ -516,10 +517,15 @@ function resolveBashShell(): { shell: string; args: string[] } {
+  * then renders UTF-8 continuation bytes 0x80–0x9F as C1 control characters
+  * (e.g. `�<0091><0098>` for 员), garbling Chinese input in the terminal.
+  * Default a UTF-8 locale so multibyte text round-trips.
++ *
++ * 接网关时 (AI Store 托管) 还要带上 claude / codex 的网关接线: 终端里敲
++ * `claude` 走的是这份 env, 而引擎子进程走的是 childEnv —— 两条路。不带的表现
++ * 是同一个界面上对话是通的、终端里张口就是 `Not logged in`。没配网关 (上游
++ * 自己跑) 时 terminalEnv 原样返回, 观感一个字不变。
+  */
+ function shellEnv(): Record<string, string> {
+ 	const env: Record<string, string> = {
+-		...process.env,
++		...(terminalEnv(process.env) as Record<string, string>),
+ 		TERM: "xterm-256color",
+ 	};
+ 	if (!env.LANG && !env.LC_ALL) env.LANG = "en_US.UTF-8";
