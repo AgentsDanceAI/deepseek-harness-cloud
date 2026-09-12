@@ -171,19 +171,37 @@
 }
 
 /* ── 直播间列表 (2026-09-09) ──────────────────────────────────────────── */
-.lv-roomgrid { display: grid; gap: 12px; margin-top: 1rem;
-               grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
+/* 09-12 改成封面画廊: 一排文字链看不出谁是谁, 而这产品卖的就是"她长什么样"。
+   封面用的是房间自己的场景图 (见 live_server 的 /rooms/<room>/cover.jpg)。 */
+.lv-roomgrid { display: grid; gap: 16px; margin-top: 1rem;
+               grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); }
 .lv-roomcard {
-  display: flex; align-items: center; justify-content: space-between; gap: 10px;
-  padding: 14px 16px; border-radius: 12px; text-decoration: none; color: inherit;
+  display: flex; flex-direction: column; border-radius: 14px; overflow: hidden;
+  text-decoration: none; color: inherit;
   border: 1px solid rgba(128,128,128,.25); background: rgba(128,128,128,.05);
   transition: border-color .15s, transform .15s;
 }
-.lv-roomcard:hover { border-color: rgba(128,128,128,.5); transform: translateY(-1px); }
+.lv-roomcard:hover { border-color: rgba(128,128,128,.5); transform: translateY(-2px); }
 /* 在播的那几间挑出来 —— 列表的第一用途就是"现在能看哪个" */
-.lv-roomcard.is-live { border-color: rgba(52,199,89,.55); background: rgba(52,199,89,.07); }
-.lv-roomname { font-weight: 600; }
-.lv-roomstate { font-size: .8rem; opacity: .7; white-space: nowrap; }
-.lv-roomstate.is-live { color: #34c759; opacity: 1; }
+.lv-roomcard.is-live { border-color: rgba(52,199,89,.55); }
+/* ⚠️ 比例写死: 图是后到的, 不先占好位就会在图到的那一刻把下面的字往下顶一跳。 */
+.lv-roomcover { position: relative; display: block; aspect-ratio: 16 / 9;
+                background: rgba(128,128,128,.14); }
+.lv-roomcover img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.lv-roomcover img.is-broken { display: none; }      /* 没底图: 留底色, 别画碎图标 */
+/* 标题行留出两行的高度 —— 标题是后填的, 不留位同样会跳 */
+.lv-roommeta { display: flex; flex-direction: column; gap: 3px;
+               padding: 11px 14px 14px; min-height: 3.2rem; }
+.lv-roomname { font-weight: 600; line-height: 1.3; }
+.lv-roomanchor { font-size: .82rem; opacity: .62; }
+/* 状态压在封面上 —— 观众第一眼找的就是"现在能不能看" */
+.lv-roomstate { position: absolute; left: 10px; top: 10px; white-space: nowrap;
+                font-size: .75rem; line-height: 1; padding: 5px 9px; border-radius: 999px;
+                background: rgba(0,0,0,.55); color: #fff; backdrop-filter: blur(4px); }
+.lv-roomstate.is-live { color: #6ef08a; }
+.lv-roomstate.is-live::before {
+  content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: #34c759; margin-right: 5px; vertical-align: 1px;
+}
 /* 状态没到之前别显示"未开播" —— 那是在说一件还不知道的事 */
 .lv-roomcard.is-loading .lv-roomstate { visibility: hidden; }

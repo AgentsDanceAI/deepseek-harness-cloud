@@ -7,6 +7,19 @@
   var grid = document.getElementById('lvRooms');
   if (!grid) return;
   var d = grid.dataset;
+  var T = window.__T || {};
+
+  // 封面取不到 (这间还没起过, 上游没有底图) 就把 img 收起来, 露出那块底色 ——
+  // 别让浏览器画一个碎图标。
+  Array.prototype.forEach.call(grid.querySelectorAll('.lv-roomcover img'), function (img) {
+    img.addEventListener('error', function () { img.classList.add('is-broken'); });
+  });
+
+  function put(el, text) {
+    // 只在真的变了的时候写: 无谓地重写 textContent 会把用户选中的文字清掉,
+    // 而这一页每十五秒刷一次。
+    if (el && text && el.textContent !== text) el.textContent = text;
+  }
 
   function paint(rooms) {
     var byId = {};
@@ -15,8 +28,11 @@
       var r = byId[card.dataset.room];
       card.classList.remove('is-loading');
       if (!r) return;
-      // 名称由管理员在控制台里配, 没配过就先显示房间 id —— 总比空着强。
-      card.querySelector('.lv-roomname').textContent = r.title || card.dataset.room;
+      // 标题/主播名服务端已经用上一次拿到的渲染过一轮 (见 live.cards_hint),
+      // 这里是把它们更到最新。**拿不到标题就别写** —— 回落成房间 id 就是
+      // "先英文后中文"那个毛病。
+      put(card.querySelector('.lv-roomname'), r.title);
+      put(card.querySelector('.lv-roomanchor'), r.preset && T['js.avatar.p.' + r.preset]);
       var st = card.querySelector('.lv-roomstate');
       st.textContent = r.live ? d.live : d.off;
       st.className = 'lv-roomstate ' + (r.live ? 'is-live' : 'is-off');

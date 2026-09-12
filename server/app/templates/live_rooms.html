@@ -8,9 +8,9 @@
   <div class="container">
     <div class="lv-head">
       <h1 class="lv-title">{{ t('live.title') }}</h1>
-      {% if user and user.is_admin %}
-      <a class="lv-adminlink" href="/live/console">{{ t('live.console') }} →</a>
-      {% endif %}
+      {# 这里原来有一个"控制台 →" —— 它没带 room, 落地永远是名单里第一间, 而管理员
+         点它的时候心里想的是"刚看的那一间"。每间的播放页上都有带 room 的同款入口,
+         那个才是对的。创始人 2026-09-12: "只跳转第一个, 去掉吧"。 #}
     </div>
     <p class="lv-sub">{{ t('live.rooms_sub') }}</p>
 
@@ -21,10 +21,19 @@
          data-off="{{ t('live.offline') }}"
          data-watch="{{ t('live.watch') }}"
          data-empty="{{ t('live.rooms_empty') }}">
+      {# 标题/主播来自 cards_hint (内存缓存, 不打上游): 拿得到就直接是中文, 拿不到
+         就先空着等 JS —— **绝不回落成房间 id**, 那就是"先英文后中文"的来源。 #}
       {% for r in rooms %}
-      <a class="lv-roomcard is-loading" href="/live/{{ r }}" data-room="{{ r }}">
-        <span class="lv-roomname">{{ r }}</span>
-        <span class="lv-roomstate"></span>
+      <a class="lv-roomcard is-loading" href="/live/{{ r.id }}" data-room="{{ r.id }}">
+        <span class="lv-roomcover">
+          {# 宽高写死是为了占位: 图后到时下面的字不会被顶得跳一下 #}
+          <img src="{{ r.cover }}" alt="" width="640" height="360" loading="lazy" decoding="async">
+          <span class="lv-roomstate"></span>
+        </span>
+        <span class="lv-roommeta">
+          <span class="lv-roomname">{{ r.title }}</span>
+          <span class="lv-roomanchor">{% if r.preset %}{{ t('js.avatar.p.' ~ r.preset) }}{% endif %}</span>
+        </span>
       </a>
       {% endfor %}
     </div>

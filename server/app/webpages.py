@@ -500,6 +500,8 @@ def live_rooms_page(request: Request):
     ⚠️ 这里**不取每间的状态** —— 那要挨个问 GPU 节点, 而页面渲染不该等在上游身上
     (它是别人的共享机, 够不着是常态)。状态由前端拿 /api/live/rooms 填, 那条路带
     两秒缓存, 一百个观众也只打上游一次。
+    标题与封面走 live.cards_hint(): 内存里上一次拿到的那份, 同样一次上游都不打 ——
+    有它才不会先闪一排房间 id 再变成中文。
     """
     from . import live as _live
 
@@ -512,7 +514,7 @@ def live_rooms_page(request: Request):
     gate = _live_gate(request)
     if gate is not None:
         return gate
-    return _render(request, "live_rooms.html", "live", rooms=names)
+    return _render(request, "live_rooms.html", "live", rooms=_live.cards_hint())
 
 
 @router.get("/live/console")

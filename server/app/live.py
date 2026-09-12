@@ -369,6 +369,35 @@ def _sign(room: str) -> str:
     return f"{ts}.{room}.{sig}"
 
 
+@router.get("/cover/{room}")
+async def cover(room: str):
+    """一间的封面图 (上游把她的场景图缩成了 640 宽的 JPEG)。
+
+    **公开** —— 流本身就是公开的, 封面不会更敏感; 而列表页上十七张图要是各带一次
+    鉴权往返, 首屏就白给。
+    """
+    if not _enabled():
+        raise HTTPException(404, "live_disabled")
+    if not room.replace("-", "").replace("_", "").isalnum():
+        raise HTTPException(400, "bad_room")
+    room = _room(room)
+    try:
+        r = await _upstream().get(
+            f"{config.LIVE_GPU_URL}/rooms/{room}/cover.jpg", params={"token": _sign(room)}
+        )
+    except Exception as e:  # noqa: BLE001
+        log.warning("取封面失败 %s: %s", room, e)
+        raise HTTPException(502, "upstream") from None
+    if r.status_code != 200:
+        # 404 = 这间还没起过, 没有底图。照实回 404, 让前端把那块留成底色, 而不是
+        # 回一张占位图 —— 占位图会被浏览器缓存五分钟, 真封面出来了也换不掉。
+        raise HTTPException(r.status_code if r.status_code in (404, 403) else 502, "upstream")
+    return Response(
+        content=r.content, media_type="image/jpeg",
+        headers={"Cache-Control": "public, max-age=300"},
+    )
+
+
 @router.get("/hls/{room}/{name}")
 async def hls(room: str, name: str):
     """代转 HLS 播放列表与切片。
@@ -532,6 +561,40 @@ async def _live_rooms() -> list[str]:
     return [r for r, st in (await _all_status()).items() if st.get("live")]
 
 
+def _card(room: str, st: dict) -> dict:
+    """列表页画一张卡需要的全部东西。一处生成 —— 接口和服务端渲染共用它, 否则
+    两边各拼一份, 迟早长出两种卡。"""
+    person, voice = str(st.get("person") or ""), str(st.get("voice") or "")
+    p = preset_of(person, voice) if person else None
+    return {
+        "id": room,
+        "title": str(st.get("title") or ""),
+        "person": person,
+        # 主播是谁: 只给搭配 id, 名字由前端/模板用 js.avatar.p.<id> 译 —— 接口不该
+        # 替调用方选语言。
+        "preset": (p or {}).get("id") or "",
+        "live": bool(st.get("live")),
+        "hls": f"/api/live/hls/{room}/index.m3u8",
+        "cover": f"/api/live/cover/{room}",
+    }
+
+
+def cards_hint() -> list[dict]:
+    """列表页渲染时先画出来的那一版, **一次上游调用都不打**。
+
+    为什么要有它: 这一页原来只渲染房间 id, 标题等 JS 拿到 /api/live/rooms 再换上 ——
+    于是每次进页面都先闪一排 official/culture/serena 再变成中文 (创始人 09-12 提:
+    "先英文然后变成中文")。而标题存在上游, 渲染时去问就把这一页绑在别人的机器上了。
+    折中: 用 _LAST_GOOD 里上一次拿到的状态渲染 (那是内存里的, 不打网络); 没有就留空,
+    由 JS 填 —— 空一下也比先给一个假名字强。封面地址与上游无关, 任何时候都画得出来。
+    """
+    out = []
+    for r in rooms():
+        last = _LAST_GOOD.get(r)
+        out.append(_card(r, last[1] if last else {}))
+    return out
+
+
 @router.get("/rooms")
 async def list_rooms():
     """有哪几间、各自在不在播。**公开** —— 开播了谁都能看, 列表当然也谁都能看。
@@ -546,16 +609,7 @@ async def list_rooms():
         {
             "enabled": True,
             "max": config.LIVE_MAX_CONCURRENT,
-            "rooms": [
-                {
-                    "id": r,
-                    "title": str((st.get(r) or {}).get("title") or ""),
-                    "person": str((st.get(r) or {}).get("person") or ""),
-                    "live": bool((st.get(r) or {}).get("live")),
-                    "hls": f"/api/live/hls/{r}/index.m3u8",
-                }
-                for r in rooms()
-            ],
+            "rooms": [_card(r, st.get(r) or {}) for r in rooms()],
         }
     )
 
