@@ -339,10 +339,10 @@ index 0000000..48e88c5
 +});
 diff --git a/tests/unit/cli-engine-sessions.test.ts b/tests/unit/cli-engine-sessions.test.ts
 new file mode 100644
-index 0000000..01d792e
+index 0000000..4b38840
 --- /dev/null
 +++ b/tests/unit/cli-engine-sessions.test.ts
-@@ -0,0 +1,125 @@
+@@ -0,0 +1,181 @@
 +/**
 + * 会话列表与回放 —— 读的是**别人的磁盘格式**。
 + *
@@ -466,6 +466,62 @@ index 0000000..01d792e
 +	it("目录不存在时返回空", async () => {
 +		const { listCodexSessions } = await import("../../server/cli/sessions.js");
 +		expect(listCodexSessions("/no/such/dir")).toEqual([]);
++	});
++});
++
++/**
++ * codex 的 rollout 行 —— 形状全是从生产 pod 的真文件抓的 (2026-09-12)。
++ *
++ * 这一组是**端到端体检抓出来的漏网之鱼**: 列表那条用例只数了条数没看内容, 于是
++ * "每条都取到空串"一直没人发现 —— 列表里全是"(无标题)", 回放 0 条, 搜索搜不到。
++ * 判据从此落在**正文**上。
++ */
++describe("codex 会话: 正文块名与前言过滤", () => {
++	const META = {
++		timestamp: "2026-09-12T06:02:58.368Z",
++		type: "session_meta",
++		payload: { session_id: "sess-1", id: "sess-1", cwd: "" },   // cwd 在用例里填
++	};
++	const line = (o: unknown) => JSON.stringify(o);
++
++	/** 写进本文件公用的假 HOME (beforeEach 已经把 node:os 的 homedir mock 到它)。 */
++	function writeRollout(lines: string[]): void {
++		const dir = join(home, ".codex", "sessions", "2026", "09", "12");
++		mkdirSync(dir, { recursive: true });
++		writeFileSync(join(dir, "rollout-2026-09-12T06-02-58-sess-1.jsonl"), lines.join("\n") + "\n", "utf8");
++	}
++
++	it("input_text / output_text 是正文 —— 只认 text 的话全是空串", async () => {
++		META.payload.cwd = work;
++		writeRollout([
++			line(META),
++			// 真文件里每轮开头这两条是**给模型看的**, 不该出现在界面上。
++			line({ type: "response_item", payload: { type: "message", role: "developer", content: [{ type: "input_text", text: "<sk>系统指令</sk>" }] } }),
++			line({ type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: "<environment_context>cwd=x</environment_context>" }] } }),
++			line({ type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: "帮我跑一下测试" }] } }),
++			line({ type: "response_item", payload: { type: "reasoning", summary: [{ type: "summary_text", text: "先看看仓库" }] } }),
++			line({ type: "response_item", payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: "跑完了, 全过" }] } }),
++		]);
++		const { replayCodexSession, listCodexSessions, searchSessions } = await import("../../server/cli/sessions.js");
++
++		const msgs = replayCodexSession(work, "sess-1");
++		const texts = msgs.map((m) => (m.content[0] as { text?: string }).text);
++		expect(texts).toContain("帮我跑一下测试");
++		expect(texts).toContain("跑完了, 全过");
++		// 前言与 developer 指令不许进界面
++		expect(texts.join("|")).not.toContain("environment_context");
++		expect(texts.join("|")).not.toContain("系统指令");
++		// 推理也要回放出来 (thinking 块)
++		expect(msgs.some((m) => (m.content[0] as { type?: string }).type === "thinking")).toBe(true);
++
++		// 列表里的首条消息不能是"(无标题)"
++		const list = listCodexSessions(work);
++		expect(list[0]?.firstMessage).toBe("帮我跑一下测试");
++
++		// 搜得到
++		const hits = searchSessions("codex", work, "全过");
++		expect(hits).toHaveLength(1);
++		expect(hits[0]!.anchors.length).toBeGreaterThan(0);
 +	});
 +});
 diff --git a/tests/unit/cli-engine-wiring.test.ts b/tests/unit/cli-engine-wiring.test.ts

@@ -415,10 +415,10 @@ index 0000000..8e57609
 +}
 diff --git a/server/cli/cli-session.ts b/server/cli/cli-session.ts
 new file mode 100644
-index 0000000..e19f7e1
+index 0000000..fb291c8
 --- /dev/null
 +++ b/server/cli/cli-session.ts
-@@ -0,0 +1,588 @@
+@@ -0,0 +1,591 @@
 +/**
 + * cli-session.ts —— 第三个引擎的会话对象 (PI_WEB_ENGINE=claude|codex)。
 + *
@@ -598,7 +598,10 @@ index 0000000..e19f7e1
 +		// codex 的 base_url/wire_api 只能从 config.toml 读, 给不了 env —— 每轮
 +		// 重写一次, 因为型号是按次可换的, 而 config 里钉着当前这个。
 +		// (开机时也写过一次, 为的是终端里的 codex —— 见 gateway.writeCodexConfig。)
-+		if (this.spec.id === "codex") writeCodexConfig(this.model);
++		// 型号还没定过时 (前端只在打开面板时才发 list_models) **别写空的进去** ——
++		// config.toml 里 `model = ""` 会让 codex 回落到它自己的内置默认, 而那个
++		// 名字不在我们的在售目录里, 网关只会回 404。
++		if (this.spec.id === "codex") writeCodexConfig(this.model || DEFAULT_MODEL.codex);
 +		// 这一轮开始前拍一次监听端口 —— 跑完再拍一次, 差集就是它留下的后台服务。
 +		this.bg.snapshotBefore();
 +		const child = spawn(this.spec.id, argv, { cwd: this.cwd, env: childEnv(this.spec.id, this.model) });
@@ -1165,10 +1168,10 @@ index 0000000..ad6ae64
 +}
 diff --git a/server/cli/sessions.ts b/server/cli/sessions.ts
 new file mode 100644
-index 0000000..09a3635
+index 0000000..70bd020
 --- /dev/null
 +++ b/server/cli/sessions.ts
-@@ -0,0 +1,304 @@
+@@ -0,0 +1,323 @@
 +/**
 + * sessions.ts —— 从 CLI 自己的会话存储里读历史（列表 + 回放）。
 + *
@@ -1199,6 +1202,12 @@ index 0000000..09a3635
 + *  也别让搜索框转半天 (前端只拿第一条做跳转)。 */
 +const SEARCH_ANCHORS_MAX = 20;
 +const SEARCH_SESSIONS_MAX = 50;
++/** 算"正文"的块类型。见 blocksText 的注释 —— 两个 CLI 的叫法不一样。 */
++const TEXT_BLOCK_TYPES = new Set(["text", "input_text", "output_text"]);
++/** codex 每轮开头会塞两条**给模型看的**上下文: role=developer 的指令, 以及
++ *  role=user 但正文是 `<environment_context>…` 的环境说明。回放里要滤掉 ——
++ *  它们不是人说的话, 摆在界面上就是一大坨 XML 顶在最前面。 */
++const CODEX_PREAMBLE = /^\s*<(environment_context|user_instructions|sk)/;
 +
 +export function claudeProjectDir(cwd: string): string {
 +	// **必须先 realpath。** macOS 上 /tmp 是指向 /private/tmp 的软链: claude 按
@@ -1231,11 +1240,18 @@ index 0000000..09a3635
 +}
 +
 +/** block 数组 → 纯文本, 用于列表上那行标题。 */
++/** 会话行里的正文块 -> 文本。
++ *
++ * **三种块名都要认。** claude 用 `text`, 而 codex 的 rollout 里是
++ * `input_text`(用户侧) / `output_text`(助手侧) —— 只认 `text` 的话 codex 那边
++ * 每条都取到空串: 列表里全是"(无标题)", 回放是 0 条, 搜索自然也搜不到。
++ * 2026-09-12 端到端体检才发现, 因为列表那条用例只数了条数没看内容。
++ */
 +function blocksText(content: unknown): string {
 +	if (typeof content === "string") return content;
 +	if (!Array.isArray(content)) return "";
 +	return content
-+		.filter((c: any) => c?.type === "text" && typeof c.text === "string")
++		.filter((c: any) => TEXT_BLOCK_TYPES.has(c?.type) && typeof c.text === "string")
 +		.map((c: any) => c.text)
 +		.join("")
 +		.trim();
@@ -1328,7 +1344,12 @@ index 0000000..09a3635
 +			const role = item?.role ?? item?.message?.role;
 +			if (role !== "user" && role !== "assistant") continue;
 +			count++;
-+			if (!first && role === "user") first = blocksText(item.content ?? item.message?.content).slice(0, 120);
++			if (!first && role === "user") {
++				// 标题要取**人问的第一句**, 不是 codex 塞在前面给模型看的环境说明
++				// —— 否则左栏每条都叫 `<environment_context>…`。
++				const t = blocksText(item.content ?? item.message?.content);
++				if (t && !CODEX_PREAMBLE.test(t)) first = t.slice(0, 120);
++			}
 +		}
 +		let modified = 0;
 +		try {
@@ -1436,9 +1457,10 @@ index 0000000..09a3635
 +			}
 +			continue;
 +		}
-+		if (role !== "user" && role !== "assistant") continue;
++		if (role !== "user" && role !== "assistant") continue;   // developer 是给模型看的
 +		const text = blocksText(item.content ?? item.message?.content);
 +		if (!text.trim()) continue;
++		if (role === "user" && CODEX_PREAMBLE.test(text)) continue;
 +		msgs.push({
 +			id: `${role === "user" ? "u" : "a"}-replay-${seq++}`,
 +			role,
