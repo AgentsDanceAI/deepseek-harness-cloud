@@ -294,13 +294,21 @@ def _spec_fingerprint(product: products.Product) -> str:
     2026-08-30 给 Hermes 加一个 env 时踩到: 改完部署完, 症状一模一样, 白查了
     十分钟才想到实例根本没重建。
 
-    密钥/令牌这类每用户的东西不在这里 (它们是占位符, 到 create 时才替换),
-    所以同一份规格对所有用户得到同一个指纹。
+    密钥/令牌这类每用户的东西不在这里 (env_for 拿空令牌/空密钥算, 它们到 create 时
+    才用真值), 所以同一份规格对所有用户得到同一个指纹。
+
+    ⚠️ env 是 2026-09-13 补进来的 —— 上面那段说的就是 env, 而 env 恰恰**不在**里面:
+    改 env_for 部署完, 已存在的工作台照旧跑旧 env, 不重建、不提示。补它的由头是终端里
+    /model 菜单改成按在售目录生成 (products._claude_menu_env): 菜单在 env 上, 不进指纹
+    就等于"改了目录也只有新开的工作台看得见"。代价是 env 一变所有人的实例下次打开时
+    重建一次 —— 与改启动脚本同一个代价, 数据在 NAS 上不受影响。
     """
     import dataclasses
 
     spec = (
         products.boot_script(product.id),
+        # 空令牌/空密钥: 要的是"这个产品的 env 长什么样", 不是"这个用户的 env"。
+        sorted(products.env_for(product.id, "", "").items()),
         product.image_ref or product.image,
         product.port,
         [dataclasses.astuple(sc) for sc in product.sidecars],

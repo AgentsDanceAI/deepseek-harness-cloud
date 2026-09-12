@@ -604,6 +604,29 @@ def test_spec_fingerprint_covers_more_than_the_boot_script():
     assert workspace._spec_fingerprint(dataclasses.replace(prod, init_containers=(ic,))) != base
 
 
+def test_spec_fingerprint_covers_the_main_container_env(monkeypatch):
+    """**主容器的 env 也要进指纹** —— 上面那条说的就是 env, 而它当初只补了伴随容器。
+
+    2026-09-13 补: claude-code 那格终端里 `/model` 菜单是按在售目录生成的一组 env
+    (products._claude_menu_env)。env 不进指纹的话, 改完目录部署完, 已存在的工作台
+    照旧跑旧菜单 —— 不重建、不提示, 与 2026-08-30 Hermes 那次一模一样。
+
+    同时钉住"指纹不跟人走": env_for 拿空令牌算, 否则每个用户一个指纹, 谁开谁重建。
+    """
+    from app import products as _p
+    from app import workspace
+
+    prod = _p.registry()[_p.DEFAULT]
+    base = workspace._spec_fingerprint(prod)
+    real = _p.env_for
+
+    monkeypatch.setattr(_p, "env_for", lambda pid, tok, sec="": {**real(pid, tok, sec), "NEW": "1"})
+    assert workspace._spec_fingerprint(prod) != base, "改主容器 env 不触发重建 -> 线上静默跑旧 env"
+
+    monkeypatch.setattr(_p, "env_for", lambda pid, tok, sec="": {"TOKEN": tok, "SECRET": sec})
+    assert workspace._spec_fingerprint(prod) == workspace._spec_fingerprint(prod), "指纹不稳定"
+
+
 def test_smtp_rejection_is_a_client_error_not_a_500():
     """Email codes are the primary sign-in path. A provider rejecting the
     recipient (bad domain, suppression list) is not a bug in our code, and

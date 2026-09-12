@@ -1481,7 +1481,7 @@ def _cli_slot_image(product_id: str = "codex") -> str:
     return config.OPENMANUS_CLI_IMAGE_REF if product_id == "openmanus" else config.CLI_WORKSPACE_IMAGE_REF
 
 
-def _cli_slot_boot() -> str:
+def _cli_slot_boot(product_id: str = "") -> str:
     """两个外壳的启动方式完全不同, **启动脚本也必须跟着开关走**。
 
     agentui 是 Python (`exec uvicorn app.main:app`), pi-web-ui 是 Node
@@ -1491,14 +1491,20 @@ def _cli_slot_boot() -> str:
     2026-09-11 切换时就是这么炸的: 镜像/端口/env 三样都换了, 漏了这第四样。
 
     pi-web-ui 那格 (_pi_boot) 的开机三件事这里也要做: /workspace 建成 git 仓库
-    (Git 面板要有仓库才有东西看), 目录属主交给运行用户。**不写任何配置文件** ——
+    (Git 面板要有仓库才有东西看), 目录属主交给运行用户。**不写 config.toml** ——
     codex 的 config.toml 由引擎自己按用户令牌写 (server/cli/gateway.ts)。
+
+    codex 那格多一件: 写 ~/.codex/models_cache.json 把 /model 菜单换成在售目录
+    (见 _codex_menu_script)。它与 config.toml 是两个文件, 引擎每轮重写 config.toml
+    时碰不到它。claude 那格的菜单走环境变量 (见 _claude_menu_env), 不用开机脚本。
     """
+    menu = _codex_menu_script() if product_id == "codex" else ""
     return (
         "set -e\n"
-        "mkdir -p /workspace /root/.pi-web\n"
+        "mkdir -p /workspace /root/.pi-web /root/.codex\n"
         "cd /workspace && (git rev-parse --git-dir >/dev/null 2>&1 || git init -q) || true\n"
-        "cd /srv\n"
+        + menu
+        + "cd /srv\n"
         "exec node dist/server/index.js\n"
     )
 
@@ -1905,6 +1911,102 @@ def _codecli_boot(product_id: str) -> str:
         f"exec code-server --auth none --bind-addr 0.0.0.0:{CODECLI_PORT} /workspace\n"
     )
     return "".join(out)
+
+
+#: claude 的 /model 菜单只有这几个**槽**, 每个槽可以被环境变量重新指向任意型号
+#: (claude 2.1.193 实测)。槽是固定的四个别名 + 一个追加项, **不是**可以无限加的列表。
+#: 顺序是 CLI 定的 (菜单里 Opus 行在 Fable 行前面), 我们只决定每个槽指向谁。
+#: ⚠️ 一个槽不设, 菜单里那一行就退回 CLI 自带的 Anthropic 牌名 (Haiku 4.5 之类),
+#:    而那些名字不在我们的在售目录里 —— 点一下就是网关 404。所以**四个槽都要设满**。
+_CLAUDE_MENU_SLOTS = ("SONNET", "OPUS", "FABLE", "HAIKU")
+
+
+def _menu_models(provider: str) -> list[dict]:
+    """在售目录里某一家的型号, 按倍率从便宜到贵。空目录时返回空 —— 调用方要能接受。"""
+    got = [m for m in model_catalog.catalog().values() if str(m.get("provider", "")) == provider]
+    return sorted(got, key=lambda m: (float(m.get("multiplier") or 0), m["id"]))
+
+
+def _menu_label(m: dict) -> tuple[str, str]:
+    """菜单上那一行的标题与说明。
+
+    说明里写**积分倍率**而不是美元: 用户在这一格花的是积分, 而 CLI 自己印的那句
+    "$5/$25 per Mtok" 是 Anthropic 的牌价, 与我们无关 (改不掉, 只出现在"默认"那一行)。
+    """
+    mult = float(m.get("multiplier") or 0)
+    return str(m.get("display_name") or m["id"]), f"{mult:g} 倍积分 · AI Store 在售"
+
+
+def _claude_menu_env() -> dict[str, str]:
+    """claude-code 那格终端里 /model 菜单的四个槽。
+
+    **不是接线, 是菜单。** 接线 (base_url / 令牌 / 默认型号) 由镜像里的 terminalEnv()
+    给, 这里给的只是"菜单上列哪几个型号"——两者互不覆盖 (实测: ANTHROPIC_MODEL 的优先级
+    高于这些槽, 所以默认型号不会被这里改掉)。加在容器 env 上就行, **不用重建镜像**:
+    terminalEnv 是 `{...process.env}` 展开的, 只覆盖它自己那五个键。
+
+    槽位分配按倍率: 最便宜的进 SONNET (它也是 CLI 心里的"日常档"), 最贵的进 FABLE,
+    中间的进 OPUS。HAIKU 这一档我们没有对等物 —— 指向最便宜的那个, 因为**留空的后果是
+    菜单里留一行点了必 404 的 "Haiku 4.5"**, 而重复一行至少是能用的。
+    ⚠️ "默认(推荐)"那一行跟着 OPUS 槽走 (不是跟 ANTHROPIC_MODEL): 点它 = 用中间那档。
+    """
+    ms = _menu_models("Anthropic")
+    if not ms:
+        return {}
+    cheap, dear, mid = ms[0], ms[-1], ms[len(ms) // 2]
+    env: dict[str, str] = {}
+    for slot, m in (("SONNET", cheap), ("OPUS", mid), ("FABLE", dear), ("HAIKU", cheap)):
+        name, desc = _menu_label(m)
+        env[f"ANTHROPIC_DEFAULT_{slot}_MODEL"] = m["id"]
+        env[f"ANTHROPIC_DEFAULT_{slot}_MODEL_NAME"] = name
+        env[f"ANTHROPIC_DEFAULT_{slot}_MODEL_DESCRIPTION"] = desc
+    return env
+
+
+def _codex_menu_script() -> str:
+    """codex 那格终端里 /model 菜单的接管, 写成开机脚本的一段。
+
+    codex 没有任何"设型号"的环境变量, 型号清单是**烧在二进制里的**(实测 10 条, 其中
+    5 条可见: 我们在售的 sol/terra/luna + 我们**不卖**的 gpt-5.5 与 gpt-5.2)。唯一的
+    杠杆是 ~/.codex/models_cache.json —— codex 起来先读它, 读到就整份替换内置清单。
+    两道闸都要踩准 (实测): `client_version` 必须**逐字**等于 codex 版本号, `fetched_at`
+    过 300 秒就作废整份 —— 所以取版本号靠 `codex --version` 现问 (镜像升级自动跟上),
+    时间写成很远的将来 (永久新鲜, codex 也就不会回头覆盖它)。
+
+    ⚠️ 清单是在**用户自己的容器里**用 codex 自带的 `codex debug models --bundled` 现取
+    再过滤的 —— 我们只注入"卖哪几个 + 倍率文案"。不把 OpenAI 那份内置目录 (每条都带
+    它整份系统提示词) 抄进我们的仓库或镜像。
+    ⚠️ 只做**过滤与改文案**, 不新增二进制里没有的型号: 往里加非 OpenAI 的型号要连
+    base_instructions 一起编, 而那条路还没验过 (千面的 responses 面收不收 claude-*
+    这类 id, 我们没实测)。
+    """
+    sell = {m["id"]: _menu_label(m)[1] for m in _menu_models("OpenAI")}
+    if not sell:
+        return ""
+    return (
+        "python3 - <<'DSHMENU' || true\n"
+        "import json, subprocess\n"
+        f"SELL = {sell!r}\n"
+        "raw = subprocess.run(['codex','debug','models','--bundled'], capture_output=True, text=True)\n"
+        "ver = subprocess.run(['codex','--version'], capture_output=True, text=True).stdout.split()[-1]\n"
+        "d = json.loads(raw.stdout)\n"
+        "ms = d['models'] if isinstance(d, dict) else d\n"
+        "out = []\n"
+        "for m in ms:\n"
+        "    m = dict(m)\n"
+        "    tag = SELL.get(m.get('slug'))\n"
+        "    if tag:\n"
+        "        m['visibility'] = 'list'\n"
+        "        m['description'] = tag + ' — ' + str(m.get('description') or '')\n"
+        "    else:\n"
+        "        m['visibility'] = 'hide'\n"
+        "    out.append(m)\n"
+        "if not [m for m in out if m['visibility'] == 'list']:\n"
+        "    raise SystemExit(0)\n"
+        "json.dump({'fetched_at': '2099-01-01T00:00:00Z', 'client_version': ver, 'models': out},\n"
+        "          open('/root/.codex/models_cache.json','w'), ensure_ascii=False)\n"
+        "DSHMENU\n"
+    )
 
 
 def _codecli_model(product_id: str) -> str:
@@ -3173,7 +3275,7 @@ def boot_script(product_id: str) -> str:
     # claude-code / codex 两格的启动方式跟着外壳开关走 —— 见 _cli_slot_boot 里
     # 那段 exitCode 127 的教训。
     if product_id in _AGENTUI_SLOTS and config.USE_CLI_WORKSPACE:
-        return _cli_slot_boot()
+        return _cli_slot_boot(product_id)
     if product_id == "openmanus" and config.USE_CLI_WORKSPACE:
         return _openmanus_cli_boot()
     builder = _BOOTS.get(product_id)
@@ -3378,6 +3480,10 @@ def env_for(product_id: str, token: str, secret: str = "") -> dict[str, str]:
             # 放在容器 env 而不是镜像里: childEnv/terminalEnv 都是 ...process.env
             # 展开的, 引擎子进程与 [终端] 里的 claude 一并拿到; 不用重建镜像。
             "IS_SANDBOX": "1",
+            # 终端里 /model 菜单列在售目录 (见 _claude_menu_env)。**这不是接线** ——
+            # 接线仍然只有 DSH_GATEWAY_BASE/DSH_CLOUD_TOKEN 那一套, 这几个只决定
+            # "菜单上列哪几个型号", 同一条路上的守护测试钉着这个区分。
+            **(_claude_menu_env() if product_id == "claude-code" else {}),
         }
     if product_id in _AGENTUI_SLOTS:
         cli, enabled = _AGENTUI_SLOTS[product_id]
