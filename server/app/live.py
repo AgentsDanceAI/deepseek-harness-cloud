@@ -610,8 +610,9 @@ async def _compose_reply(comment: str, bill_to: str, device_id: str = "", person
 
     async def _once():
         async with httpx.AsyncClient(timeout=httpx.Timeout(config.LIVE_REPLY_BUDGET_S, connect=5.0)) as c:
-            return await c.post(config.UPSTREAM_BASE_URL.rstrip("/") + "/chat/completions",
-                                json=payload, headers=headers)
+            return await c.post(
+                config.UPSTREAM_BASE_URL.rstrip("/") + "/chat/completions", json=payload, headers=headers
+            )
 
     # **对冲请求** (09-12): 同一条请求实测 1.9s / 4.9s / 20.8s —— 中位数很快, 尾巴很长,
     # 而尾巴来自上游按请求轮询几家供应商, 撞上慢的那家就是二十秒。弹幕回复等二十秒
@@ -714,8 +715,14 @@ async def say(body: dict, user: dict = Depends(resolve_user)):
     t2 = time.monotonic()
     await _gpu("POST", f"/rooms/{room}/interject", room, json={"text": spoken[:600]})
     # 弹幕"慢"的账要能查: 每一段各花了多久。
-    log.info("[live] say %s/%s: 准备 %.2fs 模型 %.2fs 插播 %.2fs", room, mode,
-             t2 - t0 - t_model, t_model, time.monotonic() - t2)
+    log.info(
+        "[live] say %s/%s: 准备 %.2fs 模型 %.2fs 插播 %.2fs",
+        room,
+        mode,
+        t2 - t0 - t_model,
+        t_model,
+        time.monotonic() - t2,
+    )
     return JSONResponse({"ok": True, "room": room, "comment": text, "spoken": spoken[:600], "mode": mode})
 
 
@@ -1104,8 +1111,13 @@ async def _maybe_reply(cid: str, text: str, room: str) -> bool:
             spoken = _SAFE_FALLBACK
         t2 = time.monotonic()
         await _gpu("POST", f"/rooms/{room}/interject", room, json={"text": spoken})
-        log.info("[live] 回评 %s: 查状态 %.2fs 模型 %.2fs 插播 %.2fs", room,
-                 t_status, t_model, time.monotonic() - t2)
+        log.info(
+            "[live] 回评 %s: 查状态 %.2fs 模型 %.2fs 插播 %.2fs",
+            room,
+            t_status,
+            t_model,
+            time.monotonic() - t2,
+        )
     except Exception as e:  # noqa: BLE001
         _LAST_REPLY_AT[room] = 0.0  # 没说成就把位子让出来
         log.warning("[live] 自动回评失败: %s", type(e).__name__)
