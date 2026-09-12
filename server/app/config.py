@@ -120,11 +120,11 @@ ZHIPU_SEARCH_BASE = _env("ZHIPU_SEARCH_BASE", "https://open.bigmodel.cn/api/paas
 # x-api-key 打过去 200, 返回原生 content 块)。
 UPSTREAM_ANTHROPIC_BASE = _env("UPSTREAM_ANTHROPIC_BASE", "") or UPSTREAM_BASE_URL
 
-# 带**预算**的 thinking (`type=enabled`) 的 claude 请求, 转发时换到上游的
-# `<型号>-thinking` 上 —— 那是上游的通道选择器, 落到收这种写法的那一路。
-# Bedrock 那路只认 adaptive, 实测老形状 6/8, 换名后 6/6 且全落直连 Anthropic。
-# **不是给 Claude Code 修的**: 它真发的是 adaptive (2026-09-12 抓包更正), 这条
-# 对它不触发; 它会栽的是某一路拒 context_management, 那个由 400 兜底重试管。
+# 要 thinking 的 claude 请求 (adaptive 或 enabled), 转发时换到上游的
+# `<型号>-thinking` 上 —— 那是上游的通道选择器。管两件事: 不被 Bedrock 拒,
+# **以及真的能拿到思考正文**。实测 (流式, 每格 4 发): 平的 claude-sonnet-5
+# adaptive 0~1/4、enabled 1/4; `-thinking` 两种都 4/4 (369~677 字)。
+# 关掉它 = 界面上"思考"那一档永远是空的。
 # **拿单价换稳定**: 直连通常比 Bedrock 贵; 账按牌名记, 用户侧价格不变。
 # 关掉它就退回原样转发, 那时靠 400 之后削平 body 重试一次兜底 (语义会降级)。
 ANTHROPIC_PIN_THINKING_CHANNEL = _env_bool("ANTHROPIC_PIN_THINKING_CHANNEL", True)

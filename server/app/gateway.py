@@ -610,15 +610,15 @@ def _is_web_search(body: object) -> bool:
 #: 的那路 (实测 6/6 全落直连 Anthropic)。我们据此选**型号名**, 不去改用户的 body
 #: —— 改 body 会动语义 (adaptive = 把 budget_tokens 丢掉改由模型自己定)。
 #:
-#: **别把这条当成"给 Claude Code 修的"。** 2026-09-12 更正: Claude Code 2.1.193
-#: 真发的是 `thinking:{"type":"adaptive"}` + `output_config:{"effort":…}` (本地
-#: sink 抓的), **不是** enabled —— 我上一版是拿 Bedrock 的报错反推的, 而那条报错
-#: 其实来自我自己手搓的重放 body。实测 (每组 8 发, 直打上游):
-#:     真客户端形状 (adaptive+cm+oc)  8/8   三家都收
-#:     老形状       (enabled+cm+oc)   6/8   2 发栽在 Bedrock
-#: 所以这条钉通道**对 Claude Code 不触发**, 它救的是"带预算 thinking"的那类调用方
-#: (旧版客户端 / 自己拼 body 的)。Claude Code 那边真正会栽的是某一路拒
-#: context_management, 兜底的 400 重试管那个。
+#: 这条**同时管两件事**, 都是实测出来的:
+#:   1. 不 400 —— 带预算的 thinking 在 Bedrock 那路会被拒 (老形状 6/8);
+#:   2. **有思考正文** —— 这才是它对 Claude Code 的意义。
+#: 2026-09-12 按型号 × thinking 类型重量了一遍 (直打上游, 流式, 每格 4 发):
+#:     claude-sonnet-5            adaptive 0~1/4   enabled 1/4 (最多 70 字)
+#:     claude-sonnet-5-thinking   adaptive 4/4     enabled 4/4  (369~677 字)
+#: 平的型号基本不给思考正文, `-thinking` 那条**不管哪种 type 都给**。而 Claude Code
+#: 每轮发的是 adaptive —— 所以判据必须把 adaptive 算进去 (上一版只认 enabled,
+#: 对真客户端从未触发, 症状就是"思考: 高设了却一个字都没有")。
 #:
 #: **计费不受影响**: 账按牌名 (parsed["model"]) 记, 这里换的只是转发给上游的名字。
 #: 成本会受影响 —— 直连 Anthropic 通常比 Bedrock 贵, 这是拿稳定换单价。
@@ -626,15 +626,27 @@ _THINKING_SUFFIX = "-thinking"
 
 
 def _wants_thinking(parsed: object) -> bool:
-    """请求要的是**带预算的** thinking (Claude Code 每轮都带)。
+    """请求要不要 thinking —— **adaptive 与 enabled 一视同仁**。
 
-    只认 `enabled`: `adaptive` 那家家都收, 不用换路; 没有 thinking 的普通请求
-    更不该被挪到贵的那条路上去。
+    2026-09-12 更正 (老板一句"claude-fable-5-thinking 是不是有问题, 换成
+    claude-fable-5 呢"问出来的): 上一版这里只认 `enabled`, 理由是"adaptive 家家
+    都收, 不用换路"。那个理由只看了**会不会 400**, 没看**给不给思考正文**。
+    重新按型号 × thinking 类型量了一遍 (直打上游, 流式, 每格 4 发):
+
+        型号                      adaptive          enabled
+        claude-sonnet-5           0~1/4             1/4 (最多 70 字)
+        claude-sonnet-5-thinking  4/4 (369~564字)   4/4 (407~677字)
+
+    `-thinking` 那条通道**不管哪种 type 都给**, 平的那个基本不给。而 Claude Code
+    每轮发的正是 adaptive —— 所以上一版的钉通道对真客户端从未触发过, 用户看到的
+    就是"思考: 高设了却一个字都没有"。
+
+    没有 thinking 字段的普通请求仍然不挪 (那是白多花钱)。
     """
     if not isinstance(parsed, dict):
         return False
     t = parsed.get("thinking")
-    return isinstance(t, dict) and t.get("type") == "enabled"
+    return isinstance(t, dict) and t.get("type") in ("enabled", "adaptive")
 
 
 def _pin_thinking_channel(upstream_model: str, parsed: object) -> str:

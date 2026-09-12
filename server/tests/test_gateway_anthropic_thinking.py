@@ -181,7 +181,6 @@ async def test_billing_still_uses_the_shelf_name(gw, monkeypatch):
 @pytest.mark.parametrize(
     ("body", "why"),
     [
-        (_cc_body(thinking={"type": "adaptive"}), "adaptive 家家都收, 不用挪到贵的那路"),
         ({"model": "claude-sonnet-5", "max_tokens": 8, "messages": []}, "没 thinking 的普通请求"),
         (_cc_body(model="gpt-5.6-luna"), "非 claude 系没有这个后缀约定"),
         (_cc_body(model="claude-sonnet-5-thinking"), "已经是了, 别加两遍"),
@@ -197,10 +196,19 @@ async def test_only_budgeted_thinking_claude_requests_are_moved(gw, monkeypatch,
 
 
 @pytest.mark.asyncio
-async def test_real_claude_code_body_is_not_moved(gw, monkeypatch):
-    """**真客户端的形状不该被挪走。** Claude Code 2.1.193 发的是 adaptive, 三家
-    上游都收 (实测 8/8) —— 把它也钉到直连去只是白白多花钱。这条用例同时是上一版
-    判断失误的留痕: 那时我按 Bedrock 的报错反推, 以为客户端发的是 enabled。"""
+async def test_real_claude_code_body_is_moved(gw, monkeypatch):
+    """**真客户端的形状必须被钉过去** —— 否则界面上"思考"那一档永远是空的。
+
+    这条用例翻过一次面, 留痕在这儿: 上一版它叫 `..._is_not_moved`, 理由是
+    "adaptive 三家都收, 挪过去只是白花钱"。那个理由只看了**会不会 400**, 没看
+    **给不给思考正文**。2026-09-12 按型号 × thinking 类型重量 (直打上游, 流式,
+    每格 4 发):
+
+        claude-sonnet-5            adaptive 0~1/4   enabled 1/4 (最多 70 字)
+        claude-sonnet-5-thinking   adaptive 4/4     enabled 4/4 (369~677 字)
+
+    平的那个基本不给, `-thinking` 两种都给。而 Claude Code 每轮发的正是 adaptive。
+    """
     client = _Client([_Resp(200, {"usage": {}})])
     _install(monkeypatch, client)
 
@@ -214,7 +222,9 @@ async def test_real_claude_code_body_is_not_moved(gw, monkeypatch):
     }
     await gateway.anthropic_messages(_request(real), gw["user"])
 
-    assert client.sent[0]["model"] == "claude-sonnet-5"
+    assert client.sent[0]["model"] == "claude-sonnet-5-thinking"
+    # body 其余部分照旧不动 —— 我们换的是通道, 不是用户要的语义。
+    assert client.sent[0]["thinking"] == {"type": "adaptive"}
 
 
 @pytest.mark.asyncio
