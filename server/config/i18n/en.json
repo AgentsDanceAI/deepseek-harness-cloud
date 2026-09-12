@@ -732,7 +732,7 @@
   "live.watch": "Watch",
   "live.all_rooms": "All rooms",
   "live.which_room": "Editing room",
-  "live.too_many": "At most {max} rooms can broadcast at once. Live now: {rooms}. Stop one before starting this one — every live room holds an avatar session even while replaying from cache, so an extra room never gets a stream and pushes real avatar callers into the queue.",
+  "live.too_many": "At most {max} rooms can broadcast at once. Live now: {rooms}. Stop one before starting this one — the cap keeps rooms from recording their first pass or answering comments all at once and starving each other.",
   "live.sub": "The face, the voice and the lip sync all come from our own models — no third-party watermark.",
   "live.online": "LIVE",
   "live.offline": "Off air",
