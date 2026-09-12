@@ -593,29 +593,59 @@ async def _compose_reply(comment: str, bill_to: str, device_id: str = "", person
         raise HTTPException(503, "upstream_not_configured")
     model_id = model_catalog.default_model()
     entry = model_catalog.resolve(model_id) or {}
+    payload = {
+        "model": entry.get("upstream_model", model_id),
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user", "content": f"观众评论：{comment}"},
+        ],
+        # 一句话。放开了她会说成一段稿子, 而那要念上一分钟, 后面的评论全堵住。
+        "max_tokens": 160,
+        "temperature": 0.7,
+    }
+    headers = {
+        "authorization": f"Bearer {config.UPSTREAM_API_KEY}",
+        "content-type": "application/json",
+    }
+
+    async def _once():
+        async with httpx.AsyncClient(timeout=httpx.Timeout(config.LIVE_REPLY_BUDGET_S, connect=5.0)) as c:
+            return await c.post(config.UPSTREAM_BASE_URL.rstrip("/") + "/chat/completions",
+                                json=payload, headers=headers)
+
+    # **对冲请求** (09-12): 同一条请求实测 1.9s / 4.9s / 20.8s —— 中位数很快, 尾巴很长,
+    # 而尾巴来自上游按请求轮询几家供应商, 撞上慢的那家就是二十秒。弹幕回复等二十秒
+    # 观众早走了。做法: 先发一份; LIVE_REPLY_HEDGE_S 秒还没回就**再发一份**, 谁先回
+    # 用谁, 另一份取消。代价是偶尔付两次一句话的钱 (三万分之一元)。
+    # 总预算 LIVE_REPLY_BUDGET_S, 两份都超时就放弃这一条 (评论已经飘出去了, 她只是不接话)。
+    tasks = [asyncio.create_task(_once())]
+    r = None
     try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(45.0, connect=10.0)) as c:
-            r = await c.post(
-                config.UPSTREAM_BASE_URL.rstrip("/") + "/chat/completions",
-                json={
-                    "model": entry.get("upstream_model", model_id),
-                    "messages": [
-                        {"role": "system", "content": system},
-                        {"role": "user", "content": f"观众评论：{comment}"},
-                    ],
-                    # 一句话。放开了她会说成一段稿子, 而那要念上一分钟, 后面的
-                    # 评论全堵住。
-                    "max_tokens": 160,
-                    "temperature": 0.7,
-                },
-                headers={
-                    "authorization": f"Bearer {config.UPSTREAM_API_KEY}",
-                    "content-type": "application/json",
-                },
-            )
-    except httpx.HTTPError:
-        raise HTTPException(502, "upstream_unreachable") from None
-    if r.status_code != 200:
+        done, _ = await asyncio.wait(tasks, timeout=config.LIVE_REPLY_HEDGE_S)
+        if not done:
+            tasks.append(asyncio.create_task(_once()))
+            log.info("[live] 回评模型 %.0fs 未回, 已对冲第二份", config.LIVE_REPLY_HEDGE_S)
+        deadline = time.monotonic() + config.LIVE_REPLY_BUDGET_S
+        while r is None:
+            pending = [t for t in tasks if not t.done()]
+            for t in tasks:
+                if t.done() and not t.cancelled() and t.exception() is None and t.result().status_code == 200:
+                    r = t.result()
+                    break
+            if r is not None or not pending:
+                break
+            left = deadline - time.monotonic()
+            if left <= 0:
+                break
+            await asyncio.wait(pending, timeout=left, return_when=asyncio.FIRST_COMPLETED)
+    finally:
+        for t in tasks:
+            if not t.done():
+                t.cancel()
+    if r is None:
+        errs = [t.exception() for t in tasks if t.done() and not t.cancelled() and t.exception()]
+        if errs and all(isinstance(e, httpx.HTTPError) for e in errs):
+            raise HTTPException(502, "upstream_unreachable")
         raise HTTPException(502, "upstream")
     d = r.json()
     spoken = (((d.get("choices") or [{}])[0].get("message") or {}).get("content") or "").strip()
@@ -667,6 +697,8 @@ async def say(body: dict, user: dict = Depends(resolve_user)):
     mode = "chat" if str(body.get("mode", "chat")) == "chat" else "echo"
 
     spoken = text
+    t0 = time.monotonic()
+    t_model = 0.0
     if mode == "chat":
         # 也带上当前形象的人设 —— 管理员插播和观众公屏是同一个直播间的同一个人,
         # 口吻不一致观众听得出来。取不到房间配置就退回通用口径, 不能因此发不出去。
@@ -675,9 +707,15 @@ async def say(body: dict, user: dict = Depends(resolve_user)):
             person = str(cfg.get("person") or "")
         except Exception:
             person = ""
+        t1 = time.monotonic()
         spoken = await _compose_reply(text, user["id"], user.get("device_id", ""), person=person)
+        t_model = time.monotonic() - t1
 
+    t2 = time.monotonic()
     await _gpu("POST", f"/rooms/{room}/interject", room, json={"text": spoken[:600]})
+    # 弹幕"慢"的账要能查: 每一段各花了多久。
+    log.info("[live] say %s/%s: 准备 %.2fs 模型 %.2fs 插播 %.2fs", room, mode,
+             t2 - t0 - t_model, t_model, time.monotonic() - t2)
     return JSONResponse({"ok": True, "room": room, "comment": text, "spoken": spoken[:600], "mode": mode})
 
 
@@ -1053,15 +1091,21 @@ async def _maybe_reply(cid: str, text: str, room: str) -> bool:
     if int(st.get("queued") or 0) >= config.LIVE_REPLY_MAX_QUEUE:
         return False  # 她已经排到几十秒开外了
     _LAST_REPLY_AT[room] = now  # 先占位再去调模型 —— 慢的那几秒里别放第二条进来
+    t_status = time.time() - now
     try:
+        t1 = time.monotonic()
         spoken = await _compose_reply(text, _bill_account(), person=str(st.get("person") or ""))
+        t_model = time.monotonic() - t1
         hit = _claims(spoken)
         if hit:
             # 不重试: 同一个提示词刚说错过一次, 再抽一次多半还是错, 而每抽一次都
             # 在花钱, 观众还在等。直接换成安全的那句。
             log.warning("[live] 自动回评命中禁词 %r, 已换成安全兜底: %s", hit, spoken[:60])
             spoken = _SAFE_FALLBACK
+        t2 = time.monotonic()
         await _gpu("POST", f"/rooms/{room}/interject", room, json={"text": spoken})
+        log.info("[live] 回评 %s: 查状态 %.2fs 模型 %.2fs 插播 %.2fs", room,
+                 t_status, t_model, time.monotonic() - t2)
     except Exception as e:  # noqa: BLE001
         _LAST_REPLY_AT[room] = 0.0  # 没说成就把位子让出来
         log.warning("[live] 自动回评失败: %s", type(e).__name__)

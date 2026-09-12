@@ -578,6 +578,10 @@ LIVE_REPLY_COOLDOWN_S = _env_int("LIVE_REPLY_COOLDOWN_S", 12)
 #: 上游待播队列超过这么多句就先不回了。她已经排到几十秒开外, 再塞只会让话术
 #: 彻底播不出去, 而观众看到的是"她答的全是几分钟前的评论"。
 LIVE_REPLY_MAX_QUEUE = _env_int("LIVE_REPLY_MAX_QUEUE", 3)
+#: 回评模型调用: 几秒没回就再发一份对冲 / 总共最多等几秒 (见 live._compose_reply)。
+#: 09-12 实测同一请求 1.9s/4.9s/20.8s, 尾巴来自上游轮询到慢供应商; 对冲把尾巴砍到 ~5s。
+LIVE_REPLY_HEDGE_S = _env_float("LIVE_REPLY_HEDGE_S", 4.0)
+LIVE_REPLY_BUDGET_S = _env_float("LIVE_REPLY_BUDGET_S", 12.0)
 #: 观众评论的长度上限。比管理员那条 (600) 短得多 —— 公屏不是投稿箱, 而长文本
 #: 既是提示词注入的载体, 也会让她念上一分钟。
 LIVE_COMMENT_MAX_LEN = _env_int("LIVE_COMMENT_MAX_LEN", 100)
