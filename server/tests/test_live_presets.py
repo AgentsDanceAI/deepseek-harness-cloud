@@ -84,7 +84,9 @@ def test_console_offers_exactly_the_designed_pairs(monkeypatch):
 
     opts = re.findall(r'<option[^>]*data-person="([^"]+)"[^>]*data-voice="([^"]+)"', html)
     assert set(opts) == DESIGNED, f"页面上的搭配与设计不符: {opts}"
-    assert len(opts) == len(live.LIVE_PRESETS), f"渲染了 {len(opts)} 个搭配, 应该是 {len(live.LIVE_PRESETS)} 个"
+    assert len(opts) == len(live.LIVE_PRESETS), (
+        f"渲染了 {len(opts)} 个搭配, 应该是 {len(live.LIVE_PRESETS)} 个"
+    )
 
 
 def test_console_labels_are_translated(monkeypatch):
