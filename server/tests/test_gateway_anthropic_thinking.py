@@ -1,9 +1,14 @@
 """Claude Code 的 body 经 anthropic 面到底转发成什么样。
 
-2026-09-11 实测 (server/scripts/probe_anthropic_face.py, 每组 6 发): 上游中继把
-同一个牌名**按请求轮询**到好几家后端, Bedrock 那路不收 `thinking.type=enabled`
-(只认 adaptive), 而 Claude Code 每轮都带 —— `claude-sonnet-5` 原样只有 3/6 通过。
-`claude-sonnet-5-thinking` 6/6, 且 6 发全落在直连 Anthropic。
+上游中继把同一个牌名**按请求轮询**到好几家后端, 各家宽严不一。Bedrock 那路不收
+带预算的 thinking (`type=enabled`, 只认 adaptive) —— 实测老形状 6/8, 换成上游的
+`claude-sonnet-5-thinking` 后 6/6 且全落直连 Anthropic。
+
+**2026-09-12 更正**: Claude Code 2.1.193 真发的是 `thinking:{"type":"adaptive"}`
+(本地 sink 抓的), 不是 enabled —— 上一版是拿 Bedrock 的报错反推客户端行为, 猜错了。
+所以钉通道这条**对 Claude Code 不触发** (真客户端形状实测 8/8, 三家都收), 它救的是
+带预算 thinking 的那类调用方; Claude Code 会栽的是某一路拒 context_management,
+归 400 兜底重试管。下面的用例照这个事实钉。
 
 于是两层:
   主路  带 thinking 的 claude 请求, 转发时换成 `<型号>-thinking` —— **不改 body**,
@@ -31,7 +36,8 @@ os.environ.setdefault("DB_PATH", os.path.join(_TMP, "test.db"))
 
 from app import gateway  # noqa: E402
 
-#: Claude Code 2.1.x 真发的三样 (2026-09-11 本地 sink 抓的原样)。
+#: **带预算**的那种 thinking —— 钉通道这条针对的就是它 (不是 Claude Code 的形状,
+#: 真客户端发的是 adaptive, 见 test_real_claude_code_body_is_not_moved)。
 CC_EXTRAS = {
     "thinking": {"type": "enabled", "budget_tokens": 1024},
     "context_management": {"edits": [{"type": "clear_thinking_20251015", "keep": "all"}]},
@@ -188,6 +194,27 @@ async def test_only_budgeted_thinking_claude_requests_are_moved(gw, monkeypatch,
     await gateway.anthropic_messages(_request(body), gw["user"])
 
     assert client.sent[0]["model"] == body["model"], why
+
+
+@pytest.mark.asyncio
+async def test_real_claude_code_body_is_not_moved(gw, monkeypatch):
+    """**真客户端的形状不该被挪走。** Claude Code 2.1.193 发的是 adaptive, 三家
+    上游都收 (实测 8/8) —— 把它也钉到直连去只是白白多花钱。这条用例同时是上一版
+    判断失误的留痕: 那时我按 Bedrock 的报错反推, 以为客户端发的是 enabled。"""
+    client = _Client([_Resp(200, {"usage": {}})])
+    _install(monkeypatch, client)
+
+    real = {
+        "model": "claude-sonnet-5",
+        "max_tokens": 16,
+        "messages": [{"role": "user", "content": "hi"}],
+        "thinking": {"type": "adaptive"},
+        "output_config": {"effort": "high"},
+        "context_management": {"edits": [{"type": "clear_thinking_20251015", "keep": "all"}]},
+    }
+    await gateway.anthropic_messages(_request(real), gw["user"])
+
+    assert client.sent[0]["model"] == "claude-sonnet-5"
 
 
 @pytest.mark.asyncio

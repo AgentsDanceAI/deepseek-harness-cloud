@@ -37,9 +37,20 @@ import httpx
 #: Claude Code 2.1.x 真发的 body 形状 (2026-09-11 用本地 sink 抓的原样, 不是照文档编的):
 #: body keys = model,messages,system,tools,metadata,max_tokens,thinking,context_management,
 #: output_config,stream
-CC_THINKING = {"type": "enabled", "budget_tokens": 1024}
+#: **是抓来的, 不是推出来的。** 2026-09-12 更正过一次: 上一版这里写的是
+#: `{"type": "enabled", "budget_tokens": 1024}` —— 那是我从 Bedrock 的报错
+#: (`thinking.type.enabled is not supported`) **反推**的, 而那条报错其实来自我
+#: 自己手搓的重放 body。真去抓 (本地 sink + 异步 spawn) 看到的是 adaptive:
+#:   thinking          = {"type":"adaptive"}
+#:   output_config     = {"effort":"high"}     ← --effort 不传时默认 high
+#:   context_management= {"edits":[{"type":"clear_thinking_20251015","keep":"all"}]}
+#: 教训记在这儿: 拿"上游拒了什么"去猜"客户端发了什么", 猜错了整条判据就跟着错。
+CC_THINKING = {"type": "adaptive"}
 CC_CONTEXT_MANAGEMENT = {"edits": [{"type": "clear_thinking_20251015", "keep": "all"}]}
-CC_OUTPUT_CONFIG = {"effort": "medium"}
+CC_OUTPUT_CONFIG = {"effort": "high"}
+#: 带预算的那种 thinking。真客户端不发这个形状, 但**别的客户端可能发** (旧版
+#: Claude Code / 自己调 API 的), 而 Bedrock 那路明确拒它 —— 留作一个对照变体。
+LEGACY_THINKING = {"type": "enabled", "budget_tokens": 1024}
 #: 同一次抓包里的 beta 头。我们的网关目前**不转发**它 —— 留在这里是为了让 --upstream
 #: 那条路尽量贴近真实客户端。
 CC_BETA = (
@@ -50,9 +61,9 @@ CC_BETA = (
 
 #: body 变体。名字即"带了哪几样", 用来定位是哪一样把请求打掉的。
 VARIANTS: dict[str, dict] = {
-    "claude-code": {"thinking": True, "cm": True, "oc": True},  # 客户端原样
+    "claude-code": {"thinking": True, "cm": True, "oc": True},  # 抓来的客户端原样
     "no-cm": {"thinking": True, "cm": False, "oc": True},  # 去掉 context_management
-    "adaptive": {"thinking": "adaptive", "cm": False, "oc": False},  # 归一化后的样子
+    "legacy": {"thinking": "legacy", "cm": True, "oc": True},  # 带预算的老形状
     "plain": {"thinking": False, "cm": False, "oc": False},  # 什么都不带
 }
 
@@ -64,8 +75,8 @@ def build_body(model: str, variant: dict, *, stream: bool = False) -> dict:
         "stream": stream,
         "messages": [{"role": "user", "content": "reply with one word: ok"}],
     }
-    if variant["thinking"] == "adaptive":
-        body["thinking"] = {"type": "adaptive"}
+    if variant["thinking"] == "legacy":
+        body["thinking"] = dict(LEGACY_THINKING)
     elif variant["thinking"]:
         body["thinking"] = dict(CC_THINKING)
     if variant["cm"]:

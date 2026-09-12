@@ -602,17 +602,23 @@ def _is_web_search(body: object) -> bool:
     return False
 
 
-#: 上游中继把同一个牌名**按请求轮询**到好几家后端, 而它们对 Claude Code 的 body
-#: 各有各的不收。2026-09-11 用 server/scripts/probe_anthropic_face.py 实测 (每组 6 发):
+#: 上游中继把同一个牌名**按请求轮询**到好几家后端, 各家对 body 的宽严不一样。
+#: 其中 Bedrock 那路明确拒**带预算的** thinking:
+#:     ValidationException: "thinking.type.enabled" is not supported for this
+#:     model. Use "thinking.type.adaptive"
+#: 上游给这一系留了个 `-thinking` 后缀当**通道选择器**: 换成它就落到收这种写法
+#: 的那路 (实测 6/6 全落直连 Anthropic)。我们据此选**型号名**, 不去改用户的 body
+#: —— 改 body 会动语义 (adaptive = 把 budget_tokens 丢掉改由模型自己定)。
 #:
-#:   claude-sonnet-5            客户端原样   3/6   失败全是 Bedrock 的
-#:                                                 `thinking.type.enabled is not supported`
-#:   claude-sonnet-5            thinking 改 adaptive  6/6 (三家都收)
-#:   claude-sonnet-5-thinking   客户端原样   6/6   **且 6 发全落在直连 Anthropic**
-#:
-#: 所以上游那个 `-thinking` 后缀就是它给"要 thinking 就走支持 thinking 的那路"
-#: 留的选择器。我们据此选**型号名**, 而不是去改用户的 body —— 改 body 会动语义
-#: (adaptive 等于把 budget_tokens 丢掉, 改由模型自己定), 选型号一个字段都不动。
+#: **别把这条当成"给 Claude Code 修的"。** 2026-09-12 更正: Claude Code 2.1.193
+#: 真发的是 `thinking:{"type":"adaptive"}` + `output_config:{"effort":…}` (本地
+#: sink 抓的), **不是** enabled —— 我上一版是拿 Bedrock 的报错反推的, 而那条报错
+#: 其实来自我自己手搓的重放 body。实测 (每组 8 发, 直打上游):
+#:     真客户端形状 (adaptive+cm+oc)  8/8   三家都收
+#:     老形状       (enabled+cm+oc)   6/8   2 发栽在 Bedrock
+#: 所以这条钉通道**对 Claude Code 不触发**, 它救的是"带预算 thinking"的那类调用方
+#: (旧版客户端 / 自己拼 body 的)。Claude Code 那边真正会栽的是某一路拒
+#: context_management, 兜底的 400 重试管那个。
 #:
 #: **计费不受影响**: 账按牌名 (parsed["model"]) 记, 这里换的只是转发给上游的名字。
 #: 成本会受影响 —— 直连 Anthropic 通常比 Bedrock 贵, 这是拿稳定换单价。
