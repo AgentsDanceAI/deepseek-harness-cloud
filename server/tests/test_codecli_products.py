@@ -484,6 +484,24 @@ def test_openmausbot_models_go_through_our_gateway(monkeypatch):
     assert env["OMB_PUBLIC_URL"] == "https://maus.test.local", "不设它界面里的 hook 地址是 127.0.0.1"
 
 
+def test_openmanus_workspace_is_our_workspace():
+    """OpenManus 的文件必须落在文件面板看得见、且在 NAS 上的 /workspace。
+
+    它把 workspace_root 写死成 /opt/openmanus/workspace (config.toml 改不了), 还把
+    这个路径烧进了 system prompt。2026-09-12 老板实拍: 对话里说"文件已生成", 文件
+    面板空着 —— 走真对话路径让它建文件, 落在 /opt/openmanus/workspace, pod 一回收
+    就没了。启动脚本把那个目录换成指向 /workspace 的软链。
+    """
+    boot = products.boot_script("openmanus")
+    assert "ln -s /workspace /opt/openmanus/workspace" in boot, "没把 OpenManus 的工作目录接到 /workspace"
+    # 幂等: 第二次启动 (已是软链) 不能再 rm -rf 一遍 —— 那会把 NAS 上用户的文件删了。
+    assert "[ -L /opt/openmanus/workspace ] ||" in boot, "不幂等: 重启会 rm -rf 软链背后的 /workspace"
+    # 必须在服务起来之前做完 —— exec 之后就没机会了。
+    assert boot.index("ln -s /workspace /opt/openmanus/workspace") < boot.index(
+        "exec /opt/venv-ui/bin/uvicorn"
+    )
+
+
 def test_openmanus_no_longer_seeds_a_crew_project(monkeypatch):
     """OpenManus 的工作区里不该长出 crew/ —— 老板 2026-09-02: "好诡异"。
 

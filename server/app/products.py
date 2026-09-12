@@ -3104,6 +3104,18 @@ def _frameworks_boot(product_id: str) -> str:
         # 空 git 仓库, 让「版本」标签页一开始就有东西可看 (用户改了 yaml 立刻
         # 能看到 diff)。已经是仓库就不动。
         "cd /workspace && (git rev-parse --git-dir >/dev/null 2>&1 || git init -q) || true\n"
+        # **OpenManus 的工作目录必须是我们的 /workspace。** 它把 workspace_root
+        # 写死成 <仓库>/workspace (app/config.py: `WORKSPACE_ROOT = PROJECT_ROOT /
+        # "workspace"`, 属性直接返回这个常量, config.toml 里没有任何键能改), 而且
+        # 这个路径还烧进了 agent 的 system prompt —— 模型被告知"你的目录是
+        # /opt/openmanus/workspace", 于是文件全落在那儿: 容器内、不在 NAS、
+        # 文件面板 (/workspace) 看不见, pod 一回收就没了。
+        # 2026-09-12 老板实拍: 对话里说"三个核心文件均已生成", 文件面板空着;
+        # 我走真对话路径让它建 hello-openmanus.txt, 落在 /opt/openmanus/workspace。
+        # 换成软链: 模型照它的 prompt 往 /opt/openmanus/workspace 写, 实际进的是
+        # /workspace。镜像里那份 example.txt 是样例, 丢掉无妨。幂等: 已是软链就不动。
+        "[ -L /opt/openmanus/workspace ] || { rm -rf /opt/openmanus/workspace; "
+        "ln -s /workspace /opt/openmanus/workspace; }\n"
         # **回 /srv 再起**: 上一行把工作目录换到了 /workspace, 而 uvicorn 要从
         # /srv 才 import 得到 app —— 不回来就是 ModuleNotFoundError, 容器起不来
         # (agentui 那边同一处注释, 是踩过的)。
