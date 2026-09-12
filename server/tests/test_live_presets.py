@@ -33,6 +33,19 @@ DESIGNED = {
     ("chen", "yunjian"),
     ("yue", "hsiaochen"),
     ("lin", "xiaoxiao"),
+    # 09-12 按百炼音色成批开的十二套 (老板定的产品变更, 见 live.LIVE_PRESETS 的注释)。
+    ("serena", "Serena"),
+    ("momo", "Momo"),
+    ("vivian", "Vivian"),
+    ("moon", "Moon"),
+    ("maia", "Maia"),
+    ("kai", "Kai"),
+    ("katerina", "Katerina"),
+    ("sage", "Eldric Sage"),
+    ("neil", "Neil"),
+    ("bellona", "Bellona"),
+    ("vincent", "Vincent"),
+    ("nini", "Nini"),
 }
 
 

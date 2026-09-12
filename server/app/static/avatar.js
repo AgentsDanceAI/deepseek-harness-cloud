@@ -27,6 +27,20 @@
     "yue": { name: t("js.avatar.p.yue", "悦 · 干练"), voice: "hsiaochen" },
     "chen": { name: t("js.avatar.p.chen", "晨 · 沉稳"), voice: "yunjian" },
     "hao": { name: t("js.avatar.p.hao", "皓 · 阳光"), voice: "yunxi" },
+    // 09-12 按百炼音色成批开的十二套: voice 直接是百炼 qwen3-tts-flash 的系统音色 id,
+    // GPU 侧 avatar 会话里认得 (BAILIAN_VOICE_IDS)。与直播间 LIVE_PRESETS 一一对应。
+    "serena": { name: t("js.avatar.p.serena", "苏瑶 · 温柔"), voice: "Serena" },
+    "momo": { name: t("js.avatar.p.momo", "茉兔 · 俏皮"), voice: "Momo" },
+    "vivian": { name: t("js.avatar.p.vivian", "十三 · 飒"), voice: "Vivian" },
+    "moon": { name: t("js.avatar.p.moon", "月白 · 帅气"), voice: "Moon" },
+    "maia": { name: t("js.avatar.p.maia", "四月 · 知性"), voice: "Maia" },
+    "kai": { name: t("js.avatar.p.kai", "阿凯 · 治愈"), voice: "Kai" },
+    "katerina": { name: t("js.avatar.p.katerina", "卡捷琳娜 · 御姐"), voice: "Katerina" },
+    "sage": { name: t("js.avatar.p.sage", "沧明子 · 睿智"), voice: "Eldric Sage" },
+    "neil": { name: t("js.avatar.p.neil", "阿闻 · 播音"), voice: "Neil" },
+    "bellona": { name: t("js.avatar.p.bellona", "燕铮莺 · 热血"), voice: "Bellona" },
+    "vincent": { name: t("js.avatar.p.vincent", "田叔 · 江湖"), voice: "Vincent" },
+    "nini": { name: t("js.avatar.p.nini", "邻家妹妹 · 软糯"), voice: "Nini" },
   };
   /* 半双工 / 全双工。
      全双工 = 她说话时麦克风照开, 你一出声就把她打断。安静环境里这是最像打电话
