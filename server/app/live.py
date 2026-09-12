@@ -550,7 +550,8 @@ _WRITER = (
     "获奖、资质、功效承诺，以及「很多用户都说」「大家反馈」这类用户证言——这些不是"
     "文案技巧，说错了是虚假宣传。宁可只讲产品本身能做什么。\n"
     "6. 你是数字人主播，不要写任何暗示自己是真人的话。\n"
-    "7. 8 到 12 句。"
+    "7. 至少 2000 字：40 到 60 句。宁可多几句，不要少于 2000 字——话术太短一会儿就循环一遍，观众听出来了。\n"
+    "8. 内容要有推进：开场寒暄、主体分三四个小话题逐个展开、中间穿插两三次互动邀请、结尾自然收回开场。"
 )
 
 #: 模型有时仍会带上"1." "- " "**" 之类。**在服务端剥掉**, 别指望提示词能 100% 管住:
@@ -579,11 +580,12 @@ async def generate(body: dict, user: dict = Depends(resolve_user)):
             {"role": "system", "content": _WRITER},
             {"role": "user", "content": f"直播间名称：{topic}"},
         ],
-        "max_tokens": 1200,
+        # 2000 字起步 (老板 09-12): 40~60 句约 3000~4000 token, 给足余量。
+        "max_tokens": 6000,
         "temperature": 0.8,
     }
     try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(90.0, connect=10.0)) as c:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(240.0, connect=10.0)) as c:
             r = await c.post(
                 config.UPSTREAM_BASE_URL.rstrip("/") + "/chat/completions",
                 json=payload,
