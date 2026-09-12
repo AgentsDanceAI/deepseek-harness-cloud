@@ -393,7 +393,8 @@ async def cover(room: str):
         # 回一张占位图 —— 占位图会被浏览器缓存五分钟, 真封面出来了也换不掉。
         raise HTTPException(r.status_code if r.status_code in (404, 403) else 502, "upstream")
     return Response(
-        content=r.content, media_type="image/jpeg",
+        content=r.content,
+        media_type="image/jpeg",
         headers={"Cache-Control": "public, max-age=300"},
     )
 
