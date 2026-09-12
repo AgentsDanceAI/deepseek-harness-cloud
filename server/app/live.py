@@ -292,9 +292,20 @@ async def _gpu(method: str, path: str, room: str, **kw):
     传什么都只能操作自己那间。房间隔离全靠这一条, 别让房间名从请求体里进来。
     """
     try:
-        r = await _upstream().request(
-            method, f"{config.LIVE_GPU_URL}{path}", params={"token": _sign(room)}, **kw
-        )
+        try:
+            r = await _upstream().request(
+                method, f"{config.LIVE_GPU_URL}{path}", params={"token": _sign(room)}, **kw
+            )
+        except (httpx.ReadError, httpx.RemoteProtocolError, httpx.ConnectError) as e:
+            # 连接池里的长连接被对端 (Cloudflare 边缘) 悄悄关掉, 第一次拿来用就是 ReadError。
+            # 09-12 实测每二十分钟来一次, 每次把一两间房在列表页上闪成"未开播"。
+            # GET 是幂等的, 换条新连接重试一次就好; POST 不重试 (插播/开播不能重复)。
+            if method.upper() != "GET":
+                raise
+            log.info("[live] 上游连接失效 (%s), 换连接重试 GET %s", type(e).__name__, path)
+            r = await _upstream().request(
+                method, f"{config.LIVE_GPU_URL}{path}", params={"token": _sign(room)}, **kw
+            )
     except httpx.HTTPError as e:
         # GPU 节点够不着是**常态之一** (它是别人的共享机, 还跟同事的排序管线挤一张卡)。
         # 不接的话异常一路冒到框架外, 用户看到 500 加一页栈 —— 而这只是"算力那头
@@ -482,12 +493,24 @@ _LIVE_CACHE: dict[str, object] = {"at": 0.0, "data": None}
 _LIVE_TTL = 2.0
 
 
+#: room -> (拿到的时刻, 状态)。上游抖一下时拿这个顶 60 秒 —— 否则列表页上在播的房间会
+#: 闪一下"未开播" (09-12 实测: 连接池里的长连接失效, 每二十分钟一两间闪一次)。
+_LAST_GOOD: dict[str, tuple[float, dict]] = {}
+_LAST_GOOD_TTL = 60.0
+
+
 async def _room_status(room: str) -> dict:
-    """一间的状态, 拿不到就当没开播 —— 上游抖一下不该让整页报错。"""
+    """一间的状态。拿不到时 60 秒内沿用上一次拿到的; 再久就当没开播 —— 上游抖一下
+    不该让整页报错, 也不该把在播的房间闪成未开播。"""
     try:
-        return await _gpu("GET", f"/rooms/{room}/status", room)
+        d = await _gpu("GET", f"/rooms/{room}/status", room)
     except HTTPException:
+        last = _LAST_GOOD.get(room)
+        if last and time.time() - last[0] < _LAST_GOOD_TTL:
+            return dict(last[1], stale=True)
         return {"live": False, "error": "unreachable"}
+    _LAST_GOOD[room] = (time.time(), d)
+    return d
 
 
 async def _all_status() -> dict[str, dict]:
