@@ -39,21 +39,38 @@ import pathlib
 #: 终端类的判据是**敲一条命令看输出**, 不是看提示符在不在 —— 提示符在而命令跑不了
 #: 正是老板撞到的那个形状。
 USE = {
-    "openmanus": {
-        # 2026-09-02 起这一格是**工作台**, 不再是裸终端 (老板: "包类似咱们为
-        # claude 和 codex 建的前端啊")。所以这里也从敲命令改成发消息 —— 验收
-        # 要走用户真正会走的那条路。
+    # ── 三格 pi-web-ui 外壳 (claude-code / codex / openmanus, USE_CLI_WORKSPACE) ──
+    # 同一个外壳, 输入框占位符 = "给 <引擎名> 发送消息 — Enter 发送，/ 查看命令",
+    # 引擎名烧在首帧里 (Claude Code / Codex / OpenManus)。判据同 pi 那格。
+    # 失败的样子: 引擎 CLI 没接上网关 —— 对话面板回 401 / Not logged in / 缺 key。
+    "claude-code": {
         "kind": "chat",
-        "placeholder": "说点什么",
+        "placeholder": "给 Claude Code 发送消息",
         "send": "{a} 加 {b} 等于几? 只回数字, 不要解释",
         "want": ["{sum}"],
-        # 这一轮跑完的标志: 「停止」按钮收起来。不等它就可能在半路截屏, 而那时
-        # 用量还是 0、答案可能还没到 —— 判到的是上一轮的残留。
-        "busy_hidden": "#stopBtn",
-        # **"本轮消耗 0↑ 0↓" 当失败**: 用量键名拼错时界面一切正常, 只是这个数
-        # 永远是 0 —— 不报错、不变红, 而积分是这个产品的核心机制。
-        "fail_extra2": ["0↑ 0↓"],
-        "why": "发一句话没反应 (它的日志走 stderr, 外壳只读 stdout)",
+        "fail_extra2": ["Not logged in", "authentication_error", "(401)", "Invalid API key"],
+        "why": "对话面板回 Not logged in / 401 —— 引擎子进程没拿到网关 env",
+    },
+    "codex": {
+        "kind": "chat",
+        "placeholder": "给 Codex 发送消息",
+        "send": "{a} 加 {b} 等于几? 只回数字, 不要解释",
+        "want": ["{sum}"],
+        "fail_extra2": ["Not logged in", "401 Unauthorized", "(401)", "Invalid API key"],
+        "why": "对话面板回 401 —— config.toml 没写成网关 / 令牌没进 env",
+    },
+    "openmanus": {
+        # 2026-09-02 起这一格是**工作台**, 不再是裸终端 (老板: "包类似咱们为
+        # claude 和 codex 建的前端啊"); 2026-09-12 起外壳换成 pi-web-ui (与
+        # claude-code / codex 同一个), 占位符也跟着变。agentui 时代那份判据
+        # ("说点什么" / #stopBtn / "0↑ 0↓") 只在开关关着时成立, 已经不是线上形态。
+        "kind": "chat",
+        "placeholder": "给 OpenManus 发送消息",
+        "send": "{a} 加 {b} 等于几? 只回数字, 不要解释",
+        "want": ["{sum}"],
+        # runner 起不来 / 打上游 401 的样子 —— 它的错误走 error 帧进气泡。
+        "fail_extra2": ["401", "Unauthorized", "api_key", "Traceback"],
+        "why": "发一句话没反应 (runner 没起来 / config.toml 没指向网关)",
     },
     "openmausbot": {
         "kind": "chat",
