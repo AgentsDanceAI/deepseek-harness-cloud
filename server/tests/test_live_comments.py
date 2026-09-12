@@ -38,6 +38,10 @@ def room(monkeypatch):
     monkeypatch.setattr(config, "LIVE_MAX_CONCURRENT", 3)
     monkeypatch.setattr(config, "AVATAR_TOKEN_SECRET", "s3cret")
     monkeypatch.setattr(live, "_LAST_REPLY_AT", {})
+    # e5bcb58 加的"沿用上一次状态 60 秒"缓存也是模块级的 —— 不清的话前一条用例
+    # 留下的 live=True 会漏进下一条: test_captions_survive_an_unreachable_gpu 单跑
+    # 绿、整文件跑红, CI 因此红了两轮 (2026-09-12)。与上面 _LAST_REPLY_AT 同款。
+    monkeypatch.setattr(live, "_LAST_GOOD", {})
     monkeypatch.setattr(live, "_CAP_CACHE", {})
     monkeypatch.setattr(live, "_LIVE_CACHE", {"at": 0.0, "data": None})
     rate_limit._windows.clear()
