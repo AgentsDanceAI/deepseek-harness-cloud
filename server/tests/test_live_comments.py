@@ -422,7 +422,10 @@ def test_room_list_does_not_leak_scripts(monkeypatch):
         extra={"official": {"lines": ["还没上线的话术"], "queued": 9, "err": "内部细节"}},
     )
     r = TestClient(app).get("/api/live/rooms").json()["rooms"][0]
-    assert set(r) == {"id", "title", "person", "live", "hls"}
+    # 白名单写死: 多一个键就红, 这样漏字段一定被抓到。92bd2f4 列表页改画廊, 多了
+    # preset (形象 id) 与 cover (封面 URL), 都是公开的, 话术/队列/错误仍然不出去。
+    assert set(r) == {"id", "title", "person", "live", "hls", "preset", "cover"}
+    assert not ({"lines", "queued", "err"} & set(r))
 
 
 def test_only_admins_can_start(monkeypatch):
