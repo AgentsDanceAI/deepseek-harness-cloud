@@ -203,10 +203,10 @@ index 0000000..d5054a1
 +}
 diff --git a/web/src/boot-engine-name.ts b/web/src/boot-engine-name.ts
 new file mode 100644
-index 0000000..1ce9410
+index 0000000..3b7d21b
 --- /dev/null
 +++ b/web/src/boot-engine-name.ts
-@@ -0,0 +1,23 @@
+@@ -0,0 +1,25 @@
 +/**
 + * 首帧就知道自己叫什么。
 + *
@@ -225,6 +225,8 @@ index 0000000..1ce9410
 +declare global {
 +	interface Window {
 +		__PI_ENGINE_NAME__?: string;
++		/** 实例默认皮肤 (PI_WEB_DEFAULT_THEME)。见 web/src/theme.ts。 */
++		__PI_DEFAULT_THEME__?: string;
 +	}
 +}
 +
@@ -380,6 +382,53 @@ index 6a5f4fc..bd09463 100644
  	placeholderConnecting: "Connecting to server…",
  	stopAgent: "Stop agent",
  	stop: "Stop",
+diff --git a/web/src/theme.ts b/web/src/theme.ts
+index c17155f..8c76c99 100644
+--- a/web/src/theme.ts
++++ b/web/src/theme.ts
+@@ -12,6 +12,8 @@
+ import { useEffect, useState } from "react";
+ import { withToken } from "./auth-token";
+ import { appUrl } from "./base-url";
++// 只为把 Window 上那两个全局声明拉进类型图 (声明在 boot-engine-name.ts)。
++import "./boot-engine-name";
+ 
+ export interface ThemeInfo {
+ 	id: string;
+@@ -27,20 +29,28 @@ const LINK_ID = "theme-stylesheet";
+ /** Broadcast when the active theme changes (after the <link> has loaded). */
+ export const THEME_CHANGE_EVENT = "pi-web-ui:theme-change";
+ 
++/** 服务端烧进首帧的默认皮肤 (PI_WEB_DEFAULT_THEME)。见 server/cli/branding.ts。 */
++function bootDefault(): string | null {
++	const v = typeof window !== "undefined" ? window.__PI_DEFAULT_THEME__ : "";
++	return v && v !== DEFAULT_THEME_ID ? v : null;
++}
++
+ export function loadTheme(): string | null {
+ 	try {
+ 		const saved = localStorage.getItem(STORAGE_KEY);
+-		if (saved && saved !== DEFAULT_THEME_ID) return saved;
++		// **选过就是选过**, 包括显式选回默认深色 —— 那时不该被实例默认值顶回去。
++		if (saved) return saved === DEFAULT_THEME_ID ? null : saved;
+ 	} catch {
+-		// localStorage unavailable — fall through to the default.
++		// localStorage unavailable — fall through to the instance default.
+ 	}
+-	return null;
++	return bootDefault();
+ }
+ 
+ export function saveTheme(id: string | null): void {
+ 	try {
+-		if (id) localStorage.setItem(STORAGE_KEY, id);
+-		else localStorage.removeItem(STORAGE_KEY);
++		// 选回默认深色也要写下来 (写成 DEFAULT_THEME_ID), 不能 remove ——
++		// remove 了下次开就又被实例默认皮肤接管, 用户的"我就要深色"没保住。
++		localStorage.setItem(STORAGE_KEY, id ?? DEFAULT_THEME_ID);
+ 	} catch {
+ 		// ignore storage errors
+ 	}
 diff --git a/web/src/use-chat.ts b/web/src/use-chat.ts
 index b54b530..4556852 100644
 --- a/web/src/use-chat.ts

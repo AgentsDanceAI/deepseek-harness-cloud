@@ -1,9 +1,9 @@
 diff --git a/server/cli/branding.ts b/server/cli/branding.ts
 new file mode 100644
-index 0000000..657c260
+index 0000000..b6be465
 --- /dev/null
 +++ b/server/cli/branding.ts
-@@ -0,0 +1,33 @@
+@@ -0,0 +1,39 @@
 +/**
 + * branding.ts —— 把引擎名烧进发出去的 HTML。
 + *
@@ -28,21 +28,27 @@ index 0000000..657c260
 + * engineName 为空 (pi / dsh 两个上游引擎) 时**原样返回** —— 上游发出去的字节
 + * 一个都不该变。
 + */
-+export function brandIndexHtml(raw: string, engineName: string): string {
-+	if (!engineName) return raw;
-+	// JSON.stringify 管引号和反斜杠, `<` 再转一手 —— 否则名字里一个 </script>
++export function brandIndexHtml(raw: string, engineName: string, defaultTheme = ""): string {
++	if (!engineName && !defaultTheme) return raw;
++	// JSON.stringify 管引号和反斜杠, `<` 再转一手 —— 否则值里一个 </script>
 +	// 就能提前关掉这个标签。
-+	const literal = JSON.stringify(engineName).replace(/</g, "\\u003c");
-+	return raw
-+		.replace(/<title>[^<]*<\/title>/, `<title>${escapeHtml(engineName)}</title>`)
-+		.replace("</head>", `\t\t<script>window.__PI_ENGINE_NAME__=${literal}</script>\n\t</head>`);
++	const lit = (v: string) => JSON.stringify(v).replace(/</g, "\\u003c");
++	const globals = [
++		engineName ? `window.__PI_ENGINE_NAME__=${lit(engineName)};` : "",
++		// 默认皮肤也要**烧进首帧**: 它走 <link> 注入, 晚一拍就是先画一屏默认深色
++		// 再整页换色。用户自己选过就以 localStorage 为准 (见 web/src/theme.ts)。
++		defaultTheme ? `window.__PI_DEFAULT_THEME__=${lit(defaultTheme)};` : "",
++	].join("");
++	let out = raw.replace("</head>", `\t\t<script>${globals}</script>\n\t</head>`);
++	if (engineName) out = out.replace(/<title>[^<]*<\/title>/, `<title>${escapeHtml(engineName)}</title>`);
++	return out;
 +}
 diff --git a/server/cli/cli-adapter.ts b/server/cli/cli-adapter.ts
 new file mode 100644
-index 0000000..94088bc
+index 0000000..c0ffad2
 --- /dev/null
 +++ b/server/cli/cli-adapter.ts
-@@ -0,0 +1,164 @@
+@@ -0,0 +1,272 @@
 +/**
 + * cli-adapter.ts —— 把 CLI 的 JSON 行归一成同一套事件。
 + *
@@ -61,6 +67,7 @@ index 0000000..94088bc
 +	| { t: "text"; text: string }
 +	| { t: "thinking"; text: string }
 +	| { t: "tool"; id: string; name: string; input: unknown }
++	| { t: "tool_args"; id: string; delta: string }
 +	| { t: "tool_end"; id: string; ok: boolean; output: string }
 +	| { t: "done"; usage: { input: number; output: number; cacheRead: number } }
 +	| { t: "error"; message: string }
@@ -69,8 +76,24 @@ index 0000000..94088bc
 +export interface CliSpec {
 +	readonly id: "claude" | "codex";
 +	readonly name: string;
++	/**
++	 * 这个 CLI **真能给**的思考档位, 以及开箱默认那一档。
++	 *
++	 * 界面那套词表是 off/minimal/low/medium/high/xhigh/max, 但两个 CLI 谁都不是
++	 * 全都收 —— 只报自己真能给的, 界面就只显示这几档。**宁可少一档, 不给一个点了
++	 * 没反应的**。都是实测出来的:
++	 *   claude 2.1.193 `--effort` 只认 low|medium|high|xhigh|max; 传 off/minimal
++	 *     它会 `Warning: Unknown --effort value … ignoring it`, 然后照默认跑。
++	 *   codex 侧 `-c model_reasoning_effort=` 在**本地不校验**(连 bogus 都收),
++	 *     真正把关的是模型: 经我们网关实测 gpt-5.6-luna 收 none/low/medium/high/
++	 *     xhigh/max, 而 `minimal` 回 400 "not supported with this model"。
++	 */
++	readonly thinkingLevels: readonly string[];
++	readonly defaultThinking: string;
++	/** 这一档对应的命令行参数。空数组 = 这一档不用加参数。 */
++	thinkingArgs(level: string): string[];
 +	/** 起一轮对话的 argv。resume 为空表示新会话。 */
-+	argv(prompt: string, resume: string | null, model: string): string[];
++	argv(prompt: string, resume: string | null, model: string, thinking?: string): string[];
 +	/** prompt 走 stdin 还是 argv。 */
 +	readonly stdinPrompt: boolean;
 +	stdinPayload(prompt: string): string | null;
@@ -79,12 +102,42 @@ index 0000000..94088bc
 +
 +const num = (v: unknown): number => (typeof v === "number" ? v : 0);
 +
++/** claude 的工具参数是按 content block 的 index 流式给的, 而结果里只有 toolCallId
++ *  —— 这张表把两者对上。进程级别的 Map 足够: 一个进程一轮, index 不会跨轮复用。 */
++const claudeToolIndex = new Map<number, string>();
++
++/** tool_result 的 content 可能是字符串, 也可能是 block 数组。 */
++function blockText(content: unknown): string {
++	if (typeof content === "string") return content;
++	if (!Array.isArray(content)) return "";
++	return content
++		.map((c: any) => (typeof c === "string" ? c : c?.type === "text" ? (c.text ?? "") : ""))
++		.filter(Boolean)
++		.join("\n");
++}
++
++/** codex 里算"工具"的那几种 item。 */
++const CODEX_TOOL_ITEMS = ["command_execution", "file_change", "tool_call", "mcp_tool_call", "web_search"];
++
++/** 卡片标题: 命令执行就显示命令本身, 比清一色的 command_execution 有用得多。 */
++function codexToolName(it: any): string {
++	if (it?.type === "command_execution" && it.command) return String(it.command).slice(0, 120);
++	return String(it?.tool_name ?? it?.name ?? it?.type ?? "?");
++}
++
 +/** Claude Code: 双向 stream-json, 三个里最完整的一个。 */
 +export const claudeSpec: CliSpec = {
 +	id: "claude",
 +	name: "Claude Code",
 +	stdinPrompt: true,
-+	argv(_prompt, resume, model) {
++	// 抓包看到的: 不传 --effort 时它自己就按 high 发 (output_config.effort=high),
++	// 所以默认值取 high —— 界面显示的那一档与它真实的行为对得上。
++	thinkingLevels: ["low", "medium", "high", "xhigh", "max"],
++	defaultThinking: "high",
++	thinkingArgs(level) {
++		return level ? ["--effort", level] : [];
++	},
++	argv(_prompt, resume, model, thinking) {
 +		const a = [
 +			"--print",
 +			"--input-format", "stream-json",
@@ -95,6 +148,7 @@ index 0000000..94088bc
 +		];
 +		if (model) a.push("--model", model);
 +		if (resume) a.push("--resume", resume);
++		if (thinking) a.push(...claudeSpec.thinkingArgs(thinking));
 +		return a;
 +	},
 +	stdinPayload(prompt) {
@@ -124,9 +178,40 @@ index 0000000..94088bc
 +			// 智能体探索, 界面停在「正在思考」二十多秒, 其实一直在干活。
 +			const cb = ev.content_block;
 +			if (ev.type === "content_block_start" && cb?.type === "tool_use") {
++				// 参数是随后用 input_json_delta 一片一片给的, 这里 input 还是 {}。
++				// 记下 index -> toolCallId 的对应, 好把后面的片段贴到正确的卡片上。
++				claudeToolIndex.set(Number(ev.index ?? -1), String(cb.id ?? ""));
 +				return [{ t: "tool", id: String(cb.id ?? ""), name: String(cb.name ?? "?"), input: cb.input }];
 +			}
++			if (d?.type === "input_json_delta") {
++				const id = claudeToolIndex.get(Number(ev.index ?? -1));
++				if (!id) return [];
++				return [{ t: "tool_args", id, delta: String(d.partial_json ?? "") }];
++			}
++			if (ev.type === "content_block_stop") {
++				claudeToolIndex.delete(Number(ev.index ?? -1));
++				return [];
++			}
 +			return [];
++		}
++		// 工具**结果**走的是一条 type="user" 的行 (里面是 tool_result 块) ——
++		// 实测抓到的原文:
++		//   {"type":"user","message":{"role":"user","content":[
++		//     {"tool_use_id":"toolu_…","type":"tool_result","content":"HELLO-TOOL",
++		//      "is_error":false}]}}
++		// **千万别把它当成用户发言**: 那样界面上会凭空多出一条"用户说了工具输出"。
++		if (e.type === "user" && Array.isArray(e.message?.content)) {
++			const out: CliEvent[] = [];
++			for (const c of e.message.content as any[]) {
++				if (c?.type !== "tool_result") continue;
++				out.push({
++					t: "tool_end",
++					id: String(c.tool_use_id ?? ""),
++					ok: c.is_error !== true,
++					output: blockText(c.content),
++				});
++			}
++			return out;
 +		}
 +		// **不收 type=\"assistant\" 的整段正文**: 开着 --include-partial-messages 时
 +		// 它与 text_delta 是同一份内容的两种给法, 两个都收正文会翻倍。
@@ -155,9 +240,18 @@ index 0000000..94088bc
 +	id: "codex",
 +	name: "Codex",
 +	stdinPrompt: false,
-+	argv(prompt, resume, model) {
++	// 界面那档叫 off, 上游的写法是 none —— 在这里翻译, 别让界面去认两套词。
++	// **不报 minimal**: gpt-5.6-luna 明确回 400 说这个模型不支持。
++	thinkingLevels: ["off", "low", "medium", "high", "xhigh", "max"],
++	defaultThinking: "medium",
++	thinkingArgs(level) {
++		if (!level) return [];
++		return ["-c", `model_reasoning_effort=${level === "off" ? "none" : level}`];
++	},
++	argv(prompt, resume, model, thinking) {
 +		const a = ["exec", "--json", "--skip-git-repo-check", "--sandbox", "danger-full-access"];
 +		if (model) a.push("-m", model);          // 按次指定 —— dsh 引擎做不到这点
++		if (thinking) a.push(...codexSpec.thinkingArgs(thinking));
 +		if (resume) a.push("resume", resume);
 +		a.push(prompt);
 +		return a;
@@ -173,12 +267,32 @@ index 0000000..94088bc
 +			return [{ t: "raw", line }];
 +		}
 +		if (e.type === "thread.started") return [{ t: "session", id: String(e.thread_id ?? "") }];
++		// codex 的工具是**两条**: item.started (in_progress, 还没输出) 与
++		// item.completed (带 aggregated_output 与 exit_code)。实测原文:
++		//   {"type":"item.started","item":{"id":"item_1","type":"command_execution",
++		//     "command":"/bin/bash -lc 'echo HELLO-TOOL'","aggregated_output":"",
++		//     "exit_code":null,"status":"in_progress"}}
++		// 先出卡片再补结果 —— 命令要跑很久时, 用户得看得见"它在跑什么"。
++		if (e.type === "item.started" && CODEX_TOOL_ITEMS.includes(e.item?.type)) {
++			const it = e.item;
++			return [{ t: "tool", id: String(it.id ?? ""), name: codexToolName(it), input: it }];
++		}
 +		if (e.type === "item.completed") {
 +			const it = e.item ?? {};
 +			if (it.type === "agent_message") return [{ t: "text", text: String(it.text ?? "") }];
 +			if (it.type === "reasoning") return [{ t: "thinking", text: String(it.text ?? "") }];
-+			if (["command_execution", "file_change", "tool_call"].includes(it.type)) {
-+				return [{ t: "tool", id: String(it.id ?? ""), name: String(it.type), input: it }];
++			if (CODEX_TOOL_ITEMS.includes(it.type)) {
++				// 没见过 started 的 (旧版本只发 completed) 也要先补一张卡片, 否则
++				// 结果贴不到任何卡片上 —— 两条一起出, 下游按 id 合并。
++				return [
++					{ t: "tool", id: String(it.id ?? ""), name: codexToolName(it), input: it },
++					{
++						t: "tool_end",
++						id: String(it.id ?? ""),
++						ok: it.exit_code === 0 || it.exit_code === null || it.exit_code === undefined,
++						output: String(it.aggregated_output ?? it.output ?? ""),
++					},
++				];
 +			}
 +			// codex 把一部分错误当成**一个 item** 发, 不走 turn.failed。实测抓到的
 +			// 一条: `Model metadata for \`claude-fable-5\` not found. Defaulting to
@@ -301,10 +415,10 @@ index 0000000..8e57609
 +}
 diff --git a/server/cli/cli-session.ts b/server/cli/cli-session.ts
 new file mode 100644
-index 0000000..5fb6305
+index 0000000..e19f7e1
 --- /dev/null
 +++ b/server/cli/cli-session.ts
-@@ -0,0 +1,460 @@
+@@ -0,0 +1,588 @@
 +/**
 + * cli-session.ts —— 第三个引擎的会话对象 (PI_WEB_ENGINE=claude|codex)。
 + *
@@ -330,18 +444,49 @@ index 0000000..5fb6305
 +	CommandDef,
 +	PromptAttachment,
 +	ServerMessage,
++	UiContentBlock,
 +	UiMessage,
 +	UiState,
 +	UiSubagentTemplate,
 +} from "../protocol.js";
 +import { SPECS, type CliSpec, type CliEvent } from "./cli-adapter.js";
 +import { DEFAULT_MODEL, childEnv, listCatalog, writeCodexConfig } from "./gateway.js";
-+import { claudeProjectDir, listClaudeSessions, listCodexSessions, replayClaudeSession } from "./sessions.js";
++import {
++	claudeProjectDir,
++	listClaudeSessions,
++	listCodexSessions,
++	replayClaudeSession,
++	replayCodexSession,
++	searchSessions,
++} from "./sessions.js";
 +import { FilesService } from "../files-service.js";
++import { BgServerTracker } from "../bg-servers.js";
 +import { existsSync, rmSync, statSync } from "node:fs";
 +import { resolve } from "node:path";
 +import { loadCommands, saveCommandsFile, TerminalManager } from "../terminals.js";
 +import { join } from "node:path";
++
++/** 工具输出的上限。一条 `find /` 能有几 MB —— 整条塞给前端只会把页面卡住,
++ *  而人要看的是头几十行。截断标记交给前端渲染 (UiTextBlock.truncated)。 */
++const TOOL_OUTPUT_CAP = 20000;
++
++function capOutput(raw: string): { text: string; truncated: boolean } {
++	return raw.length > TOOL_OUTPUT_CAP
++		? { text: raw.slice(0, TOOL_OUTPUT_CAP), truncated: true }
++		: { text: raw, truncated: false };
++}
++
++/** 工具参数转成卡片上显示的那段文本。对象就序列化, 字符串原样。 */
++function argsText(input: unknown): string {
++	if (input === undefined || input === null) return "";
++	if (typeof input === "string") return input;
++	try {
++		const s = JSON.stringify(input);
++		return s === "{}" ? "" : s;
++	} catch {
++		return "";
++	}
++}
 +
 +type Send = (msg: ServerMessage) => void;
 +
@@ -364,6 +509,20 @@ index 0000000..5fb6305
 +	// dsh 引擎也是这么接的; 各写一份必然漂, 而且这两块和 agent 无关。
 +	private readonly files: FilesService;
 +	private readonly terminals: TerminalManager;
++	/** 本轮已经建过卡片的工具 (toolCallId -> 那个块)。参数是流式补上去的, 而
++	 *  codex 的 started/completed 两条都带同一个 id —— 靠它去重。 */
++	private toolBlocks = new Map<string, { argumentsText?: string }>();
++	/** 后台服务列表。复用上游那个自包含模块 (server/bg-servers.ts) —— 它只依赖
++	 *  端口快照, 不关心是谁跑的命令, 所以我们这条"CLI 自己跑 bash"的路也能用。
++	 *  **粒度是每轮一次**, 不是每条 bash 命令一次: 我们看不见 CLI 内部的命令边界,
++	 *  只看得见一轮的开始与结束。要的语义("这一轮之后它留下了什么常驻服务")是对的。 */
++	private readonly bg = new BgServerTracker({
++		emit: (msg) => this.send(msg),
++		flushSnapshot: () => this.snapshot(),
++		isDisposed: () => this.disposed,
++	});
++	/** 当前思考档位。默认值与 CLI 自己的默认对得上 (见 cli-adapter)。 */
++	private thinking = "";
 +	/** 本轮 CLI 自己报过的最后一条错。没有正文时拿它当结论。 */
 +	private lastError: string | null = null;
 +	/** 这一轮是用户自己按停的。**按停不是故障** —— 别给他报一条"退出码 143"。 */
@@ -378,6 +537,7 @@ index 0000000..5fb6305
 +		const spec = SPECS[engine];
 +		if (!spec) throw new Error(`unknown CLI engine: ${engine}`);
 +		this.spec = spec;
++		this.thinking = spec.defaultThinking;
 +		this.files = new FilesService({
 +			emit: (msg) => this.send(msg),
 +			isDisposed: () => this.disposed,
@@ -405,8 +565,8 @@ index 0000000..5fb6305
 +			streamingMessage: this.streaming,
 +			isStreaming: this.child !== null,
 +			model: this.model ? { id: this.model, name: this.model, provider: this.spec.name, vision: false } : null,
-+			thinkingLevel: "off",
-+			availableThinkingLevels: ["off"],
++			thinkingLevel: this.thinking,
++			availableThinkingLevels: [...this.spec.thinkingLevels],
 +			queue: { steering: [], followUp: [] },
 +			tools: [],
 +			version: 0,
@@ -430,14 +590,17 @@ index 0000000..5fb6305
 +			content: [{ type: "text", text }],
 +			timestamp: Date.now(),
 +		});
++		this.toolBlocks.clear();
 +		this.streaming = { id: `a-${Date.now()}-${this.seq++}`, role: "assistant", content: [], timestamp: Date.now() };
 +		this.snapshot();
 +
-+		const argv = this.spec.argv(text, this.resume, this.model);
++		const argv = this.spec.argv(text, this.resume, this.model, this.thinking);
 +		// codex 的 base_url/wire_api 只能从 config.toml 读, 给不了 env —— 每轮
 +		// 重写一次, 因为型号是按次可换的, 而 config 里钉着当前这个。
 +		// (开机时也写过一次, 为的是终端里的 codex —— 见 gateway.writeCodexConfig。)
 +		if (this.spec.id === "codex") writeCodexConfig(this.model);
++		// 这一轮开始前拍一次监听端口 —— 跑完再拍一次, 差集就是它留下的后台服务。
++		this.bg.snapshotBefore();
 +		const child = spawn(this.spec.id, argv, { cwd: this.cwd, env: childEnv(this.spec.id, this.model) });
 +		this.child = child;
 +		if (this.spec.stdinPrompt) {
@@ -482,6 +645,7 @@ index 0000000..5fb6305
 +				this.lastError = null;
 +				this.streaming = null;
 +				this.snapshot();
++				void this.bg.trackAfterBash();        // 这一轮留下的常驻服务
 +				done();
 +			});
 +			child.on("error", (e) => {
@@ -516,18 +680,56 @@ index 0000000..5fb6305
 +			return;
 +		}
 +		if (ev.t === "tool") {
-+			// 先按一行文本给, 让用户看见"它在干活"。渲染成真正的工具卡片要连
-+			// toolResult 一起配对 (dsh 引擎为此写了 301 行), 那是下一步。
++			// 真正的工具卡片: 助手消息里放一个 toolCall 块, 结果另起一条
++			// role="toolResult" 的消息按 toolCallId 配对 (前端就是这么认的,
++			// 见 web/src/use-chat.ts 里 `m.role === "toolResult" && m.toolCallId`)。
++			// **一轮里全是工具活动是常态** (模型先派子智能体再回答), 卡片一出来
++			// 用户才看得见它在干什么 —— 原来只给一行 `[工具] X`, 干了二十秒也只有
++			// 那一行, 看着像卡死。
 +			if (!this.streaming) return;
-+			this.streaming.content.push({ type: "text", text: `\n[工具] ${ev.name}\n` });
++			if (this.toolBlocks.has(ev.id)) return;   // started + completed 都来时只建一次
++			const block = {
++				type: "toolCall",
++				id: ev.id,
++				name: ev.name,
++				argumentsText: argsText(ev.input),
++			} as UiContentBlock;
++			this.streaming.content.push(block);
++			this.toolBlocks.set(ev.id, block as { argumentsText?: string });
++			this.snapshot();
++			return;
++		}
++		if (ev.t === "tool_args") {
++			// claude 的参数是 input_json_delta 一片片给的, 贴到对应那张卡片上。
++			const b = this.toolBlocks.get(ev.id);
++			if (!b) return;
++			b.argumentsText = (b.argumentsText ?? "") + ev.delta;
 +			this.send({
-+				type: "message_delta",
++				type: "tool_delta",
 +				conversationId: this.conversationId,
 +				seq: this.seq++,
-+				messageId: this.streaming.id,
-+				usage: null,
-+				assistantMessageEvent: { type: "text_delta", contentIndex: this.streaming.content.length - 1, delta: `\n[工具] ${ev.name}\n` },
++				toolCallId: ev.id,
++				toolName: "",
++				delta: ev.delta,
 +			});
++			return;
++		}
++		if (ev.t === "tool_end") {
++			// 结果单独成一条消息 —— 与 dsh 引擎同一个形状 (dsh-serialize.ts)。
++			// 截断在服务端做: 一条 `find /` 的输出能有几 MB, 整条塞给前端只会把
++			// 页面卡住, 而用户要看的是头几十行。
++			const { text, truncated } = capOutput(ev.output);
++			this.messages.push({
++				id: `t-${ev.id}`,
++				role: "toolResult",
++				content: [{ type: "text", text, truncated }],
++				toolCallId: ev.id,
++				isError: !ev.ok,
++				timestamp: Date.now(),
++			});
++			// 这一帧让界面立刻从"运行中"翻成"done", 不用等下一次快照。
++			this.send({ type: "tool_status", toolCallId: ev.id, toolName: "", isError: !ev.ok });
++			this.snapshot();
 +			return;
 +		}
 +		if (ev.t === "error") {
@@ -622,10 +824,26 @@ index 0000000..5fb6305
 +		this.messages = this.messages.slice(0, i);
 +		if (text) await this.prompt(text);
 +	}
-+	async killBackgroundServer(_port?: number, _taskId?: string): Promise<boolean> { return false; }
-+	async killAllBackgroundServers(): Promise<string[]> { return []; }
-+	async listBgServers(): Promise<void> {  }
-+	async editMessage(_messageId: string, _text: string, _attachments?: PromptAttachment[]): Promise<void> {  }
++	async killBackgroundServer(port?: number, _taskId?: string): Promise<boolean> {
++		// taskId 那条是插件注册的常驻任务, 我们这条路没有插件 —— 只按端口杀。
++		return port === undefined ? false : await this.bg.killOne(port);
++	}
++	async killAllBackgroundServers(): Promise<string[]> { return await this.bg.killAll(); }
++	async listBgServers(): Promise<void> { await this.bg.listAndPush(); }
++	/** 改掉一条已发的提问再重问。
++	 *
++	 *  **那条之后的全部要一起丢掉** —— 包括它自己的回复和后面每一轮。否则界面上会
++	 *  留着"针对旧问题的回答", 而 CLI 侧的上下文里也还留着它, 越问越不对。
++	 *  同 retryLast 的口径 (它丢的是最后一条之后)。
++	 *  改完必然是新话题: 断开 resume, 让 CLI 起一轮新的, 别把旧上下文带进来。 */
++	async editMessage(messageId: string, text: string, _attachments?: PromptAttachment[]): Promise<void> {
++		if (this.child) return;                       // 一次一轮, 正在跑就不动
++		const i = this.messages.findIndex((m) => m.id === messageId);
++		if (i < 0 || !text.trim()) return;
++		this.messages = this.messages.slice(0, i);
++		this.resume = null;
++		await this.prompt(text);
++	}
 +	/** 在在售目录里轮换到下一个型号。快捷键走这里, 与下拉选择是同一个状态。 */
 +	async cycleModel(): Promise<void> {
 +		const models = await listCatalog();
@@ -633,7 +851,12 @@ index 0000000..5fb6305
 +		const i = models.findIndex((m) => m.id === this.model);
 +		await this.setModel(models[(i + 1) % models.length]!.id);
 +	}
-+	cycleThinking(): void {  }
++	/** 快捷键轮换到下一档 —— 与下拉选择是同一个状态 (同 cycleModel)。 */
++	cycleThinking(): void {
++		const ls = this.spec.thinkingLevels;
++		const i = ls.indexOf(this.thinking);
++		this.setThinking(ls[(i + 1) % ls.length]!);
++	}
 +	flushSnapshot(_forceFull?: boolean): void {
 +		this.snapshot();
 +	}
@@ -669,22 +892,41 @@ index 0000000..5fb6305
 +		this.resume = path;
 +		this.streaming = null;
 +		this.conversationId = randomUUID();
-+		this.messages = this.spec.id === "claude" ? replayClaudeSession(this.cwd, path) : [];
++		this.messages =
++			this.spec.id === "claude" ? replayClaudeSession(this.cwd, path) : replayCodexSession(this.cwd, path);
 +		if (!this.messages.length) {
-+			// codex 的回放还没做 (它的行格式与 claude 不同, 见 sessions.ts),
-+			// 所以这里要说清楚"界面空不等于上下文丢了"。
++			// 回放不出东西时要说清楚"界面空不等于上下文丢了" —— CLI 那边 --resume
++			// 拿到的仍是完整会话。(会话文件被清过、或只有工具调用没有正文时会这样。)
 +			this.emitNotice("info", "已接上这个会话，上下文在 CLI 侧保留", "Resumed; context is kept on the CLI side");
 +		}
 +		this.snapshot();
 +	}
-+	async switchConversation(_id: string): Promise<void> {  }
++	/** 切到另一个会话 —— 与左栏点一条历史是同一件事, 复用同一段逻辑。 */
++	async switchConversation(id: string): Promise<void> {
++		await this.switchSession(id);
++	}
 +	async listFiles(path?: string): Promise<void> { await this.files.listFiles(path); }
 +	async searchFiles(query: string, reqId: number): Promise<void> { await this.files.searchFiles(query, reqId); }
-+	async searchSessions(_query: string, _reqId: number): Promise<void> {  }
++	/** 全局搜索面板里的"会话内容"那一栏。扫的是 CLI 自己的会话文件。 */
++	async searchSessions(query: string, reqId: number): Promise<void> {
++		try {
++			const results = searchSessions(this.spec.id, this.cwd, query);
++			this.send({ type: "session_search_results", reqId, query, ok: true, results });
++		} catch {
++			// ok:false 的约定是"扫失败, 当没结果" —— 别让一个坏文件把搜索框打成错误页。
++			this.send({ type: "session_search_results", reqId, query, ok: false, results: [] });
++		}
++	}
 +	async readFile(path: string): Promise<void> { await this.files.readFile(path); }
 +	async writeFile(path: string, text: string): Promise<void> { await this.files.writeFile(path, text); }
 +	async uploadFile(dirPath: string, name: string, data: string): Promise<void> { await this.files.uploadFile(dirPath, name, data); }
-+	setThinking(_level: string): void {  }
++	/** 思考档位。**只收这个 CLI 真能给的那几档** —— 界面里也只会列出这几档
++	 *  (见 cli-adapter 的 thinkingLevels)。收到不认识的就忽略, 不假装设上了。 */
++	setThinking(level: string): void {
++		if (!this.spec.thinkingLevels.includes(level)) return;
++		this.thinking = level;
++		this.snapshot();
++	}
 +	async setCwd(path: string): Promise<void> {
 +		const abs = resolve(path);
 +		if (!existsSync(abs) || !statSync(abs).isDirectory()) {
@@ -923,10 +1165,10 @@ index 0000000..ad6ae64
 +}
 diff --git a/server/cli/sessions.ts b/server/cli/sessions.ts
 new file mode 100644
-index 0000000..dfbfb59
+index 0000000..09a3635
 --- /dev/null
 +++ b/server/cli/sessions.ts
-@@ -0,0 +1,212 @@
+@@ -0,0 +1,304 @@
 +/**
 + * sessions.ts —— 从 CLI 自己的会话存储里读历史（列表 + 回放）。
 + *
@@ -946,13 +1188,17 @@ index 0000000..dfbfb59
 +import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 +import { homedir } from "node:os";
 +import { join } from "node:path";
-+import type { SessionSummary, UiMessage } from "../protocol.js";
++import type { SessionSearchResult, SessionSummary, UiMessage } from "../protocol.js";
 +
 +/** 读前 N 字节就够: 标题在最前面, 而会话文件可以几十 MB。 */
 +const HEAD_BYTES = 65536;
 +/** 回放的上限。一个跑了一天的会话能有几千条, 全塞给前端只会把页面卡死;
 + *  取最后 N 条 —— 人回到一个会话时看的是尾巴, 不是开头。 */
 +const REPLAY_MAX = 200;
++/** 搜索的两个上限。扫的是整个文件, 一个项目几十个会话就够慢了 —— 宁可少给几条,
++ *  也别让搜索框转半天 (前端只拿第一条做跳转)。 */
++const SEARCH_ANCHORS_MAX = 20;
++const SEARCH_SESSIONS_MAX = 50;
 +
 +export function claudeProjectDir(cwd: string): string {
 +	// **必须先 realpath。** macOS 上 /tmp 是指向 /private/tmp 的软链: claude 按
@@ -1139,11 +1385,99 @@ index 0000000..dfbfb59
 +	// 取尾巴: 人回到一个会话时看的是最近发生了什么。
 +	return msgs.length > REPLAY_MAX ? msgs.slice(-REPLAY_MAX) : msgs;
 +}
++
++/** 把 codex 的 rollout JSONL 翻成界面上的消息。
++ *
++ * 行格式与 claude **完全不同**, 所以不能共用一个翻译器:
++ *   · 对话行是 `type=response_item`, 真正的东西在 `payload` 里 (有的版本直接摊在
++ *     行上, 两种都认 —— 取 `e.payload ?? e`, 同 listCodexSessions);
++ *   · 正文块是 `input_text` / `output_text`, 不是 claude 那套 `text`;
++ *   · 推理是 `type=reasoning`, 正文在 `summary[]` 里;
++ *   · 其余 (session_meta / turn_context / event_msg / compacted) 是内部记账。
++ *
++ * 会话 id 与文件名不是一回事: 文件名是 rollout-<时间>-<uuid>, 而我们列表里给的
++ * path 是 session_meta.payload.id —— 所以只能扫一遍去找, 不能拼路径。
++ */
++export function replayCodexSession(cwd: string, sessionId: string): UiMessage[] {
++	let real = cwd;
++	try {
++		real = realpathSync(cwd);
++	} catch {
++		/* 目录没了也照常按原路径找 */
++	}
++	const file = codexFiles().find((f) => {
++		const head = readLines(f, HEAD_BYTES);
++		const meta = head.length ? parse(head[0]!) : null;
++		if (meta?.type !== "session_meta") return false;
++		const p = meta.payload ?? {};
++		return String(p.id ?? "") === sessionId && (p.cwd === real || p.cwd === cwd);
++	});
++	if (!file) return [];
++
++	const msgs: UiMessage[] = [];
++	let seq = 0;
++	for (const line of readLines(file)) {
++		const e = parse(line);
++		if (!e) continue;
++		const item = e.payload ?? e;
++		const role = item?.role ?? item?.message?.role;
++		if (item?.type === "reasoning" || (!role && Array.isArray(item?.summary))) {
++			const text = (item.summary ?? [])
++				.map((s: any) => (typeof s === "string" ? s : (s?.text ?? "")))
++				.filter(Boolean)
++				.join("\n");
++			if (text.trim()) {
++				msgs.push({
++					id: `a-replay-${seq++}`,
++					role: "assistant",
++					content: [{ type: "thinking", text }],
++					timestamp: Date.parse(e.timestamp ?? "") || Date.now(),
++				});
++			}
++			continue;
++		}
++		if (role !== "user" && role !== "assistant") continue;
++		const text = blocksText(item.content ?? item.message?.content);
++		if (!text.trim()) continue;
++		msgs.push({
++			id: `${role === "user" ? "u" : "a"}-replay-${seq++}`,
++			role,
++			content: [{ type: "text", text }],
++			timestamp: Date.parse(e.timestamp ?? "") || Date.now(),
++		});
++	}
++	return msgs.length > REPLAY_MAX ? msgs.slice(-REPLAY_MAX) : msgs;
++}
++
++/** 在这个项目的会话里搜正文。
++ *
++ * 直接读 CLI 自己的文件, 不另建索引 —— 索引会和"用户在终端里直接敲出来的会话"
++ * 对不上 (见本文件开头)。代价是每次搜都要扫一遍; 用**整文件**读而不是 HEAD_BYTES,
++ * 因为要搜的正是正文, 只读头部等于只搜得到开头几句。
++ *
++ * 命中锚点按 (role, timestamp) 给 —— 前端载入会话后照这两样在消息里定位。
++ */
++export function searchSessions(engine: "claude" | "codex", cwd: string, query: string): SessionSearchResult[] {
++	const q = query.trim().toLowerCase();
++	if (!q) return [];
++	const list = engine === "claude" ? listClaudeSessions(cwd) : listCodexSessions(cwd);
++	const out: SessionSearchResult[] = [];
++	for (const s of list) {
++		const msgs = engine === "claude" ? replayClaudeSession(cwd, s.path) : replayCodexSession(cwd, s.path);
++		const anchors = msgs
++			.filter((m) => m.content.some((c) => String((c as { text?: string }).text ?? "").toLowerCase().includes(q)))
++			.slice(0, SEARCH_ANCHORS_MAX)
++			.map((m) => ({ role: m.role, timestamp: m.timestamp ?? 0 }));
++		if (anchors.length) out.push({ ...s, anchors });
++		if (out.length >= SEARCH_SESSIONS_MAX) break;
++	}
++	return out;
++}
 diff --git a/server/index.ts b/server/index.ts
-index 7186abf..0f6fda1 100644
+index 7186abf..707762f 100644
 --- a/server/index.ts
 +++ b/server/index.ts
-@@ -217,7 +217,17 @@ if (AUTH_TOKEN) {
+@@ -217,7 +217,21 @@ if (AUTH_TOKEN) {
  }
  
  /** 引擎选择：PI_WEB_ENGINE=pi|dsh（默认 pi）。重启生效。 */
@@ -1155,6 +1489,10 @@ index 7186abf..0f6fda1 100644
 + *  两个引擎的观感一个字都不动。 */
 +const ENGINE_NAME = ENGINE === "claude" ? "Claude Code" : ENGINE === "codex" ? "Codex" : "";
 +
++/** PI_WEB_DEFAULT_THEME: 这个实例开箱的皮肤 (themes/<id>.css 里的 id)。
++ *  只是**默认值** —— 用户在界面上选过就以他的选择为准。留空 = 打包的深色。 */
++const DEFAULT_THEME = (process.env.PI_WEB_DEFAULT_THEME ?? "").trim();
++
 +// codex 的 config.toml 开机就写到位。只在 prompt() 里写的话, 用户开完工作台
 +// 直接进 [终端] 敲 codex —— 对话面板还没连过, config 还不存在, 它就去问用户要
 +// OpenAI 的登录。**终端不该等对话面板先跑一轮**。
@@ -1162,7 +1500,7 @@ index 7186abf..0f6fda1 100644
  
  /** PI_WEB_MANAGED=1: this instance is updated by whoever deploys it. */
  const MANAGED = isManaged();
-@@ -415,6 +425,23 @@ app.get("/plugins/:id/client/*", (req, res) => {
+@@ -415,6 +429,23 @@ app.get("/plugins/:id/client/*", (req, res) => {
  });
  /** Set in the env of the replacement child spawned by a self-update restart. */
  const RESTART_CHILD_ENV = "PI_WEB_RESTART_CHILD";
@@ -1175,9 +1513,9 @@ index 7186abf..0f6fda1 100644
 +let brandedHtml: string | null | undefined;
 +function brandedIndexHtml(file: string, engineName: string): string | null {
 +	if (brandedHtml !== undefined) return brandedHtml;
-+	if (!engineName) return (brandedHtml = null);
++	if (!engineName && !DEFAULT_THEME) return (brandedHtml = null);
 +	try {
-+		return (brandedHtml = brandIndexHtml(readFileSync(file, "utf8"), engineName));
++		return (brandedHtml = brandIndexHtml(readFileSync(file, "utf8"), engineName, DEFAULT_THEME));
 +	} catch {
 +		return (brandedHtml = null);
 +	}
@@ -1186,7 +1524,7 @@ index 7186abf..0f6fda1 100644
  const webDist = join(pkgRoot, "web", "dist");
  if (existsSync(webDist)) {
  	// gzip/deflate 响应压缩：前端 bundle ~1MB，局域网/反代场景传输量降到 ~1/4；
-@@ -422,6 +449,10 @@ if (existsSync(webDist)) {
+@@ -422,6 +453,10 @@ if (existsSync(webDist)) {
  	app.use(compression());
  	app.use(
  		express.static(webDist, {
@@ -1197,7 +1535,7 @@ index 7186abf..0f6fda1 100644
  			// Vite 产物文件名带内容 hash，可永久强缓存——业务发版后 hash 变化自然失效，
  			// index.html 由下方 catch-all 处理（sendFile 不走这里）
  			setHeaders(res, filePath) {
-@@ -449,6 +480,17 @@ if (existsSync(webDist)) {
+@@ -449,6 +484,17 @@ if (existsSync(webDist)) {
  		next();
  	});
  	app.get(/^\/(?!api\/|ws).*/, (_req, res) => {
@@ -1215,7 +1553,7 @@ index 7186abf..0f6fda1 100644
  		// Callback form: a failed stat here (npm i -g is mid-replacement of the
  		// package dir) responds 503 instead of crashing the request pipeline
  		// with an unhandled ENOENT stack trace.
-@@ -567,6 +609,9 @@ const heartbeatTimer = setInterval(() => {
+@@ -567,6 +613,9 @@ const heartbeatTimer = setInterval(() => {
  // 引擎分发：PI_WEB_ENGINE=dsh 时使用 DeepSeek Harness 引擎（server/dsh/），
  // 默认 pi 引擎。同一 wire 协议，前端无感知（ready/health 携带 engine 字段）。
  import { DshAgentService } from "./dsh/dsh-agent-service.js";
@@ -1225,7 +1563,7 @@ index 7186abf..0f6fda1 100644
  
  /** dispatch 表所需的方法契约（pi 的 ClientSession 与 dsh 的 DshClientSession
   *  都结构兼容；dsh 引擎对不支持的功能做简化实现）。 */
-@@ -763,7 +808,9 @@ export interface EngineService {
+@@ -763,7 +812,9 @@ export interface EngineService {
  }
  
  const service: EngineService =
@@ -1236,7 +1574,7 @@ index 7186abf..0f6fda1 100644
  		? new DshAgentService(CWD, join(DATA_DIR, "client-state.json"), DATA_DIR, getAgentDir())
  		: new AgentService(
  				CWD,
-@@ -1315,6 +1362,7 @@ wss.on("connection", (ws) => {
+@@ -1315,6 +1366,7 @@ wss.on("connection", (ws) => {
  						serverVersion: VERSION,
  						protocolVersion: PROTOCOL_VERSION,
  						engine: ENGINE,

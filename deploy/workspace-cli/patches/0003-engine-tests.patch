@@ -121,10 +121,10 @@ index a37615a..57a508e 100644
  	"project-model-key-test",
 diff --git a/tests/unit/cli-engine-adapter.test.ts b/tests/unit/cli-engine-adapter.test.ts
 new file mode 100644
-index 0000000..573052e
+index 0000000..48e88c5
 --- /dev/null
 +++ b/tests/unit/cli-engine-adapter.test.ts
-@@ -0,0 +1,107 @@
+@@ -0,0 +1,212 @@
 +/**
 + * 第三个引擎的适配层。钉的是**上游 CLI 的 wire 格式**。
 + *
@@ -230,6 +230,111 @@ index 0000000..573052e
 +		expect(codexSpec.stdinPrompt).toBe(false);
 +		expect(codexSpec.stdinPayload("hi")).toBeNull();
 +		expect(codexSpec.argv("说句话", null, "gpt-5.6-luna")).toContain("说句话");
++	});
++});
++
++describe("工具帧 —— 形状全是实测抓来的", () => {
++	it("claude: content_block_start 起卡片, input_json_delta 补参数", () => {
++		const start = JSON.stringify({
++			type: "stream_event",
++			event: {
++				type: "content_block_start",
++				index: 1,
++				content_block: { type: "tool_use", id: "toolu_1", name: "Bash", input: {} },
++			},
++		});
++		expect(claudeSpec.feed(start)).toEqual([{ t: "tool", id: "toolu_1", name: "Bash", input: {} }]);
++
++		const d = JSON.stringify({
++			type: "stream_event",
++			event: { type: "content_block_delta", index: 1, delta: { type: "input_json_delta", partial_json: '{"command": "echo hi"}' } },
++		});
++		expect(claudeSpec.feed(d)).toEqual([{ t: "tool_args", id: "toolu_1", delta: '{"command": "echo hi"}' }]);
++	});
++
++	it("claude: 工具结果那条 type=user 不是用户发言", () => {
++		// 实测原文 (echo HELLO-TOOL 那一轮)。
++		const line = JSON.stringify({
++			type: "user",
++			message: {
++				role: "user",
++				content: [{ tool_use_id: "toolu_1", type: "tool_result", content: "HELLO-TOOL", is_error: false }],
++			},
++		});
++		expect(claudeSpec.feed(line)).toEqual([{ t: "tool_end", id: "toolu_1", ok: true, output: "HELLO-TOOL" }]);
++	});
++
++	it("claude: 真的用户发言不会被当成工具结果", () => {
++		const line = JSON.stringify({ type: "user", message: { role: "user", content: [{ type: "text", text: "你好" }] } });
++		expect(claudeSpec.feed(line)).toEqual([]);
++	});
++
++	it("claude: 工具结果的 content 是块数组时也要拼出文本", () => {
++		const line = JSON.stringify({
++			type: "user",
++			message: {
++				role: "user",
++				content: [
++					{ tool_use_id: "t2", type: "tool_result", content: [{ type: "text", text: "一" }, { type: "text", text: "二" }], is_error: true },
++				],
++			},
++		});
++		expect(claudeSpec.feed(line)).toEqual([{ t: "tool_end", id: "t2", ok: false, output: "一\n二" }]);
++	});
++
++	it("codex: item.started 先出卡片, 标题用命令本身", () => {
++		const line = JSON.stringify({
++			type: "item.started",
++			item: { id: "item_1", type: "command_execution", command: "/bin/bash -lc 'echo HELLO-TOOL'", aggregated_output: "", exit_code: null, status: "in_progress" },
++		});
++		const out = codexSpec.feed(line);
++		expect(out).toHaveLength(1);
++		expect(out[0]!.t).toBe("tool");
++		// command_execution 这个词对用户没用, 命令本身才有用。
++		expect((out[0] as { name: string }).name).toContain("echo HELLO-TOOL");
++	});
++
++	it("codex: item.completed 同时补卡片和结果 (旧版只发 completed)", () => {
++		const line = JSON.stringify({
++			type: "item.completed",
++			item: { id: "item_1", type: "command_execution", command: "echo hi", aggregated_output: "HELLO-TOOL\n", exit_code: 0, status: "completed" },
++		});
++		const out = codexSpec.feed(line);
++		expect(out.map((e) => e.t)).toEqual(["tool", "tool_end"]);
++		expect(out[1]).toMatchObject({ t: "tool_end", id: "item_1", ok: true, output: "HELLO-TOOL\n" });
++	});
++
++	it("codex: 非零退出码要标成失败", () => {
++		const line = JSON.stringify({
++			type: "item.completed",
++			item: { id: "item_2", type: "command_execution", command: "false", aggregated_output: "", exit_code: 1, status: "completed" },
++		});
++		expect(codexSpec.feed(line).at(-1)).toMatchObject({ t: "tool_end", ok: false });
++	});
++});
++
++describe("思考档位 —— 只报这个 CLI 真能给的", () => {
++	it("claude: 五档, 默认与它自己不传参数时的行为一致 (抓包是 high)", () => {
++		expect([...claudeSpec.thinkingLevels]).toEqual(["low", "medium", "high", "xhigh", "max"]);
++		expect(claudeSpec.defaultThinking).toBe("high");
++		expect(claudeSpec.thinkingArgs("xhigh")).toEqual(["--effort", "xhigh"]);
++		// off / minimal 不在表里 —— claude 2.1.193 传了会 Warning 然后忽略。
++		expect(claudeSpec.thinkingLevels).not.toContain("off");
++		expect(claudeSpec.thinkingLevels).not.toContain("minimal");
++	});
++
++	it("codex: 界面的 off 翻成上游的 none; 不报 minimal (那个型号明确不支持)", () => {
++		expect(codexSpec.thinkingArgs("off")).toEqual(["-c", "model_reasoning_effort=none"]);
++		expect(codexSpec.thinkingArgs("high")).toEqual(["-c", "model_reasoning_effort=high"]);
++		expect(codexSpec.thinkingLevels).not.toContain("minimal");
++	});
++
++	it("档位进得了 argv", () => {
++		expect(claudeSpec.argv("hi", null, "m", "max")).toContain("--effort");
++		expect(codexSpec.argv("hi", null, "m", "low")).toContain("model_reasoning_effort=low");
++		// 不给档位就一个参数都不加 —— 本机开发时用 CLI 自己的默认。
++		expect(claudeSpec.argv("hi", null, "m").join(" ")).not.toContain("--effort");
++		expect(codexSpec.argv("hi", null, "m").join(" ")).not.toContain("model_reasoning_effort");
 +	});
 +});
 diff --git a/tests/unit/cli-engine-sessions.test.ts b/tests/unit/cli-engine-sessions.test.ts
@@ -365,10 +470,10 @@ index 0000000..01d792e
 +});
 diff --git a/tests/unit/cli-engine-wiring.test.ts b/tests/unit/cli-engine-wiring.test.ts
 new file mode 100644
-index 0000000..9f233ca
+index 0000000..9658648
 --- /dev/null
 +++ b/tests/unit/cli-engine-wiring.test.ts
-@@ -0,0 +1,269 @@
+@@ -0,0 +1,425 @@
 +/**
 + * 第三个引擎的两条「界面之外」的接线。
 + *
@@ -383,7 +488,11 @@ index 0000000..9f233ca
 +import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 +import { brandIndexHtml } from "../../server/cli/branding.js";
 +
-+type Snap = { messages?: Array<{ errorMessage?: string; content?: Array<{ text?: string }> }> };
++type Snap = {
++	messages?: Array<{ role?: string; toolCallId?: string; errorMessage?: string; content?: Array<{ text?: string; type?: string }> }>;
++	thinkingLevel?: string;
++	availableThinkingLevels?: string[];
++};
 +
 +const GW = "https://aistore.best";
 +const TOK = "tok-abc";
@@ -464,8 +573,23 @@ index 0000000..9f233ca
 +		expect(out).toContain("\\u003c/script>");
 +	});
 +
-+	it("上游两个引擎 (没名字): 原样返回, 一个字节不动", () => {
++	it("上游两个引擎 (没名字, 也没指定皮肤): 原样返回, 一个字节不动", () => {
 +		expect(brandIndexHtml(RAW, "")).toBe(RAW);
++		expect(brandIndexHtml(RAW, "", "")).toBe(RAW);
++	});
++
++	it("实例默认皮肤也烧进首帧", () => {
++		const out = brandIndexHtml(RAW, "Codex", "dazzle");
++		expect(out).toContain('window.__PI_DEFAULT_THEME__="dazzle"');
++		// 与引擎名同一个 <script>, 都在 </head> 之前 —— 晚一拍就是先画一屏深色再换色。
++		expect(out.indexOf("__PI_DEFAULT_THEME__")).toBeLessThan(out.indexOf("</head>"));
++		expect(out).toContain('window.__PI_ENGINE_NAME__="Codex"');
++	});
++
++	it("只给皮肤不给引擎名: 标题不动, 但皮肤要发下去", () => {
++		const out = brandIndexHtml(RAW, "", "cyberpunk");
++		expect(out).toContain('window.__PI_DEFAULT_THEME__="cyberpunk"');
++		expect(out).toContain("<title>pi-web-ui — pi 编码智能体</title>");
 +	});
 +});
 +
@@ -475,7 +599,24 @@ index 0000000..9f233ca
 + * 用户在终端里敲 claude 照样要登录。所以这里起一个真 PTY 去问它。
 + */
 +describe("终端里真的能看到那几个变量", () => {
++	let restoreEnv: (() => void) | null = null;
++	afterEach(() => {
++		restoreEnv?.();
++		restoreEnv = null;
++	});
++
 +	it("PTY 里 echo 得出网关地址", async () => {
++		// **必须收回去。** 这两个变量一旦泄漏到后面的用例, 那些用例里
++		// gatewayConfigured() 就是真的 —— 于是 writeCodexConfig 会往**真实的
++		// $HOME** 写 ~/.codex/config.toml。2026-09-12 我就是这么把自己这台
++		// Mac 上的 codex 配置覆盖掉的。
++		const saved = { base: process.env.DSH_GATEWAY_BASE, tok: process.env.DSH_CLOUD_TOKEN };
++		restoreEnv = () => {
++			if (saved.base === undefined) delete process.env.DSH_GATEWAY_BASE;
++			else process.env.DSH_GATEWAY_BASE = saved.base;
++			if (saved.tok === undefined) delete process.env.DSH_CLOUD_TOKEN;
++			else process.env.DSH_CLOUD_TOKEN = saved.tok;
++		};
 +		process.env.DSH_GATEWAY_BASE = GW;
 +		process.env.DSH_CLOUD_TOKEN = TOK;
 +		vi.resetModules();
@@ -637,4 +778,189 @@ index 0000000..9f233ca
 +		const errs = ((last as Snap | null)?.messages ?? []).map((m) => m.errorMessage).filter(Boolean);
 +		expect(errs).toEqual([]);
 +	}, 20_000);
++});
++
++/**
++ * 会话层: 工具卡片的配对、思考档位、改写重问。
++ * 都用假 CLI 驱真 CliSession —— 钉的是"界面最终拿到什么", 不是某个函数的返回值。
++ */
++describe("会话层", () => {
++	/**
++	 * 起一个真 CliSession, 用假 CLI 驱一轮。
++	 *
++	 * 两条**不能省**的隔离 (2026-09-12 各踩一次):
++	 *  · HOME 指到临时目录 —— 引擎开机会写 ~/.codex/config.toml, 不隔离就是往
++	 *    跑测试这台机器的真实配置上盖。我把自己这台 Mac 的 codex 配置写没了。
++	 *  · PATH 里那个假 CLI **要活到用例用完 session 为止** —— 原来在 drive()
++	 *    返回时就还原了, 于是之后再调 session 的方法, 跑的是机器上**真的** codex
++	 *    (真去打网关, 20 秒超时)。所以交回一个 done() 让用例自己收尾。
++	 * 另外 state 要用 getter 拿: 快照每次是新对象, 返回值拿到的是当时那一份。
++	 */
++	async function drive(lines: string[], engine = "codex") {
++		const { mkdtempSync, writeFileSync, chmodSync } = await import("node:fs");
++		const { tmpdir } = await import("node:os");
++		const { join } = await import("node:path");
++		const { CliSession } = await import("../../server/cli/cli-session.js");
++		const bin = mkdtempSync(join(tmpdir(), "pi-fakecli-"));
++		const cwd = mkdtempSync(join(tmpdir(), "pi-fakecwd-"));
++		const home = mkdtempSync(join(tmpdir(), "pi-fakehome-"));
++		const fake = join(bin, engine);
++		writeFileSync(fake, ["#!/bin/sh", "cat > /dev/null", ...lines, ""].join("\n"), "utf8");
++		chmodSync(fake, 0o755);
++		const saved = { PATH: process.env.PATH, HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE };
++		process.env.PATH = `${bin}:${saved.PATH}`;
++		process.env.HOME = home;
++		process.env.USERPROFILE = home;
++		let last: Snap | null = null;
++		const frames: { type: string }[] = [];
++		const session = new CliSession("c1", cwd, engine, (msg: { type: string; state?: unknown }) => {
++			frames.push(msg);
++			if (msg.type === "snapshot") last = msg.state as Snap;
++		});
++		const done = () => {
++			for (const [k, v] of Object.entries(saved)) {
++				if (v === undefined) delete process.env[k];
++				else process.env[k] = v;
++			}
++		};
++		try {
++			await session.prompt("说句话");
++		} catch (e) {
++			done();
++			throw e;
++		}
++		return { state: () => last as Snap | null, frames, session, done, home };
++	}
++
++	it("工具卡片: 调用块进助手消息, 结果单独一条按 id 配对", async () => {
++		const { state, frames, done } = await drive([
++			`echo '{"type":"item.started","item":{"id":"item_1","type":"command_execution","command":"echo hi","aggregated_output":"","exit_code":null,"status":"in_progress"}}'`,
++			// 注意别在这里写 \n: 假 CLI 跑在 sh(dash) 下, 它的 echo **会展开反斜杠转义**
++			// —— `"HI\n"` 会被拆成两行, JSON 解析失败, 于是 tool_end 根本不产生。
++			// 我第一版就栽在这儿, 查了半天以为是引擎没配对。要多行输出就用 printf。
++			`echo '{"type":"item.completed","item":{"id":"item_1","type":"command_execution","command":"echo hi","aggregated_output":"HI","exit_code":0,"status":"completed"}}'`,
++			`echo '{"type":"item.completed","item":{"type":"agent_message","text":"跑完了"}}'`,
++			`echo '{"type":"turn.completed","usage":{}}'`,
++		]);
++		done();
++		const msgs = state()?.messages ?? [];
++		const assistant = msgs.find((m) => (m.content ?? []).some((c) => (c as { type?: string }).type === "toolCall"));
++		expect(assistant, "助手消息里没有 toolCall 块 —— 卡片不会出现").toBeTruthy();
++		const call = (assistant!.content ?? []).find((c) => (c as { type?: string }).type === "toolCall") as {
++			id: string; name: string;
++		};
++		expect(call.name).toContain("echo hi");
++
++		const result = msgs.find((m) => (m as { role?: string }).role === "toolResult");
++		expect(result, "没有 toolResult 消息 —— 卡片会永远停在运行中").toBeTruthy();
++		expect((result as { toolCallId?: string }).toolCallId).toBe(call.id);
++		expect((result!.content ?? [])[0]).toMatchObject({ text: "HI" });
++		// started + completed 两条同 id, 卡片只能有一张。
++		const calls = msgs.flatMap((m) => (m.content ?? []).filter((c) => (c as { type?: string }).type === "toolCall"));
++		expect(calls).toHaveLength(1);
++		expect(frames.some((f) => f.type === "tool_status")).toBe(true);
++	});
++
++	it("思考档位: 报的是这个引擎真能给的那几档, 设进去会跟着发参数", async () => {
++		const { state, session, done } = await drive([`echo '{"type":"turn.completed","usage":{}}'`]);
++		done();
++		expect(state()?.availableThinkingLevels).toEqual(["off", "low", "medium", "high", "xhigh", "max"]);
++		expect(state()?.thinkingLevel).toBe("medium");
++		const s2 = session as unknown as { setThinking(l: string): void };
++		// 不认识的档位不许"假装设上了" —— minimal 那个型号明确不支持。
++		s2.setThinking("minimal");
++		expect(state()?.thinkingLevel).toBe("medium");
++		s2.setThinking("xhigh");
++		expect(state()?.thinkingLevel).toBe("xhigh");
++	});
++
++	it("改写重问: 那条之后的全部丢掉, 不留着旧回答", async () => {
++		const { session, state, done } = await drive([
++			`echo '{"type":"item.completed","item":{"type":"agent_message","text":"第一次的回答"}}'`,
++			`echo '{"type":"turn.completed","usage":{}}'`,
++		]);
++		try {
++			const before = state()?.messages ?? [];
++			expect(before.map((m) => (m as { role?: string }).role)).toContain("assistant");
++			const userMsg = before.find((m) => (m as { role?: string }).role === "user") as { id: string };
++
++			// **假 CLI 还要留在 PATH 上** —— editMessage 会再跑一轮。
++			await (session as unknown as { editMessage(id: string, t: string): Promise<void> }).editMessage(
++				userMsg.id,
++				"改过的问题",
++			);
++			const after = (state()?.messages ?? []) as { role?: string; content?: { text?: string }[] }[];
++			// 判据落在**提问**上, 不是回答 —— 假 CLI 每轮吐的是同一句话, 拿回答当
++			// 判据等于问了一道答案必然出现在题面里的题。
++			const asked = after.filter((m) => m.role === "user").flatMap((m) => (m.content ?? []).map((c) => c.text));
++			expect(asked).toEqual(["改过的问题"]);
++		} finally {
++			done();
++		}
++	}, 20_000);
++});
+diff --git a/tests/unit/instance-theme.test.ts b/tests/unit/instance-theme.test.ts
+new file mode 100644
+index 0000000..e5ccecb
+--- /dev/null
++++ b/tests/unit/instance-theme.test.ts
+@@ -0,0 +1,59 @@
++// @vitest-environment jsdom
++/**
++ * 实例默认皮肤 (PI_WEB_DEFAULT_THEME 由服务端烧进首帧) 与用户自己的选择, 谁赢。
++ *
++ * 这条线上有一个**容易丢用户设置**的坑: "选回默认深色"原来走 removeItem, 而
++ * removeItem 之后下次开就又被实例默认皮肤接管 —— 用户明明选了深色, 第二天打开
++ * 还是赛博朋克, 而且他再选一次还是不管用。所以默认深色也要写下来。
++ */
++
++import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
++
++const KEY = "pi-web-ui:theme";
++const setBootDefault = (v: string | undefined) => {
++	const w = window as unknown as { __PI_DEFAULT_THEME__?: string };
++	if (v === undefined) delete w.__PI_DEFAULT_THEME__;
++	else w.__PI_DEFAULT_THEME__ = v;
++};
++
++describe("默认皮肤 vs 用户选择", () => {
++	beforeEach(() => {
++		localStorage.clear();
++		vi.resetModules();
++		setBootDefault("cyberpunk");
++	});
++	afterEach(() => {
++		setBootDefault(undefined);
++		localStorage.clear();
++	});
++
++	it("没选过: 用实例默认", async () => {
++		const { loadTheme } = await import("../../web/src/theme");
++		expect(loadTheme()).toBe("cyberpunk");
++	});
++
++	it("选过别的: 用户赢", async () => {
++		localStorage.setItem(KEY, "white");
++		const { loadTheme } = await import("../../web/src/theme");
++		expect(loadTheme()).toBe("white");
++	});
++
++	it("显式选回深色: 也要赢, 不能被实例默认顶回去", async () => {
++		const { saveTheme, loadTheme } = await import("../../web/src/theme");
++		saveTheme(null);
++		expect(localStorage.getItem(KEY)).toBe("dark");
++		expect(loadTheme()).toBeNull();
++	});
++
++	it("没配实例默认: 还是打包的深色", async () => {
++		setBootDefault(undefined);
++		const { loadTheme } = await import("../../web/src/theme");
++		expect(loadTheme()).toBeNull();
++	});
++
++	it("实例默认就是 dark: 等价于不配", async () => {
++		setBootDefault("dark");
++		const { loadTheme } = await import("../../web/src/theme");
++		expect(loadTheme()).toBeNull();
++	});
 +});

@@ -1462,6 +1462,12 @@ _AGENTUI_SLOTS = {
     "codex": ("codex", "codex,claude"),
 }
 
+#: 每格开箱的皮肤 (pi-web-ui themes/<id>.css 里的 id)。老板 2026-09-12 点的名:
+#: claude 那格赛博朋克, codex 那格炫彩 —— 两格长得不一样, 开着一堆标签页时
+#: 一眼能认出哪个是哪个 (与左上角显示引擎名同一个用意)。
+#: **只是默认值**: 用户在界面右上角「主题」里选过就以他的为准, 换格不影响。
+_CLI_SLOT_THEME = {"claude-code": "cyberpunk", "codex": "dazzle"}
+
 
 def _cli_slot_image() -> str:
     """claude-code / codex 两格用哪个外壳。
@@ -3292,6 +3298,9 @@ def env_for(product_id: str, token: str, secret: str = "") -> dict[str, str]:
             "PI_WEB_ALLOW_ORIGINS": f"https://{domain}" if domain else "",
             "DSH_GATEWAY_BASE": gateway,
             "DSH_CLOUD_TOKEN": token,
+            # 开箱皮肤。服务端把它烧进首帧的 HTML (不是等前端去问), 否则会先画一屏
+            # 默认深色再整页换色。用户自己选过就以他的为准。
+            "PI_WEB_DEFAULT_THEME": _CLI_SLOT_THEME.get(product_id, ""),
             # 容器以 root 跑 (要写 NAS), 引擎又是拿 --dangerously-skip-permissions
             # 起 claude 的 —— Claude Code 2.1.x 对 root 一律拒绝这个开关:
             #   --dangerously-skip-permissions cannot be used with root/sudo privileges

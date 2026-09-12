@@ -58,6 +58,18 @@ def test_flag_switches_image_port_env_and_boot_together(slot):
     assert "uvicorn" not in boot, "还在用 agentui 那份 Python 启动命令"
 
 
+@pytest.mark.parametrize(("pid", "theme"), [("claude-code", "cyberpunk"), ("codex", "dazzle")])
+def test_each_slot_ships_its_own_skin(monkeypatch, pid, theme):
+    """两格开箱皮肤不同 —— 开着一堆标签页时一眼认得出哪个是哪个。
+    只是默认值: 用户选过以他为准 (前端那半在 pi-web-ui 的 instance-theme.test.ts)。
+    要先翻开关 —— 皮肤是新外壳才有的东西, agentui 那条路没有这个概念。"""
+    monkeypatch.setattr(config, "USE_CLI_WORKSPACE", True)
+    env = products.env_for(pid, "TOK", "")
+    assert env.get("PI_WEB_DEFAULT_THEME") == theme
+    monkeypatch.setattr(config, "USE_CLI_WORKSPACE", False)
+    assert "PI_WEB_DEFAULT_THEME" not in products.env_for(pid, "TOK", "")
+
+
 def test_root_container_lets_claude_skip_permissions(slot):
     """容器以 root 跑, 而引擎拿 --dangerously-skip-permissions 起 claude ——
     Claude Code 2.1.x 对 root 一律拒: `cannot be used with root/sudo privileges`。
