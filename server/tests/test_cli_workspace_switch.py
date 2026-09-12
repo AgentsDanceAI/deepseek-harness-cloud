@@ -58,6 +58,15 @@ def test_flag_switches_image_port_env_and_boot_together(slot):
     assert "uvicorn" not in boot, "还在用 agentui 那份 Python 启动命令"
 
 
+@pytest.mark.parametrize(("pid", "cli"), [("claude-code", "claude"), ("codex", "codex")])
+def test_terminal_boots_into_this_slots_cli(monkeypatch, pid, cli):
+    """点进 [终端] 应该直接是这一格那个 CLI 的界面。
+    老板连提两次 —— 上一版只做了"免登录", 没做"自动唤起"。
+    唤起哪个必须跟着**本格的引擎**走: claude 那格唤起 claude, codex 那格唤起 codex。"""
+    monkeypatch.setattr(config, "USE_CLI_WORKSPACE", True)
+    assert products.env_for(pid, "TOK", "")["PI_WEB_TERMINAL_BOOT_CMD"] == cli
+
+
 @pytest.mark.parametrize(("pid", "theme"), [("claude-code", "cyberpunk"), ("codex", "dazzle")])
 def test_each_slot_ships_its_own_skin(monkeypatch, pid, theme):
     """两格开箱皮肤不同 —— 开着一堆标签页时一眼认得出哪个是哪个。

@@ -70,6 +70,9 @@ async function main() {
   const msgs = (last && last.messages) || [];
   const texts = msgs.flatMap((m) => (m.content || []).map((c) => c.text || "")).join("\n");
   check("模型真的答了话", texts.includes("DONE"), texts.slice(0, 120).replace(/\s+/g, " "));
+  const think = msgs.flatMap((m) => (m.content || []).filter((c) => c.type === "thinking"));
+  check("思考内容真的进了界面", think.length > 0 && think.some((t) => (t.thinking || "").trim()),
+    think.length ? "有块但字段空 —— 字段名应为 thinking" : "一个思考块都没有");
   const calls = msgs.flatMap((m) => (m.content || []).filter((c) => c.type === "toolCall"));
   check("工具卡片出来了", calls.length > 0, calls.map((c) => c.name).join(", ").slice(0, 100));
   const results = msgs.filter((m) => m.role === "toolResult");

@@ -45,10 +45,10 @@ index 0000000..b6be465
 +}
 diff --git a/server/cli/cli-adapter.ts b/server/cli/cli-adapter.ts
 new file mode 100644
-index 0000000..c0ffad2
+index 0000000..00b8c4e
 --- /dev/null
 +++ b/server/cli/cli-adapter.ts
-@@ -0,0 +1,272 @@
+@@ -0,0 +1,287 @@
 +/**
 + * cli-adapter.ts —— 把 CLI 的 JSON 行归一成同一套事件。
 + *
@@ -112,6 +112,15 @@ index 0000000..c0ffad2
 +	if (!Array.isArray(content)) return "";
 +	return content
 +		.map((c: any) => (typeof c === "string" ? c : c?.type === "text" ? (c.text ?? "") : ""))
++		.filter(Boolean)
++		.join("\n");
++}
++
++/** reasoning 的 summary[] -> 文本。元素是 {type:"summary_text", text} 或直接字符串。 */
++function summaryText(summary: unknown): string {
++	if (!Array.isArray(summary)) return "";
++	return summary
++		.map((x: any) => (typeof x === "string" ? x : (x?.text ?? "")))
 +		.filter(Boolean)
 +		.join("\n");
 +}
@@ -280,7 +289,13 @@ index 0000000..c0ffad2
 +		if (e.type === "item.completed") {
 +			const it = e.item ?? {};
 +			if (it.type === "agent_message") return [{ t: "text", text: String(it.text ?? "") }];
-+			if (it.type === "reasoning") return [{ t: "thinking", text: String(it.text ?? "") }];
++			if (it.type === "reasoning") {
++				// 两种形状都见过: 有的版本直接给 `text`, 会话文件里则是
++				// `summary: [{type:"summary_text", text}]`。只认 text 的话思考是空的
++				// —— 界面上有个思考块但一个字没有, 比不显示更让人以为是坏了。
++				const text = String(it.text ?? "") || summaryText(it.summary);
++				return text ? [{ t: "thinking", text }] : [];
++			}
 +			if (CODEX_TOOL_ITEMS.includes(it.type)) {
 +				// 没见过 started 的 (旧版本只发 completed) 也要先补一张卡片, 否则
 +				// 结果贴不到任何卡片上 —— 两条一起出, 下游按 id 合并。
@@ -415,10 +430,10 @@ index 0000000..8e57609
 +}
 diff --git a/server/cli/cli-session.ts b/server/cli/cli-session.ts
 new file mode 100644
-index 0000000..fb291c8
+index 0000000..7f2da6a
 --- /dev/null
 +++ b/server/cli/cli-session.ts
-@@ -0,0 +1,591 @@
+@@ -0,0 +1,619 @@
 +/**
 + * cli-session.ts —— 第三个引擎的会话对象 (PI_WEB_ENGINE=claude|codex)。
 + *
@@ -679,6 +694,34 @@ index 0000000..fb291c8
 +				messageId: this.streaming.id,
 +				usage: null,
 +				assistantMessageEvent: { type: "text_delta", contentIndex: this.streaming.content.length - 1, delta: ev.text },
++			});
++			return;
++		}
++		if (ev.t === "thinking") {
++			// **思考也要出。** 适配层一直在产生这个事件 (claude 的 thinking_delta /
++			// codex 的 reasoning), 而 onEvent 里**根本没有这个分支** —— 事件生成出来
++			// 就没人要, 界面上"思考: 高"设了也永远看不到思考内容 (老板 2026-09-12 实拍)。
++			//
++			// 块的字段名是 `thinking` 不是 `text` (protocol.ts 的 UiThinkingBlock),
++			// 增量帧的类型是 `thinking_delta` —— 前端按这两样认 (web/src/message-delta.ts),
++			// 写错任何一个都是"有块但空白"。
++			if (!this.streaming) return;
++			const tail = this.streaming.content[this.streaming.content.length - 1] as
++				| { type: string; thinking?: string }
++				| undefined;
++			if (tail && tail.type === "thinking") tail.thinking = (tail.thinking ?? "") + ev.text;
++			else this.streaming.content.push({ type: "thinking", thinking: ev.text } as UiContentBlock);
++			this.send({
++				type: "message_delta",
++				conversationId: this.conversationId,
++				seq: this.seq++,
++				messageId: this.streaming.id,
++				usage: null,
++				assistantMessageEvent: {
++					type: "thinking_delta",
++					contentIndex: this.streaming.content.length - 1,
++					delta: ev.text,
++				},
 +			});
 +			return;
 +		}
@@ -1168,10 +1211,10 @@ index 0000000..ad6ae64
 +}
 diff --git a/server/cli/sessions.ts b/server/cli/sessions.ts
 new file mode 100644
-index 0000000..70bd020
+index 0000000..25bff20
 --- /dev/null
 +++ b/server/cli/sessions.ts
-@@ -0,0 +1,323 @@
+@@ -0,0 +1,331 @@
 +/**
 + * sessions.ts —— 从 CLI 自己的会话存储里读历史（列表 + 回放）。
 + *
@@ -1202,6 +1245,13 @@ index 0000000..70bd020
 + *  也别让搜索框转半天 (前端只拿第一条做跳转)。 */
 +const SEARCH_ANCHORS_MAX = 20;
 +const SEARCH_SESSIONS_MAX = 50;
++/** 一个内容块里可搜的文字。**思考块的字段叫 thinking 不叫 text** —— 只读 text
++ *  的话思考内容搜不到 (而思考往往正是人想找回来的那段)。 */
++function blockSearchText(c: unknown): string {
++	const b = (c ?? {}) as { text?: string; thinking?: string };
++	return String(b.text ?? b.thinking ?? "");
++}
++
 +/** 算"正文"的块类型。见 blocksText 的注释 —— 两个 CLI 的叫法不一样。 */
 +const TEXT_BLOCK_TYPES = new Set(["text", "input_text", "output_text"]);
 +/** codex 每轮开头会塞两条**给模型看的**上下文: role=developer 的指令, 以及
@@ -1388,7 +1438,8 @@ index 0000000..70bd020
 +				if (c?.type === "text" && typeof c.text === "string" && c.text.trim()) {
 +					blocks.push({ type: "text", text: c.text });
 +				} else if (c?.type === "thinking" && typeof c.thinking === "string") {
-+					blocks.push({ type: "thinking", text: c.thinking });
++					// 字段名是 `thinking` 不是 `text` —— 写成 text 的话块在但永远是空白。
++					blocks.push({ type: "thinking", thinking: c.thinking });
 +				} else if (c?.type === "tool_use") {
 +					blocks.push({ type: "text", text: `[工具] ${String(c.name ?? "")}` });
 +				}
@@ -1451,7 +1502,7 @@ index 0000000..70bd020
 +				msgs.push({
 +					id: `a-replay-${seq++}`,
 +					role: "assistant",
-+					content: [{ type: "thinking", text }],
++					content: [{ type: "thinking", thinking: text }],
 +					timestamp: Date.parse(e.timestamp ?? "") || Date.now(),
 +				});
 +			}
@@ -1487,7 +1538,7 @@ index 0000000..70bd020
 +	for (const s of list) {
 +		const msgs = engine === "claude" ? replayClaudeSession(cwd, s.path) : replayCodexSession(cwd, s.path);
 +		const anchors = msgs
-+			.filter((m) => m.content.some((c) => String((c as { text?: string }).text ?? "").toLowerCase().includes(q)))
++			.filter((m) => m.content.some((c) => blockSearchText(c).toLowerCase().includes(q)))
 +			.slice(0, SEARCH_ANCHORS_MAX)
 +			.map((m) => ({ role: m.role, timestamp: m.timestamp ?? 0 }));
 +		if (anchors.length) out.push({ ...s, anchors });
@@ -1622,7 +1673,7 @@ index 536423e..a231578 100644
  			 *  compares it against its own copy — a mismatch means the page was
  			 *  loaded before an app update and must be refreshed. */
 diff --git a/server/terminals.ts b/server/terminals.ts
-index 7b1faf0..60b20f3 100644
+index 7b1faf0..eb700d0 100644
 --- a/server/terminals.ts
 +++ b/server/terminals.ts
 @@ -22,6 +22,7 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
@@ -1633,7 +1684,18 @@ index 7b1faf0..60b20f3 100644
  import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent";
  import { Type } from "typebox";
  import type { CommandDef, ServerMessage, TerminalInfo } from "./protocol.js";
-@@ -516,10 +517,15 @@ function resolveBashShell(): { shell: string; args: string[] } {
+@@ -179,6 +180,10 @@ interface TermEntry {
+ 	/** true = 终端接管 bash 的持久终端（'ai-bash'）：不计入 MAX_TERMINALS，
+ 	 *  前端单独归到「AI bash」折叠分组。 */
+ 	agentBash: boolean;
++	/** 还没敲出去的开机命令 (见 TERMINAL_BOOT_CMD)。敲完置空。 */
++	bootCmd?: string;
++	bootTimer?: ReturnType<typeof setTimeout>;
++	bootFire?: () => void;
+ 	/** UI locale at creation ("en" = English exit banner, else Chinese). */
+ 	locale?: string;
+ }
+@@ -516,10 +521,31 @@ function resolveBashShell(): { shell: string; args: string[] } {
   * then renders UTF-8 continuation bytes 0x80–0x9F as C1 control characters
   * (e.g. `�<0091><0098>` for 员), garbling Chinese input in the terminal.
   * Default a UTF-8 locale so multibyte text round-trips.
@@ -1642,7 +1704,23 @@ index 7b1faf0..60b20f3 100644
 + * `claude` 走的是这份 env, 而引擎子进程走的是 childEnv —— 两条路。不带的表现
 + * 是同一个界面上对话是通的、终端里张口就是 `Not logged in`。没配网关 (上游
 + * 自己跑) 时 terminalEnv 原样返回, 观感一个字不变。
++ */
++/**
++ * 新开的第一个终端里自动敲的那条命令 (PI_WEB_TERMINAL_BOOT_CMD)。
++ *
++ * AI Store 的 claude-code / codex 两格用它把 CLI 直接唤起来: 用户点进 [终端]
++ * 看到的应该是 claude/codex 的界面, 而不是一个光秃秃的 root@… 提示符 —— 那一格
++ * 卖的就是这个 CLI (老板 2026-09-12 连着提了两次)。
++ *
++ * **只在第一个终端里敲。** 点 "+" 新开的那些保持原样的 shell —— 否则想跑一句
++ * `git status` 都得先退出 CLI, 而这个面板本来就是通用终端。
++ * agentBash (ai-bash, 智能体自己跑命令那个) 永远不敲: 那是工具通道, 敲进去
++ * 会把它的命令喂给 CLI。
   */
++/** 提示符迟迟不来时的兜底 —— 到点也敲。 */
++const BOOT_CMD_FALLBACK_MS = 1500;
++const TERMINAL_BOOT_CMD = (process.env.PI_WEB_TERMINAL_BOOT_CMD ?? "").trim();
++
  function shellEnv(): Record<string, string> {
  	const env: Record<string, string> = {
 -		...process.env,
@@ -1650,3 +1728,66 @@ index 7b1faf0..60b20f3 100644
  		TERM: "xterm-256color",
  	};
  	if (!env.LANG && !env.LC_ALL) env.LANG = "en_US.UTF-8";
+@@ -784,6 +810,9 @@ export class TerminalManager {
+ 				opts?.forceBash,
+ 				opts?.agentBash,
+ 				opts?.locale,
++				// 只有**第一个**用户终端自动唤起 CLI; "+" 新开的保持普通 shell。
++				// this.terms 此刻还不含本条 —— 空 = 这就是第一个。
++				TERMINAL_BOOT_CMD && !opts?.agentBash && this.terms.size === 0 ? TERMINAL_BOOT_CMD : "",
+ 			)
+ 		) {
+ 			this.maybeEmitTccHint(id);
+@@ -872,6 +901,7 @@ export class TerminalManager {
+ 		forceBash?: boolean,
+ 		agentBash = false,
+ 		locale?: string,
++		bootCmd = "",
+ 	): boolean {
+ 		let abs = cwd;
+ 		if (!abs) abs = homedir();
+@@ -932,12 +962,34 @@ export class TerminalManager {
+ 			watches: [],
+ 			agentBash,
+ 			locale,
++			bootCmd,
+ 		};
+ 		this.terms.set(id, entry);
+ 		// The closures capture `entry`: after a restart the map points at the
+ 		// replacement, so a late event from the OLD pty must be ignored.
++		if (entry.bootCmd) {
++			// **等提示符出来再敲。** spawn 完立刻写, 字符会落在 shell 还没开始读的
++			// 那段窗口里被吞掉 —— 表现是"有时唤起有时不唤起"。第一次有输出就说明
++			// 它已经在读了。兜底再加一个定时器, 免得遇上不打印提示符的 shell。
++			const fire = () => {
++				const e = this.terms.get(id);
++				if (!e || e !== entry || !e.bootCmd) return;
++				const cmd = e.bootCmd;
++				e.bootCmd = "";
++				if (e.bootTimer) clearTimeout(e.bootTimer);
++				try {
++					e.pty.write(cmd + "\r");
++				} catch {
++					/* 终端已经没了就算了 */
++				}
++			};
++			entry.bootTimer = setTimeout(fire, BOOT_CMD_FALLBACK_MS);
++			entry.bootTimer.unref?.();
++			entry.bootFire = fire;
++		}
+ 		pty.onData((data) => {
+ 			if (this.terms.get(id) !== entry) return;
++			if (entry.bootCmd && entry.bootFire) entry.bootFire();
+ 			this.appendOutput(entry, data);
+ 			// Coalesce instead of emitting per chunk: node-pty onData fires per
+ 			// ConPTY read buffer (dozens of bytes to a few KB each), so a build or
+@@ -949,6 +1001,9 @@ export class TerminalManager {
+ 		});
+ 		pty.onExit(({ exitCode }) => {
+ 			if (this.terms.get(id) !== entry) return;
++			// 开机命令还没敲就退出了 (比如立刻被 kill) —— 别让那个定时器空转。
++			if (entry.bootTimer) clearTimeout(entry.bootTimer);
++			entry.bootCmd = "";
+ 			this.exit(id, exitCode);
+ 		});
+ 		return true;

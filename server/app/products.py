@@ -3301,6 +3301,10 @@ def env_for(product_id: str, token: str, secret: str = "") -> dict[str, str]:
             # 开箱皮肤。服务端把它烧进首帧的 HTML (不是等前端去问), 否则会先画一屏
             # 默认深色再整页换色。用户自己选过就以他的为准。
             "PI_WEB_DEFAULT_THEME": _CLI_SLOT_THEME.get(product_id, ""),
+            # 点进 [终端] 直接是这个 CLI 的界面, 不是光秃秃的 root@… 提示符 ——
+            # 这一格卖的就是它 (老板 2026-09-12 连提两次)。**只唤起第一个终端**,
+            # 点 "+" 新开的保持普通 shell, 否则想跑一句 git status 都得先退出 CLI。
+            "PI_WEB_TERMINAL_BOOT_CMD": cli,
             # 容器以 root 跑 (要写 NAS), 引擎又是拿 --dangerously-skip-permissions
             # 起 claude 的 —— Claude Code 2.1.x 对 root 一律拒绝这个开关:
             #   --dangerously-skip-permissions cannot be used with root/sudo privileges

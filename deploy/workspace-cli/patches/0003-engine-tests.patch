@@ -121,10 +121,10 @@ index a37615a..57a508e 100644
  	"project-model-key-test",
 diff --git a/tests/unit/cli-engine-adapter.test.ts b/tests/unit/cli-engine-adapter.test.ts
 new file mode 100644
-index 0000000..48e88c5
+index 0000000..057cf19
 --- /dev/null
 +++ b/tests/unit/cli-engine-adapter.test.ts
-@@ -0,0 +1,212 @@
+@@ -0,0 +1,240 @@
 +/**
 + * 第三个引擎的适配层。钉的是**上游 CLI 的 wire 格式**。
 + *
@@ -337,6 +337,34 @@ index 0000000..48e88c5
 +		expect(codexSpec.argv("hi", null, "m").join(" ")).not.toContain("model_reasoning_effort");
 +	});
 +});
++
++describe("思考内容的两种形状都要认", () => {
++	it("codex: summary[] 那种 (会话文件里就是这个)", () => {
++		const line = JSON.stringify({
++			type: "item.completed",
++			item: { type: "reasoning", summary: [{ type: "summary_text", text: "先看看仓库结构" }] },
++		});
++		expect(codexSpec.feed(line)).toEqual([{ t: "thinking", text: "先看看仓库结构" }]);
++	});
++
++	it("codex: 直接给 text 那种", () => {
++		const line = JSON.stringify({ type: "item.completed", item: { type: "reasoning", text: "在想" } });
++		expect(codexSpec.feed(line)).toEqual([{ t: "thinking", text: "在想" }]);
++	});
++
++	it("codex: 两样都空就不出事件 (别造一个空的思考块)", () => {
++		const line = JSON.stringify({ type: "item.completed", item: { type: "reasoning", summary: [] } });
++		expect(codexSpec.feed(line)).toEqual([]);
++	});
++
++	it("claude: thinking_delta 出增量", () => {
++		const line = JSON.stringify({
++			type: "stream_event",
++			event: { type: "content_block_delta", delta: { type: "thinking_delta", thinking: "让我想想" } },
++		});
++		expect(claudeSpec.feed(line)).toEqual([{ t: "thinking", text: "让我想想" }]);
++	});
++});
 diff --git a/tests/unit/cli-engine-sessions.test.ts b/tests/unit/cli-engine-sessions.test.ts
 new file mode 100644
 index 0000000..4b38840
@@ -526,10 +554,10 @@ index 0000000..4b38840
 +});
 diff --git a/tests/unit/cli-engine-wiring.test.ts b/tests/unit/cli-engine-wiring.test.ts
 new file mode 100644
-index 0000000..9658648
+index 0000000..4462ae4
 --- /dev/null
 +++ b/tests/unit/cli-engine-wiring.test.ts
-@@ -0,0 +1,425 @@
+@@ -0,0 +1,555 @@
 +/**
 + * 第三个引擎的两条「界面之外」的接线。
 + *
@@ -545,7 +573,12 @@ index 0000000..9658648
 +import { brandIndexHtml } from "../../server/cli/branding.js";
 +
 +type Snap = {
-+	messages?: Array<{ role?: string; toolCallId?: string; errorMessage?: string; content?: Array<{ text?: string; type?: string }> }>;
++	messages?: Array<{
++		role?: string;
++		toolCallId?: string;
++		errorMessage?: string;
++		content?: Array<{ text?: string; thinking?: string; type?: string }>;
++	}>;
 +	thinkingLevel?: string;
 +	availableThinkingLevels?: string[];
 +};
@@ -917,6 +950,32 @@ index 0000000..9658648
 +		expect(frames.some((f) => f.type === "tool_status")).toBe(true);
 +	});
 +
++	it("思考内容要真的出现在界面上 (块名/字段名/增量类型三样都得对)", async () => {
++		const { state, frames, done } = await drive([
++			`echo '{"type":"item.completed","item":{"type":"reasoning","summary":[{"type":"summary_text","text":"先看看仓库结构"}]}}'`,
++			`echo '{"type":"item.completed","item":{"type":"agent_message","text":"看完了"}}'`,
++			`echo '{"type":"turn.completed","usage":{}}'`,
++		]);
++		done();
++		const msgs = state()?.messages ?? [];
++		const blocks = msgs.flatMap((m) => m.content ?? []) as { type?: string; thinking?: string; text?: string }[];
++		const th = blocks.find((b) => b.type === "thinking");
++		expect(th, "一个 thinking 块都没有 —— 思考内容根本没进界面").toBeTruthy();
++		// **字段名是 thinking 不是 text** (protocol.ts 的 UiThinkingBlock)。
++		// 写成 text 的话前端拿到的是 undefined: 块在, 但永远是空白。
++		expect(th!.thinking).toContain("先看看仓库结构");
++		expect(th!.text).toBeUndefined();
++		// 流式增量也要按 thinking_delta 发, 否则前端只在下一次快照才补上。
++		const d = frames.find(
++			(f) => (f as { assistantMessageEvent?: { type?: string } }).assistantMessageEvent?.type === "thinking_delta",
++		) as { assistantMessageEvent?: { delta?: string; contentIndex?: number } } | undefined;
++		expect(d, "没发 thinking_delta").toBeTruthy();
++		expect(d!.assistantMessageEvent!.delta).toContain("先看看仓库结构");
++		expect(typeof d!.assistantMessageEvent!.contentIndex).toBe("number");
++		// 正文照旧
++		expect(blocks.some((b) => b.type === "text" && (b.text ?? "").includes("看完了"))).toBe(true);
++	});
++
 +	it("思考档位: 报的是这个引擎真能给的那几档, 设进去会跟着发参数", async () => {
 +		const { state, session, done } = await drive([`echo '{"type":"turn.completed","usage":{}}'`]);
 +		done();
@@ -954,6 +1013,105 @@ index 0000000..9658648
 +			done();
 +		}
 +	}, 20_000);
++});
++
++/**
++ * 点进 [终端] 应该直接是 CLI 的界面, 不是光秃秃的 root@… 提示符。
++ * 老板 2026-09-12 连提两次 —— 上一版我只解决了"免登录", 没解决"自动唤起"。
++ */
++describe("第一个终端自动唤起 CLI", () => {
++	let saved: string | undefined;
++	beforeEach(() => {
++		saved = process.env.PI_WEB_TERMINAL_BOOT_CMD;
++	});
++	afterEach(() => {
++		if (saved === undefined) delete process.env.PI_WEB_TERMINAL_BOOT_CMD;
++		else process.env.PI_WEB_TERMINAL_BOOT_CMD = saved;
++	});
++
++	async function withMgr(bootCmd: string | undefined) {
++		if (bootCmd === undefined) delete process.env.PI_WEB_TERMINAL_BOOT_CMD;
++		else process.env.PI_WEB_TERMINAL_BOOT_CMD = bootCmd;
++		vi.resetModules();
++		const { TerminalManager } = await import("../../server/terminals.js");
++		const { mkdtempSync } = await import("node:fs");
++		const { tmpdir } = await import("node:os");
++		const { join } = await import("node:path");
++		const cwd = mkdtempSync(join(tmpdir(), "pi-bootterm-"));
++		return { mgr: new TerminalManager(() => {}, cwd, () => "zh"), cwd };
++	}
++
++	/** 等到终端输出里出现 needle, 或超时。 */
++	async function waitFor(mgr: { read: (id: string, c: number, m: number) => { data: string } | null }, id: string, needle: string, ms = 15000) {
++		const end = Date.now() + ms;
++		let out = "";
++		while (Date.now() < end) {
++			out = mgr.read(id, 0, 200_000)?.data ?? "";
++			if (out.includes(needle)) return out;
++			await new Promise((r) => setTimeout(r, 100));
++		}
++		return out;
++	}
++
++	it("配了就自动敲进去 (真 PTY 跑一条会留痕的命令)", async () => {
++		const { mgr, cwd } = await withMgr("echo BOOTED-BY-PI");
++		expect(mgr.create("t1", cwd, 100, 30, cwd)).not.toBeNull();
++		try {
++			const out = await waitFor(mgr, "t1", "BOOTED-BY-PI");
++			expect(out, "开机命令没被敲进去").toContain("BOOTED-BY-PI");
++			// **只许敲一次** —— 提示符触发和兜底定时器是两条路, 真敲两遍的话在
++			// 真 CLI 上就是开两个实例。
++			// 坦白: 这条断言拦得比较松。命令在第一次触发时就被从 entry 上取走并
++			// 清空了, 所以第二条路即使跑起来也写不出命令 —— 我把两道保险都去掉
++			// 变异过, 它仍然是绿的。留着是为了拦"重构成每次都重读 bootCmd"那种
++			// 改法, 不是因为它钉住了现在这两道保险。
++			await new Promise((r) => setTimeout(r, 2500));
++			const later = mgr.read("t1", 0, 200_000)?.data ?? "";
++			expect(later.split("echo BOOTED-BY-PI").length - 1, "开机命令敲了不止一次").toBeLessThanOrEqual(1);
++		} finally {
++			mgr.kill("t1");
++		}
++	}, 25_000);
++
++	it('"+" 新开的第二个终端保持普通 shell', async () => {
++		const { mgr, cwd } = await withMgr("echo BOOTED-BY-PI");
++		mgr.create("t1", cwd, 100, 30, cwd);
++		await waitFor(mgr, "t1", "BOOTED-BY-PI");
++		expect(mgr.create("t2", cwd, 100, 30, cwd)).not.toBeNull();
++		try {
++			// 给它足够长的时间, 真要敲的话早敲了 (兜底定时器 1.5s)。
++			await new Promise((r) => setTimeout(r, 3000));
++			const out = mgr.read("t2", 0, 200_000)?.data ?? "";
++			expect(out, "第二个终端也被唤起了 —— 想跑一句 git status 都得先退出 CLI").not.toContain("BOOTED-BY-PI");
++		} finally {
++			mgr.kill("t1");
++			mgr.kill("t2");
++		}
++	}, 25_000);
++
++	it("智能体自己的 ai-bash 永远不敲 (那是工具通道)", async () => {
++		const { mgr, cwd } = await withMgr("echo BOOTED-BY-PI");
++		expect(mgr.create("ai-bash", cwd, 100, 30, cwd, undefined, { agentBash: true })).not.toBeNull();
++		try {
++			await new Promise((r) => setTimeout(r, 3000));
++			const out = mgr.read("ai-bash", 0, 200_000)?.data ?? "";
++			expect(out, "把开机命令喂给了工具通道").not.toContain("BOOTED-BY-PI");
++		} finally {
++			mgr.kill("ai-bash");
++		}
++	}, 25_000);
++
++	it("没配就一个字都不敲 (上游自己跑时观感不变)", async () => {
++		const { mgr, cwd } = await withMgr(undefined);
++		mgr.create("t1", cwd, 100, 30, cwd);
++		try {
++			await new Promise((r) => setTimeout(r, 2500));
++			const out = mgr.read("t1", 0, 200_000)?.data ?? "";
++			expect(out).not.toContain("BOOTED-BY-PI");
++		} finally {
++			mgr.kill("t1");
++		}
++	}, 25_000);
 +});
 diff --git a/tests/unit/instance-theme.test.ts b/tests/unit/instance-theme.test.ts
 new file mode 100644
