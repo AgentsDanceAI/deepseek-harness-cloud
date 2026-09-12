@@ -602,6 +602,75 @@ def _is_web_search(body: object) -> bool:
     return False
 
 
+#: 上游中继把同一个牌名**按请求轮询**到好几家后端, 而它们对 Claude Code 的 body
+#: 各有各的不收。2026-09-11 用 server/scripts/probe_anthropic_face.py 实测 (每组 6 发):
+#:
+#:   claude-sonnet-5            客户端原样   3/6   失败全是 Bedrock 的
+#:                                                 `thinking.type.enabled is not supported`
+#:   claude-sonnet-5            thinking 改 adaptive  6/6 (三家都收)
+#:   claude-sonnet-5-thinking   客户端原样   6/6   **且 6 发全落在直连 Anthropic**
+#:
+#: 所以上游那个 `-thinking` 后缀就是它给"要 thinking 就走支持 thinking 的那路"
+#: 留的选择器。我们据此选**型号名**, 而不是去改用户的 body —— 改 body 会动语义
+#: (adaptive 等于把 budget_tokens 丢掉, 改由模型自己定), 选型号一个字段都不动。
+#:
+#: **计费不受影响**: 账按牌名 (parsed["model"]) 记, 这里换的只是转发给上游的名字。
+#: 成本会受影响 —— 直连 Anthropic 通常比 Bedrock 贵, 这是拿稳定换单价。
+_THINKING_SUFFIX = "-thinking"
+
+
+def _wants_thinking(parsed: object) -> bool:
+    """请求要的是**带预算的** thinking (Claude Code 每轮都带)。
+
+    只认 `enabled`: `adaptive` 那家家都收, 不用换路; 没有 thinking 的普通请求
+    更不该被挪到贵的那条路上去。
+    """
+    if not isinstance(parsed, dict):
+        return False
+    t = parsed.get("thinking")
+    return isinstance(t, dict) and t.get("type") == "enabled"
+
+
+def _pin_thinking_channel(upstream_model: str, parsed: object) -> str:
+    """带 thinking 的 claude 请求 -> 上游的 `<型号>-thinking`。
+
+    只对 claude 系动手 (后缀是上游给这一系的约定), 已经带后缀的不重复加。
+    换不到的名字上游会 404, 而 400 那条重试网兜不住 404 —— 所以这里宁可保守。
+    """
+    if not config.ANTHROPIC_PIN_THINKING_CHANNEL or not _wants_thinking(parsed):
+        return upstream_model
+    if not upstream_model.startswith("claude-") or upstream_model.endswith(_THINKING_SUFFIX):
+        return upstream_model
+    return upstream_model + _THINKING_SUFFIX
+
+
+# 上游各家最常拒的三样。**只在 400 之后**用来重试一次, 正常流量一个字节不改。
+def _normalize_after_400(parsed: object) -> bytes | None:
+    """把 body 削成"家家都收"的样子; 已经是那个样子就返回 None (不值得重试)。
+
+    削哪三样是实测出来的, 不是照文档猜的:
+      * thinking.type=enabled -> adaptive   (Bedrock: 只认 adaptive)
+      * 去掉 context_management             (某一家: Extra inputs are not permitted)
+      * 去掉 output_config                  (同上, 一并削平)
+    **这是兜底不是主路**: 主路是上面的换型号, 它不改语义; 走到这里说明那条没兜住
+    (用户点了个我们没料到的型号, 或上游又加了一家) —— 那时宁可用降级的语义把这一
+    轮答出来, 也好过让用户吃一个 400。
+    """
+    if not isinstance(parsed, dict):
+        return None
+    body = dict(parsed)
+    changed = False
+    t = body.get("thinking")
+    if isinstance(t, dict) and t.get("type") == "enabled":
+        body["thinking"] = {"type": "adaptive"}
+        changed = True
+    for k in ("context_management", "output_config"):
+        if k in body:
+            body.pop(k)
+            changed = True
+    return json.dumps(body).encode() if changed else None
+
+
 @router.post("/anthropic/v1/messages")
 async def anthropic_messages(request: Request, user: dict = Depends(resolve_user)):
     rejected = _admit(user)
@@ -677,10 +746,13 @@ async def anthropic_messages(request: Request, user: dict = Depends(resolve_user
                 },
             },
         )
-    if entry is not None and entry.get("upstream_model", requested_model) != requested_model:
-        # 牌名与上游型号名不同的话, 转发的 body 里要换成后者。
+    upstream_model = entry.get("upstream_model", requested_model) if entry else requested_model
+    upstream_model = _pin_thinking_channel(upstream_model, parsed)
+    if requested_model and upstream_model != requested_model:
+        # 牌名与上游型号名不同的话 (改名的, 或上面按 thinking 钉了通道的),
+        # 转发的 body 里要换成后者。**账仍按牌名记** —— 见下面的 billed_model。
         body = dict(parsed or {})
-        body["model"] = entry["upstream_model"]
+        body["model"] = upstream_model
         raw = json.dumps(body).encode()
     headers = {
         "x-api-key": config.UPSTREAM_API_KEY,
@@ -724,6 +796,9 @@ async def anthropic_messages(request: Request, user: dict = Depends(resolve_user
             request_id=request_id,
         )
 
+    # relay() 内部把 `parsed` 重绑成了 SSE 的每一行 —— 它因此是 relay 的**局部**
+    # 变量, 在里面读外层那个会 UnboundLocalError。请求体另起一个名字捕获。
+    req_parsed = parsed
     stream_requested = False
     try:
         stream_requested = bool(json.loads(raw).get("stream", False))
@@ -734,6 +809,17 @@ async def anthropic_messages(request: Request, user: dict = Depends(resolve_user
         async with _upstream_client() as client:
             with _Slot(user["id"]):
                 upstream = await client.post(url, content=raw, headers=headers)
+                if upstream.status_code == 400:
+                    # 兜底: 上游某一家不收 body 里的某一样。削平了再来一次 ——
+                    # 这一发没有产生任何计费, 重试不会重复扣钱。
+                    retry_raw = _normalize_after_400(req_parsed)
+                    if retry_raw is not None:
+                        log.info(
+                            "anthropic 400, 削平 body 重试一次 request_id=%s model=%s",
+                            request_id,
+                            upstream_model,
+                        )
+                        upstream = await client.post(url, content=retry_raw, headers=headers)
             if upstream.status_code == 200:
                 data = upstream.json()
                 bill(data.get("usage"))
@@ -760,36 +846,54 @@ async def anthropic_messages(request: Request, user: dict = Depends(resolve_user
         buffer = b""
         try:
             async with _upstream_client() as client:
-                async with client.stream("POST", url, content=raw, headers=headers) as upstream:
-                    if not 200 <= upstream.status_code < 300:
-                        detail = await upstream.aread()
-                        yield _sse_error_bytes(upstream.status_code, detail)
-                        return
-                    upstream_started = True
-                    async for chunk in upstream.aiter_raw():
-                        forwarded_bytes += len(chunk)
-                        buffer += chunk
-                        while b"\n" in buffer:
-                            line, buffer = buffer.split(b"\n", 1)
-                            text = line.strip()
-                            if text == b"event: message_stop":
-                                stream_complete = True
-                            if text.startswith(b"data:"):
-                                try:
-                                    parsed = json.loads(text[5:].strip())
-                                    if parsed.get("type") == "message_stop":
-                                        stream_complete = True
-                                    event_usage = (
-                                        parsed.get("usage")
-                                        or (parsed.get("message") or {}).get("usage")
-                                        or {}
-                                    )
-                                    if isinstance(event_usage, dict):
-                                        usage.update(event_usage)
-                                except (json.JSONDecodeError, AttributeError):
-                                    pass
-                        yield chunk
-                    stream_exhausted = True
+                # 400 会在**第一个字节之前**到, 所以流式这条路照样重试得起 ——
+                # 已经开始往下吐的流不能重来, 而这时还没开始吐。
+                send = raw
+                for attempt in (0, 1):
+                    async with client.stream("POST", url, content=send, headers=headers) as upstream:
+                        if not 200 <= upstream.status_code < 300:
+                            detail = await upstream.aread()
+                            retry_raw = (
+                                _normalize_after_400(req_parsed)
+                                if upstream.status_code == 400 and attempt == 0
+                                else None
+                            )
+                            if retry_raw is not None:
+                                log.info(
+                                    "anthropic 400 (流式), 削平 body 重试一次 request_id=%s model=%s",
+                                    request_id,
+                                    upstream_model,
+                                )
+                                send = retry_raw
+                                continue
+                            yield _sse_error_bytes(upstream.status_code, detail)
+                            return
+                        upstream_started = True
+                        async for chunk in upstream.aiter_raw():
+                            forwarded_bytes += len(chunk)
+                            buffer += chunk
+                            while b"\n" in buffer:
+                                line, buffer = buffer.split(b"\n", 1)
+                                text = line.strip()
+                                if text == b"event: message_stop":
+                                    stream_complete = True
+                                if text.startswith(b"data:"):
+                                    try:
+                                        parsed = json.loads(text[5:].strip())
+                                        if parsed.get("type") == "message_stop":
+                                            stream_complete = True
+                                        event_usage = (
+                                            parsed.get("usage")
+                                            or (parsed.get("message") or {}).get("usage")
+                                            or {}
+                                        )
+                                        if isinstance(event_usage, dict):
+                                            usage.update(event_usage)
+                                    except (json.JSONDecodeError, AttributeError):
+                                        pass
+                            yield chunk
+                        stream_exhausted = True
+                    break
         finally:
             slot.__exit__()
             if upstream_started and (forwarded_bytes or not stream_exhausted):

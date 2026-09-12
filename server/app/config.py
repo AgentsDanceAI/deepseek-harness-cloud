@@ -120,6 +120,15 @@ ZHIPU_SEARCH_BASE = _env("ZHIPU_SEARCH_BASE", "https://open.bigmodel.cn/api/paas
 # x-api-key 打过去 200, 返回原生 content 块)。
 UPSTREAM_ANTHROPIC_BASE = _env("UPSTREAM_ANTHROPIC_BASE", "") or UPSTREAM_BASE_URL
 
+# 带 thinking 的 claude 请求, 转发时换到上游的 `<型号>-thinking` 上。
+# 上游中继把同一个牌名按请求轮询到好几家后端, 其中 Bedrock 那路不收
+# `thinking.type=enabled` (只认 adaptive) —— 而 Claude Code 每轮都带。实测
+# (server/scripts/probe_anthropic_face.py): claude-sonnet-5 原样 3/6 通过,
+# claude-sonnet-5-thinking 6/6 且全落在直连 Anthropic 那路。
+# **拿单价换稳定**: 直连通常比 Bedrock 贵; 账按牌名记, 用户侧价格不变。
+# 关掉它就退回原样转发, 那时靠 400 之后削平 body 重试一次兜底 (语义会降级)。
+ANTHROPIC_PIN_THINKING_CHANNEL = _env_bool("ANTHROPIC_PIN_THINKING_CHANNEL", True)
+
 # Gemini 面转发到哪。Google 原生协议的路径是 `/v1beta/models/{model}:generateContent`
 # —— 注意它**不挂在 /v1 下面**, 所以这里要的是上游的根, 不是 UPSTREAM_BASE_URL。
 # 默认由主上游推导 (千面: https://api.qianmian.ai/v1 -> https://api.qianmian.ai),
