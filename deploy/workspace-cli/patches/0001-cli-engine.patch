@@ -45,10 +45,10 @@ index 0000000..b6be465
 +}
 diff --git a/server/cli/cli-adapter.ts b/server/cli/cli-adapter.ts
 new file mode 100644
-index 0000000..dec4673
+index 0000000..b5ffc33
 --- /dev/null
 +++ b/server/cli/cli-adapter.ts
-@@ -0,0 +1,310 @@
+@@ -0,0 +1,383 @@
 +/**
 + * cli-adapter.ts —— 把 CLI 的 JSON 行归一成同一套事件。
 + *
@@ -63,7 +63,7 @@ index 0000000..dec4673
 +
 +// 两格的默认型号住在 gateway.ts (它是"接 AI Store 网关"那一摊的事实来源),
 +// 这里只是把它挂到各自的 spec 上, 免得两处各写一份迟早写歪。
-+import { DEFAULT_MODEL } from "./gateway.js";
++import { DEFAULT_MODEL, type CliId } from "./gateway.js";
 +
 +export type CliEvent =
 +	| { t: "session"; id: string }
@@ -78,8 +78,14 @@ index 0000000..dec4673
 +	| { t: "raw"; line: string };
 +
 +export interface CliSpec {
-+	readonly id: "claude" | "codex";
++	readonly id: CliId;
 +	readonly name: string;
++	/** 起进程用的可执行文件。缺省 = id (claude / codex 就是 PATH 上的命令);
++	 *  OpenManus 是 python 库, 起的是它 venv 里的解释器 + 我们的 runner。 */
++	readonly exe?: string;
++	/** 历史从哪来: 两个 CLI 有自己的会话文件 ("cli"); runner 型引擎没有, 由
++	 *  引擎自己把每轮落成 JSONL ("runner", 见 sessions.ts 的 runner* 那组)。 */
++	readonly historyStore: "cli" | "runner";
 +	/**
 +	 * 这个 CLI **真能给**的思考档位, 以及开箱默认那一档。
 +	 *
@@ -144,6 +150,7 @@ index 0000000..dec4673
 +export const claudeSpec: CliSpec = {
 +	id: "claude",
 +	name: "Claude Code",
++	historyStore: "cli",
 +	stdinPrompt: true,
 +	// 抓包看到的: 不传 --effort 时它自己就按 high 发 (output_config.effort=high),
 +	// 所以默认值取 high —— 界面显示的那一档与它真实的行为对得上。
@@ -255,6 +262,7 @@ index 0000000..dec4673
 +export const codexSpec: CliSpec = {
 +	id: "codex",
 +	name: "Codex",
++	historyStore: "cli",
 +	stdinPrompt: false,
 +	// 界面那档叫 off, 上游的写法是 none —— 在这里翻译, 别让界面去认两套词。
 +	// **不报 minimal**: gpt-5.6-luna 明确回 400 说这个模型不支持。
@@ -358,7 +366,72 @@ index 0000000..dec4673
 +	},
 +};
 +
-+export const SPECS: Record<string, CliSpec> = { claude: claudeSpec, codex: codexSpec };
++/** runner 的 tool 事件拿工具名当 id —— 同一轮里同一个工具调两次就撞车: 第二张
++ *  卡片建不出来 (按 id 去重), 它的结果还会贴到第一张上。这里给每次调用发一个
++ *  本轮唯一的 id, tool_end 按"同名、最近、还没收尾"的那张配。进程级 Map 够用:
++ *  一个进程一轮。 */
++const omOpenTools = new Map<string, string[]>();
++let omSeq = 0;
++
++/** OpenManus: 不是 CLI, 是 Python 库 —— 跑我们自己的 runner (dhc 仓
++ *  deploy/workspace-frameworks/runner/openmanus_run.py), 它挂 loguru 的 sink 直接
++ *  吐这套统一事件, 一行一个 JSON。所以 feed 基本是透传 + 两处整形。 */
++export const openmanusSpec: CliSpec = {
++	id: "openmanus",
++	name: "OpenManus",
++	exe: process.env.OPENMANUS_PYTHON ?? "/opt/venv-openmanus/bin/python",
++	historyStore: "runner",
++	stdinPrompt: false,
++	// 它没有思考档位这回事 —— 只报 off, 界面上那个下拉就只有一项。
++	thinkingLevels: ["off"],
++	defaultThinking: "off",
++	thinkingArgs() {
++		return [];
++	},
++	defaultModel: DEFAULT_MODEL.openmanus,
++	// 一轮一个进程, 上下文不由它保存 —— 没有 resume。型号走 config.toml
++	// (cli-session 每轮先写), 不走 argv。
++	argv(prompt) {
++		return [process.env.OPENMANUS_RUNNER ?? "/opt/dsh/openmanus_run.py", prompt];
++	},
++	stdinPayload() {
++		return null;
++	},
++	feed(line) {
++		let e: Record<string, any>;
++		try {
++			e = JSON.parse(line);
++		} catch {
++			return [{ t: "raw", line }];
++		}
++		if (!e || typeof e.t !== "string") return [{ t: "raw", line }];
++		if (e.t === "tool") {
++			const name = String(e.name ?? e.id ?? "?");
++			const id = `om-${++omSeq}`;
++			const open = omOpenTools.get(name) ?? [];
++			open.push(id);
++			omOpenTools.set(name, open);
++			return [{ t: "tool", id, name, input: e.input }];
++		}
++		if (e.t === "tool_end") {
++			const name = String(e.id ?? e.name ?? "?");
++			const open = omOpenTools.get(name) ?? [];
++			const id = open.shift() ?? `om-${++omSeq}`;
++			return [{ t: "tool_end", id, ok: e.ok !== false, output: String(e.output ?? "") }];
++		}
++		if (e.t === "done") {
++			const u = e.usage ?? {};
++			return [{ t: "done", usage: { input: num(u.input), output: num(u.output), cacheRead: 0 } }];
++		}
++		if (e.t === "text") return [{ t: "text", text: String(e.text ?? "") }];
++		if (e.t === "thinking") return [{ t: "thinking", text: String(e.text ?? "") }];
++		if (e.t === "error") return [{ t: "error", message: String(e.message ?? "") }];
++		if (e.t === "raw") return [{ t: "raw", line: String(e.line ?? "") }];
++		return [{ t: "raw", line }];
++	},
++};
++
++export const SPECS: Record<string, CliSpec> = { claude: claudeSpec, codex: codexSpec, openmanus: openmanusSpec };
 diff --git a/server/cli/cli-agent-service.ts b/server/cli/cli-agent-service.ts
 new file mode 100644
 index 0000000..8e57609
@@ -453,10 +526,10 @@ index 0000000..8e57609
 +}
 diff --git a/server/cli/cli-session.ts b/server/cli/cli-session.ts
 new file mode 100644
-index 0000000..6224674
+index 0000000..3e920ab
 --- /dev/null
 +++ b/server/cli/cli-session.ts
-@@ -0,0 +1,627 @@
+@@ -0,0 +1,679 @@
 +/**
 + * cli-session.ts —— 第三个引擎的会话对象 (PI_WEB_ENGINE=claude|codex)。
 + *
@@ -488,13 +561,17 @@ index 0000000..6224674
 +	UiSubagentTemplate,
 +} from "../protocol.js";
 +import { SPECS, type CliSpec, type CliEvent } from "./cli-adapter.js";
-+import { DEFAULT_MODEL, childEnv, listCatalog, writeCodexConfig } from "./gateway.js";
++import { DEFAULT_MODEL, childEnv, listCatalog, writeCodexConfig, writeOpenManusConfig } from "./gateway.js";
 +import {
++	appendRunnerTurn,
 +	claudeProjectDir,
++	deleteRunnerSession,
 +	listClaudeSessions,
 +	listCodexSessions,
++	listRunnerSessions,
 +	replayClaudeSession,
 +	replayCodexSession,
++	replayRunnerSession,
 +	searchSessions,
 +} from "./sessions.js";
 +import { FilesService } from "../files-service.js";
@@ -540,7 +617,9 @@ index 0000000..6224674
 +	private streaming: UiMessage | null = null;
 +	private rev = 0;
 +	private seq = 0;
-+	private conversationId = randomUUID();
++	/** 显式 string: randomUUID() 会把它推成 UUID 模板类型, 而 runner 型会话切过去时
++	 *  要把它换成历史文件的 id (随便一个 [\\w-]+), 那不是 UUID。 */
++	private conversationId: string = randomUUID();
 +	private usage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
 +	// 文件树 / 预览 / 补全 / SCM 与终端**都不是引擎的事** —— 它们是工作区的事。
 +	// 所以直接用项目自己的实现 (server/files-service.ts / server/terminals.ts),
@@ -648,9 +727,15 @@ index 0000000..6224674
 +		// config.toml 里 `model = ""` 会让 codex 回落到它自己的内置默认, 而那个
 +		// 名字不在我们的在售目录里, 网关只会回 404。
 +		if (this.spec.id === "codex") writeCodexConfig(this.model || DEFAULT_MODEL.codex);
++		// OpenManus 同款: 型号/令牌都在它的 config.toml 里, 每轮先写。
++		if (this.spec.id === "openmanus") writeOpenManusConfig(this.model || DEFAULT_MODEL.openmanus);
 +		// 这一轮开始前拍一次监听端口 —— 跑完再拍一次, 差集就是它留下的后台服务。
 +		this.bg.snapshotBefore();
-+		const child = spawn(this.spec.id, argv, { cwd: this.cwd, env: childEnv(this.spec.id, this.model) });
++		// exe 缺省就是 id (PATH 上的 claude / codex); runner 型引擎起的是解释器。
++		const child = spawn(this.spec.exe ?? this.spec.id, argv, {
++			cwd: this.cwd,
++			env: childEnv(this.spec.id, this.model),
++		});
 +		this.child = child;
 +		if (this.spec.stdinPrompt) {
 +			const payload = this.spec.stdinPayload(text);
@@ -695,6 +780,7 @@ index 0000000..6224674
 +				this.streaming = null;
 +				this.snapshot();
 +				void this.bg.trackAfterBash();        // 这一轮留下的常驻服务
++				this.persistTurn();
 +				done();
 +			});
 +			child.on("error", (e) => {
@@ -713,7 +799,13 @@ index 0000000..6224674
 +		if (ev.t === "delta" || ev.t === "text") {
 +			if (!this.streaming) return;
 +			const last = this.streaming.content[this.streaming.content.length - 1] as { type: string; text?: string } | undefined;
-+			if (last && last.type === "text") last.text = (last.text ?? "") + ev.text;
++			// `text` 是**一整段** (codex 的 agent_message、OpenManus 每一步的"想法"),
++			// 不是流式增量 —— 接在上一段后面要空一行, 否则多步的想法糊成一坨:
++			// "…双击 index.html 即可预览。首页结构已完成：…" (老板 9/2 那条就是)。
++			// `delta` 才是逐字续写, 照旧直接拼。
++			const sep = ev.t === "text" && last && last.type === "text" && (last.text ?? "").trim() ? "\n\n" : "";
++			const piece = sep + ev.text;
++			if (last && last.type === "text") last.text = (last.text ?? "") + piece;
 +			else this.streaming.content.push({ type: "text", text: ev.text });
 +			// **别用 as never 糊过去。** 第一版就是这么写的 (只带 text), 而真实帧要
 +			// messageId / usage / assistantMessageEvent —— 前端读 .assistantMessageEvent.type
@@ -724,7 +816,7 @@ index 0000000..6224674
 +				seq: this.seq++,
 +				messageId: this.streaming.id,
 +				usage: null,
-+				assistantMessageEvent: { type: "text_delta", contentIndex: this.streaming.content.length - 1, delta: ev.text },
++				assistantMessageEvent: { type: "text_delta", contentIndex: this.streaming.content.length - 1, delta: piece },
 +			});
 +			return;
 +		}
@@ -834,6 +926,7 @@ index 0000000..6224674
 +
 +	async newChat(): Promise<void> {
 +		this.resume = null;
++		this.persisted = 0;
 +		this.messages = [];
 +		this.streaming = null;
 +		this.conversationId = randomUUID();
@@ -940,9 +1033,26 @@ index 0000000..6224674
 +	async pushSlashCommands(): Promise<void> {  }
 +	async refreshSessions(): Promise<void> {
 +		// codex 的会话按日期摊开存, 跟 cwd 没有对应关系 —— 靠逐个读第一行的
-+		// session_meta.payload.cwd 认项目 (见 sessions.ts)。
-+		const sessions = this.spec.id === "claude" ? listClaudeSessions(this.cwd) : listCodexSessions(this.cwd);
++		// session_meta.payload.cwd 认项目 (见 sessions.ts)。runner 型引擎的历史是
++		// 我们自己落的 JSONL。
++		const sessions =
++			this.spec.historyStore === "runner"
++				? listRunnerSessions(this.spec.id)
++				: this.spec.id === "claude"
++					? listClaudeSessions(this.cwd)
++					: listCodexSessions(this.cwd);
 +		this.send({ type: "sessions", sessions });
++	}
++
++	/** runner 型引擎: 一轮跑完把这一轮 (从上一次落库之后的新消息) 追加进历史。
++	 *  会话 id 就是 conversationId; 切到旧会话时 switchSession 会把它换过来。 */
++	private persisted = 0;
++	private persistTurn(): void {
++		if (this.spec.historyStore !== "runner") return;
++		const fresh = this.messages.slice(this.persisted);
++		if (!fresh.length) return;
++		appendRunnerTurn(this.spec.id, this.conversationId, fresh);
++		this.persisted = this.messages.length;
 +	}
 +	async pushProjects(): Promise<void> {  }
 +	async removeProject(_path: string): Promise<void> {  }
@@ -950,6 +1060,11 @@ index 0000000..6224674
 +	 *  只删当前引擎目录下的那一个, 且路径由 sessionId 拼出来, 不接受外部传入的
 +	 *  绝对路径 (那是任意文件删除)。 */
 +	async deleteSession(path: string): Promise<void> {
++		if (this.spec.historyStore === "runner") {
++			deleteRunnerSession(this.spec.id, path);
++			await this.refreshSessions();
++			return;
++		}
 +		if (this.spec.id !== "claude" || !/^[\w-]+$/.test(path)) return;
 +		try {
 +			rmSync(join(claudeProjectDir(this.cwd), `${path}.jsonl`), { force: true });
@@ -966,8 +1081,18 @@ index 0000000..6224674
 +		// path 就是 sessionId —— 直接喂给下一轮的 --resume, 同时把历史翻出来
 +		// 铺到界面上 (replayClaudeSession)。不回放的话界面从空白开始, 而 CLI 那边
 +		// 其实记得上下文 —— 用户看到的是"它把刚才说的忘了", 实际没忘, 更糊涂。
-+		this.resume = path;
 +		this.streaming = null;
++		if (this.spec.historyStore === "runner") {
++			// 一轮一个进程, 没有 resume: "切会话"就是把那份历史铺回来, 之后的新轮次
++			// 继续追加到同一个文件 —— 所以 conversationId 要换成它的 id。
++			this.resume = null;
++			this.conversationId = path;
++			this.messages = replayRunnerSession(this.spec.id, path);
++			this.persisted = this.messages.length;
++			this.snapshot();
++			return;
++		}
++		this.resume = path;
 +		this.conversationId = randomUUID();
 +		this.messages =
 +			this.spec.id === "claude" ? replayClaudeSession(this.cwd, path) : replayCodexSession(this.cwd, path);
@@ -1086,10 +1211,10 @@ index 0000000..6224674
 +}
 diff --git a/server/cli/gateway.ts b/server/cli/gateway.ts
 new file mode 100644
-index 0000000..ad6ae64
+index 0000000..32e65bd
 --- /dev/null
 +++ b/server/cli/gateway.ts
-@@ -0,0 +1,150 @@
+@@ -0,0 +1,201 @@
 +/**
 + * gateway.ts —— 接 AI Store 的模型网关。
 + *
@@ -1107,7 +1232,7 @@ index 0000000..ad6ae64
 +
 +import { mkdirSync, writeFileSync } from "node:fs";
 +import { homedir } from "node:os";
-+import { join } from "node:path";
++import { dirname, join } from "node:path";
 +
 +import type { ModelInfo } from "../protocol.js";
 +
@@ -1125,7 +1250,10 @@ index 0000000..ad6ae64
 + * haiku, 而网关只放行在售目录, 那个名字不在里面 —— 症状是主对话正常、后台
 + * 静默 404。
 + */
-+export function childEnv(cli: "claude" | "codex", model: string): NodeJS.ProcessEnv {
++/** 三个引擎共用的 id 类型。加引擎先加这里, 编译器会把漏改的地方逐个点出来。 */
++export type CliId = "claude" | "codex" | "openmanus";
++
++export function childEnv(cli: CliId, model: string): NodeJS.ProcessEnv {
 +	const env: NodeJS.ProcessEnv = { ...process.env };
 +	if (!gatewayConfigured()) return env;
 +	if (cli === "claude") {
@@ -1138,10 +1266,18 @@ index 0000000..ad6ae64
 +		// 有 ANTHROPIC_API_KEY 时 CLI 会优先用它 —— 那是用户自己的厂商密钥,
 +		// 会绕过我们的计费。托管环境里一律不带。
 +		delete env.ANTHROPIC_API_KEY;
-+	} else {
++	} else if (cli === "codex") {
 +		// codex 的 base_url / wire_api 在 ~/.codex/config.toml 里 (见 writeCodexConfig),
 +		// 这里只给密钥 —— config.toml 的 env_key 指的就是它。
 +		env.OPENAI_API_KEY = GATEWAY_TOKEN;
++	} else {
++		// OpenManus: 模型/网关/密钥全在它的 config/config.toml 里 (见
++		// writeOpenManusConfig)。这几个 env 是给它的工具链兜底的 (litellm 风格的
++		// 名字), 与 dhc 仓 products.py env_for("openmanus") 保持同名。
++		env.OPENAI_API_KEY = GATEWAY_TOKEN;
++		env.OPENAI_BASE_URL = `${GATEWAY_BASE}/llm/v1`;
++		env.OPENAI_API_BASE = `${GATEWAY_BASE}/llm/v1`;
++		if (model) env.DSH_MODEL = model;
 +	}
 +	return env;
 +}
@@ -1194,9 +1330,11 @@ index 0000000..ad6ae64
 + * 提示返回空内容, 界面一直转 (见 cli-session.listModels 那段)。与 AI Store 产品
 + * 侧一致 (dhc 仓 products.py 的 _codecli_model)。
 + */
-+export const DEFAULT_MODEL: Record<"claude" | "codex", string> = {
++export const DEFAULT_MODEL: Record<CliId, string> = {
 +	claude: "claude-sonnet-5",
 +	codex: "gpt-5.6-luna",
++	// OpenManus 走 chat/completions 面, 与 codex 同一条模型线 (dhc 侧 _codecli_model("codex"))。
++	openmanus: "gpt-5.6-luna",
 +};
 +
 +/**
@@ -1220,7 +1358,45 @@ index 0000000..ad6ae64
 +	// 同 childEnv: 有它时 CLI 优先用它, 那是用户自己的厂商密钥, 会绕过计费。
 +	delete env.ANTHROPIC_API_KEY;
 +	env.OPENAI_API_KEY = GATEWAY_TOKEN;
++	// OpenManus 那格的终端里 `python main.py` 读的是 config.toml, 不靠这两个; 但它
++	// 的工具链 (litellm 一类) 认这两个名字, 给上无害、少一类"终端里跑不通"。
++	env.OPENAI_BASE_URL = `${GATEWAY_BASE}/llm/v1`;
++	env.OPENAI_API_BASE = `${GATEWAY_BASE}/llm/v1`;
 +	return env;
++}
++
++/** OpenManus 的 config/config.toml 放哪。它 import 时就构造 Config() 读这个文件。 */
++export const OPENMANUS_CONFIG = process.env.OPENMANUS_CONFIG ?? "/opt/openmanus/config/config.toml";
++
++/** OpenManus 的 config.toml。**每次开机 + 每轮重写** (与 codex 同款): 里面有该用户
++ *  的网关令牌 (每次建实例都换), 型号又是按次可换的。
++ *
++ *  [daytona] 那一段**不能漏**: 上游 DaytonaSettings.daytona_api_key 没有默认值,
++ *  缺了它 Config() 在 import 期就抛 pydantic 校验错 —— dhc 仓 _frameworks_boot
++ *  里踩过, 注释原话"渲染出来一看就发现, 光读代码看不出来"。 */
++export function openManusConfigToml(model: string): string {
++	return [
++		"[llm]",
++		`model = "${model}"`,
++		`base_url = "${GATEWAY_BASE}/llm/v1"`,
++		`api_key = "${GATEWAY_TOKEN}"`,
++		"max_tokens = 8192",
++		"temperature = 0.0",
++		"",
++		"[daytona]",
++		'daytona_api_key = "unused"',
++		"",
++	].join("\n");
++}
++
++export function writeOpenManusConfig(model: string = DEFAULT_MODEL.openmanus): void {
++	if (!gatewayConfigured()) return;
++	try {
++		mkdirSync(dirname(OPENMANUS_CONFIG), { recursive: true });
++		writeFileSync(OPENMANUS_CONFIG, openManusConfigToml(model), "utf8");
++	} catch (e) {
++		console.error("[openmanus] 写 config.toml 失败:", e);
++	}
 +}
 +
 +/**
@@ -1242,10 +1418,10 @@ index 0000000..ad6ae64
 +}
 diff --git a/server/cli/sessions.ts b/server/cli/sessions.ts
 new file mode 100644
-index 0000000..25bff20
+index 0000000..4eb74b6
 --- /dev/null
 +++ b/server/cli/sessions.ts
-@@ -0,0 +1,331 @@
+@@ -0,0 +1,408 @@
 +/**
 + * sessions.ts —— 从 CLI 自己的会话存储里读历史（列表 + 回放）。
 + *
@@ -1262,7 +1438,7 @@ index 0000000..25bff20
 + * 终端里直接敲 claude/codex 产生的会话在网页上看不见, 而两边指的是同一个目录。
 + */
 +
-+import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
++import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync } from "node:fs";
 +import { homedir } from "node:os";
 +import { join } from "node:path";
 +import type { SessionSearchResult, SessionSummary, UiMessage } from "../protocol.js";
@@ -1561,13 +1737,19 @@ index 0000000..25bff20
 + *
 + * 命中锚点按 (role, timestamp) 给 —— 前端载入会话后照这两样在消息里定位。
 + */
-+export function searchSessions(engine: "claude" | "codex", cwd: string, query: string): SessionSearchResult[] {
++export function searchSessions(engine: "claude" | "codex" | "openmanus", cwd: string, query: string): SessionSearchResult[] {
 +	const q = query.trim().toLowerCase();
 +	if (!q) return [];
-+	const list = engine === "claude" ? listClaudeSessions(cwd) : listCodexSessions(cwd);
++	const list =
++		engine === "claude" ? listClaudeSessions(cwd) : engine === "codex" ? listCodexSessions(cwd) : listRunnerSessions(engine);
 +	const out: SessionSearchResult[] = [];
 +	for (const s of list) {
-+		const msgs = engine === "claude" ? replayClaudeSession(cwd, s.path) : replayCodexSession(cwd, s.path);
++		const msgs =
++			engine === "claude"
++				? replayClaudeSession(cwd, s.path)
++				: engine === "codex"
++					? replayCodexSession(cwd, s.path)
++					: replayRunnerSession(engine, s.path);
 +		const anchors = msgs
 +			.filter((m) => m.content.some((c) => blockSearchText(c).toLowerCase().includes(q)))
 +			.slice(0, SEARCH_ANCHORS_MAX)
@@ -1577,21 +1759,95 @@ index 0000000..25bff20
 +	}
 +	return out;
 +}
++
++
++// --- runner 型引擎的历史 (OpenManus) ------------------------------------------
++//
++// 它自己没有会话存储 —— 一轮一个进程, 跑完什么都不留。agentui 外壳那会儿是外壳
++// 自己落库的; 换到这里, 同样由引擎落: 一个会话一个 JSONL, 一行一条 UiMessage。
++// 放在数据目录 (NAS 上的 /root/.pi-web) 而不是 /workspace: 历史不该出现在用户的
++// 文件面板和 git 状态里。
++
++/** 数据目录。与 index.ts 的 DATA_DIR 同源 (PI_WEB_DATA_DIR), 缺省 ~/.pi-web。 */
++function dataDir(): string {
++	return process.env.PI_WEB_DATA_DIR || join(homedir(), ".pi-web");
++}
++
++function runnerDir(engine: string): string {
++	return join(dataDir(), "cli-history", engine);
++}
++
++const RUNNER_ID = /^[\w-]+$/;
++
++/** 追加一轮 (通常是 user + assistant 两条, 中间可能夹 toolResult)。 */
++export function appendRunnerTurn(engine: string, id: string, msgs: UiMessage[]): void {
++	if (!RUNNER_ID.test(id) || !msgs.length) return;
++	const dir = runnerDir(engine);
++	mkdirSync(dir, { recursive: true });
++	appendFileSync(join(dir, `${id}.jsonl`), msgs.map((m) => JSON.stringify(m)).join("\n") + "\n", "utf8");
++}
++
++export function listRunnerSessions(engine: string): SessionSummary[] {
++	const dir = runnerDir(engine);
++	if (!existsSync(dir)) return [];
++	const out: SessionSummary[] = [];
++	for (const name of readdirSync(dir)) {
++		if (!name.endsWith(".jsonl")) continue;
++		const file = join(dir, name);
++		const msgs = replayRunnerSession(engine, name.slice(0, -".jsonl".length));
++		if (!msgs.length) continue;
++		const firstUser = msgs.find((m) => m.role === "user");
++		let modified = 0;
++		try {
++			modified = statSync(file).mtimeMs;
++		} catch {
++			continue;
++		}
++		out.push({
++			path: name.slice(0, -".jsonl".length),
++			firstMessage: blocksText(firstUser?.content).slice(0, 120) || "(无标题)",
++			messageCount: msgs.filter((m) => m.role === "user" || m.role === "assistant").length,
++			modified,
++			source: "web",
++		});
++	}
++	return out.sort((a, b) => b.modified - a.modified);
++}
++
++export function replayRunnerSession(engine: string, id: string): UiMessage[] {
++	if (!RUNNER_ID.test(id)) return [];
++	const file = join(runnerDir(engine), `${id}.jsonl`);
++	if (!existsSync(file)) return [];
++	const msgs: UiMessage[] = [];
++	for (const line of readLines(file)) {
++		const m = parse(line);
++		if (m && typeof m.role === "string" && Array.isArray(m.content)) msgs.push(m as UiMessage);
++	}
++	return msgs.length > REPLAY_MAX ? msgs.slice(-REPLAY_MAX) : msgs;
++}
++
++export function deleteRunnerSession(engine: string, id: string): void {
++	if (!RUNNER_ID.test(id)) return;
++	rmSync(join(runnerDir(engine), `${id}.jsonl`), { force: true });
++}
 diff --git a/server/index.ts b/server/index.ts
-index 7186abf..707762f 100644
+index 7186abf..8920d8b 100644
 --- a/server/index.ts
 +++ b/server/index.ts
-@@ -217,7 +217,21 @@ if (AUTH_TOKEN) {
+@@ -217,7 +217,26 @@ if (AUTH_TOKEN) {
  }
  
  /** 引擎选择：PI_WEB_ENGINE=pi|dsh（默认 pi）。重启生效。 */
 -const ENGINE: "pi" | "dsh" = process.env.PI_WEB_ENGINE === "dsh" ? "dsh" : "pi";
 +const RAW_ENGINE = process.env.PI_WEB_ENGINE ?? "pi";
-+const ENGINE: "pi" | "dsh" | "claude" | "codex" =
-+	RAW_ENGINE === "dsh" || RAW_ENGINE === "claude" || RAW_ENGINE === "codex" ? RAW_ENGINE : "pi";
++const ENGINE: "pi" | "dsh" | "claude" | "codex" | "openmanus" =
++	RAW_ENGINE === "dsh" || RAW_ENGINE === "claude" || RAW_ENGINE === "codex" || RAW_ENGINE === "openmanus"
++		? RAW_ENGINE
++		: "pi";
 +/** 左上角品牌显示的名字。pi / dsh 留空 —— 前端回落到它自己原本的名字, 上游
 + *  两个引擎的观感一个字都不动。 */
-+const ENGINE_NAME = ENGINE === "claude" ? "Claude Code" : ENGINE === "codex" ? "Codex" : "";
++const ENGINE_NAME =
++	ENGINE === "claude" ? "Claude Code" : ENGINE === "codex" ? "Codex" : ENGINE === "openmanus" ? "OpenManus" : "";
 +
 +/** PI_WEB_DEFAULT_THEME: 这个实例开箱的皮肤 (themes/<id>.css 里的 id)。
 + *  只是**默认值** —— 用户在界面上选过就以他的选择为准。留空 = 打包的深色。 */
@@ -1601,10 +1857,12 @@ index 7186abf..707762f 100644
 +// 直接进 [终端] 敲 codex —— 对话面板还没连过, config 还不存在, 它就去问用户要
 +// OpenAI 的登录。**终端不该等对话面板先跑一轮**。
 +if (ENGINE === "claude" || ENGINE === "codex") writeCodexConfig();
++// OpenManus 同理: 终端里 `python main.py` 读的就是这份 config.toml, 开机就得在。
++if (ENGINE === "openmanus") writeOpenManusConfig();
  
  /** PI_WEB_MANAGED=1: this instance is updated by whoever deploys it. */
  const MANAGED = isManaged();
-@@ -415,6 +429,23 @@ app.get("/plugins/:id/client/*", (req, res) => {
+@@ -415,6 +434,23 @@ app.get("/plugins/:id/client/*", (req, res) => {
  });
  /** Set in the env of the replacement child spawned by a self-update restart. */
  const RESTART_CHILD_ENV = "PI_WEB_RESTART_CHILD";
@@ -1628,7 +1886,7 @@ index 7186abf..707762f 100644
  const webDist = join(pkgRoot, "web", "dist");
  if (existsSync(webDist)) {
  	// gzip/deflate 响应压缩：前端 bundle ~1MB，局域网/反代场景传输量降到 ~1/4；
-@@ -422,6 +453,10 @@ if (existsSync(webDist)) {
+@@ -422,6 +458,10 @@ if (existsSync(webDist)) {
  	app.use(compression());
  	app.use(
  		express.static(webDist, {
@@ -1639,7 +1897,7 @@ index 7186abf..707762f 100644
  			// Vite 产物文件名带内容 hash，可永久强缓存——业务发版后 hash 变化自然失效，
  			// index.html 由下方 catch-all 处理（sendFile 不走这里）
  			setHeaders(res, filePath) {
-@@ -449,6 +484,17 @@ if (existsSync(webDist)) {
+@@ -449,6 +489,17 @@ if (existsSync(webDist)) {
  		next();
  	});
  	app.get(/^\/(?!api\/|ws).*/, (_req, res) => {
@@ -1657,28 +1915,28 @@ index 7186abf..707762f 100644
  		// Callback form: a failed stat here (npm i -g is mid-replacement of the
  		// package dir) responds 503 instead of crashing the request pipeline
  		// with an unhandled ENOENT stack trace.
-@@ -567,6 +613,9 @@ const heartbeatTimer = setInterval(() => {
+@@ -567,6 +618,9 @@ const heartbeatTimer = setInterval(() => {
  // 引擎分发：PI_WEB_ENGINE=dsh 时使用 DeepSeek Harness 引擎（server/dsh/），
  // 默认 pi 引擎。同一 wire 协议，前端无感知（ready/health 携带 engine 字段）。
  import { DshAgentService } from "./dsh/dsh-agent-service.js";
 +import { brandIndexHtml } from "./cli/branding.js";
-+import { writeCodexConfig } from "./cli/gateway.js";
++import { writeCodexConfig, writeOpenManusConfig } from "./cli/gateway.js";
 +import { CliAgentService } from "./cli/cli-agent-service.js";
  
  /** dispatch 表所需的方法契约（pi 的 ClientSession 与 dsh 的 DshClientSession
   *  都结构兼容；dsh 引擎对不支持的功能做简化实现）。 */
-@@ -763,7 +812,9 @@ export interface EngineService {
+@@ -763,7 +817,9 @@ export interface EngineService {
  }
  
  const service: EngineService =
 -	ENGINE === "dsh"
-+	ENGINE === "claude" || ENGINE === "codex"
++	ENGINE === "claude" || ENGINE === "codex" || ENGINE === "openmanus"
 +	? new CliAgentService(CWD, ENGINE, VERSION)
 +	: ENGINE === "dsh"
  		? new DshAgentService(CWD, join(DATA_DIR, "client-state.json"), DATA_DIR, getAgentDir())
  		: new AgentService(
  				CWD,
-@@ -1315,6 +1366,7 @@ wss.on("connection", (ws) => {
+@@ -1315,6 +1371,7 @@ wss.on("connection", (ws) => {
  						serverVersion: VERSION,
  						protocolVersion: PROTOCOL_VERSION,
  						engine: ENGINE,

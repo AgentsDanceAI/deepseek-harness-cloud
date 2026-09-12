@@ -40,7 +40,8 @@ def _switchable_refs() -> set[str]:
     """
     from app import config
 
-    return {config.CLI_WORKSPACE_IMAGE_REF, config.AGENTUI_IMAGE_REF}
+    # OpenManus 那格的 pi-web-ui 版也在开关另一侧 (同一个开关管三格)。
+    return {config.CLI_WORKSPACE_IMAGE_REF, config.AGENTUI_IMAGE_REF, config.OPENMANUS_CLI_IMAGE_REF}
 
 
 def ghcr_refs() -> list[str]:

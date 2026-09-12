@@ -383,6 +383,210 @@ index 0000000..9e9c702
 +		expect(claudeSpec.defaultModel).toBeTruthy();
 +	});
 +});
+diff --git a/tests/unit/cli-engine-openmanus.test.ts b/tests/unit/cli-engine-openmanus.test.ts
+new file mode 100644
+index 0000000..b0c964d
+--- /dev/null
++++ b/tests/unit/cli-engine-openmanus.test.ts
+@@ -0,0 +1,198 @@
++/**
++ * 第四个引擎 openmanus —— 不是 CLI, 是 Python 库, 起的是我们自己的 runner。
++ *
++ * 钉三样:
++ *   1. 适配层: runner 吐的统一事件透传, 但**同名工具要分开** (runner 拿工具名当 id,
++ *      同一轮调两次同一个工具会撞车: 第二张卡片建不出来, 结果贴到第一张上);
++ *   2. `text` 是一整段, 接在上一段后面要空一行 —— 多步"想法"不能糊成一坨
++ *      (老板 9/2 那条"…即可预览。首页结构已完成：…"就是这么来的);
++ *   3. runner 型历史: 它自己不存会话, 引擎落 JSONL —— 列表 / 回放 / 搜索 / 删除
++ *      都要走通, 而且**换会话之后新轮次继续追加到同一份**。
++ */
++
++import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
++import { chmodSync, mkdtempSync, writeFileSync } from "node:fs";
++import { tmpdir } from "node:os";
++import { join } from "node:path";
++import { openmanusSpec } from "../../server/cli/cli-adapter.js";
++
++describe("openmanus 适配层", () => {
++	it("同名工具各自一张卡片, 结果按先来后到配", () => {
++		const t1 = openmanusSpec.feed(JSON.stringify({ t: "tool", id: "str_replace_editor", name: "str_replace_editor", input: "a" }));
++		const t2 = openmanusSpec.feed(JSON.stringify({ t: "tool", id: "str_replace_editor", name: "str_replace_editor", input: "b" }));
++		const e1 = openmanusSpec.feed(JSON.stringify({ t: "tool_end", id: "str_replace_editor", ok: true, output: "A" }));
++		const e2 = openmanusSpec.feed(JSON.stringify({ t: "tool_end", id: "str_replace_editor", ok: true, output: "B" }));
++		const id1 = (t1[0] as { id: string }).id;
++		const id2 = (t2[0] as { id: string }).id;
++		expect(id1).not.toBe(id2);
++		expect((e1[0] as { id: string }).id).toBe(id1);
++		expect((e2[0] as { id: string }).id).toBe(id2);
++		expect((t1[0] as { name: string }).name).toBe("str_replace_editor");
++	});
++
++	it("done 的用量按引擎的键名整形 (input/output/cacheRead)", () => {
++		const out = openmanusSpec.feed(JSON.stringify({ t: "done", usage: { input: 859, output: 72, total: 931 } }));
++		expect(out).toEqual([{ t: "done", usage: { input: 859, output: 72, cacheRead: 0 } }]);
++	});
++
++	it("text / error / raw 透传; 认不出的行走 raw", () => {
++		expect(openmanusSpec.feed(JSON.stringify({ t: "text", text: "你好" }))).toEqual([{ t: "text", text: "你好" }]);
++		expect(openmanusSpec.feed(JSON.stringify({ t: "error", message: "炸了" }))).toEqual([{ t: "error", message: "炸了" }]);
++		expect(openmanusSpec.feed("not json")).toEqual([{ t: "raw", line: "not json" }]);
++		expect(openmanusSpec.feed(JSON.stringify({ foo: 1 }))).toEqual([{ t: "raw", line: JSON.stringify({ foo: 1 }) }]);
++	});
++
++	it("没有思考档位 —— 只报 off, 不加参数; 起的是解释器 + runner", () => {
++		expect([...openmanusSpec.thinkingLevels]).toEqual(["off"]);
++		expect(openmanusSpec.thinkingArgs("off")).toEqual([]);
++		expect(openmanusSpec.exe).toBeTruthy();
++		expect(openmanusSpec.historyStore).toBe("runner");
++		const argv = openmanusSpec.argv("干活", null, "gpt-5.6-luna");
++		expect(argv[argv.length - 1]).toBe("干活");
++		expect(argv.join(" ")).not.toContain("resume");
++	});
++});
++
++/** 一个假 runner: 吐两段"想法" + 一个工具 + done。用 sh 写, 免得依赖 python。 */
++function fakeRunner(dir: string, lines: string[]): string {
++	const f = join(dir, "fake-runner.sh");
++	writeFileSync(f, ["#!/bin/sh", "cat > /dev/null", ...lines, ""].join("\n"), "utf8");
++	chmodSync(f, 0o755);
++	return f;
++}
++
++describe("openmanus 走 CliSession", () => {
++	let saved: Record<string, string | undefined>;
++	let home: string;
++	beforeEach(() => {
++		saved = {
++			OPENMANUS_PYTHON: process.env.OPENMANUS_PYTHON,
++			OPENMANUS_RUNNER: process.env.OPENMANUS_RUNNER,
++			OPENMANUS_CONFIG: process.env.OPENMANUS_CONFIG,
++			PI_WEB_DATA_DIR: process.env.PI_WEB_DATA_DIR,
++			HOME: process.env.HOME,
++			DSH_GATEWAY_BASE: process.env.DSH_GATEWAY_BASE,
++			DSH_CLOUD_TOKEN: process.env.DSH_CLOUD_TOKEN,
++		};
++		home = mkdtempSync(join(tmpdir(), "pi-om-home-"));
++		// **全部指到临时目录**: 这条会写 config.toml 和历史文件, 不隔离就是往跑测试
++		// 这台机器上写 (2026-09-12 我把自己的 ~/.codex/config.toml 就这么写没了)。
++		process.env.HOME = home;
++		process.env.PI_WEB_DATA_DIR = join(home, ".pi-web");
++		process.env.OPENMANUS_CONFIG = join(home, "openmanus", "config.toml");
++		delete process.env.DSH_GATEWAY_BASE;
++		delete process.env.DSH_CLOUD_TOKEN;
++		vi.resetModules();
++	});
++	afterEach(() => {
++		for (const [k, v] of Object.entries(saved)) {
++			if (v === undefined) delete process.env[k];
++			else process.env[k] = v;
++		}
++	});
++
++	async function session(lines: string[]) {
++		const dir = mkdtempSync(join(tmpdir(), "pi-om-bin-"));
++		const cwd = mkdtempSync(join(tmpdir(), "pi-om-cwd-"));
++		// exe = 那个假 runner 脚本本身; runner 参数随便给 (它不看)。
++		process.env.OPENMANUS_PYTHON = fakeRunner(dir, lines);
++		process.env.OPENMANUS_RUNNER = "/dev/null";
++		vi.resetModules();
++		const { CliSession } = await import("../../server/cli/cli-session.js");
++		const frames: { type: string; [k: string]: unknown }[] = [];
++		let last: { messages?: { role?: string; content?: { type?: string; text?: string }[] }[] } | null = null;
++		const s = new CliSession("c1", cwd, "openmanus", (m: { type: string; state?: unknown }) => {
++			frames.push(m as { type: string });
++			if (m.type === "snapshot") last = m.state as typeof last;
++		});
++		return { s, frames, state: () => last as typeof last, cwd };
++	}
++
++	const TWO_STEPS = [
++		`echo '{"t":"text","text":"我先看看仓库。"}'`,
++		`echo '{"t":"tool","id":"str_replace_editor","name":"str_replace_editor","input":"create"}'`,
++		`echo '{"t":"tool_end","id":"str_replace_editor","ok":true,"output":"ok"}'`,
++		`echo '{"t":"text","text":"文件建好了。"}'`,
++		`echo '{"t":"done","usage":{"input":10,"output":5,"total":15}}'`,
++	];
++
++	it("相邻的两段想法之间空一行, 不糊成一坨", async () => {
++		// 两段 text **中间没有工具** —— 会落进同一个文本块, 这才是会糊的情形。
++		const { s, state } = await session([
++			`echo '{"t":"text","text":"我先看看仓库。"}'`,
++			`echo '{"t":"text","text":"看完了, 开始建。"}'`,
++			`echo '{"t":"done","usage":{}}'`,
++		]);
++		await s.prompt("建个文件");
++		const texts = (state()?.messages ?? [])
++			.filter((m) => m.role === "assistant")
++			.flatMap((m) => (m.content ?? []).filter((c) => c.type === "text").map((c) => c.text ?? ""));
++		expect(texts).toHaveLength(1);
++		expect(texts[0]).toBe("我先看看仓库。\n\n看完了, 开始建。");
++	}, 20_000);
++
++	it("中间夹着工具的两段想法各自成块 (文字 / 卡片 / 文字)", async () => {
++		const { s, state } = await session(TWO_STEPS);
++		await s.prompt("建个文件");
++		const types = (state()?.messages ?? [])
++			.filter((m) => m.role === "assistant")
++			.flatMap((m) => (m.content ?? []).map((c) => c.type));
++		expect(types).toEqual(["text", "toolCall", "text"]);
++	}, 20_000);
++
++	it("历史落成 JSONL: 列表 / 回放 / 搜索 / 删除, 换会话后继续追加同一份", async () => {
++		const { s, frames, state } = await session(TWO_STEPS);
++		await s.prompt("第一轮");
++		const { listRunnerSessions, replayRunnerSession } = await import("../../server/cli/sessions.js");
++
++		const list = listRunnerSessions("openmanus");
++		expect(list, "跑完一轮, 历史里应当有一个会话").toHaveLength(1);
++		expect(list[0]!.firstMessage).toBe("第一轮");
++		const id = list[0]!.path;
++
++		// 会话列表帧
++		await s.refreshSessions();
++		const sf = [...frames].reverse().find((f) => f.type === "sessions") as { sessions: { path: string }[] } | undefined;
++		expect(sf?.sessions.map((x) => x.path)).toEqual([id]);
++
++		// 搜索搜得到正文
++		await s.searchSessions("文件建好了", 7);
++		const rf = [...frames].reverse().find((f) => f.type === "session_search_results") as
++			| { ok: boolean; results: unknown[] }
++			| undefined;
++		expect(rf?.ok).toBe(true);
++		expect(rf?.results).toHaveLength(1);
++
++		// 新会话 -> 再跑一轮 -> 两个会话
++		await s.newChat();
++		await s.prompt("第二轮");
++		expect(listRunnerSessions("openmanus")).toHaveLength(2);
++
++		// 切回第一个: 回放出来, 再跑一轮追加到它 (不是再开一份)
++		await s.switchSession(id);
++		expect((state()?.messages ?? []).some((m) => (m.content ?? []).some((c) => c.text === "第一轮"))).toBe(true);
++		await s.prompt("第一轮的第二问");
++		expect(listRunnerSessions("openmanus")).toHaveLength(2);
++		const replayed = replayRunnerSession("openmanus", id);
++		const asked = replayed.filter((m) => m.role === "user").flatMap((m) => m.content.map((c) => (c as { text?: string }).text));
++		expect(asked).toEqual(["第一轮", "第一轮的第二问"]);
++
++		// 删掉
++		await s.deleteSession(id);
++		expect(listRunnerSessions("openmanus")).toHaveLength(1);
++	}, 40_000);
++
++	it("每轮先把型号/令牌写进它的 config.toml (网关配了才写)", async () => {
++		process.env.DSH_GATEWAY_BASE = "https://gw.test";
++		process.env.DSH_CLOUD_TOKEN = "tok-om";
++		const { s } = await session([`echo '{"t":"done","usage":{}}'`]);
++		await s.prompt("hi");
++		const { readFileSync } = await import("node:fs");
++		const toml = readFileSync(join(home, "openmanus", "config.toml"), "utf8");
++		expect(toml).toContain('base_url = "https://gw.test/llm/v1"');
++		expect(toml).toContain('api_key = "tok-om"');
++		expect(toml).toContain('model = "gpt-5.6-luna"');
++		// 缺了 [daytona] 上游 import 期就炸 —— dhc 侧的启动脚本踩过。
++		expect(toml).toContain("[daytona]");
++	}, 20_000);
++});
 diff --git a/tests/unit/cli-engine-sessions.test.ts b/tests/unit/cli-engine-sessions.test.ts
 new file mode 100644
 index 0000000..4b38840

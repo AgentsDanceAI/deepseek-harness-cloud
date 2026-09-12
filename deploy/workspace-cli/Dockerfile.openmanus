@@ -1,0 +1,54 @@
+# OpenManus 那格: pi-web-ui 外壳 (第四个引擎 openmanus) + OpenManus 本体。
+#
+# **不从头建**, 而是把两份现成的叠起来:
+#   · 底座 = agent-frameworks (python:3.12 / trixie): OpenManus 源码、venv、补丁、
+#     我们的 runner 都在里面, 与 agentui 时代同一份 —— 引擎起的就是这份 runner。
+#   · 外壳 = workspace-cli (node:22 / bookworm) 里**已经构建好**的 /srv 和 node
+#     二进制, 整层拷过来。glibc 2.36 上编的东西跑在 2.41 上没问题 (向后兼容);
+#     node-pty 的 .node 也在 /srv/node_modules 里, 同 amd64、同 Node 22, 直接可用。
+#
+# 为什么不反过来 (在 workspace-cli 上装 OpenManus): 那要在 bookworm 的 python 3.11
+# 上重装一遍它的依赖 —— 上游按 3.12 钉的, 能不能装上、装上了对不对都要重新验。
+# 叠现成的两层, 两边各自验过的东西都不动。
+#
+# 两个 ARG 必须**分别**指向已推到 ghcr 的标签 (build.sh 传): 叠在本机没推过的
+# 层上, 别的节点拉的就是另一个东西。
+#
+# 产物标签 = 外壳标签 + "-openmanus", **同一个包** (ghcr.io/agentsdancepro/workspace-cli):
+# 另开一个包默认是私有的, 节点匿名拉不动, 还要有人去网页上点"公开" (2026-09-12 就
+# 差点这么卡住); 老包早已公开, 新标签推上去当场能拉。
+ARG FRAMEWORKS_REF=ghcr.io/agentsdancepro/agent-frameworks:0.2.5
+ARG SHELL_REF=ghcr.io/agentsdancepro/workspace-cli:0.77.0-r8
+
+FROM ${SHELL_REF} AS shell
+
+FROM ${FRAMEWORKS_REF}
+
+# node 二进制 + 已构建的外壳。npm 不需要 (运行期不装东西)。
+COPY --from=shell /usr/local/bin/node /usr/local/bin/node
+COPY --from=shell /srv /srv
+
+# 外壳与 agentui 时代同一批开机事: /workspace 是 NAS, 空 git 仓库让 Git 面板有东西看。
+# OpenManus 的 config.toml 由引擎写 (server/cli/gateway.ts writeOpenManusConfig),
+# 镜像里那份占位值只为 import 不炸。
+RUN mkdir -p /workspace /root/.pi-web \
+ && node --version \
+ && test -f /srv/dist/server/index.js \
+ && test -f /opt/dsh/openmanus_run.py \
+ && test -x /opt/venv-openmanus/bin/python \
+ && echo "[build] 外壳与 OpenManus 都在"
+
+EXPOSE 8787
+ENV PI_WEB_HOST=0.0.0.0 PI_WEB_PORT=8787 PI_WEB_CWD=/workspace PI_WEB_MANAGED=1 \
+    PI_WEB_ENGINE=openmanus \
+    OPENMANUS_PYTHON=/opt/venv-openmanus/bin/python \
+    OPENMANUS_RUNNER=/opt/dsh/openmanus_run.py \
+    OPENMANUS_CONFIG=/opt/openmanus/config/config.toml
+WORKDIR /srv
+CMD ["node", "dist/server/index.js"]
+
+# ── 构建元数据放最后 (同 Dockerfile: ARG 会进后面每条 RUN 的缓存键) ─────────────
+ARG REVISION=unknown
+LABEL org.opencontainers.image.source="https://github.com/AgentsDanceAI/deepseek-harness-cloud" \
+      org.opencontainers.image.title="AI Store OpenManus workspace (pi-web-ui + openmanus engine)" \
+      org.opencontainers.image.revision="${REVISION}"

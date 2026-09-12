@@ -107,3 +107,46 @@ def test_both_slots_move_together(slot, monkeypatch, pid):
     assert products.env_for(pid, "TOK", "")["PI_WEB_ENGINE"] == (
         "claude" if pid == "claude-code" else "codex"
     )
+
+
+# ── OpenManus 也跟着同一个开关走 (2026-09-12) ─────────────────────────────────
+
+
+def test_openmanus_switch_moves_image_port_env_and_boot_together(monkeypatch):
+    """与 claude-code / codex 同一条铁律: **四样一起换**。少一样的症状都在
+    claude-code 那格踩过 (端口不换 -> 就绪探针超时; 启动脚本不换 -> exitCode 127)。"""
+    monkeypatch.setattr(config, "USE_CLI_WORKSPACE", True)
+    p = products.get("openmanus")
+    env = products.env_for("openmanus", "TOK", "")
+    boot = products.boot_script("openmanus")
+    # 同一个包的 -openmanus 标签 (不另开包: 新包默认私有, 节点拉不动)
+    assert "/workspace-cli:" in p.image and p.image.endswith("-openmanus") and p.image == p.image_ref
+    assert p.port == config.CLI_WORKSPACE_PORT == 8787
+    assert env["PI_WEB_ENGINE"] == "openmanus"
+    assert env["DSH_GATEWAY_BASE"] and env["DSH_CLOUD_TOKEN"] == "TOK"
+    assert "exec node dist/server/index.js" in boot
+    assert "uvicorn" not in boot, "还在起 agentui 的 Python 外壳"
+    # 引擎自己写 config.toml —— 启动脚本别再写一份, 两份谁生效说不清。
+    assert "config/config.toml" not in boot
+    # 工作目录软链那条不能丢 (它的 workspace_root 写死, 见 _frameworks_boot 的注释)。
+    assert "ln -s /workspace /opt/openmanus/workspace" in boot
+    assert "[ -L /opt/openmanus/workspace ] ||" in boot
+
+
+def test_openmanus_switch_off_is_the_frameworks_shell(monkeypatch):
+    """开关关着 = 原来那份 (frameworks 镜像 + agentui 外壳 + 8080), 一个字不变。"""
+    monkeypatch.setattr(config, "USE_CLI_WORKSPACE", False)
+    p = products.get("openmanus")
+    env = products.env_for("openmanus", "TOK", "")
+    boot = products.boot_script("openmanus")
+    assert p.image == config.FRAMEWORKS_IMAGE_REF and p.port == 8080
+    assert "PI_WEB_ENGINE" not in env and env["DSH_DEFAULT_CLI"] == "openmanus"
+    assert "uvicorn app.main:app" in boot
+
+
+def test_openmanus_terminal_boots_into_its_own_entry(monkeypatch):
+    """点进 [终端] 直接是 OpenManus 自己的交互入口 —— 与 agentui 时代 term_cmd 一致。"""
+    monkeypatch.setattr(config, "USE_CLI_WORKSPACE", True)
+    env = products.env_for("openmanus", "TOK", "")
+    assert env["PI_WEB_TERMINAL_BOOT_CMD"].endswith("python main.py")
+    assert env["PI_WEB_DEFAULT_THEME"] == "translucent"

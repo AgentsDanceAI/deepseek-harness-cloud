@@ -1466,16 +1466,19 @@ _AGENTUI_SLOTS = {
 #: claude 那格赛博朋克, codex 那格炫彩 —— 两格长得不一样, 开着一堆标签页时
 #: 一眼能认出哪个是哪个 (与左上角显示引擎名同一个用意)。
 #: **只是默认值**: 用户在界面右上角「主题」里选过就以他的为准, 换格不影响。
-_CLI_SLOT_THEME = {"claude-code": "cyberpunk", "codex": "dazzle"}
+_CLI_SLOT_THEME = {"claude-code": "cyberpunk", "codex": "dazzle", "openmanus": "translucent"}
 
 
-def _cli_slot_image() -> str:
-    """claude-code / codex 两格用哪个外壳。
+def _cli_slot_image(product_id: str = "codex") -> str:
+    """claude-code / codex / openmanus 三格用哪个外壳。
 
-    默认仍是自研的 agentui (线上就是它, 好好的)。`USE_CLI_WORKSPACE=1` 切到
-    pi-web-ui + 第三个引擎那份 —— 切之前镜像得先构建推送, 否则容器拉不起来。
+    默认仍是自研的 agentui / frameworks 那两份 (线上跑过的)。`USE_CLI_WORKSPACE=1`
+    切到 pi-web-ui 那份 —— 切之前镜像得先构建推送, 否则容器拉不起来。OpenManus
+    是叠在 agent-frameworks 上的另一个镜像 (它带着 OpenManus 本体), 标签同步。
     """
-    return config.CLI_WORKSPACE_IMAGE_REF if config.USE_CLI_WORKSPACE else config.AGENTUI_IMAGE_REF
+    if not config.USE_CLI_WORKSPACE:
+        return config.FRAMEWORKS_IMAGE_REF if product_id == "openmanus" else config.AGENTUI_IMAGE_REF
+    return config.OPENMANUS_CLI_IMAGE_REF if product_id == "openmanus" else config.CLI_WORKSPACE_IMAGE_REF
 
 
 def _cli_slot_boot() -> str:
@@ -1501,9 +1504,31 @@ def _cli_slot_boot() -> str:
 
 
 def _cli_slot_port() -> int:
-    """两个外壳端口不同: agentui 8080, pi-web-ui 8787。**别写死** —— 端口对不上
-    的症状是容器起来了、就绪探针一直超时, 而日志里一切正常。"""
+    """两个外壳端口不同: agentui/frameworks 8080, pi-web-ui 8787。**别写死** ——
+    端口对不上的症状是容器起来了、就绪探针一直超时, 而日志里一切正常。"""
     return config.CLI_WORKSPACE_PORT if config.USE_CLI_WORKSPACE else AGENTUI_PORT
+
+
+def _openmanus_cli_boot() -> str:
+    """OpenManus 换到 pi-web-ui 外壳后的开机事。
+
+    与 _frameworks_boot 的差别: **不再由启动脚本写 config.toml** —— 引擎自己写
+    (开机一次 + 每轮一次, 型号按次可换), 与 codex 同款。留下来的三件:
+      · /opt/openmanus/workspace -> /workspace 软链 (它的 workspace_root 写死, 见
+        _frameworks_boot 同一处注释; 幂等, 否则重启会删掉 NAS 上用户的文件);
+      · venv 进 /etc/profile.d (终端起的是 bash -l, 会冲掉 export 的 PATH);
+      · /workspace 建成 git 仓库 (Git 面板要有仓库才有东西看)。
+    """
+    return (
+        "set -e\n"
+        "mkdir -p /workspace /root/.pi-web\n"
+        "[ -L /opt/openmanus/workspace ] || { rm -rf /opt/openmanus/workspace; "
+        "ln -s /workspace /opt/openmanus/workspace; }\n"
+        "printf 'export PATH=/opt/venv-openmanus/bin:$PATH\\n' > /etc/profile.d/dsh-venv.sh\n"
+        "cd /workspace && (git rev-parse --git-dir >/dev/null 2>&1 || git init -q) || true\n"
+        "cd /srv\n"
+        "exec node dist/server/index.js\n"
+    )
 
 
 def _agentui_boot(product_id: str) -> str:
@@ -2370,10 +2395,11 @@ def registry() -> dict[str, Product]:
         "openmanus": Product(
             id="openmanus",
             name="OpenManus",
-            image=config.FRAMEWORKS_IMAGE_REF,
-            image_ref=config.FRAMEWORKS_IMAGE_REF,
-            # 8080 是工作台外壳 (ttyd 退到它后面, 由 /terminal 反代出去)。
-            port=8080,
+            # 外壳跟开关走 (与 claude-code / codex 同一个开关): frameworks 那份是
+            # agentui 外壳 (8080, ttyd 退到 /terminal 后面); pi-web-ui 那份 8787。
+            image=_cli_slot_image("openmanus"),
+            image_ref=_cli_slot_image("openmanus"),
+            port=_cli_slot_port(),
             # 探后端, 别探首页 —— 首页是静态文件, 后端没起来照样 200。
             ready_path="/api/health",
             mem_mb=config.FRAMEWORKS_MEM_LIMIT_MB,
@@ -3148,6 +3174,8 @@ def boot_script(product_id: str) -> str:
     # 那段 exitCode 127 的教训。
     if product_id in _AGENTUI_SLOTS and config.USE_CLI_WORKSPACE:
         return _cli_slot_boot()
+    if product_id == "openmanus" and config.USE_CLI_WORKSPACE:
+        return _openmanus_cli_boot()
     builder = _BOOTS.get(product_id)
     if builder is None:
         raise ValueError(f"unknown product {product_id!r}")
@@ -3218,6 +3246,29 @@ def env_for(product_id: str, token: str, secret: str = "") -> dict[str, str]:
             # 用户复制出去的 hook 地址是打不通的。
             "OMB_PUBLIC_URL": f"https://{config.OPENMAUSBOT_DOMAIN}",
             "OMB_WEBHOOK_PUBLIC_URL": f"https://{config.OPENMAUSBOT_DOMAIN}",
+        }
+    if product_id == "openmanus" and config.USE_CLI_WORKSPACE:
+        domain = config.OPENMANUS_DOMAIN
+        return {
+            "HOME": "/root",
+            "PI_WEB_ENGINE": "openmanus",
+            "PI_WEB_HOST": "0.0.0.0",
+            "PI_WEB_CWD": "/workspace",
+            "PI_WEB_DATA_DIR": "/root/.pi-web",
+            "PI_WEB_MANAGED": "1",
+            "PI_WEB_ALLOW_ORIGINS": f"https://{domain}" if domain else "",
+            "PI_WEB_DEFAULT_THEME": _CLI_SLOT_THEME["openmanus"],
+            # 点进 [终端] 直接是 OpenManus 自己的交互入口 (与 agentui 时代 term_cmd 一致)。
+            "PI_WEB_TERMINAL_BOOT_CMD": "cd /opt/openmanus && /opt/venv-openmanus/bin/python main.py",
+            "DSH_GATEWAY_BASE": gateway,
+            "DSH_CLOUD_TOKEN": token,
+            # 引擎写 config.toml 时用的型号; 也是它工具链 (litellm 风格) 认的几个名字。
+            "DSH_MODEL": _codecli_model("codex"),
+            "OPENAI_BASE_URL": f"{gateway}/llm/v1",
+            "OPENAI_API_KEY": token,
+            "OPENAI_API_BASE": f"{gateway}/llm/v1",
+            "OPENMANUS_DISABLE_BROWSER_USE": "1",
+            "PYTHONIOENCODING": "utf-8:replace",
         }
     if product_id == "openmanus":
         return {

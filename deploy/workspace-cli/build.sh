@@ -12,6 +12,10 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
+# VARIANT=openmanus: 不建外壳, 把已推到 ghcr 的外壳叠到 agent-frameworks 上
+# (见 Dockerfile.openmanus)。先建/推外壳 (无 VARIANT), 再建这个 —— 它按 SHELL_REF
+# 从 ghcr 拉外壳那一层, 本机没推过的层叠不上去。
+VARIANT="${VARIANT:-}"
 REPO=$(python3 -c "import json;print(json.load(open('upstream.json'))['repository'])")
 COMMIT=$(python3 -c "import json;print(json.load(open('upstream.json'))['commit'])")
 IMAGE="${IMAGE:-ghcr.io/agentsdancepro/workspace-cli}"
@@ -19,6 +23,21 @@ IMAGE="${IMAGE:-ghcr.io/agentsdancepro/workspace-cli}"
 # 同一个标签重推, 已经拉过那层的节点不会再拉 (imagePullPolicy 不是 Always),
 # 结果是有的节点跑新的有的跑旧的, 而两边都"正常"。
 TAG="${TAG:-$(python3 -c "import json;d=json.load(open('upstream.json'));print(f\"{d['version']}-r{d['revision']}\")")}"
+
+if [ "$VARIANT" = "openmanus" ]; then
+  # 变体放在**同一个包**里, 靠标签后缀区分 (node:22-slim 那种写法), 不另开
+  # workspace-cli-openmanus 包: ghcr 新包默认私有, 节点匿名拉不动, 还得有人去网页
+  # 上点一次"公开"; 老包早就公开了, 新标签推上去当场能拉。
+  OM_TAG="$TAG-openmanus"
+  FRAMEWORKS_REF="${FRAMEWORKS_REF:-$(python3 -c "import json;print(json.load(open('upstream.json'))['frameworks_ref'])")}"
+  echo "==> 构建 $IMAGE:$OM_TAG  (外壳 $IMAGE:$TAG 叠在 $FRAMEWORKS_REF 上)"
+  docker build --platform linux/amd64 -f Dockerfile.openmanus \
+    --build-arg "SHELL_REF=$IMAGE:$TAG" --build-arg "FRAMEWORKS_REF=$FRAMEWORKS_REF" \
+    --build-arg "REVISION=$OM_TAG" -t "$IMAGE:$OM_TAG" .
+  echo "==> 完成: $IMAGE:$OM_TAG"
+  echo "    推送: docker push $IMAGE:$OM_TAG"
+  exit 0
+fi
 
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
