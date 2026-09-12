@@ -148,6 +148,10 @@ def test_terminal_menu_lists_the_catalog(monkeypatch):
     )["id"]
     assert env["ANTHROPIC_DEFAULT_SONNET_MODEL"] == cheap
     assert env["ANTHROPIC_DEFAULT_HAIKU_MODEL"] == cheap
+    # 两个槽同一个型号, 菜单上就是并排两行一样的字 —— 说明里要点破哪一行是什么
+    assert (
+        env["ANTHROPIC_DEFAULT_HAIKU_MODEL_DESCRIPTION"] != env["ANTHROPIC_DEFAULT_SONNET_MODEL_DESCRIPTION"]
+    ), "菜单上会出现两行一模一样的字, 用户只会觉得这里有个重复项"
     # codex 那格不该拿到 claude 的菜单 (它走 models_cache.json, 见下一条)
     assert not [k for k in products.env_for("codex", "TOK", "") if k.startswith("ANTHROPIC")]
 

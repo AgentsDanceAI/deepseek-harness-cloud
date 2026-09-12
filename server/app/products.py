@@ -1955,11 +1955,18 @@ def _claude_menu_env() -> dict[str, str]:
         return {}
     cheap, dear, mid = ms[0], ms[-1], ms[len(ms) // 2]
     env: dict[str, str] = {}
-    for slot, m in (("SONNET", cheap), ("OPUS", mid), ("FABLE", dear), ("HAIKU", cheap)):
+    # HAIKU 槽指向的是与 SONNET 同一个型号 (我们没有更小的 Claude), 菜单上就会并排两行
+    # 一模一样的字 —— 说明里点破这一行是什么, 否则用户只会觉得"这里有个重复项"。
+    for slot, m, note in (
+        ("SONNET", cheap, ""),
+        ("OPUS", mid, ""),
+        ("FABLE", dear, ""),
+        ("HAIKU", cheap, " · 小任务档(平台没有更小的 Claude)"),
+    ):
         name, desc = _menu_label(m)
         env[f"ANTHROPIC_DEFAULT_{slot}_MODEL"] = m["id"]
         env[f"ANTHROPIC_DEFAULT_{slot}_MODEL_NAME"] = name
-        env[f"ANTHROPIC_DEFAULT_{slot}_MODEL_DESCRIPTION"] = desc
+        env[f"ANTHROPIC_DEFAULT_{slot}_MODEL_DESCRIPTION"] = desc + note
     return env
 
 
