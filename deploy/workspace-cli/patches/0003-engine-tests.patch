@@ -121,10 +121,10 @@ index a37615a..57a508e 100644
  	"project-model-key-test",
 diff --git a/tests/unit/cli-engine-adapter.test.ts b/tests/unit/cli-engine-adapter.test.ts
 new file mode 100644
-index 0000000..057cf19
+index 0000000..9e9c702
 --- /dev/null
 +++ b/tests/unit/cli-engine-adapter.test.ts
-@@ -0,0 +1,240 @@
+@@ -0,0 +1,258 @@
 +/**
 + * 第三个引擎的适配层。钉的是**上游 CLI 的 wire 格式**。
 + *
@@ -324,9 +324,15 @@ index 0000000..057cf19
 +	});
 +
 +	it("codex: 界面的 off 翻成上游的 none; 不报 minimal (那个型号明确不支持)", () => {
-+		expect(codexSpec.thinkingArgs("off")).toEqual(["-c", "model_reasoning_effort=none"]);
-+		expect(codexSpec.thinkingArgs("high")).toEqual(["-c", "model_reasoning_effort=high"]);
++		expect(codexSpec.thinkingArgs("off")).toContain("model_reasoning_effort=none");
++		expect(codexSpec.thinkingArgs("high")).toContain("model_reasoning_effort=high");
 +		expect(codexSpec.thinkingLevels).not.toContain("minimal");
++	});
++
++	it("codex: 必须**显式**要 reasoning 摘要, 否则上游一个字都不回", () => {
++		// 抓包: 不加这一项时 codex 发的是 {"effort":…,"context":"all_turns"}, 没有
++		// summary 字段; 上游于是不回推理。加上后实测 350~425 字。
++		expect(codexSpec.thinkingArgs("high")).toContain("model_reasoning_summary=auto");
 +	});
 +
 +	it("档位进得了 argv", () => {
@@ -363,6 +369,18 @@ index 0000000..057cf19
 +			event: { type: "content_block_delta", delta: { type: "thinking_delta", thinking: "让我想想" } },
 +		});
 +		expect(claudeSpec.feed(line)).toEqual([{ t: "thinking", text: "让我想想" }]);
++	});
++});
++
++describe("型号从一开始就钉住", () => {
++	it("两个 spec 都带默认型号, 且与网关那份一致", async () => {
++		const { DEFAULT_MODEL } = await import("../../server/cli/gateway.js");
++		// **不能等前端发 list_models**: 它只在打开型号选择器时才发, 在那之前
++		// argv 里没有 --model、env 里没有 ANTHROPIC_MODEL, CLI 会拿它自己内置的
++		// 默认型号名去打我们的网关 —— 那个名字不在在售目录里。
++		expect(claudeSpec.defaultModel).toBe(DEFAULT_MODEL.claude);
++		expect(codexSpec.defaultModel).toBe(DEFAULT_MODEL.codex);
++		expect(claudeSpec.defaultModel).toBeTruthy();
 +	});
 +});
 diff --git a/tests/unit/cli-engine-sessions.test.ts b/tests/unit/cli-engine-sessions.test.ts
@@ -554,10 +572,10 @@ index 0000000..4b38840
 +});
 diff --git a/tests/unit/cli-engine-wiring.test.ts b/tests/unit/cli-engine-wiring.test.ts
 new file mode 100644
-index 0000000..4462ae4
+index 0000000..f648f7d
 --- /dev/null
 +++ b/tests/unit/cli-engine-wiring.test.ts
-@@ -0,0 +1,555 @@
+@@ -0,0 +1,561 @@
 +/**
 + * 第三个引擎的两条「界面之外」的接线。
 + *
@@ -976,6 +994,16 @@ index 0000000..4462ae4
 +		expect(blocks.some((b) => b.type === "text" && (b.text ?? "").includes("看完了"))).toBe(true);
 +	});
 +
++	it("开箱就有型号 —— 不等前端打开选择器", async () => {
++		const { state, done } = await drive([`echo '{"type":"turn.completed","usage":{}}'`]);
++		done();
++		const { DEFAULT_MODEL } = await import("../../server/cli/gateway.js");
++		// 空型号的后果不是"没选"而是"CLI 用它自己的默认名去打我们的网关" ——
++		// 那个名字不在在售目录里。2026-09-12 的症状: 钉了型号 3/3 出思考, 不钉的
++		// 只出一个空思考块。
++		expect((state() as { model?: { id?: string } } | null)?.model?.id).toBe(DEFAULT_MODEL.codex);
++	});
++
 +	it("思考档位: 报的是这个引擎真能给的那几档, 设进去会跟着发参数", async () => {
 +		const { state, session, done } = await drive([`echo '{"type":"turn.completed","usage":{}}'`]);
 +		done();
@@ -1059,15 +1087,11 @@ index 0000000..4462ae4
 +		try {
 +			const out = await waitFor(mgr, "t1", "BOOTED-BY-PI");
 +			expect(out, "开机命令没被敲进去").toContain("BOOTED-BY-PI");
-+			// **只许敲一次** —— 提示符触发和兜底定时器是两条路, 真敲两遍的话在
-+			// 真 CLI 上就是开两个实例。
-+			// 坦白: 这条断言拦得比较松。命令在第一次触发时就被从 entry 上取走并
-+			// 清空了, 所以第二条路即使跑起来也写不出命令 —— 我把两道保险都去掉
-+			// 变异过, 它仍然是绿的。留着是为了拦"重构成每次都重读 bootCmd"那种
-+			// 改法, 不是因为它钉住了现在这两道保险。
-+			await new Promise((r) => setTimeout(r, 2500));
-+			const later = mgr.read("t1", 0, 200_000)?.data ?? "";
-+			expect(later.split("echo BOOTED-BY-PI").length - 1, "开机命令敲了不止一次").toBeLessThanOrEqual(1);
++			// 这里原本还有一条"只许敲一次"的断言, **删掉了**: 它数的是终端输出里那串
++			// 命令文字出现几次, 而 PTY 的回显和重绘本来就会让同一行文字出现两次 ——
++			// 实测 3 跑 1 抖。一条会抖的用例比没有更糟, 它会让人开始忽略红灯。
++			// 单次触发是结构上保证的: 命令在第一次触发时就从 entry 上取走并清空,
++			// 兜底定时器也一并清掉 (server/terminals.ts)。
 +		} finally {
 +			mgr.kill("t1");
 +		}

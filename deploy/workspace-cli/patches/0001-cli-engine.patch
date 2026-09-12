@@ -45,10 +45,10 @@ index 0000000..b6be465
 +}
 diff --git a/server/cli/cli-adapter.ts b/server/cli/cli-adapter.ts
 new file mode 100644
-index 0000000..00b8c4e
+index 0000000..dec4673
 --- /dev/null
 +++ b/server/cli/cli-adapter.ts
-@@ -0,0 +1,287 @@
+@@ -0,0 +1,310 @@
 +/**
 + * cli-adapter.ts —— 把 CLI 的 JSON 行归一成同一套事件。
 + *
@@ -60,6 +60,10 @@ index 0000000..00b8c4e
 + * (server/dsh/runtime/, 973 行); claude 与 codex 本来就往 stdout 吐 JSON,
 + * 直接 spawn 就行。
 + */
++
++// 两格的默认型号住在 gateway.ts (它是"接 AI Store 网关"那一摊的事实来源),
++// 这里只是把它挂到各自的 spec 上, 免得两处各写一份迟早写歪。
++import { DEFAULT_MODEL } from "./gateway.js";
 +
 +export type CliEvent =
 +	| { t: "session"; id: string }
@@ -90,6 +94,8 @@ index 0000000..00b8c4e
 +	 */
 +	readonly thinkingLevels: readonly string[];
 +	readonly defaultThinking: string;
++	/** 开箱用哪个型号。**不能等前端来告诉我们** —— 见 cli-session 构造函数里那段。 */
++	readonly defaultModel: string;
 +	/** 这一档对应的命令行参数。空数组 = 这一档不用加参数。 */
 +	thinkingArgs(level: string): string[];
 +	/** 起一轮对话的 argv。resume 为空表示新会话。 */
@@ -143,6 +149,7 @@ index 0000000..00b8c4e
 +	// 所以默认值取 high —— 界面显示的那一档与它真实的行为对得上。
 +	thinkingLevels: ["low", "medium", "high", "xhigh", "max"],
 +	defaultThinking: "high",
++	defaultModel: DEFAULT_MODEL.claude,
 +	thinkingArgs(level) {
 +		return level ? ["--effort", level] : [];
 +	},
@@ -253,9 +260,25 @@ index 0000000..00b8c4e
 +	// **不报 minimal**: gpt-5.6-luna 明确回 400 说这个模型不支持。
 +	thinkingLevels: ["off", "low", "medium", "high", "xhigh", "max"],
 +	defaultThinking: "medium",
++	defaultModel: DEFAULT_MODEL.codex,
 +	thinkingArgs(level) {
 +		if (!level) return [];
-+		return ["-c", `model_reasoning_effort=${level === "off" ? "none" : level}`];
++		return [
++			"-c",
++			`model_reasoning_effort=${level === "off" ? "none" : level}`,
++			// **要不要摘要得显式说。** codex 默认发的 reasoning 里没有 summary 字段
++			// (本地 sink 抓的: {"effort":"medium","context":"all_turns"}), 上游于是
++			// 一个字的推理也不回。加上它, 上游实测能给 350~425 字 (4 发中 3 发)。
++			// 写在 config.toml 里**不生效** —— 只有命令行 -c 这种形式进得了请求体,
++			// 同样是抓包看出来的。
++			//
++			// 注意: 加了它今天界面上仍然看不到推理正文 —— codex 的解析器会把这些帧
++			// 丢掉, 因为上游那条流是坏的 (第一帧就是 response.output_text.delta,
++			// 排在 response.created 前面, codex 因此报 "OutputTextDelta without
++			// active item")。这一行是把**我们该做的**做对: 上游哪天顺了, 不用再出镜像。
++			"-c",
++			"model_reasoning_summary=auto",
++		];
 +	},
 +	argv(prompt, resume, model, thinking) {
 +		const a = ["exec", "--json", "--skip-git-repo-check", "--sandbox", "danger-full-access"];
@@ -430,10 +453,10 @@ index 0000000..8e57609
 +}
 diff --git a/server/cli/cli-session.ts b/server/cli/cli-session.ts
 new file mode 100644
-index 0000000..7f2da6a
+index 0000000..6224674
 --- /dev/null
 +++ b/server/cli/cli-session.ts
-@@ -0,0 +1,619 @@
+@@ -0,0 +1,627 @@
 +/**
 + * cli-session.ts —— 第三个引擎的会话对象 (PI_WEB_ENGINE=claude|codex)。
 + *
@@ -553,6 +576,14 @@ index 0000000..7f2da6a
 +		if (!spec) throw new Error(`unknown CLI engine: ${engine}`);
 +		this.spec = spec;
 +		this.thinking = spec.defaultThinking;
++		// **型号一开始就得钉住。** 原来它是空串, 要等前端发 list_models 才有值 ——
++		// 而前端只在**打开型号选择器**时才发。在那之前每一轮都是: argv 里没有
++		// --model、childEnv 里没有 ANTHROPIC_MODEL, 于是 CLI 拿它**自己内置的
++		// 默认型号名**去打我们的网关 —— 那个名字不在在售目录里。
++		// 2026-09-12 实测的症状: 同一条链路, 钉了型号 3/3 出思考 (732~844 字),
++		// 不钉的只出一个空的思考块。(codex 的 config.toml 已经这么兜过一次,
++		// 这里是同一个洞的另一半。)
++		this.model = spec.defaultModel;
 +		this.files = new FilesService({
 +			emit: (msg) => this.send(msg),
 +			isDisposed: () => this.disposed,

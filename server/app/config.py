@@ -522,7 +522,7 @@ AGENTUI_IMAGE_REF = _env("AGENTUI_IMAGE_REF", "ghcr.io/agentsdancepro/agentui:0.
 # **默认关着。** 打开之前镜像得先构建并推上去 (deploy/workspace-cli/build.sh),
 # 否则两格当场拉不到镜像 —— 而它们现在是好的。切换只动这一个变量, 回滚同理。
 USE_CLI_WORKSPACE = _env_bool("USE_CLI_WORKSPACE", False)
-CLI_WORKSPACE_IMAGE_REF = _env("CLI_WORKSPACE_IMAGE_REF", "ghcr.io/agentsdancepro/workspace-cli:0.77.0-r6")
+CLI_WORKSPACE_IMAGE_REF = _env("CLI_WORKSPACE_IMAGE_REF", "ghcr.io/agentsdancepro/workspace-cli:0.77.0-r7")
 #: pi-web-ui 监听 8787 (与 pi 那格同一个外壳, 同一个端口)。
 CLI_WORKSPACE_PORT = 8787
 

@@ -31,7 +31,10 @@ RUN npm i -g --no-fund --no-audit \
 # 外壳本体: build.sh 已经把补丁打好, 这里只装依赖 + 构建。
 WORKDIR /srv
 COPY . /srv
+# --fetch-retries: 这一层要拉 660 个包, 一次 ECONNRESET 就白跑二十分钟 (2026-09-12
+# 的 r7 就是这么挂的)。npm 默认只重试 2 次、退避很短, 对这条链路不够。
 RUN npm ci --no-audit --no-fund --ignore-scripts \
+      --fetch-retries 5 --fetch-retry-mintimeout 5000 --fetch-retry-maxtimeout 120000 \
  && npm rebuild node-pty \
  && npm run build \
  && npm prune --omit=dev \
