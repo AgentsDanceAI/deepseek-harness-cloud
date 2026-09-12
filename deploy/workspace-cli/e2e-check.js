@@ -70,18 +70,21 @@ async function main() {
   const msgs = (last && last.messages) || [];
   const texts = msgs.flatMap((m) => (m.content || []).map((c) => c.text || "")).join("\n");
   check("模型真的答了话", texts.includes("DONE"), texts.slice(0, 120).replace(/\s+/g, " "));
-  // 思考内容: **这条不算失败**, 因为它取决于上游给不给。
-  // 2026-09-12 实测 (直接问上游中继, 绕开我们的网关): 它回的 thinking 块里
-  // 只有 signature, `thinking` 字段是**空字符串** —— 思考正文在中继那层就没了。
-  // 我们这边的管子是通的 (单测用合成事件钉住), 但没米下锅。
-  // 所以这里只报告状态: 有内容说明上游开始给了; 没有则照旧, 不该把整轮判红。
+  // 思考内容: **这条不算失败**, 因为它取决于上游当时给不给 —— 而那是会变的。
+  // 2026-09-12 同一天里实测到两种结果 (直接问上游, claude-sonnet-5-thinking,
+  // 流式, 每次 4 发):
+  //    上午  4/4, 369~564 字  (界面上真的出来了, 732~844 字/轮)
+  //    一小时后  0/4, 全落 direct 且 thinking 字段是空串
+  // 我们这边的管子是通的 (单测用合成事件钉住, 而且上午真出来过)。给不给看上游。
+  // 所以这里只报告状态: 有内容说明上游在给; 没有则打印一行, 不该把整轮判红 ——
+  // 一条永远红的检查等于噪音, 下次真出问题反而没人看。
   const think = msgs.flatMap((m) => (m.content || []).filter((c) => c.type === "thinking"));
   if (think.some((t) => (t.thinking || "").trim())) {
     check("思考内容进了界面", true);
   } else if (think.length) {
     check("思考块有但字段是空的 —— 字段名该是 thinking", false);
   } else {
-    console.log("  --   思考内容: 本轮没有 (上游中继只回 signature 不回正文, 与我们的接线无关)");
+    console.log("  --   思考内容: 本轮没有 (上游这会儿不给; 我们这边的接线是通的, 上午实测出来过)");
   }
   const calls = msgs.flatMap((m) => (m.content || []).filter((c) => c.type === "toolCall"));
   check("工具卡片出来了", calls.length > 0, calls.map((c) => c.name).join(", ").slice(0, 100));
