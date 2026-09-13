@@ -761,6 +761,8 @@
   "live.remuted": "Sound was blocked after reconnecting — tap Unmute to restore.",
   "live.away": "She has stepped away — the stream is still running",
   "live.note": "Watching costs no machine time or credits. The script is generated once, cached per sentence and replayed on every loop at no GPU cost; only replies to comments are generated live.",
+  "live.chat_empty": "Nobody has said anything yet — be the first.",
+  "live.chat_replied": "answered",
   "live.say_ph": "Say something… (sign in to post)",
   "live.say_btn": "Send",
   "live.say_sent": "Sent",

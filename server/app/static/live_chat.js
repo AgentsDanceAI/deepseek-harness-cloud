@@ -22,7 +22,9 @@ window.LiveChat = (function () {
   var input = document.getElementById('lvSayBox');
   var send = document.getElementById('lvSayBtn');
   var hint = document.getElementById('lvSayHint');
+  var list = document.getElementById('lvChat');
   var since = 0, seen = {}, lane = 0;
+  var KEEP = 60;                 // 列表里最多留多少条 —— 挂一小时不能攒成几千个节点
 
   function t(k) { return (hint && hint.dataset[k]) || ''; }
 
@@ -44,6 +46,35 @@ window.LiveChat = (function () {
     });
   }
 
+  /* 列表里的一条。与飘屏是同一条评论的两种呈现:
+     飘屏是"此刻热闹", 列表是"回头能看" —— 观众最关心的那句"我发的她理了没"
+     只有列表答得了, 飘屏早飞走了。 */
+  function show(item) {
+    if (!list) return;
+    var empty = list.querySelector('.lv-chatempty');
+    if (empty) empty.remove();
+    // 贴着底才跟着滚。用户往上翻着看别人说什么的时候, 新消息不该把他拽回去。
+    var stick = list.scrollHeight - list.scrollTop - list.clientHeight < 24;
+    var el = document.createElement('div');
+    el.className = 'lv-chatline' + (item.replied ? ' lv-chatline--replied' : '');
+    if (item.replied) el.dataset.replied = (list.dataset.replied || '');
+    var who = document.createElement('b');
+    who.textContent = (item.nick || '') + '：';
+    el.appendChild(who);
+    el.appendChild(document.createTextNode(item.text || ''));
+    list.appendChild(el);
+    while (list.children.length > KEEP) list.removeChild(list.firstChild);
+    if (stick) list.scrollTop = list.scrollHeight;
+  }
+
+  function emptyState() {
+    if (!list || list.children.length) return;
+    var el = document.createElement('div');
+    el.className = 'lv-chatempty';
+    el.textContent = list.dataset.empty || '';
+    list.appendChild(el);
+  }
+
   function pull() {
     return fetch('/api/live/comments?room=' + encodeURIComponent(room()) + '&since=' + encodeURIComponent(since), { credentials: 'same-origin' })
       .then(function (r) { return r.ok ? r.json() : null; })
@@ -54,6 +85,7 @@ window.LiveChat = (function () {
           seen[x.id] = 1;
           if (x.t > since) since = x.t;
           fly(x);
+          show(x);
         });
       })
       .catch(function () {});
@@ -76,7 +108,7 @@ window.LiveChat = (function () {
       if (!d) return;
       input.value = '';
       // 自己发的立刻飘出来, 不等下一轮轮询 —— 发完看不见等于"没发出去"。
-      if (!seen[d.id]) { seen[d.id] = 1; if (d.t > since) since = d.t; fly(d); }
+      if (!seen[d.id]) { seen[d.id] = 1; if (d.t > since) since = d.t; fly(d); show(d); }
       hint.textContent = d.replied ? t('replied') : t('sent');
     }).catch(function () { hint.textContent = t('failed'); })
       .then(function () { send.disabled = false; });
@@ -89,13 +121,17 @@ window.LiveChat = (function () {
     });
   }
 
-  // 起步时不把历史全部倒出来 —— 一进直播间被几十条糊满屏是灾难。
-  // 只从"现在"开始收。
-  fetch('/api/live/comments?limit=1&room=' + encodeURIComponent(room()), { credentials: 'same-origin' })
+  // 起步时**飘屏**不倒历史 —— 一进直播间被几十条糊满屏是灾难。但**列表**要有:
+  // 一进来底下空着, 观众会以为这里没人说话。所以取最近二十条只填列表, 不飞。
+  fetch('/api/live/comments?limit=20&room=' + encodeURIComponent(room()), { credentials: 'same-origin' })
     .then(function (r) { return r.ok ? r.json() : null; })
-    .then(function (d) { if (d) since = d.now || 0; })
+    .then(function (d) {
+      if (!d) return;
+      since = d.now || 0;
+      (d.items || []).forEach(function (x) { seen[x.id] = 1; show(x); });
+    })
     .catch(function () {})
-    .then(function () { setInterval(pull, 4000); });
+    .then(function () { emptyState(); setInterval(pull, 4000); });
 
   return { pull: pull };
 })();

@@ -62,6 +62,11 @@
          data-toofast="{{ t('live.say_toofast') }}"
          data-needlogin="{{ t('live.say_needlogin') }}"
          data-failed="{{ t('live.say_failed') }}">{% if not user %}{{ t('live.say_needlogin') }}{% endif %}</div>
+    {# 公屏列表。飘屏飞过去就没了, 而观众想回头看看别人说了什么、她回了哪条 ——
+       创始人 2026-09-12: "弹幕或评论在直播间输入框下面要有啊"。 #}
+    <div id="lvChat" class="lv-chat"
+         data-empty="{{ t('live.chat_empty') }}"
+         data-replied="{{ t('live.chat_replied') }}"></div>
     <div class="lv-note">{{ t('live.danmu_note') }}</div>
     <div class="lv-note">{{ t('live.note') }}</div>
   </div>
