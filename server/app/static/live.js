@@ -500,5 +500,51 @@ window.LivePlayer = (function () {
     return l > 120 ? 120 : l;      // 离谱值当没有, 别把字幕甩到几分钟前
   }
 
-  return { refresh: refresh, online: online, lag: lag };
+  /* 播放头在**整条流时间轴**上的读数 (秒)。拿不到返回 null。
+   *
+   * 这是字幕对齐的唯一依据, 而它是**读出来的, 不是估出来的**: 上游把每一片的绝对
+   * 位置写进了播放列表 (EXT-X-PROGRAM-DATE-TIME, 见 live_server 的 _write_m3u8),
+   * hls.js 据此给出 playingDate。
+   *
+   * ⚠️ 别退回用 currentTime 去推。currentTime 是 hls.js 重挂过的 —— 中途进来的观众
+   *    从 0 开始走, 与上游的时间轴差着几百秒。以前是拿 `edge - lag` 估那个差值,
+   *    而 lag 抖 ±1.3 秒还带系统偏差, EMA 磨得掉抖动磨不掉偏差 —— 那就是字幕
+   *    "整体偏一句"反复回来的原因。 */
+  var PDT_EPOCH = 946684800;      // 2000-01-01T00:00:00Z, 与上游同一个常数
+
+  function mediaTime() {
+    if (hls && hls.playingDate) {
+      var ms = hls.playingDate.getTime();
+      if (isFinite(ms)) return ms / 1000 - PDT_EPOCH;
+    }
+    // Safari 原生 HLS 没有 hls 对象, 但它把 PDT 暴露成 getStartDate()。
+    if (v && typeof v.getStartDate === 'function' && isFinite(v.currentTime)) {
+      var d = v.getStartDate();
+      if (d && isFinite(d.getTime())) return d.getTime() / 1000 - PDT_EPOCH + v.currentTime;
+    }
+    return null;
+  }
+
+  /* 播放头此刻落在哪一片上。**只给验证用** —— 要拿切片里真实的 PTS 当判据, 就得
+     知道是哪一片、播放头在片内第几秒。 */
+  function frag() {
+    if (!hls) return null;
+    // hls.js 各版本给播放列表的入口不一样, 挨个试 —— 这是验证用的路, 不值得为它
+    // 钉死某一版的内部字段。
+    var det = hls.latestLevelDetails
+      || (hls.levels && hls.levels[hls.currentLevel >= 0 ? hls.currentLevel : hls.loadLevel]
+          && hls.levels[hls.currentLevel >= 0 ? hls.currentLevel : hls.loadLevel].details);
+    var fs = (det && det.fragments) || [];
+    for (var i = 0; i < fs.length; i++) {
+      var f = fs[i];
+      if (v.currentTime >= f.start && v.currentTime < f.start + f.duration) {
+        return { name: (f.relurl || f.url || '').split('/').pop(),
+                 into: v.currentTime - f.start, start: f.start, dur: f.duration,
+                 pdt: f.programDateTime ? f.programDateTime / 1000 - PDT_EPOCH : null };
+      }
+    }
+    return null;
+  }
+
+  return { refresh: refresh, online: online, lag: lag, mediaTime: mediaTime, frag: frag };
 })();

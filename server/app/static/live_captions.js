@@ -182,9 +182,17 @@ window.LiveCaptions = (function () {
     if (!snap || !snap.lines.length) return;
     var elapsed = nowSec() - snap.at, lag = lagBehindEdge();
     var idx;
+    // 首选: 播放列表自己带的绝对位置 (PDT → hls.playingDate)。**读数, 不是估算** ——
+    // 与句子的 vt 是同一条轴, 零换算、零标定、不随负载变。
+    var P = window.LivePlayer;
+    var exact = P && typeof P.mediaTime === 'function' ? P.mediaTime() : null;
+    if (exact !== null && isFinite(exact) && snap.hasVt) {
+      render(snap.lines, pickVt(snap.lines, exact, 0, 0));
+      return;
+    }
     var ct = snap.hasVt ? viewerVt(snap, elapsed, lag) : null;
     if (ct !== null) {
-      // 首选: 直接用播放头在时间轴上的读数, 零换算。
+      // 回落零: 上游还没带 PDT (旧版播出端)。拿 edge-lag 标一次轴再靠 currentTime 走。
       idx = pickVt(snap.lines, ct, 0, 0);
     } else if (snap.hasVt) {
       // 回落一: 播放头不可信, 用 edge - lag 那条推。
