@@ -2985,20 +2985,18 @@ _OMB_NGINX = """server {
 def _omb_model_lists() -> dict[str, dict]:
     """OpenMausBot 两个驱动各自能选的型号 —— 按**在售目录**生成, 不是抄上游的表。
 
-    见 _OMB_PATCH_MODELS 的注释。便宜的排前面 (选择器按给的顺序显示), 展示名直接
-    用目录里的 display_name, 与价目表、其他工作台的叫法保持一致。
+    见 _OMB_PATCH_MODELS 的注释。按**供应商**取 (与两格终端的 /model 菜单同一个
+    _menu_models —— 它这一格的两个驱动分别就是 claude 与 codex 那两个 CLI), 便宜的
+    排前面 (选择器按给的顺序显示), 展示名直接用目录里的 display_name, 与价目表、
+    其他工作台的叫法保持一致。
     """
-    cat = model_catalog.catalog()
 
-    def face(prefix: str, want_default: str) -> dict | None:
-        rows = sorted(
-            (m for mid, m in cat.items() if mid.startswith(prefix)),
-            key=lambda m: (m.get("credits_per_m") or 0, m["id"]),
-        )
+    def face(provider: str, want_default: str) -> dict | None:
+        rows = _menu_models(provider)
         if not rows:
             # 这一家一个型号都不卖了。宁可留着上游那份 (至少能看出是哪家) 也别写一份
             # 空清单 —— 空的选择器在界面上和"加载中"长得一样。
-            logger.warning("[openmausbot] 在售目录里没有 %s* 型号, 这一家的清单不改", prefix)
+            logger.warning("[openmausbot] 在售目录里没有 %s 的型号, 这一家的清单不改", provider)
             return None
         ids = [m["id"] for m in rows]
         default = want_default if want_default in ids else ids[0]
@@ -3014,8 +3012,8 @@ def _omb_model_lists() -> dict[str, dict]:
         }
 
     out = {
-        "STATIC_CLAUDE_MODELS": face("claude-", config.OPENMAUSBOT_CLAUDE_MODEL),
-        "STATIC_CODEX_MODELS": face("gpt-", config.OPENMAUSBOT_CODEX_MODEL),
+        "STATIC_CLAUDE_MODELS": face("Anthropic", config.OPENMAUSBOT_CLAUDE_MODEL),
+        "STATIC_CODEX_MODELS": face("OpenAI", config.OPENMAUSBOT_CODEX_MODEL),
     }
     return {k: v for k, v in out.items() if v}
 
@@ -3063,8 +3061,11 @@ for (const [name, spec] of Object.entries(WANT)) {
 fs.writeFileSync(BUNDLE, src);
 
 // 存量机器人里选中了**已经不卖**的型号的, 拨回该家的默认值 —— 否则它一说话就是
-// 一句 404, 而用户只看到"这个机器人不理我"。只认 claude-* / gpt-* 两种牌名 (就是
-// 我们接的那两个驱动), 别家驱动 (grok / gemini / kimi ...) 的选择一个字不动。
+// 一句 404, 而用户只看到"这个机器人不理我"。
+//
+// 这里按**牌名前缀**认 (claude-* / gpt-*), 比上面那份清单保守: 清单是"我们卖什么"
+// (按供应商取, 该全), 这里是"我敢断定它属于这两个 CLI 吗" —— 认不出来就不动, 代价
+// 只是少修一个, 而认错的代价是把别家驱动 (grok / gemini / kimi ...) 的选择改坏。
 try {
   const raw = fs.readFileSync(BOTS, "utf8");
   const bots = JSON.parse(raw);

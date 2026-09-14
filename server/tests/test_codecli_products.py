@@ -483,9 +483,11 @@ def test_openmausbot_model_picker_only_offers_what_the_gateway_sells(monkeypatch
         assert not set(ids) - sellable, f"{name} 里有网关不卖的型号: {set(ids) - sellable}"
         assert spec["default"] in ids, f"{name} 的默认值不在自己的清单里"
         assert all(o["label"] for o in spec["options"]), "没有展示名的话选择器里是一串裸 id"
-    # 两家各按各的牌名, 别串了 —— codex 那个 CLI 只认 OpenAI 的名字。
-    assert all(o["id"].startswith("claude-") for o in lists["STATIC_CLAUDE_MODELS"]["options"])
-    assert all(o["id"].startswith("gpt-") for o in lists["STATIC_CODEX_MODELS"]["options"])
+    # 两家各取各的供应商, 别串了 —— 这一格的两个驱动就是 claude 与 codex 那两个 CLI,
+    # 与两格终端的 /model 菜单取的是同一批 (同一个 _menu_models)。
+    for name, provider in (("STATIC_CLAUDE_MODELS", "Anthropic"), ("STATIC_CODEX_MODELS", "OpenAI")):
+        want = [m["id"] for m in products._menu_models(provider)]
+        assert [o["id"] for o in lists[name]["options"]] == want, f"{name} 与在售目录对不上"
 
 
 def test_openmausbot_default_model_falls_back_when_it_is_delisted(monkeypatch):
