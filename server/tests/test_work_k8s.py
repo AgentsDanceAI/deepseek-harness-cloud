@@ -785,6 +785,44 @@ async def test_sync_secret_holds_rclone_config_and_is_written_once(k8s, oss):
 
 
 @pytest.mark.asyncio
+async def test_scratch_dirs_never_reach_oss(k8s, oss):
+    """临时目录不同步 —— 它是冷启动时间的大头, 而且看不见。
+
+    2026-09-14 实测: QA 那格 codex 的家目录 175MB / 10918 个文件, 其中 172MB 是
+    `.codex/tmp` 与 `.codex/.tmp` (现解出来的 arg0 助手 + 两份一模一样的插件克隆)。
+    每次冷启动都要把它整份从 OSS 拉回来 —— 恢复 14 秒, 而同一个镜像的 claude-code
+    (1.7MB / 41 个文件) 只要 2 秒。
+
+    **模式不许以 / 开头**: 恢复与终态推送的根是 /data, 周期推送的根是 /data/home,
+    锚定到根的模式只在其中一个方向生效 —— 那会变成"恢复时跳过了, 却还在每隔几十秒
+    往上传", 而这种半生效从日志上看不出来。
+    """
+    b, fake = k8s
+    await _create(b)
+    restore, syncer = fake.created()[0]["spec"]["initContainers"][:2]
+    for script in (restore["command"][2], syncer["command"][2]):
+        for pat in (".codex/tmp/**", ".codex/.tmp/**"):
+            assert f"--exclude '{pat}'" in script, f"{pat} 还会进 OSS"
+    from app import workbackend as wb
+
+    for pat in wb._SYNC_EXCLUDES:
+        if pat.startswith("/"):
+            assert pat == "/.dsh-*", f"{pat} 锚定到根了 —— 周期推送的根是 /data/home, 这条只会生效一半"
+
+
+@pytest.mark.asyncio
+async def test_restore_says_how_much_it_pulled(k8s, oss):
+    """恢复完要报体积和文件数: 冷启动的头几秒就花在这里, 而"为什么这格开得慢"
+    以前只能事后一格一格量。胖了要自己喊出来。"""
+    b, fake = k8s
+    await _create(b)
+    r = fake.created()[0]["spec"]["initContainers"][0]["command"][2]
+    assert "个文件" in r and "du -sm /data" in r
+    assert r.index("du -sm /data") > r.index(": > /data/.dsh-restored"), "拉成功了才数"
+    assert "_SYNC_EXCLUDES" in r or "--exclude" in r
+
+
+@pytest.mark.asyncio
 async def test_sync_scripts_guard_against_pushing_a_half_restore(k8s, oss):
     """拉失败不落标记, 同步器见不到标记就不推 —— 半份数据推上去会把正本弄坏。"""
     b, fake = k8s

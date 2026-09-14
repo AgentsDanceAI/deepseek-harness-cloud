@@ -760,10 +760,26 @@ def _parse_k8s_time(s: str) -> float:
         return 0.0
 
 
+#: 不进 OSS 的东西。**模式不要以 / 开头** —— 恢复与终态推送的根是 /data, 而周期
+#: 推送的根是 /data/home, 锚定到根的模式只在其中一个方向生效 (于是"恢复时跳过了,
+#: 却还在每隔几十秒往上传"), 不锚定的两边都匹配 (2026-09-14 两个方向都实测过)。
+#:
+#: `.codex/tmp` `.codex/.tmp`: codex CLI 每次运行现解出来的 arg0 助手与插件克隆。
+#: 2026-09-14 实测 QA 那格的 codex 家目录 175MB / 10918 个文件, 其中 172MB 是这两个
+#: 目录 (plugins 与 plugins-clone-* 两份一模一样的 86MB) —— 纯临时产物, 却跟着同步
+#: 上了 OSS, 于是**每次冷启动都要整个拉回来**: 恢复用 14 秒, 而同一个镜像的
+#: claude-code (1.7MB / 41 个文件) 只要 2 秒。那 4 个 xattr 报错也全在这里面。
+_SYNC_EXCLUDES = (
+    "/.dsh-*",  # 我们自己的标记文件 (这个**要**锚定到根: 只有根上那几个是标记)
+    ".codex/tmp/**",
+    ".codex/.tmp/**",
+)
+
 _K8S_RCLONE_FLAGS = (
     "--metadata --links --fast-list --transfers 16 --checkers 32 "
-    "--s3-directory-markers --create-empty-src-dirs --exclude '/.dsh-*' "
-    "--stats-one-line --stats 60s"
+    "--s3-directory-markers --create-empty-src-dirs "
+    + " ".join(f"--exclude '{p}'" for p in _SYNC_EXCLUDES)
+    + " --stats-one-line --stats 60s"
 )
 
 #: 初始化容器: 起动前把用户目录从 OSS 拉回本地卷。OSS 是正本 —— 本地有而 OSS 没有
@@ -799,7 +815,15 @@ if rclone lsf "$R" --max-depth 1 2>/dev/null | grep -q .; then
   echo "restore: $R -> /data"
   if rclone sync "$R" /data %(flags)s; then
     : > /data/.dsh-restored
-    echo "restore: done"
+    # 拉回来多少 —— 冷启动的头几秒就花在这里, 而"为什么这一格开得慢"以前只能靠
+    # 事后一格一格量 (2026-09-14 就是这么才发现 codex 在同步 172MB 临时文件的)。
+    # 让它自己说: 下次哪一格胖了, 日志第一行就写着。
+    n=$(find /data -type f 2>/dev/null | wc -l)
+    m=$(du -sm /data 2>/dev/null | cut -f1)
+    echo "restore: done (${m}MB, ${n} 个文件)"
+    if [ "${n:-0}" -gt 3000 ] || [ "${m:-0}" -gt 200 ]; then
+      echo "restore: !! 这一格的数据偏大, 每次冷启动都要整份拉回来 —— 先看看是不是有临时目录该进 _SYNC_EXCLUDES" >&2
+    fi
   else
     echo "restore: FAILED, syncer will not push until a clean restore" >&2
   fi
