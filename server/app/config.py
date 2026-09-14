@@ -397,17 +397,33 @@ OPENMAUSBOT_IMAGE_REF = _env("OPENMAUSBOT_IMAGE_REF", "ghcr.io/agentsdancepro/op
 #: 那一格**新建**机器人时默认选中的型号 (存量机器人保留各自已选的, 不动)。
 #: 型号清单本身在启动时按在售目录重写, 见 products.py 的 _OMB_PATCH_MODELS。
 #:
-#: 默认给 claude-fable-5 而不是 sonnet-5 是为了**快**: 2026-09-13 在这一格的 pod 里
-#: 实测 (Claude Code 的请求形状, 一句 "reply with exactly: OK"):
-#:     claude-sonnet-5  带思考 31~45 秒  | 不带思考 3.3 秒
-#:     claude-fable-5   带思考 4.2 秒
-#: CLI 默认就带思考, 而网关按 thinking 把带思考的请求钉到直连 Anthropic 那条通道
-#: (见 memory anthropic-face-thinking-channel) —— sonnet-5 走那条就是几十秒, 当天的
-#: 巡检也只有 5/6 通过, fable-5 6/6。
-#: **代价是钱**: fable-5 的倍率是 5.0, sonnet-5 是 1.0 —— 同样的 token 贵五倍。
-#: 觉得不值就把这个环境变量设回 claude-sonnet-5, 不用改代码。
-OPENMAUSBOT_CLAUDE_MODEL = _env("OPENMAUSBOT_CLAUDE_MODEL", "claude-fable-5")
+#: 留在 claude-sonnet-5 —— **换成 fable-5 并不会更快, 只会贵五倍**。
+#: 2026-09-14 为"这一格有点卡"量过两轮, 第一轮 n=2 看着像 fable-5 快十倍, 差点据此
+#: 把默认换掉; 补到每边 10 发、交错采样后结论反过来:
+#:     claude-sonnet-5  中位 24.6 秒  最快 2.6  最慢 91.2  半数以上 >30 秒
+#:     claude-fable-5   中位 32.7 秒  最快 4.5  最慢 81.6  同上
+#: 慢的不是型号, 是上游那条通道本身在抖 —— 整个 claude 面一起抖, 换型号换不掉。
+#: (倍率: sonnet-5 = 1.0, opus-5 = 2.5, fable-5 = 5.0。)
+#: 教训记在 memory anthropic-face-thinking-channel: 这条链路上**两发不算数据**。
+OPENMAUSBOT_CLAUDE_MODEL = _env("OPENMAUSBOT_CLAUDE_MODEL", "claude-sonnet-5")
 OPENMAUSBOT_CODEX_MODEL = _env("OPENMAUSBOT_CODEX_MODEL", "gpt-5.6-luna")
+#: 这一格的机器人**不开扩展思考** (0 = 关)。老板 2026-09-13: "有点卡"。
+#:
+#: 卡在哪 —— 2026-09-14 在这一格的 pod 里交错采样, 同一个型号、同一时刻、一句
+#: "reply with exactly: OK", 唯一的差别是请求里带不带 thinking:
+#:     带思考   中位 45.7 秒   最慢 91.5 秒   10 发里 8 发 >10 秒
+#:     不带思考 中位  2.4 秒   最慢  3.7 秒   10 发全部 <4 秒
+#: 走 CLI 也一样 (它默认带思考): 原样中位 76 秒、最慢 194.5 秒 (验收脚本等三分钟
+#: 都能超时), 关掉之后中位 5.0 秒。
+#:
+#: 机理: 网关按 thinking 把这类请求钉到直连 Anthropic 那条通道 (见 memory
+#: anthropic-face-thinking-channel —— 那是为了躲 Bedrock 拒 thinking 的 400,
+#: 是对的), 而那条通道这阵子在抖。整个 claude 面一起抖, **换型号换不掉**。
+#:
+#: 为什么只关这一格: 群聊里等三分钟等于产品废了; 而 claude-code / codex 两格是
+#: 干活的工作台, 老板明确要看思考过程 (2026-09-12 "思考不显示思考内容呢") ——
+#: 那两格照旧。要给这格把思考调回来就把这个值设成比如 4000。
+OPENMAUSBOT_MAX_THINKING_TOKENS = _env_int("OPENMAUSBOT_MAX_THINKING_TOKENS", 0)
 OPENMAUSBOT_MEM_LIMIT_MB = _env_int("OPENMAUSBOT_MEM_LIMIT_MB", 4096)
 OPENMAUSBOT_CPUS = _env_float("OPENMAUSBOT_CPUS", 2.0)
 # 4G/2 核不是阔气: 一个群里可以同时挂几个机器人, 每个机器人是一个独立的 CLI 进程

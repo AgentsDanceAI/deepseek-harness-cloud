@@ -3469,6 +3469,10 @@ def env_for(product_id: str, token: str, secret: str = "") -> dict[str, str]:
             "ANTHROPIC_SMALL_FAST_MODEL": _codecli_model("claude-code"),
             "OPENAI_API_KEY": token,
             "OPENAI_BASE_URL": f"{gateway}/llm/v1",
+            # 不开扩展思考 —— 这一格"有点卡"就卡在这里 (见 config 里那段实测:
+            # 带思考中位 45.7 秒 / 不带 2.4 秒, 同型号同时刻)。claude CLI 默认带,
+            # 只能从外面关。
+            "MAX_THINKING_TOKENS": str(config.OPENMAUSBOT_MAX_THINKING_TOKENS),
             # 界面里显示的 webhook 地址与配对链接用这两个。不设的话它写 127.0.0.1,
             # 用户复制出去的 hook 地址是打不通的。
             "OMB_PUBLIC_URL": f"https://{config.OPENMAUSBOT_DOMAIN}",

@@ -517,6 +517,28 @@ def test_openmausbot_rewrites_the_model_lists_before_the_server_reads_them():
     assert ".dsh-bak-" in products._OMB_PATCH_MODELS, "动用户数据之前要留一份原样的"
 
 
+def test_openmausbot_bots_do_not_pay_the_thinking_channel_tax(monkeypatch):
+    """群聊里的机器人不开扩展思考 —— 那是这一格"有点卡"的**唯一**原因。
+
+    2026-09-14 同型号同时刻交错采样: 带思考中位 45.7 秒 (最慢 91.5), 不带 2.4 秒
+    (10 发全部 <4 秒); 走 CLI 更夸张, 原样最慢 194.5 秒。网关按 thinking 把这类请求
+    钉到直连 Anthropic 那条通道, 而那条在抖 —— 整个 claude 面一起抖, 换型号换不掉
+    (fable-5 中位 32.7 秒, 比 sonnet-5 的 24.6 还慢, 还贵五倍)。
+
+    只关这一格: claude-code / codex 两格是干活的工作台, 老板要看思考过程。
+    """
+    from app import config
+
+    env = products.env_for("openmausbot", "TOK", "")
+    assert env["MAX_THINKING_TOKENS"] == "0"
+    for pid in ("claude-code", "codex"):
+        assert "MAX_THINKING_TOKENS" not in products.env_for(pid, "TOK", ""), (
+            f"{pid} 那格要看思考过程, 别把它一起关了"
+        )
+    monkeypatch.setattr(config, "OPENMAUSBOT_MAX_THINKING_TOKENS", 4000)
+    assert products.env_for("openmausbot", "TOK", "")["MAX_THINKING_TOKENS"] == "4000"
+
+
 def test_openmausbot_keeps_the_incoming_forwarded_proto():
     boot = products.boot_script("openmausbot")
     assert "map $http_x_forwarded_proto $dsh_proto" in boot, "默认那份 map 少了它, nginx 起不来"
