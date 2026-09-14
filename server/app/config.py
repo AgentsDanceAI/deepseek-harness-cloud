@@ -730,6 +730,14 @@ TEAM_SEAT_TIERS = [
 TEAM_DEFAULT_CREDIT_CAP_X = _env_float("TEAM_DEFAULT_CREDIT_CAP_X", 3.0)
 TEAM_DEFAULT_MINUTE_CAP_X = _env_float("TEAM_DEFAULT_MINUTE_CAP_X", 3.0)
 WORK_MAX_CONCURRENT = _env_int("WORK_MAX_CONCURRENT", 40)  # global running-container cap
+#: 跳进工作台之前, 先在等待页上把它的首屏资源拉进浏览器缓存 (见 workspace._warm_assets)。
+#: 关掉 = 回到 2026-09-14 之前的行为: 后端一就绪就直接跳过去。
+#:
+#: 为什么默认开: 后端就绪 ≠ 用户能用。实测 Open Design 后端 9 秒就绪, 浏览器那边还要
+#: 46 秒 (首屏 9.1MB, 单个 js 块 6.9MB); 走这条路之后**整段** (冷容器 + 空缓存) 26.6 秒,
+#: 而且那段等待是在我们自己的进度条上、有刻度的。
+#: 代价: 缓存已经热的用户多绕一次等待页 —— 那一次预载全是缓存命中, 量下来零点几秒。
+WORK_PREWARM = _env_bool("WORK_PREWARM", True)
 WORK_MEM_LIMIT_MB = _env_int("WORK_MEM_LIMIT_MB", 512)
 # Require this much free host memory before allocating another workspace. The
 # static concurrency cap alone cannot account for unrelated host workloads.

@@ -1301,6 +1301,41 @@ def test_the_tap_handler_runs_in_capture_phase():
     assert m.group(1) == "true", "不是捕获阶段 —— 会被抽屉内部的 stopPropagation 吃掉"
 
 
+def test_even_a_ready_slot_goes_through_the_prewarm_page(fake, monkeypatch):
+    """容器热着 ≠ 这个浏览器热着。
+
+    换一台笔记本 / 换个浏览器配置 / 无痕窗口, 缓存都是空的 —— 那时直接跳过去就是
+    几十秒对着别人家的转圈图 (2026-09-14 同一格实测 44.5 秒与 108 秒两次)。所以就绪
+    了也先过一趟等待页, 让它把首屏资源拉进缓存。缓存已热时那一趟全是命中。
+
+    关掉开关就回到老行为 —— 演示当天出岔子能一条环境变量退回去。
+    """
+
+    async def ready(user, product):
+        return "running"
+
+    monkeypatch.setattr(workspace, "ensure_workspace", ready)
+    monkeypatch.setattr(workspace, "try_resolve_user", lambda r: {"id": "u_t", "is_admin": False})
+    monkeypatch.setattr(workspace.credits, "balance", lambda uid: 100)
+    monkeypatch.setattr(workspace.work_access, "blocked_reason", lambda uid: "")
+    monkeypatch.setattr(config, "COMFY_IMAGE", "comfy:test")
+    monkeypatch.setattr(config, "COMFY_DOMAIN", "comfy.test.local")
+    c = TestClient(app)
+
+    def go():
+        return c.get(
+            "/work?product_id=comfyui", headers={"host": "work.test.local"}, follow_redirects=False
+        ).headers.get("location", "")
+
+    monkeypatch.setattr(config, "WORK_PREWARM", True)
+    loc = go()
+    assert "/work/starting" in loc and "product_id=comfyui" in loc, loc
+
+    monkeypatch.setattr(config, "WORK_PREWARM", False)
+    loc2 = go()
+    assert "comfy.test.local" in loc2, f"开关关掉要回到直跳: {loc2}"
+
+
 def test_warm_list_is_same_origin_assets_only(monkeypatch):
     """预载清单只收**这一格自己域名下**的 js/css。
 

@@ -1347,7 +1347,7 @@ async def work_status(request: Request):
         "is_admin": bool(user.get("is_admin")),
         # 首屏资源清单 —— 等待页跳转前先把它们拉进缓存, 见 _warm_assets。
         # 只在就绪那一次给: 之前给了也没用 (容器还没起, 拉不到)。
-        "warm": await _warm_assets(key, product) if ready else [],
+        "warm": await _warm_assets(key, product) if ready and config.WORK_PREWARM else [],
     }
     out.update(work_access.state(user["id"]))
     return out
@@ -1409,8 +1409,14 @@ async def work_entry(request: Request, product_id: str = products.DEFAULT):
         kind = "busy" if str(e) == "capacity" else "error"
         _log_ensure_failure(product, user, e)
         return RedirectResponse(f"{site}/work/starting?state={kind}&product_id={product.id}", status_code=302)
-    if state == "running":
+    if state == "running" and not config.WORK_PREWARM:
         return RedirectResponse(_work_url("/" + suffix, product), status_code=302)
+    # 就绪了也先过一趟等待页 —— 它会把首屏资源拉进缓存再放人进去。
+    #
+    # 为什么连"已经就绪"也要绕: 容器热着不代表**这个浏览器**热着。换一台笔记本、
+    # 换一个浏览器配置、无痕窗口, 缓存都是空的, 而那时直接跳过去就是几十秒对着
+    # 别人家的转圈图 (2026-09-14 实测同一格 44.5 秒与 108 秒两次)。绕这一趟在
+    # 缓存已热时是全命中, 零点几秒就过去了。
     joiner = "&" if suffix else "?"
     return RedirectResponse(f"{site}/work/starting{suffix}{joiner}product_id={product.id}", status_code=302)
 
