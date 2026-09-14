@@ -9,22 +9,8 @@
   <aside class="auth-aside">
     <canvas id="hero-waves" aria-hidden="true"></canvas>
     <a class="brand" href="/" style="color:#fff">
-      <svg class="logo" viewBox="0 0 32 32" width="28" height="28" aria-hidden="true">
-        <defs>
-          <linearGradient id="lgl" x1="0" y1="0" x2="1" y2="1">
-            <stop offset="0" stop-color="#5b93f0"/><stop offset="1" stop-color="#2663c9"/>
-          </linearGradient>
-          <mask id="lgl-bag">
-            <rect width="32" height="32" fill="#000"/>
-            <path d="M12.6 12.2a3.4 3.4 0 0 1 6.8 0" fill="none" stroke="#fff" stroke-width="1.8"/>
-            <rect x="8" y="12.2" width="16" height="12" rx="1.8" fill="#fff"/>
-            <circle cx="12.7" cy="16.6" r="1.25"/><circle cx="19.3" cy="16.6" r="1.25"/>
-            <circle cx="12.7" cy="20.4" r="1.25"/><circle cx="19.3" cy="20.4" r="1.25"/>
-          </mask>
-        </defs>
-        <rect x="1.5" y="1.5" width="29" height="29" rx="9" fill="url(#lgl)"/>
-        <rect width="32" height="32" fill="#fff" mask="url(#lgl-bag)"/>
-      </svg>
+      <img class="logo" src="/pwa/icon-192.png?v={{ asset_v }}" width="28" height="28"
+           alt="" aria-hidden="true" decoding="async">
       <span class="brand-name" style="color:#fff">AI Store</span>
     </a>
 
