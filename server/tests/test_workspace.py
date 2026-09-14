@@ -1474,6 +1474,38 @@ def test_the_bar_waits_for_the_prewarm_before_handing_over():
     assert js.count("jumped=true") == 1 and "if(jumped)return" in js, "别跳两次"
 
 
+def test_ios_home_screen_icon_is_opaque_and_reachable(monkeypatch):
+    """iOS「添加到主屏幕」那张图要**不透明**, 而且约定路径要能取到。
+
+    2026-09-14 老板加到主屏, 出来的是 Safari 按标题首字母现造的白色 "A" —— 它一张
+    我们的图都没取到。苹果要的是不透明、满幅、不预切圆角的方图 (圆角系统自己加);
+    我们原来给的是带透明圆角的 icon-180, 而 /apple-touch-icon.png 还是 404。
+    """
+    import struct
+
+    from fastapi.testclient import TestClient
+
+    from app.main import create_app
+
+    c = TestClient(create_app())
+    for path in ("/apple-touch-icon.png", "/apple-touch-icon-precomposed.png"):
+        r = c.get(path)
+        assert r.status_code == 200, f"{path} 取不到 —— iOS 读不到标签时就来要这个"
+        assert r.headers["content-type"] == "image/png"
+        w, h, depth, ctype = struct.unpack(">IIBB", r.content[16:26])
+        assert (w, h) == (180, 180), f"{path} 是 {w}×{h}"
+        # PNG 颜色类型 4/6 带 alpha; 苹果要的是不透明
+        assert ctype not in (4, 6), "带透明通道 —— iOS 会把角合成成黑的, 或者干脆不用"
+
+    html = c.get("/", headers={"host": "aistore.best"}).text
+    assert '<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">' in html
+    assert "apple-touch-icon" not in html.split("</head>")[0].replace(
+        '<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">', ""
+    ), "只该有一条 apple-touch-icon"
+    line = [x for x in html.splitlines() if "apple-touch-icon" in x][0]
+    assert "?v=" not in line, "带查询串的图标地址有版本的 iOS 会跳过"
+
+
 def test_the_workspace_host_is_exempt_from_our_csp(monkeypatch):
     """CSP 落在工作台文档上 = 整页白屏。
 

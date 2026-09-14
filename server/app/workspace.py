@@ -1182,6 +1182,32 @@ async def favicon():
     )
 
 
+@router.get("/apple-touch-icon.png")
+@router.get("/apple-touch-icon-precomposed.png")
+async def apple_touch_icon():
+    """iOS 「添加到主屏幕」用的图标。
+
+    2026-09-14 老板加到主屏, 出来的是 Safari 按标题首字母现造的白色 "A" —— 它一张
+    我们的图都没取到。三处一起修 (手上没有他那台设备, 没法逐条排除, 所以把已知的
+    坑一次填平):
+
+      · **不透明、满幅、不预先切圆角**。苹果要的就是这样, 圆角由系统加。我们原来
+        那张 icon-180 带透明圆角, 给过去要么被合成成黑角, 要么直接不用。
+      · **这个约定路径要能取到**。标签没读到时 iOS 会直接来要 /apple-touch-icon.png,
+        而它之前是 404。
+      · 标签上的 `?v=` 去掉 —— 有版本的 iOS 对带查询串的图标地址会跳过。
+
+    缓存跟着 favicon 走一小时: 换 logo 之后不至于让用户长期挂着旧图。
+    """
+    from fastapi.responses import FileResponse
+
+    return FileResponse(
+        _pwa_path("apple-touch-icon.png"),
+        media_type="image/png",
+        headers={"cache-control": "public, max-age=3600"},
+    )
+
+
 @router.get("/pwa/{name}")
 async def pwa_asset(name: str):
     from fastapi.responses import FileResponse

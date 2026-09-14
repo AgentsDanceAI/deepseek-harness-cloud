@@ -10,7 +10,7 @@
    还是一个空白方块。图标是现成的 (手机壳那套 PWA 图标), 只是从来没挂到网页上。
    /favicon.ico 那条路由也留着: 爬虫和部分客户端不看 link 标签, 照要不误。 #}
 <link rel="icon" type="image/png" sizes="192x192" href="/pwa/icon-192.png?v={{ asset_v }}">
-<link rel="apple-touch-icon" href="/pwa/icon-180.png?v={{ asset_v }}">
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
 <script>window.__T=JSON.parse({{ js_i18n | tojson | tojson }});window.__LANG="{{ lang }}";</script>
   <script src="/static/app.js?v={{ asset_v }}" defer></script>
 {% block head %}{% endblock %}
