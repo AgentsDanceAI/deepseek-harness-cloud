@@ -332,6 +332,40 @@ export async function start(
   }
 }
 
+/**
+ * 等到这一格**真的能应答**为止。
+ *
+ * `docker run` 返回只代表容器**建起来了**, 不代表里面的服务开始监听 —— 中间还有
+ * 应用自己的启动 (Node 起 server、Python 载模块、前端静态文件就位)。这段时间里
+ * 开窗口, 用户看到的是**一片白**: Chromium 加载一个没人应答的地址, 失败之后不会
+ * 自己重试。2026-09-14 老板点 Claude Code 与 Agents Team 都是白窗, 而那时容器好
+ * 好地在跑、端口也已经 200 了 —— 只是窗口比它早开了十几秒。
+ *
+ * 判据用计划里的 `ready_path`(它本来就是为这个存在的, 之前没人用它等), 且
+ * **答了就算**, 不要求 200: 未初始化的应用首页常常是 302/307 跳去安装向导,
+ * 要求 200 会让它永远等下去。5xx 才算"起来了但坏了"。
+ */
+export async function waitReady(
+  port: number, readyPath: string, opts: { timeoutMs?: number, onWait?: (secs: number) => void } = {},
+): Promise<boolean> {
+  const timeoutMs = opts.timeoutMs ?? 180_000
+  const started = Date.now()
+  const url = `http://127.0.0.1:${port}${readyPath.startsWith('/') ? readyPath : `/${readyPath}`}`
+  let notified = -1
+  while (Date.now() - started < timeoutMs) {
+    try {
+      const res = await fetch(url, { redirect: 'manual', signal: AbortSignal.timeout(4_000) })
+      if (res.status < 500) return true
+    } catch {
+      // 还没开始监听 —— 正常, 再等
+    }
+    const secs = Math.floor((Date.now() - started) / 1000)
+    if (secs !== notified && secs % 5 === 0) { notified = secs; opts.onWait?.(secs) }
+    await new Promise(resolve => setTimeout(resolve, 400))
+  }
+  return false
+}
+
 /** 停一格 —— 连同它的整栈。
  *
  * 按名字正则收: 主容器叫 aistore-<格>, 伴随容器叫 aistore-<格>--<名>。锚定两端,

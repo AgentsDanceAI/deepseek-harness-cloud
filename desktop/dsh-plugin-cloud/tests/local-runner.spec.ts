@@ -4,9 +4,9 @@
  * 的家目录上、令牌占位符被换掉、以及计划里不该出现真令牌。
  */
 
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import type { LocalPlan } from '../../src/cloud/api.ts'
-import { augmentedPath, buildRunArgs, buildSidecarArgs, candidates, containerName, dockerEnv, freePort, homeOf, sidecarName }
+import { augmentedPath, buildRunArgs, buildSidecarArgs, candidates, containerName, dockerEnv, freePort, homeOf, sidecarName, waitReady }
   from '../../src/cloud/local-runner.ts'
 
 const PLACEHOLDER = '${AISTORE_TOKEN}'
@@ -189,5 +189,50 @@ describe('给 docker 的 PATH', () => {
 
   it('PATH 原本是空的也不能产出前导冒号 (空条目 = 当前目录, 是个坑)', () => {
     expect(augmentedPath({}).split(':').filter(x => x === '')).toHaveLength(0)
+  })
+})
+
+describe('等这一格真的能应答', () => {
+  /** docker run 返回只代表容器**建起来了**。不等就开窗 = 一片白: Chromium 加载一个
+   * 没人应答的地址, 失败之后不会自己重试。2026-09-14 老板点 Claude Code 与
+   * Agents Team 都是白窗, 而那时容器在跑、端口也已经 200 —— 窗口早开了十几秒。 */
+  const withServer = async (handler: (n: number) => number | undefined): Promise<number> => {
+    const { createServer } = await import('node:http')
+    let n = 0
+    const srv = createServer((_req, res) => {
+      const code = handler(++n)
+      if (code === undefined) { res.destroy(); return }
+      res.writeHead(code); res.end('x')
+    })
+    await new Promise<void>(r => srv.listen(0, '127.0.0.1', r))
+    const port = (srv.address() as { port: number }).port
+    servers.push(srv)
+    return port
+  }
+  const servers: Array<{ close: () => void }> = []
+  afterEach(() => { servers.splice(0).forEach(s => s.close()) })
+
+  it('一答就走, 不傻等', async () => {
+    const port = await withServer(() => 200)
+    expect(await waitReady(port, '/api/health', { timeoutMs: 5_000 })).toBe(true)
+  })
+
+  it('302 也算起来了 —— 未初始化的应用首页常常是跳安装向导', async () => {
+    const port = await withServer(() => 302)
+    expect(await waitReady(port, '/', { timeoutMs: 5_000 })).toBe(true)
+  })
+
+  it('5xx 不算 —— 那是起来了但坏了', async () => {
+    const port = await withServer(() => 500)
+    expect(await waitReady(port, '/', { timeoutMs: 1_500 })).toBe(false)
+  })
+
+  it('前几次拒连、随后起来: 要等到它起来而不是第一次就放弃', async () => {
+    const port = await withServer(n => (n < 3 ? undefined : 200))
+    expect(await waitReady(port, '/api/health', { timeoutMs: 8_000 })).toBe(true)
+  })
+
+  it('一直没人应答就在超时后认输, 不无限挂着', async () => {
+    expect(await waitReady(1, '/', { timeoutMs: 1_200 })).toBe(false)
   })
 })

@@ -12,7 +12,8 @@
 import { app, BrowserWindow, ipcMain, shell } from 'electron'
 import { fileURLToPath } from 'node:url'
 import { fetchLocalCatalog, fetchLocalPlan, type LocalCatalogEntry } from './api.ts'
-import { dockerState, freePort, pullAll, running, start, stop, type DockerState } from './local-runner.ts'
+import { dockerState, freePort, pullAll, running, start, stop, waitReady, type DockerState }
+  from './local-runner.ts'
 
 const IPC_CHANNELS = [
   'dsh-cloud:shelf-boot-host',
@@ -112,6 +113,17 @@ export function openShelf(token: string, requestHost: () => void): BrowserWindow
       say('dsh-cloud:shelf-progress', { id: productId, line: n > 1 ? `起 ${n} 个容器…` : '起容器…' })
       await start(plan, token, port, platforms)
       openPorts.set(productId, port)
+      // **容器建起来 ≠ 里面的服务在应答。** 不等就开窗, 用户看到的是一片白 ——
+      // Chromium 加载一个没人应答的地址, 失败之后不会自己重试 (2026-09-14 实测)。
+      say('dsh-cloud:shelf-progress', { id: productId, line: '等它起来…' })
+      const up = await waitReady(port, plan.ready_path, {
+        onWait: secs => {
+          say('dsh-cloud:shelf-progress', { id: productId, line: `等它起来… ${secs}s` })
+        },
+      })
+      if (!up) {
+        return { ok: false, error: '容器起来了, 但里面的服务三分钟没有应答。再试一次, 或看 docker logs。' }
+      }
       // 开根路径, 不是 ready_path —— 后者是给探针用的 (codex 那格是
       // /api/health), 直接开会给用户看一段 JSON。
       openWorkspace(`http://127.0.0.1:${port}`, plan.name)
