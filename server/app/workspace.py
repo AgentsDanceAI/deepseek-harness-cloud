@@ -1353,6 +1353,25 @@ async def work_status(request: Request):
     return out
 
 
+@router.post("/api/work/waited")
+async def work_waited(request: Request):
+    """等待页在跳转前报一次"这次一共等了多少秒"。
+
+    为什么要客户端报: 文案说的是"你要等多久", 那是**整段** —— 后端建容器 + 预载首屏。
+    服务端只看得到前半截, 而对 open-design 这种格子后半截才是大头 (首屏 18.5MB)。
+    只影响那句提示的措辞, 所以按不可信输入处理: 夹在合理区间里, 越界就丢。
+    """
+    user = try_resolve_user(request)
+    if user is None:
+        return JSONResponse(status_code=401, content={"detail": "not_authenticated"})
+    try:
+        seconds = float(request.query_params.get("s") or 0)
+    except ValueError:
+        return {"ok": False}
+    _record_boot(_product_of(request).id, seconds)
+    return {"ok": True}
+
+
 @router.post("/api/work/active")
 async def work_active(request: Request):
     """“有真人正在用这台工作台。”
@@ -1478,7 +1497,7 @@ var track=document.getElementById('track'),fill=document.getElementById('fill'),
 var BAND={queued:[2,12,6],booting:[12,68,9],warming:[68,86,4],prewarm:[86,98,1],ready:[100,100,1]};
 var LABEL={queued:'正在排队',booting:'正在分配算力',warming:'工作台就绪中',ready:'就绪',
            prewarm:'正在预载界面'};
-var cur=0,phase='queued',since=Date.now(),t0=Date.now(),frac=0;
+var cur=0,phase='queued',since=Date.now(),t0=Date.now(),frac=0,wd=0,wn=0;
 function paint(){
   var b=BAND[phase]||BAND.queued,el=(Date.now()-since)/1000,
       // 预载这一段是**数出来的**, 不是估的: 已经拉回来几个就走到几 —— 这一段
@@ -1488,7 +1507,9 @@ function paint(){
   if(target>cur)cur=target;              // 只前进, 不回退
   fill.style.width=cur+'%';caret.style.left=cur+'%';
   track.setAttribute('aria-valuenow',Math.round(cur));
-  phaseEl.textContent=LABEL[phase]||'';
+  // 预载这一段把"几分之几"直接写出来: 这段以前根本不存在, 光一条在动的
+  // 进度条说明不了它在干什么。
+  phaseEl.textContent=(LABEL[phase]||'')+(phase==='prewarm'&&wn?' '+wd+'/'+wn:'');
   // 比平时久就直说。一条不动的进度条只会让人以为坏了。
   if(slowEl)slowEl.hidden=(Date.now()-t0)<60000||phase==='ready';
 }
@@ -1503,6 +1524,11 @@ setInterval(paint,120);paint();
       var go=function(){
         if(jumped)return;jumped=true;
         phase='ready';cur=100;paint();
+        // 把"这次一共等了多久"报回去, 下一个人看到的提示就按真实的说。
+        // sendBeacon 不会拖慢跳转 (发出去就走)。
+        try{navigator.sendBeacon('/api/work/waited?product_id='+
+          encodeURIComponent(new URLSearchParams(location.search).get('product_id')||'')+
+          '&s='+((Date.now()-t0)/1000).toFixed(1));}catch(e){}
         location.href=s.url+(t?'?task='+encodeURIComponent(t):'');
       };
       // 后端就绪 ≠ 用户能用: 有的格子首屏要拉十几 MB, 跳过去还得再等几十秒,
@@ -1512,8 +1538,8 @@ setInterval(paint,120);paint();
       var w=s.warm||[];
       if(!w.length){go();return;}
       phase='prewarm';since=Date.now();frac=0;paint();
-      var done=0;
-      var bump=function(){done++;frac=done/w.length;paint();};
+      wn=w.length;wd=0;
+      var bump=function(){wd++;frac=wd/wn;paint();};
       Promise.all(w.map(function(u){
         return fetch(u,{mode:'no-cors',credentials:'include'}).then(bump,bump);
       })).then(go,go);
@@ -1528,12 +1554,38 @@ setInterval(paint,120);paint();
 """
 
 
-def _boot_wait_hint() -> str:
-    """等多久, 按后端说实话。
+#: 每个产品最近几次"从点开到能用"的秒数 (只留最近 _BOOT_KEEP 次)。
+#: 用来把等待页那句"通常需要 X"说准 —— 见 _boot_wait_hint。
+_BOOT_SEEN: dict[str, list[float]] = {}
+_BOOT_KEEP = 12
+#: 少于这么多样本就不敢报数 —— 一两次的抖动当不得真 (2026-09-14 我拿 n=2 的采样
+#: 得出过一个正好相反的结论, 见 memory anthropic-face-thinking-channel)。
+_BOOT_MIN_SAMPLES = 4
 
-    docker 使用 stop/start，卷和镜像保留在本机；ECI 每次创建新实例，通常需要
-    更长的等待时间。用户界面的提示应按后端区分。
+
+def _record_boot(product_id: str, seconds: float) -> None:
+    if not (0.5 <= seconds <= 600):
+        return  # 跨重启/时钟跳变的脏数据不要
+    xs = _BOOT_SEEN.setdefault(product_id, [])
+    xs.append(seconds)
+    del xs[:-_BOOT_KEEP]
+
+
+def _boot_wait_hint(product: products.Product | None = None) -> str:
+    """等多久 —— **按这一格实际测到的**说, 没数据才退回后端的粗略值。
+
+    为什么不能一句话打发所有格子: 2026-09-14 逐格实测, 从点开到能用, claude-code
+    5 秒而 dify 光服务端就 73 秒、open-design 与 comfyui 的大头还在浏览器那边
+    (首屏 18.5MB / 建图)。一句写死的"5–15 秒"对一半格子是假话, 而进度条走到底还没
+    进去, 比没有提示更像坏了。
+
+    取最近几次的四分位区间: 中位数一个数会显得过于笃定, 而最慢那次通常是上游抖动。
     """
+    xs = sorted(_BOOT_SEEN.get(product.id, ())) if product else []
+    if len(xs) >= _BOOT_MIN_SAMPLES:
+        lo = xs[len(xs) // 4]
+        hi = xs[min(len(xs) - 1, (3 * len(xs)) // 4)]
+        return f"{round(lo)}–{round(hi)} 秒" if round(hi) > round(lo) else f"约 {round(hi)} 秒"
     return backend().boot_hint
 
 
@@ -1552,7 +1604,7 @@ async def work_starting(request: Request, state: str = ""):
     else:
         title, body, poll = (
             "云工作台启动中…",
-            f"正在为你准备云端工作区，通常需要 {_boot_wait_hint()}。",
+            f"正在为你准备云端工作区，通常需要 {_boot_wait_hint(product)}。",
             True,
         )
 

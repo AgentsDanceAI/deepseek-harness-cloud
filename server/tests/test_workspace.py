@@ -1301,6 +1301,41 @@ def test_the_tap_handler_runs_in_capture_phase():
     assert m.group(1) == "true", "不是捕获阶段 —— 会被抽屉内部的 stopPropagation 吃掉"
 
 
+def test_wait_hint_is_per_slot_and_learned_from_real_openings(monkeypatch):
+    """ "通常需要 X" 要按**这一格实际测到的**说。
+
+    一句写死的"5–15 秒"对一半格子是假话: 2026-09-14 逐格实测, claude-code 5 秒,
+    而 dify 光服务端就 73 秒, open-design 与 comfyui 的大头还在浏览器那边。进度条
+    走到底还没进去, 比没有提示更像坏了。
+
+    样本不够就闭嘴退回后端的粗略值 —— 一两次抖动当不得真 (我为此栽过一次)。
+    """
+    from app import products
+    from app import workspace as w
+
+    w._BOOT_SEEN.clear()
+    p = products.get("open-design")
+    assert w._boot_wait_hint(p) == w.backend().boot_hint, "没数据时不该编"
+    # 一两次的抖动当不得真: 样本没攒够之前, 一律闭嘴用后端的粗略值。
+    for x in (40, 44, 46):
+        w._record_boot("open-design", x)
+        assert w._boot_wait_hint(p) == w.backend().boot_hint, (
+            f"只有 {len(w._BOOT_SEEN['open-design'])} 个样本就敢报数了"
+        )
+    for x in (40, 44, 46, 52):
+        w._record_boot("open-design", x)
+    hint = w._boot_wait_hint(p)
+    assert "秒" in hint and "5–15" not in hint, hint
+    assert any(ch.isdigit() for ch in hint)
+    # 脏数据不要: 跨重启/时钟跳变会算出荒唐的秒数
+    w._BOOT_SEEN.clear()
+    for x in (-3, 0.1, 99999):
+        w._record_boot("open-design", x)
+    assert w._BOOT_SEEN.get("open-design", []) == []
+    # 别的格子不受影响
+    assert w._boot_wait_hint(products.get("claude-code")) == w.backend().boot_hint
+
+
 def test_even_a_ready_slot_goes_through_the_prewarm_page(fake, monkeypatch):
     """容器热着 ≠ 这个浏览器热着。
 
@@ -1402,7 +1437,9 @@ def test_the_bar_waits_for_the_prewarm_before_handing_over():
 
     js = w._BOOT_JS.replace(" ", "").replace("\n", "")
     assert "mode:'no-cors'" in js and "credentials:'include'" in js
-    assert "frac=done/w.length" in js, "进度要按真实完成数走, 不是又估一个时间"
+    assert "frac=wd/wn" in js, "进度要按真实完成数走, 不是又估一个时间"
+    assert "wd+'/'+wn" in js, "预载要把几分之几写出来 —— 这一段以前根本不存在"
+    assert "sendBeacon('/api/work/waited" in js, "要把真实等待时长报回去, 否则提示永远靠猜"
     assert "setTimeout(go,45000)" in js, "预载卡住也不能把人关在门外"
     assert "if(!w.length){go();return;}" in js, "没有清单时要退回老行为"
     assert js.count("jumped=true") == 1 and "if(jumped)return" in js, "别跳两次"
