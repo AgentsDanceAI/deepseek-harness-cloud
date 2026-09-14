@@ -6,7 +6,7 @@
 
 import { describe, expect, it } from 'vitest'
 import type { LocalPlan } from '../../src/cloud/api.ts'
-import { buildRunArgs, buildSidecarArgs, candidates, containerName, freePort, homeOf, sidecarName }
+import { augmentedPath, buildRunArgs, buildSidecarArgs, candidates, containerName, dockerEnv, freePort, homeOf, sidecarName }
   from '../../src/cloud/local-runner.ts'
 
 const PLACEHOLDER = '${AISTORE_TOKEN}'
@@ -157,5 +157,37 @@ describe('freePort', () => {
     // 普通端口保持"能用原号就用原号"的好处: 用户看到的端口和产品端口对得上
     const high = await freePort(28123)
     expect(high).toBeGreaterThanOrEqual(28123)
+  })
+})
+
+describe('给 docker 的 PATH', () => {
+  /** 2026-09-14 老板装上 0.4.0 第一次点货架, 每一格都是这条:
+   *    error getting credentials - err: exec: "docker-credential-desktop":
+   *    executable file not found in $PATH
+   * 镜像是**公开**的, 根本不需要凭据 —— 但 credsStore=desktop 时 docker 每次都要
+   * 先把助手跑起来, 而助手在 /usr/local/bin, 不在 GUI 应用继承的那份 launchd
+   * 默认 PATH 里。上一次 (42547f3) 修的是"我们怎么找 docker", 这条修的是
+   * "docker 怎么找它自己的助手"。 */
+  it('把 Docker Desktop 装 CLI 的那几个目录补进去', () => {
+    const got = augmentedPath({ PATH: '/usr/bin:/bin' }).split(':')
+    expect(got).toContain('/usr/local/bin')
+    expect(got).toContain('/Applications/Docker.app/Contents/Resources/bin')
+    expect(got.slice(-2)).toEqual(['/usr/bin', '/bin'])  // 原有的还在, 而且在后面
+  })
+
+  it('已经有的目录不重复塞', () => {
+    const got = augmentedPath({ PATH: '/usr/local/bin:/usr/bin' }).split(':')
+    expect(got.filter(x => x === '/usr/local/bin')).toHaveLength(1)
+  })
+
+  it('只动 PATH, 别的环境变量原样带过去', () => {
+    const env = dockerEnv({ PATH: '/usr/bin', HOME: '/Users/x', DOCKER_HOST: 'unix:///x.sock' })
+    expect(env.HOME).toBe('/Users/x')
+    expect(env.DOCKER_HOST).toBe('unix:///x.sock')
+    expect(env.PATH).not.toBe('/usr/bin')
+  })
+
+  it('PATH 原本是空的也不能产出前导冒号 (空条目 = 当前目录, 是个坑)', () => {
+    expect(augmentedPath({}).split(':').filter(x => x === '')).toHaveLength(0)
   })
 })

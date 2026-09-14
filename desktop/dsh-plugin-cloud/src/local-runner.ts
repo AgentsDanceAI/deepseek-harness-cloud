@@ -57,6 +57,36 @@ export function candidates(): string[] {
   ]
 }
 
+/**
+ * 给 docker 子进程用的 PATH。
+ *
+ * **光找到 docker 的绝对路径还不够**: docker 自己要去 PATH 里找凭据助手
+ * (`credsStore: "desktop"` 时是 `docker-credential-desktop`), 而它继承的正是我们
+ * 这份 launchd 默认 PATH —— /usr/bin:/bin:/usr/sbin:/sbin, 里面没有 /usr/local/bin。
+ * 于是 `docker pull` 在**公开镜像**上也会死在:
+ *   error getting credentials - err: exec: "docker-credential-desktop":
+ *   executable file not found in $PATH
+ * 2026-09-14 老板装上 0.4.0 第一次点货架, 每一格都是这条。
+ *
+ * 上一次 (42547f3) 只修了"我们怎么找 docker", 这次修的是"docker 怎么找它的助手"。
+ * 把候选目录补进 PATH 就够了 —— 助手与 docker 装在同一个目录里。
+ */
+export function augmentedPath(env: NodeJS.ProcessEnv = process.env): string {
+  const extra = [
+    '/usr/local/bin',
+    '/opt/homebrew/bin',
+    `${homedir()}/.docker/bin`,
+    '/Applications/Docker.app/Contents/Resources/bin',
+  ]
+  const cur = (env.PATH ?? '').split(':').filter(Boolean)
+  return [...extra.filter(d => !cur.includes(d)), ...cur].join(':')
+}
+
+/** 跑 docker 时要带的环境 —— 只改 PATH, 其余原样。 */
+export function dockerEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  return { ...env, PATH: augmentedPath(env) }
+}
+
 let resolvedBin: string | undefined
 
 /** 找到 docker 可执行文件的绝对路径; 找不到返回 undefined。找到的结果会记住。 */
@@ -64,7 +94,7 @@ export async function dockerBin(): Promise<string | undefined> {
   if (resolvedBin !== undefined) return resolvedBin
   for (const candidate of candidates()) {
     try {
-      await exec(candidate, ['--version'], { timeout: 8_000 })
+      await exec(candidate, ['--version'], { timeout: 8_000, env: dockerEnv() })
       resolvedBin = candidate
       return resolvedBin
     } catch {
@@ -86,7 +116,7 @@ export async function dockerState(): Promise<DockerState> {
   const bin = await dockerBin()
   if (bin === undefined) return 'missing'
   try {
-    await exec(bin, ['info', '--format', '{{.ServerVersion}}'], { timeout: 15_000 })
+    await exec(bin, ['info', '--format', '{{.ServerVersion}}'], { timeout: 15_000, env: dockerEnv() })
     return 'ready'
   } catch {
     return 'daemon-down'
@@ -172,7 +202,7 @@ function pullOnce(bin: string, image: string, platform: string | undefined, onLi
 Promise<void> {
   const args = platform === undefined ? ['pull', image] : ['pull', '--platform', platform, image]
   return new Promise<void>((resolve, reject) => {
-    const child = execFile(bin, args, { maxBuffer: 1 << 24 }, error => {
+    const child = execFile(bin, args, { maxBuffer: 1 << 24, env: dockerEnv() }, error => {
       if (error) reject(error)
       else resolve()
     })
@@ -290,14 +320,15 @@ export async function start(
   // 1. 初始化容器逐个跑完 —— **不能并行**, 它们之间就是靠顺序保证的
   for (const init of plan.containers.filter(c => c.role === 'init')) {
     await exec(bin, buildInitArgs(plan, init, token, home, platformOf(init.image_ref)),
-      { timeout: 600_000 })
+      { timeout: 600_000, env: dockerEnv() })
   }
   // 2. 主容器: 它建网络命名空间, 端口也只有它映射
-  await exec(bin, buildRunArgs(plan, token, hostPort, platformOf(main.image_ref)), { timeout: 300_000 })
+  await exec(bin, buildRunArgs(plan, token, hostPort, platformOf(main.image_ref)),
+    { timeout: 300_000, env: dockerEnv() })
   // 3. 伴随容器加入主容器的命名空间
   for (const sidecar of plan.containers.filter(c => c.role === 'sidecar')) {
     await exec(bin, buildSidecarArgs(plan, sidecar, token, platformOf(sidecar.image_ref)),
-      { timeout: 300_000 })
+      { timeout: 300_000, env: dockerEnv() })
   }
 }
 
@@ -311,9 +342,9 @@ export async function stop(productId: string): Promise<void> {
   try {
     const { stdout } = await exec(bin, [
       'ps', '-aq', '--filter', `name=^${containerName(productId)}(--.*)?$`,
-    ], { timeout: 30_000 })
+    ], { timeout: 30_000, env: dockerEnv() })
     const ids = stdout.split('\n').map(x => x.trim()).filter(x => x !== '')
-    if (ids.length > 0) await exec(bin, ['rm', '-f', ...ids], { timeout: 120_000 })
+    if (ids.length > 0) await exec(bin, ['rm', '-f', ...ids], { timeout: 120_000, env: dockerEnv() })
   } catch {
     // 没在跑就没什么可停的
   }
@@ -327,7 +358,7 @@ export async function running(): Promise<RunningSlot[]> {
   const { stdout } = await exec(
     bin,
     ['ps', '--filter', `name=${CONTAINER_PREFIX}`, '--format', '{{.Names}}\t{{.Status}}\t{{.Ports}}'],
-    { timeout: 15_000 },
+    { timeout: 15_000, env: dockerEnv() },
   )
   return stdout.split('\n').filter(line => line.trim() !== '').map(line => {
     const [name = '', status = '', ports = ''] = line.split('\t')
