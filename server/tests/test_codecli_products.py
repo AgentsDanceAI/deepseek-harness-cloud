@@ -463,6 +463,58 @@ def test_openmausbot_nginx_repeats_headers_in_every_location():
     assert conf.count("proxy_set_header X-Forwarded-Proto $dsh_proto;") == 3
 
 
+def test_openmausbot_model_picker_only_offers_what_the_gateway_sells(monkeypatch):
+    """选择器里的型号必须**在售** —— 上游那份是它家的牌名表, 不是我们的。
+
+    2026-09-13 老板在这一格问"现在用的什么模型"时暴露: 它写死了 claude 5 个 /
+    codex 7 个, 我们只卖 3 + 3, 多出来的那 6 个在网关一律 404 ("is not offered")。
+    他那格的 Pesto 正好选中了 claude-fable-5-1, 一说话就报错 —— 而界面上看不出
+    任何异常, 就是"这个机器人不理我"。
+    """
+    from app import model_catalog
+
+    sellable = set(model_catalog.catalog())
+    assert sellable, "目录是空的, 这条用例等于没测"
+    lists = products._omb_model_lists()
+    assert set(lists) == {"STATIC_CLAUDE_MODELS", "STATIC_CODEX_MODELS"}
+    for name, spec in lists.items():
+        ids = [o["id"] for o in spec["options"]]
+        assert ids, f"{name} 一个型号都没有"
+        assert not set(ids) - sellable, f"{name} 里有网关不卖的型号: {set(ids) - sellable}"
+        assert spec["default"] in ids, f"{name} 的默认值不在自己的清单里"
+        assert all(o["label"] for o in spec["options"]), "没有展示名的话选择器里是一串裸 id"
+    # 两家各按各的牌名, 别串了 —— codex 那个 CLI 只认 OpenAI 的名字。
+    assert all(o["id"].startswith("claude-") for o in lists["STATIC_CLAUDE_MODELS"]["options"])
+    assert all(o["id"].startswith("gpt-") for o in lists["STATIC_CODEX_MODELS"]["options"])
+
+
+def test_openmausbot_default_model_falls_back_when_it_is_delisted(monkeypatch):
+    """配置里钉的默认型号被下架了, 要退到一个还在卖的, 不能原样发下去。
+
+    下架每周都有, 而这个默认值是写在 .env 里的 —— 没人会记得同步。原样发下去的
+    结果是"新建的机器人一说话就 404", 与上面那条同一个形状。
+    """
+    from app import config
+
+    monkeypatch.setattr(config, "OPENMAUSBOT_CLAUDE_MODEL", "claude-这个型号不存在")
+    spec = products._omb_model_lists()["STATIC_CLAUDE_MODELS"]
+    assert spec["default"] in [o["id"] for o in spec["options"]]
+
+
+def test_openmausbot_rewrites_the_model_lists_before_the_server_reads_them():
+    """启动顺序: 改完清单和 bots.json 才能起服务端 —— 它一启动就把 bots.json
+    读进内存了, 之后再改文件是白改。"""
+    boot = products.boot_script("openmausbot")
+    assert "/run/dsh/omb-patch-models.js" in boot
+    assert "claude-fable-5" in boot, "清单没跟着发下去"
+    assert boot.index("node /run/dsh/omb-patch-models.js") < boot.index("exec node"), (
+        "改在服务端起来之后 = 没改"
+    )
+    # 存量机器人只拨**已下架**的那些; 别家驱动 (grok / gemini ...) 的选择不许动。
+    assert "/^(claude|gpt)-/" in products._OMB_PATCH_MODELS
+    assert ".dsh-bak-" in products._OMB_PATCH_MODELS, "动用户数据之前要留一份原样的"
+
+
 def test_openmausbot_keeps_the_incoming_forwarded_proto():
     boot = products.boot_script("openmausbot")
     assert "map $http_x_forwarded_proto $dsh_proto" in boot, "默认那份 map 少了它, nginx 起不来"

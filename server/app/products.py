@@ -2982,6 +2982,117 @@ _OMB_NGINX = """server {
 """
 
 
+def _omb_model_lists() -> dict[str, dict]:
+    """OpenMausBot 两个驱动各自能选的型号 —— 按**在售目录**生成, 不是抄上游的表。
+
+    见 _OMB_PATCH_MODELS 的注释。便宜的排前面 (选择器按给的顺序显示), 展示名直接
+    用目录里的 display_name, 与价目表、其他工作台的叫法保持一致。
+    """
+    cat = model_catalog.catalog()
+
+    def face(prefix: str, want_default: str) -> dict | None:
+        rows = sorted(
+            (m for mid, m in cat.items() if mid.startswith(prefix)),
+            key=lambda m: (m.get("credits_per_m") or 0, m["id"]),
+        )
+        if not rows:
+            # 这一家一个型号都不卖了。宁可留着上游那份 (至少能看出是哪家) 也别写一份
+            # 空清单 —— 空的选择器在界面上和"加载中"长得一样。
+            logger.warning("[openmausbot] 在售目录里没有 %s* 型号, 这一家的清单不改", prefix)
+            return None
+        ids = [m["id"] for m in rows]
+        default = want_default if want_default in ids else ids[0]
+        if default != want_default:
+            logger.warning(
+                "[openmausbot] 默认型号 %s 不在售, 退到 %s —— 配置里那个名字该改了",
+                want_default,
+                default,
+            )
+        return {
+            "default": default,
+            "options": [{"id": m["id"], "label": m.get("display_name") or m["id"]} for m in rows],
+        }
+
+    out = {
+        "STATIC_CLAUDE_MODELS": face("claude-", config.OPENMAUSBOT_CLAUDE_MODEL),
+        "STATIC_CODEX_MODELS": face("gpt-", config.OPENMAUSBOT_CODEX_MODEL),
+    }
+    return {k: v for k, v in out.items() if v}
+
+
+#: 见 _openmausbot_boot。把上游写死的型号清单换成**网关在售目录**里真有的那些。
+#:
+#: 为什么非做不可 (2026-09-13 老板在 maus 上问"现在用的什么模型"时暴露): 上游把
+#: 每个驱动能选的型号写死在自己的构建里 (`var STATIC_CLAUDE_MODELS = {...}`),
+#: 而那是**它家**的牌名表, 与我们卖的不是一回事:
+#:   · claude 面它列 5 个, 我们只卖 3 个 —— claude-fable-5-1 与 claude-haiku-4-5
+#:     在网关一律 404 ("Model ... is not offered")。老板那格的 Pesto 就选中了
+#:     fable-5-1, 一说话就报错。
+#:   · codex 面它列 7 个, 我们只卖 3 个 (luna / terra / sol), 另外四个同样 404。
+#: 用户在选择器里看到的名字必须是能用的名字 —— 摆着四个一点就废的选项, 正是这条线
+#: 反复踩的"页面正常、功能是废的"。
+#:
+#: 为什么在**启动时改**而不是重建镜像: 在售目录 (config/models.json) 是会变的
+#: (上下架每周都有), 而镜像是钉死的 tag。启动时按当时的目录生成, 上架/下架一个型号
+#: 只要 dhc 部署一次就同步, 不用重推 585MB 的镜像。
+#:
+#: 找不到锚点就**退出非零**(启动脚本 set -e, 于是 Pod 起不来)。这是故意的: 只有
+#: 换上游镜像才可能发生, 而那是一次有人盯着的动作; 反过来"静默不改"的代价是选择器
+#: 继续摆着一点就废的型号, 几周都不会有人发现。
+_OMB_PATCH_MODELS = r"""// 由 products.py 下发。
+const fs = require("node:fs");
+// 三个路径都能用环境变量顶掉 —— 生产用默认值, 测试拿真脚本对着临时目录跑 (照抄一份
+// 到测试里等于给自己发了一张永远不会红的通行证)。
+const BUNDLE = process.env.DSH_OMB_BUNDLE || "/app/dist-server/index.js";
+const SPEC = process.env.DSH_OMB_SPEC || "/run/dsh/omb-models.json";
+const BOTS = process.env.DSH_OMB_BOTS || "/root/.openmausbot/bots.json";
+const WANT = JSON.parse(fs.readFileSync(SPEC, "utf8"));
+
+let src = fs.readFileSync(BUNDLE, "utf8");
+for (const [name, spec] of Object.entries(WANT)) {
+  // 块的形状是 `var NAME = {\n ... \n};` —— 非贪婪吃到第一个顶格的 `};`。
+  // options 里没有顶格的 `};`, 所以不会吃过头。
+  const re = new RegExp("var " + name + " = \\{[\\s\\S]*?\\n\\};\\n");
+  if (!re.test(src)) {
+    console.error("[dsh] 改不动 " + name + " —— 上游 bundle 的形状变了, 先去对一遍 products.py 的 _OMB_PATCH_MODELS");
+    process.exit(3);
+  }
+  src = src.replace(re, "var " + name + " = " + JSON.stringify(spec, null, 2) + ";\n");
+  console.error("[dsh] " + name + " -> " + spec.options.map((o) => o.id).join(", ") + " (默认 " + spec.default + ")");
+}
+fs.writeFileSync(BUNDLE, src);
+
+// 存量机器人里选中了**已经不卖**的型号的, 拨回该家的默认值 —— 否则它一说话就是
+// 一句 404, 而用户只看到"这个机器人不理我"。只认 claude-* / gpt-* 两种牌名 (就是
+// 我们接的那两个驱动), 别家驱动 (grok / gemini / kimi ...) 的选择一个字不动。
+try {
+  const raw = fs.readFileSync(BOTS, "utf8");
+  const bots = JSON.parse(raw);
+  const ok = new Set();
+  for (const spec of Object.values(WANT)) for (const o of spec.options) ok.add(o.id);
+  const fallback = (id) =>
+    id.startsWith("gpt-") ? WANT.STATIC_CODEX_MODELS.default : WANT.STATIC_CLAUDE_MODELS.default;
+  const fixed = [];
+  for (const b of Array.isArray(bots) ? bots : []) {
+    const m = b && b.modelSelection && b.modelSelection.model;
+    if (typeof m !== "string" || ok.has(m)) continue;
+    if (!/^(claude|gpt)-/.test(m)) continue;
+    b.modelSelection.model = fallback(m);
+    fixed.push((b.name || b.id) + ": " + m + " -> " + b.modelSelection.model);
+  }
+  if (fixed.length) {
+    // 动用户数据之前先留一份原样的。
+    fs.writeFileSync(BOTS + ".dsh-bak-" + Date.now(), raw);
+    fs.writeFileSync(BOTS, JSON.stringify(bots, null, 2));
+    console.error("[dsh] 已下架型号的机器人拨回默认: " + fixed.join("; "));
+  }
+} catch (e) {
+  // 头一次开这一格时还没有 bots.json —— 不是错。
+  if (e.code !== "ENOENT") console.error("[dsh] bots.json 没修成 (不拦启动): " + e.message);
+}
+"""
+
+
 #: 见 _openmausbot_boot。
 _OMB_AUTOLOGIN = r"""#!/bin/sh
 # 由 products.py 下发。工作台替用户完成一次配对, 把会话注入到**上游方向** ——
@@ -3080,9 +3191,15 @@ def _openmausbot_boot() -> str:
         '[projects."/workspace"]\n'
         'trust_level = "trusted"\n'
     )
+    models_json = _json.dumps(_omb_model_lists(), ensure_ascii=False, indent=2)
     return (
         "set -e\n"
         "mkdir -p /run/dsh /root/.openmausbot /root/.codex /workspace\n"
+        # 选择器里只留在售的型号 + 把选中了已下架型号的机器人拨回默认。必须在服务端
+        # 起来**之前**做完 —— 它一启动就把 bots.json 读进内存了。
+        "cat > /run/dsh/omb-models.json <<'DSHEOF'\n" + models_json + "\nDSHEOF\n"
+        "cat > /run/dsh/omb-patch-models.js <<'DSHEOF'\n" + _OMB_PATCH_MODELS + "DSHEOF\n"
+        "node /run/dsh/omb-patch-models.js\n"
         # 首跑向导: 不压掉的话机器人第一次说话卡在选主题 (与 agentui 那格同一份)。
         # 只在文件不存在时写 —— 之后那是用户自己的偏好。
         "if [ ! -f /root/.claude.json ]; then\n"

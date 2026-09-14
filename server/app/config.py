@@ -394,6 +394,20 @@ PI_TAB_GRACE_MIN = _env_int("PI_TAB_GRACE_MIN", 10)
 # 一个群聊形态的多智能体外壳: 群里若干机器人, 每个背后是一个命令行智能体。
 # 镜像见 deploy/workspace-openmausbot —— 上游服务端 + 我们的 nginx 外壳 + 引擎 CLI。
 OPENMAUSBOT_IMAGE_REF = _env("OPENMAUSBOT_IMAGE_REF", "ghcr.io/agentsdancepro/openmausbot:acf88c4-r1")
+#: 那一格**新建**机器人时默认选中的型号 (存量机器人保留各自已选的, 不动)。
+#: 型号清单本身在启动时按在售目录重写, 见 products.py 的 _OMB_PATCH_MODELS。
+#:
+#: 默认给 claude-fable-5 而不是 sonnet-5 是为了**快**: 2026-09-13 在这一格的 pod 里
+#: 实测 (Claude Code 的请求形状, 一句 "reply with exactly: OK"):
+#:     claude-sonnet-5  带思考 31~45 秒  | 不带思考 3.3 秒
+#:     claude-fable-5   带思考 4.2 秒
+#: CLI 默认就带思考, 而网关按 thinking 把带思考的请求钉到直连 Anthropic 那条通道
+#: (见 memory anthropic-face-thinking-channel) —— sonnet-5 走那条就是几十秒, 当天的
+#: 巡检也只有 5/6 通过, fable-5 6/6。
+#: **代价是钱**: fable-5 的倍率是 5.0, sonnet-5 是 1.0 —— 同样的 token 贵五倍。
+#: 觉得不值就把这个环境变量设回 claude-sonnet-5, 不用改代码。
+OPENMAUSBOT_CLAUDE_MODEL = _env("OPENMAUSBOT_CLAUDE_MODEL", "claude-fable-5")
+OPENMAUSBOT_CODEX_MODEL = _env("OPENMAUSBOT_CODEX_MODEL", "gpt-5.6-luna")
 OPENMAUSBOT_MEM_LIMIT_MB = _env_int("OPENMAUSBOT_MEM_LIMIT_MB", 4096)
 OPENMAUSBOT_CPUS = _env_float("OPENMAUSBOT_CPUS", 2.0)
 # 4G/2 核不是阔气: 一个群里可以同时挂几个机器人, 每个机器人是一个独立的 CLI 进程
