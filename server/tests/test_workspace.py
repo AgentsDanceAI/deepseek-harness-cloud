@@ -1301,6 +1301,34 @@ def test_the_tap_handler_runs_in_capture_phase():
     assert m.group(1) == "true", "不是捕获阶段 —— 会被抽屉内部的 stopPropagation 吃掉"
 
 
+def _forget_waits(db, w, product_id):
+    """把某一格学到的等待时长**连内存带库**忘干净 (用例之间别串味)。"""
+    w._BOOT_SEEN.pop(product_id, None)
+    with db.tx() as conn:
+        conn.execute("DELETE FROM kv WHERE k=?", (w._boot_kv_key(product_id),))
+
+
+def test_wait_hint_survives_a_deploy(monkeypatch):
+    """学到的等待时长要**落库**, 不能只在内存里。
+
+    老板 2026-09-14: "你测一轮不就知道每个格子要多久了吗, 还要每次学习啊"。对 ——
+    只放内存里, 每次部署清零, 用户又得连开四次才看得到准数, 而部署是常有的事。
+    代码里也不写死"这一格大概多少秒": 那种常量改个镜像就过时, 而且错了没人看得出来。
+    """
+    from app import db, products
+    from app import workspace as w
+
+    _forget_waits(db, w, "open-design")
+    for x in (40, 44, 46, 52):
+        w._record_boot("open-design", x)
+    learned = w._boot_wait_hint(products.get("open-design"))
+    assert learned != w.backend().boot_hint
+
+    w._BOOT_SEEN.clear()  # = 进程重启, 内存那份没了
+    assert w._boot_wait_hint(products.get("open-design")) == learned, "重启后又忘了"
+    assert w._boot_samples("open-design") == [40, 44, 46, 52]
+
+
 def test_wait_hint_is_per_slot_and_learned_from_real_openings(monkeypatch):
     """ "通常需要 X" 要按**这一格实际测到的**说。
 
@@ -1310,10 +1338,11 @@ def test_wait_hint_is_per_slot_and_learned_from_real_openings(monkeypatch):
 
     样本不够就闭嘴退回后端的粗略值 —— 一两次抖动当不得真 (我为此栽过一次)。
     """
-    from app import products
+    from app import db, products
     from app import workspace as w
 
-    w._BOOT_SEEN.clear()
+    _forget_waits(db, w, "open-design")
+    _forget_waits(db, w, "claude-code")
     p = products.get("open-design")
     assert w._boot_wait_hint(p) == w.backend().boot_hint, "没数据时不该编"
     # 一两次的抖动当不得真: 样本没攒够之前, 一律闭嘴用后端的粗略值。
@@ -1328,10 +1357,10 @@ def test_wait_hint_is_per_slot_and_learned_from_real_openings(monkeypatch):
     assert "秒" in hint and "5–15" not in hint, hint
     assert any(ch.isdigit() for ch in hint)
     # 脏数据不要: 跨重启/时钟跳变会算出荒唐的秒数
-    w._BOOT_SEEN.clear()
+    _forget_waits(db, w, "open-design")
     for x in (-3, 0.1, 99999):
         w._record_boot("open-design", x)
-    assert w._BOOT_SEEN.get("open-design", []) == []
+    assert w._boot_samples("open-design") == []
     # 别的格子不受影响
     assert w._boot_wait_hint(products.get("claude-code")) == w.backend().boot_hint
 

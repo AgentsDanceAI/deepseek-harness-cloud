@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import logging
 import re
 import time
@@ -1556,6 +1557,11 @@ setInterval(paint,120);paint();
 
 #: 每个产品最近几次"从点开到能用"的秒数 (只留最近 _BOOT_KEEP 次)。
 #: 用来把等待页那句"通常需要 X"说准 —— 见 _boot_wait_hint。
+#:
+#: **落库**, 不只是内存 (kv 表, 键 work_wait:<产品>): 否则每次部署清零, 用户又要
+#: 连开四次这一格才看得到准数, 而部署是常有的事。内存这份只是缓存, miss 时回库读。
+#: 代码里**不写任何"这一格大概多少秒"的常量** —— 那种数字会悄悄过时 (改个镜像、
+#: 换条网络就不对了), 而它是错的时候没人看得出来。初始值靠实测跑一轮灌进去。
 _BOOT_SEEN: dict[str, list[float]] = {}
 _BOOT_KEEP = 12
 #: 少于这么多样本就不敢报数 —— 一两次的抖动当不得真 (2026-09-14 我拿 n=2 的采样
@@ -1563,12 +1569,40 @@ _BOOT_KEEP = 12
 _BOOT_MIN_SAMPLES = 4
 
 
+def _boot_kv_key(product_id: str) -> str:
+    return f"work_wait:{product_id}"
+
+
+def _boot_samples(product_id: str) -> list[float]:
+    """这一格最近几次的真实等待时长。内存没有就回库读一次。"""
+    xs = _BOOT_SEEN.get(product_id)
+    if xs is not None:
+        return xs
+    xs = []
+    try:
+        row = db.query_one("SELECT v FROM kv WHERE k=?", (_boot_kv_key(product_id),))
+        if row:
+            xs = [float(x) for x in json.loads(row["v"]) if 0.5 <= float(x) <= 600][-_BOOT_KEEP:]
+    except (ValueError, TypeError, json.JSONDecodeError):
+        xs = []  # 库里那条坏了就当没有 —— 一句提示不值得让开工作台失败
+    _BOOT_SEEN[product_id] = xs
+    return xs
+
+
 def _record_boot(product_id: str, seconds: float) -> None:
     if not (0.5 <= seconds <= 600):
         return  # 跨重启/时钟跳变的脏数据不要
-    xs = _BOOT_SEEN.setdefault(product_id, [])
+    xs = _boot_samples(product_id)
     xs.append(seconds)
     del xs[:-_BOOT_KEEP]
+    try:
+        with db.tx() as conn:
+            conn.execute(
+                "INSERT INTO kv (k, v) VALUES (?, ?) ON CONFLICT (k) DO UPDATE SET v = EXCLUDED.v",
+                (_boot_kv_key(product_id), json.dumps(xs)),
+            )
+    except Exception:  # noqa: BLE001
+        log.warning("[work] 等待时长没存进库 (只影响那句提示)", exc_info=True)
 
 
 def _boot_wait_hint(product: products.Product | None = None) -> str:
@@ -1581,7 +1615,7 @@ def _boot_wait_hint(product: products.Product | None = None) -> str:
 
     取最近几次的四分位区间: 中位数一个数会显得过于笃定, 而最慢那次通常是上游抖动。
     """
-    xs = sorted(_BOOT_SEEN.get(product.id, ())) if product else []
+    xs = sorted(_boot_samples(product.id)) if product else []
     if len(xs) >= _BOOT_MIN_SAMPLES:
         lo = xs[len(xs) // 4]
         hi = xs[min(len(xs) - 1, (3 * len(xs)) // 4)]
