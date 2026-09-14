@@ -231,13 +231,14 @@ def test_each_page_has_every_element_its_javascript_reaches_for():
             # 那时它没有列表, 自然也没有 live_rooms.js。
             pages = {
                 f"/live/{first}": (["live.js", "live_chat.js", "live_captions.js"], set()),
-                # live_chat.js 干两件事: 弹幕渲染 + 观众发言框。控制台只要前者 ——
-                # 管理员那一栏是自己的"互动"面板 (能选复读/问答), 不是观众公屏。
-                # 这三个 id 在控制台上**故意**没有, 脚本里也各自 if 兜住了。
+                # live_chat.js 干两件事: 弹幕渲染 + 观众那一套发言 UI (输入框 + 公屏
+                # 列表)。控制台只要前者 —— 管理员那一栏是自己的"互动"面板 (能选
+                # 复读/问答), 不是观众公屏。这四个 id 在控制台上**故意**没有,
+                # 脚本里也各自 if 兜住了 (lvChat 见 live_chat.js 的 `if (!list) return`)。
                 # 列在这里而不是放宽整条规则: 例外要写下来, 否则下次真漂了没人知道。
                 "/live/console": (
                     ["live.js", "live_chat.js", "live_captions.js", "live_console.js"],
-                    {"lvSayBox", "lvSayBtn", "lvSayHint"},
+                    {"lvSayBox", "lvSayBtn", "lvSayHint", "lvChat"},
                 ),
             }
             for url, (scripts, optional) in pages.items():
