@@ -1172,12 +1172,15 @@ def test_the_bar_never_claims_to_be_done_early():
     bands = re.findall(r"(\w+):\[(\d+),(\d+),", w._BOOT_JS.replace(" ", ""))
     assert bands, "解析不到 BAND 定义"
     got = {name: (int(lo), int(hi)) for name, lo, hi in bands}
-    assert set(got) == {"queued", "booting", "warming", "ready"}, got
+    assert set(got) == {"queued", "booting", "warming", "prewarm", "ready"}, got
     for name, (lo, hi) in got.items():
         assert lo <= hi, f"{name} 区间反了: {lo}..{hi}"
         if name != "ready":
             assert hi < 100, f"{name} 上界是 {hi}, 会在未就绪时走满"
     assert got["ready"][1] == 100
+    # prewarm 接在 warming 后面: 后端就绪之后还要把首屏资源拉进缓存, 那一段以前
+    # 完全没人管 (进度条已经交班, 用户盯着别人家的转圈图)。
+    assert got["warming"][1] <= got["prewarm"][0] < got["prewarm"][1] < 100
 
 
 def test_the_loading_page_does_not_ship_someone_elses_logo():
@@ -1296,6 +1299,78 @@ def test_the_tap_handler_runs_in_capture_phase():
     m = re.search(r"addEventListener\(\s*['\"]click['\"]\s*,\s*tapOutsideSidebar\s*,\s*(\w+)\s*\)", js)
     assert m, "没有注册抽屉外点击处理"
     assert m.group(1) == "true", "不是捕获阶段 —— 会被抽屉内部的 stopPropagation 吃掉"
+
+
+def test_warm_list_is_same_origin_assets_only(monkeypatch):
+    """预载清单只收**这一格自己域名下**的 js/css。
+
+    第三方 CDN 的东西我们既不该也不能替它预热 (跨源、还可能带 cookie); 而写死成
+    绝对地址的那些本来就不在我们的缓存分区里, 拉了也白拉。
+    """
+    import httpx
+
+    from app import workspace as w
+
+    html = (
+        b'<html><head><link rel="stylesheet" href="/_next/a.css">'
+        b'<script src="/_next/b.js" defer></script>'
+        b'<script src="https://cdn.example.com/x.js"></script>'
+        b'<link href="c.css" rel="stylesheet"></head></html>'
+    )
+    got = [m.group(1).decode() for m in w._ASSET_RE.finditer(html)]
+    assert got == ["/_next/a.css", "/_next/b.js", "https://cdn.example.com/x.js", "c.css"]
+    assert isinstance(httpx.HTTPError, type)
+
+
+@pytest.mark.asyncio
+async def test_warm_list_falls_back_to_empty_when_the_pod_will_not_answer(monkeypatch):
+    """拿不到清单就当没有这个功能 —— 开工作台这条路上多一个功能, 不能多一种坏法。"""
+    from app import products
+    from app import workspace as w
+
+    w._WARM_ASSETS.clear()
+    monkeypatch.setattr(w, "_upstream", lambda *a, **k: "127.0.0.1:1")  # 必然连不上
+    got = await w._warm_assets("k", products.get("open-design"))
+    assert got == []
+
+
+def test_starting_page_may_reach_its_own_slot_but_only_on_the_main_site(monkeypatch):
+    """预载要 fetch 工作台子域, 而全站 CSP 是 default-src 'self' —— 不开口子的话
+    13 个请求全被拒 (2026-09-14 实测)。口子只开 connect-src、只开这一格的域名。
+
+    **而且只在主站上加**: 同一个路由在工作台子域上也会被请求, 那个域上的文档一个
+    CSP 头都不能带 (见上一条用例, 2026-08-23 白屏事故)。
+    """
+    monkeypatch.setattr(config, "WORK_DOMAIN", "work.aistore.best")
+    monkeypatch.setattr(config, "OPEN_DESIGN_DOMAIN", "design.aistore.best")
+    from fastapi.testclient import TestClient
+
+    from app.main import create_app
+
+    c = TestClient(create_app())
+    r = c.get("/work/starting?product_id=open-design", headers={"host": "aistore.best"})
+    csp = r.headers.get("content-security-policy", "")
+    assert "connect-src 'self' https://design.aistore.best" in csp
+    assert "default-src 'self'" in csp, "开口子不等于把别的都放开"
+    # 子域上一个字都不许带
+    r2 = c.get("/work/starting?product_id=open-design", headers={"host": "work.aistore.best"})
+    assert "content-security-policy" not in r2.headers
+
+
+def test_the_bar_waits_for_the_prewarm_before_handing_over():
+    """跳转前要先把首屏资源拉进缓存, 而且必须有兜底。
+
+    以前是后端一说 running 就 location.href 跳走, 之后那几十秒 (Open Design 实测
+    46 秒) 进度条完全看不见。现在那一段归 prewarm 管, 由真实完成数驱动。
+    """
+    from app import workspace as w
+
+    js = w._BOOT_JS.replace(" ", "").replace("\n", "")
+    assert "mode:'no-cors'" in js and "credentials:'include'" in js
+    assert "frac=done/w.length" in js, "进度要按真实完成数走, 不是又估一个时间"
+    assert "setTimeout(go,45000)" in js, "预载卡住也不能把人关在门外"
+    assert "if(!w.length){go();return;}" in js, "没有清单时要退回老行为"
+    assert js.count("jumped=true") == 1 and "if(jumped)return" in js, "别跳两次"
 
 
 def test_the_workspace_host_is_exempt_from_our_csp(monkeypatch):

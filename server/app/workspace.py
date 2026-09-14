@@ -1256,6 +1256,57 @@ async def work_heartbeat(request: Request):
     return JSONResponse({"ok": True})
 
 
+#: 首屏资源清单的缓存: (产品 id, 规格指纹) -> (时刻, [绝对地址]).
+#: 清单只随镜像变, 所以按规格指纹缓存; 指纹一变自然失效。
+_WARM_ASSETS: dict[tuple[str, str], tuple[float, list[str]]] = {}
+_WARM_TTL_S = 600.0
+#: 最多预热多少个 —— 首屏那十几个就够, 再多是浪费用户的带宽。
+_WARM_MAX = 24
+_ASSET_RE = re.compile(
+    rb"""<(?:script[^>]*\ssrc|link[^>]*\shref)\s*=\s*["']([^"']+\.(?:js|css))["']""",
+    re.I,
+)
+
+
+async def _warm_assets(key: str, product: products.Product) -> list[str]:
+    """这一格首屏要拉的 js/css, 换算成工作台域名下的绝对地址。
+
+    干什么用: 启动等待页拿到之后**先把它们拉进浏览器缓存再跳转** —— 否则进度条走
+    到 100% 就交班, 而真正的等待才刚开始 (2026-09-14 实测 Open Design 后端就绪只要
+    9 秒, 浏览器那边还要 46 秒; ComfyUI 热缓存也还要 27 秒)。这段时间用户盯着的是
+    别人家的转圈图, 我们的进度条什么也不知道。
+
+    取不到就返回空 —— 调用方按"没有清单"处理, 行为与加这个功能之前一模一样。
+    这条路上任何一环出问题都不该影响开工作台。
+    """
+    fp = _spec_fingerprint(product)
+    hit = _WARM_ASSETS.get((product.id, fp))
+    if hit and time.time() - hit[0] < _WARM_TTL_S:
+        return hit[1]
+    urls: list[str] = []
+    try:
+        async with httpx.AsyncClient(timeout=3.0, follow_redirects=False) as client:
+            r = await client.get(f"http://{_upstream(key, product)}/", headers={"host": "127.0.0.1:3080"})
+        if r.status_code < 400 and "html" in r.headers.get("content-type", "").lower():
+            base = _work_url("/", product).rstrip("/")
+            seen = set()
+            for m in _ASSET_RE.finditer(r.content):
+                href = m.group(1).decode("utf-8", "ignore")
+                # 只要同源的相对地址: 第三方 CDN 我们既不该也不能替它预热。
+                if href.startswith(("http://", "https://", "//")):
+                    continue
+                u = base + (href if href.startswith("/") else "/" + href)
+                if u not in seen:
+                    seen.add(u)
+                    urls.append(u)
+                if len(urls) >= _WARM_MAX:
+                    break
+    except (httpx.HTTPError, ValueError):
+        urls = []
+    _WARM_ASSETS[(product.id, fp)] = (time.time(), urls)
+    return urls
+
+
 @router.get("/api/work/status")
 async def work_status(request: Request):
     user = try_resolve_user(request)
@@ -1294,6 +1345,9 @@ async def work_status(request: Request):
         # has no server-side template to branch on — the admin entry in the
         # floating menu is gated on this flag instead.
         "is_admin": bool(user.get("is_admin")),
+        # 首屏资源清单 —— 等待页跳转前先把它们拉进缓存, 见 _warm_assets。
+        # 只在就绪那一次给: 之前给了也没用 (容器还没起, 拉不到)。
+        "warm": await _warm_assets(key, product) if ready else [],
     }
     out.update(work_access.state(user["id"]))
     return out
@@ -1415,12 +1469,16 @@ var track=document.getElementById('track'),fill=document.getElementById('fill'),
 // 每个阶段一个区间: [下界, 上界, 时间常数]。阶段跳变才是大跨步; 区间内按停留
 // 时长渐近逼近上界, 永远不撞天花板 —— 慢的时候表现为"变慢"而不是"卡死",
 // 也不会在还没好的时候假装做完了。
-var BAND={queued:[2,12,6],booting:[12,68,9],warming:[68,94,4],ready:[100,100,1]};
-var LABEL={queued:'正在排队',booting:'正在分配算力',warming:'工作台就绪中',ready:'就绪'};
-var cur=0,phase='queued',since=Date.now(),t0=Date.now();
+var BAND={queued:[2,12,6],booting:[12,68,9],warming:[68,86,4],prewarm:[86,98,1],ready:[100,100,1]};
+var LABEL={queued:'正在排队',booting:'正在分配算力',warming:'工作台就绪中',ready:'就绪',
+           prewarm:'正在预载界面'};
+var cur=0,phase='queued',since=Date.now(),t0=Date.now(),frac=0;
 function paint(){
   var b=BAND[phase]||BAND.queued,el=(Date.now()-since)/1000,
-      target=b[0]+(b[1]-b[0])*(1-Math.exp(-el/b[2]));
+      // 预载这一段是**数出来的**, 不是估的: 已经拉回来几个就走到几 —— 这一段
+      // 恰恰是以前完全没人管的那段 (后端早就就绪了, 用户还在看别人家的转圈)。
+      target=phase==='prewarm'?b[0]+(b[1]-b[0])*frac
+            :b[0]+(b[1]-b[0])*(1-Math.exp(-el/b[2]));
   if(target>cur)cur=target;              // 只前进, 不回退
   fill.style.width=cur+'%';caret.style.left=cur+'%';
   track.setAttribute('aria-valuenow',Math.round(cur));
@@ -1434,9 +1492,28 @@ setInterval(paint,120);paint();
     var s=await (await fetch('/api/work/status'+location.search)).json();
     if(s.phase&&s.phase!==phase){phase=s.phase;since=Date.now();}
     if(s.state==='running'){
-      phase='ready';cur=100;paint();
       var t=new URLSearchParams(location.search).get('task');
-      location.href=s.url+(t?'?task='+encodeURIComponent(t):'');return;
+      var jumped=false;
+      var go=function(){
+        if(jumped)return;jumped=true;
+        phase='ready';cur=100;paint();
+        location.href=s.url+(t?'?task='+encodeURIComponent(t):'');
+      };
+      // 后端就绪 ≠ 用户能用: 有的格子首屏要拉十几 MB, 跳过去还得再等几十秒,
+      // 而那几十秒进度条已经交班了, 用户盯着的是别人家的转圈图。
+      // 这里趁进度条还在, 先把首屏资源拉进浏览器缓存再跳 —— 等待挪到我们这边,
+      // 而且是**有刻度的**等待。拿不到清单 (或者浏览器不让拉) 就按老样子直接跳。
+      var w=s.warm||[];
+      if(!w.length){go();return;}
+      phase='prewarm';since=Date.now();frac=0;paint();
+      var done=0;
+      var bump=function(){done++;frac=done/w.length;paint();};
+      Promise.all(w.map(function(u){
+        return fetch(u,{mode:'no-cors',credentials:'include'}).then(bump,bump);
+      })).then(go,go);
+      // 兜底: 预载再慢也不能把人关在门外 (资源可能被缓存策略/网络卡住)。
+      setTimeout(go,45000);
+      return;
     }
   }catch(e){}
   setTimeout(poll,1500);
@@ -1461,6 +1538,7 @@ async def work_starting(request: Request, state: str = ""):
     ECI 上“恢复”是一次完整冷启动，因此等待页显示后端报告的真实阶段：
     (/api/work/status 的 phase), 页面按阶段推进, 阶段内渐近而不撞满格。
     """
+    product = _product_of(request)
     if state == "busy":
         title, body, poll = "云工作台当前繁忙", "在线名额已满，请稍后再试或使用桌面版。", False
     elif state == "error":
@@ -1496,7 +1574,26 @@ async def work_starting(request: Request, state: str = ""):
 {progress}
 <p class="muted small" style="margin-top:18px"><a href="/console">返回控制台</a></p>
 </div></section>{tail}</body></html>"""
-    return HTMLResponse(html)
+    # 这一页要 fetch 工作台子域上的首屏资源 (见 _BOOT_JS 的预载)。全站默认 CSP 是
+    # default-src 'self', 连自己的子域也会被挡下 —— 实测 13 个请求全部被拒。
+    # 只给这一页开一个口子, 而且只开 connect-src、只开这一格自己的那个域名。
+    #
+    # ⚠️ **只在主站上加**。这一页在工作台子域上也会被请求, 而那个域上的文档
+    # **一个 CSP 头都不能带** —— 工作台应用的打包产物用 new Function(), 带上就是
+    # 启动即死、整页白屏 (2026-08-23 生产真实发生, 见
+    # test_the_workspace_host_is_exempt_from_our_csp)。中间件按 Host 放行, 这里
+    # 自己设头会绕过那道放行, 所以要自己判一次。
+    host = (request.headers.get("host") or "").split(":")[0].lower()
+    on_work_host = bool(config.WORK_DOMAIN) and host == config.WORK_DOMAIN.lower()
+    if not poll or not product.domain or on_work_host:
+        return HTMLResponse(html)
+    csp = (
+        "default-src 'self'; base-uri 'self'; frame-ancestors 'none'; object-src 'none'; "
+        "form-action 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline'; "
+        "script-src 'self' 'unsafe-inline'; "
+        f"connect-src 'self' https://{product.domain}"
+    )
+    return HTMLResponse(html, headers={"content-security-policy": csp})
 
 
 # --- billing + idle reaper (one asyncio task, started from main.py) ----------
