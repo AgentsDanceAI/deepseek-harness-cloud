@@ -74,12 +74,24 @@ RUN /opt/venv-openmanus/bin/python /opt/dsh-patch_openmanus.py \
 #
 # 校验 sha256: 从网上取二进制不核对等于把镜像的完整性交给别人的 CDN。
 ARG TTYD_VERSION=1.7.7
-ARG TTYD_SHA256=8a217c968aba172e0dbf3f34447218dc015bc4d5e59bf51db2f2cd12b7be4f55
-RUN curl -fsSL -o /usr/local/bin/ttyd \
-      "https://github.com/tsl0922/ttyd/releases/download/${TTYD_VERSION}/ttyd.x86_64" \
- && echo "${TTYD_SHA256}  /usr/local/bin/ttyd" | sha256sum -c - \
- && chmod +x /usr/local/bin/ttyd \
- && ttyd --version
+# 一个架构一个校验和 (抄自上游 release 的 SHA256SUMS)。桌面端把这些镜像跑在用户
+# 自己的机器上, Apple Silicon 上要的是 aarch64 那份 —— 写死 x86_64 的话镜像只能
+# 是单架构, M 系机器全程走 Rosetta。
+ARG TTYD_SHA256_amd64=8a217c968aba172e0dbf3f34447218dc015bc4d5e59bf51db2f2cd12b7be4f55
+ARG TTYD_SHA256_arm64=b38acadd89d1d396a0f5649aa52c539edbad07f4bc7348b27b4f4b7219dd4165
+# BuildKit 自动注入; 没有对应资产就直接失败, 别悄悄装一个跑不了的二进制。
+ARG TARGETARCH
+RUN set -eu; \
+    case "$TARGETARCH" in \
+      amd64) asset=ttyd.x86_64;  sum="$TTYD_SHA256_amd64" ;; \
+      arm64) asset=ttyd.aarch64; sum="$TTYD_SHA256_arm64" ;; \
+      *) echo "ttyd 没有 $TARGETARCH 的预编译包" >&2; exit 1 ;; \
+    esac; \
+    curl -fsSL -o /usr/local/bin/ttyd \
+      "https://github.com/tsl0922/ttyd/releases/download/${TTYD_VERSION}/${asset}"; \
+    echo "${sum}  /usr/local/bin/ttyd" | sha256sum -c -; \
+    chmod +x /usr/local/bin/ttyd; \
+    ttyd --version
 
 # ---- 工作台外壳 ----
 # 老板 2026-09-02: "CrewAI 和 OpenManus 包类似咱们为 claude 和 codex 建的前端啊"。

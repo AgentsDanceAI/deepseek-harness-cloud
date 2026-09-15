@@ -9,7 +9,9 @@
 # 生产是 ECI 后端, 实例从 registry 拉 —— 本机 tag 对它没意义, COMFY_IMAGE_REF
 # 必须是完整仓库地址。推完记得重建 ECI 镜像缓存 (server/scripts/eci_image_cache.py),
 # 否则冷启动要从头拉一遍这 2.5GB。
-FROM --platform=linux/amd64 python:3.12-slim-bookworm
+# 不钉 --platform: 桌面端要在 Apple Silicon 上跑同一个镜像, 钉死就只能出单架构。
+# torch 的 CPU 源同时有 x86_64 和 aarch64 的 wheel。
+FROM python:3.12-slim-bookworm
 
 # 钉死版本: master 每次构建拿到的都不一样, 而"镜像变了就重建工作台"这套机制
 # 依赖镜像身份稳定 —— 浮动 ref 会让每次构建都把所有人的工作台判成过期。
