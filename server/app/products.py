@@ -2659,6 +2659,57 @@ def _dsh_boot() -> str:
     )
 
 
+# ComfyUI 打开时那张"未保存的工作流"是**前端里写死的**一张图 (v0.34 是 Z-Image
+# Turbo): UNet 加载器要 z_image_turbo_bf16.safetensors, CLIP 要 qwen_3_4b。
+# 我们这一格是纯编排器 —— 没有 GPU、一个本地模型文件都没有, 于是用户一打开就是
+# 两个红节点加一条"发现 2 个错误"。老板 2026-09-15 截图问的就是这个。
+#
+# 上游没有"指定默认图"的设置。打开哪张图的状态 (Comfy.Workflow.OpenPaths /
+# ActivePath) 存在浏览器的 session/localStorage 里, 服务端的 comfy.settings.json
+# 管不着; 而没有可恢复的标签页时走的是
+#     resolveStartupOutcome = () => settings.get('Comfy.TutorialCompleted')
+#         ? app.loadGraphData()      // ← 无参 = 用模块内那个常量 defaultGraph
+#         : loadBlankWorkflow()
+# 也就是说**老用户每开一个新标签页都会撞上这张坏图**(新用户看到的是空白画布)。
+#
+# 能下手的点只有一个: `loadGraphData()` 里是 `e = defaultGraph; e = clone(e)`,
+# 克隆的是那个对象; 而前端把同一个对象挂在
+# `window.comfyAPI.defaultGraph.defaultGraph` 上 (上游留给老式扩展的公开面)。
+# 所以**原地改它的属性**就能换掉默认图 —— 必须原地改, 给 window 上那个属性重新
+# 赋值没有用, 模块里的常量还指着老对象。
+#
+# 装法: custom_nodes 下放一个只有 WEB_DIRECTORY 的空节点包, 启动前写好即可,
+# 不用重建镜像。图取 example_workflows 里排第一的那张 (文件名前缀 01/02 就是顺序)。
+_COMFY_DEFAULT_GRAPH = r"""import glob, json, os
+SRC = os.environ.get("DSH_COMFY_WORKFLOWS",
+                     "/opt/ComfyUI/custom_nodes/dsh_cloud/example_workflows")
+OUT = os.environ.get("DSH_COMFY_EXT_JS",
+                     "/opt/ComfyUI/custom_nodes/dsh_default_graph/js/dsh_default_graph.js")
+cands = sorted(glob.glob(os.path.join(SRC, "*.json")))
+if not cands:
+    print("[dsh] 没有预置工作流, 默认图保持上游那张", flush=True)
+    raise SystemExit(0)
+g = json.load(open(cands[0], encoding="utf-8"))
+g.pop("id", None)  # 留着它, 新开的工作流会和预置那张撞 id
+js = (
+    "const G = " + json.dumps(g, ensure_ascii=False) + ";\n"
+    "const ns = globalThis.comfyAPI && globalThis.comfyAPI.defaultGraph;\n"
+    "const dg = ns && ns.defaultGraph;\n"
+    "if (dg && typeof dg === 'object' && Array.isArray(dg.nodes)) {\n"
+    "  for (const k of Object.keys(dg)) delete dg[k];\n"
+    "  Object.assign(dg, JSON.parse(JSON.stringify(G)));\n"
+    "  ns.defaultGraphJSON = JSON.stringify(G);\n"
+    "} else {\n"
+    "  console.warn('[dsh] comfyAPI.defaultGraph 不在了, 默认图保持上游那张');\n"
+    "}\n"
+)
+os.makedirs(os.path.dirname(OUT), exist_ok=True)
+open(OUT, "w", encoding="utf-8").write(js)
+print("[dsh] 默认图换成 %s (%d 个节点)"
+      % (os.path.basename(cands[0]), len(g.get("nodes", []))), flush=True)
+"""
+
+
 def _comfyui_boot() -> str:
     """ComfyUI 以**纯编排器**运行 —— 不带 GPU, 算力全在远端。
 
@@ -2706,6 +2757,15 @@ def _comfyui_boot() -> str:
         # 日志走 **stdout**, 不落文件: ECI 上没有 docker exec, 落进容器里的文件
         # 谁也看不到 —— 垫片一出问题就完全没有线索。stdout 会进容器日志
         # (DescribeContainerLog 能取), 与 ComfyUI 的交错但有 [shim] 前缀。
+        # 把"未保存的工作流"换成我们那张能直接跑的 (见 _COMFY_DEFAULT_GRAPH)。
+        # 必须在 main.py 之前: custom_nodes 只在启动时扫一次。
+        "mkdir -p /opt/ComfyUI/custom_nodes/dsh_default_graph/js\n"
+        "cat > /opt/ComfyUI/custom_nodes/dsh_default_graph/__init__.py <<'DSHINIT'\n"
+        "NODE_CLASS_MAPPINGS = {}\n"
+        "NODE_DISPLAY_NAME_MAPPINGS = {}\n"
+        'WEB_DIRECTORY = "./js"\n'
+        "DSHINIT\n"
+        "python3 - <<'DSHGRAPH' || true\n" + _COMFY_DEFAULT_GRAPH + "DSHGRAPH\n"
         "python -u /opt/dsh-api-shim.py 2>&1 &\n"
         "cd /opt/ComfyUI\n"
         "exec python main.py --cpu --listen 0.0.0.0 --port 8188 "

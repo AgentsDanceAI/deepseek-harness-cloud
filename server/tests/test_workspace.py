@@ -1638,6 +1638,25 @@ def test_comfyui_boot_persists_output_on_the_volume(monkeypatch):
     assert "--cpu" in boot, "编排模式不带 GPU"
 
 
+def test_comfyui_default_graph_extension_is_in_place_before_the_server_starts():
+    """打开 ComfyUI 那张"未保存的工作流"必须是能跑的那张。
+
+    上游默认图 (Z-Image Turbo) 要本地模型文件, 我们这格一个都没有 —— 用户一打开
+    就是两个红节点。换法是往 custom_nodes 里塞一个只有 WEB_DIRECTORY 的包,
+    **顺序是死的**: custom_nodes 只在 main.py 启动时扫一次, 写晚了这个包根本不会
+    被加载, 而且不会有任何报错, 只是默认图还是坏的那张。
+
+    JS 那一侧的行为由 server/tests/js/comfy_default_graph.test.mjs 真跑一遍。
+    """
+    boot = products.boot_script("comfyui")
+    ext = boot.index("custom_nodes/dsh_default_graph")
+    assert 'WEB_DIRECTORY = "./js"' in boot
+    assert "DSH_COMFY_WORKFLOWS" in boot, "路径要能被测试覆盖掉"
+    assert ext < boot.index("exec python main.py"), "扩展必须在启动之前写好"
+    # 装不上也不能拖垮启动 —— 这一格没有默认图照样能用。
+    assert "python3 - <<'DSHGRAPH' || true" in boot
+
+
 def test_comfyui_env_carries_only_the_gateway(monkeypatch):
     """节点不认识任何一家厂商, 只认我们的网关 —— 容器里不该出现上游凭据。"""
     env = products.env_for("comfyui", "tok_123")
