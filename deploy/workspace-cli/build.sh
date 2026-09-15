@@ -16,6 +16,12 @@ cd "$(dirname "$0")"
 # (见 Dockerfile.openmanus)。先建/推外壳 (无 VARIANT), 再建这个 —— 它按 SHELL_REF
 # 从 ghcr 拉外壳那一层, 本机没推过的层叠不上去。
 VARIANT="${VARIANT:-}"
+# 目标架构。默认 amd64 (线上节点全是 amd64), 但桌面端把这些镜像跑在**用户自己的
+# 机器**上 —— Apple Silicon 上跑 amd64 要过 Rosetta, 实测 node 冷启动 27ms → 208ms,
+# sha256 慢 8 倍 (Rosetta 用不上 ARM 的加密指令)。所以 arm64 那份也要有。
+# 两份**各自在原生机器上建**再合成一个 manifest list (见文件末尾的说明); 用 buildx
+# 跨架构建等于全程 QEMU, 光 apt + npm 就要几十分钟。
+PLATFORM="${PLATFORM:-linux/amd64}"
 REPO=$(python3 -c "import json;print(json.load(open('upstream.json'))['repository'])")
 COMMIT=$(python3 -c "import json;print(json.load(open('upstream.json'))['commit'])")
 IMAGE="${IMAGE:-ghcr.io/agentsdancepro/workspace-cli}"
@@ -31,7 +37,7 @@ if [ "$VARIANT" = "openmanus" ]; then
   OM_TAG="$TAG-openmanus"
   FRAMEWORKS_REF="${FRAMEWORKS_REF:-$(python3 -c "import json;print(json.load(open('upstream.json'))['frameworks_ref'])")}"
   echo "==> 构建 $IMAGE:$OM_TAG  (外壳 $IMAGE:$TAG 叠在 $FRAMEWORKS_REF 上)"
-  docker build --platform linux/amd64 -f Dockerfile.openmanus \
+  docker build --platform "$PLATFORM" -f Dockerfile.openmanus \
     --build-arg "SHELL_REF=$IMAGE:$TAG" --build-arg "FRAMEWORKS_REF=$FRAMEWORKS_REF" \
     --build-arg "REVISION=$OM_TAG" -t "$IMAGE:$OM_TAG" .
   echo "==> 完成: $IMAGE:$OM_TAG"
@@ -54,6 +60,35 @@ done
 
 cp Dockerfile "$WORK/src/Dockerfile.aistore"
 echo "==> 构建 $IMAGE:$TAG"
-docker build --platform linux/amd64 -f "$WORK/src/Dockerfile.aistore" -t "$IMAGE:$TAG" "$WORK/src"
+docker build --platform "$PLATFORM" -f "$WORK/src/Dockerfile.aistore" -t "$IMAGE:$TAG" "$WORK/src"
 echo "==> 完成: $IMAGE:$TAG"
 echo "    推送: docker push $IMAGE:$TAG"
+
+# ── 多架构 (2026-09-15) ────────────────────────────────────────────────────
+# 线上节点全是 amd64, 但桌面端把同一个镜像跑在**用户自己的机器**上。Apple
+# Silicon 上跑 amd64 要过 Rosetta, 本机实测 (M 系, Docker Desktop 29.2.1,
+# 已开 Rosetta):
+#     node 冷启动      12ms → 208ms   (17 倍)
+#     sha256 200MB     87ms → 747ms   (8.6 倍, Rosetta 用不上 ARM 的加密指令)
+#     容器起到首页 200  879ms → 1499ms
+# Docker Desktop 会在货架上挂一个橙色 AMD64 角标: "may have poor performance,
+# or fail, if run via emulation" —— 老板 2026-09-15 截的就是它。
+#
+# 两份**各自在原生机器上建**, 再把两个 digest 合成一个 manifest list。别用
+# buildx 跨架构建: 那是全程 QEMU, 光 apt + npm 就要几十分钟。
+#
+#   # amd64 (在 144 上, 或任何 amd64 机器)
+#   PLATFORM=linux/amd64 TAG=<tag> bash build.sh && docker push $IMAGE:<tag>
+#   # arm64 (在这台 Mac 上)
+#   PLATFORM=linux/arm64 TAG=<tag>-arm64 bash build.sh && docker push $IMAGE:<tag>-arm64
+#   # 合成 (两个都推完之后)
+#   docker buildx imagetools create -t $IMAGE:<tag> \
+#     $IMAGE@<amd64 digest> $IMAGE@<arm64 digest>
+#
+# **合成时 amd64 那一份要按 digest 引用已经推上去的那个**, 不要重建: digest 不变
+# 线上节点就不会重拉 (crictl 答 "Image is up to date"), 也不会出现"有的节点跑新的
+# 有的跑旧的"。
+#
+# 推 ghcr 的凭据: 这台 Mac 的 docker-credential-desktop 会无限挂起, 要
+#   export DOCKER_CONFIG=$(mktemp -d); export DOCKER_HOST=unix://$HOME/.docker/run/docker.sock
+#   gh auth token | docker login ghcr.io -u AgentsDancePro --password-stdin
