@@ -126,6 +126,39 @@ contracts.
 [**Development setup**](#development) · [Contributing](CONTRIBUTING.md) ·
 [Architecture](docs/architecture.md) · [Changelog](CHANGELOG.md)
 
+## The sixteen products
+
+Every slot opens in the browser on the same account, the same credit balance
+and the same server-side gateway — no per-product signup, no API keys of your
+own. Fourteen of them open as their own workspace container at
+`/work?product_id=<id>`; the two digital-human slots live on the main site
+instead, because they share GPU nodes rather than running a container per user.
+
+<!-- app-catalog:start -->
+| Product | In one line | What you get |
+| --- | --- | --- |
+| **DeepSeek Harness**<br>`dsh` | DeepSeek general agent | The general agent: writes code, researches, runs commands, ships results. Our flagship. |
+| **Agents Team**<br>`agents-team` | A crew of bots, in parallel | Hand one task to a room of bots: group them, they work in parallel and bring the results back together. |
+| **ComfyUI**<br>`comfyui` | Node-graph controllable video & image | Node-graph canvas for image & video generation — Seedance, Wan and Qwen-Image ready to pick. |
+| **Codex**<br>`codex` | OpenAI coding agent | OpenAI Codex in the browser: the same editor and terminal, driven by Codex — on your credits from the first minute. |
+| **OpenClaw 2.0**<br>`openclaw` | The classic lobster, 2.0 | A self-hosted always-on personal agent: one gateway across Telegram, Discord, Slack and dozens more — it reads your files and gets things done. |
+| **Claude Code**<br>`claude-code` | Anthropic coding agent | Claude Code in the browser: full VS Code plus an agent that reads your repo, edits code and runs tests — on your credits from the first minute. |
+| **Hermes Agent**<br>`hermes` | Persistent memory, self-taught skills | Nous Research's always-on agent: persistent memory, and it writes each solved problem into a reusable skill — it gets better the longer it runs. |
+| **Dify**<br>`dify` | Visual LLM app builder | Visual LLM app platform: workflows, knowledge bases and agents, with models through the platform gateway. |
+| **数字人直播**<br>`/live` · on the main site | 24/7 digital host | A digital human streaming 24/7: pick one of five ready-made personas (look, voice and character as a set), hand it your script and products, and it speaks — straight into your channel. |
+| **数字人伴聊**<br>`/avatar` · on the main site | Full-duplex digital human | Full-duplex digital human. She listens while she speaks — real-time lip sync, cloned voice, billed by the minute. |
+| **Open Design**<br>`open-design` | Open-source Claude Design | An AI design agent: describe it, get the artifact — pages, apps, decks, images, driven by DeepSeek Harness. |
+| **Pi Agent**<br>`pi` | Lightweight open-source AI agent | The Pi Agent coding agent with the community pi-web-ui front end: chat, files, built-in terminal, Git panel. Open source, take it apart and rebuild. |
+| **AutoGen Studio**<br>`autogen` | Multi-agent teams that debate | Microsoft's multi-agent studio. Assemble a team, watch them split the work and talk it through. |
+| **LangChain**<br>`langchain` | LangGraph agent chat | A LangGraph agent behind LangChain's own chat UI. Streaming, tool calls, interruptible — on your credits. |
+| **OpenManus**<br>`openmanus` | Open-source Manus | Open-source Manus. A general agent that browses, codes and calls tools — you brief it from the terminal. |
+| **OpenMausBot**<br>`openmausbot` | Open-source Grok Bot | Many bots in one group chat, each with its own character and tools, able to drive a computer and connected apps. |
+<!-- app-catalog:end -->
+
+The table is generated from the same catalog the product grid reads
+([`server/app/apps_catalog.py`](server/app/apps_catalog.py) plus the `apps.*`
+strings), so it cannot drift from what the site actually offers.
+
 ## What is included
 
 | Capability | Community behavior |

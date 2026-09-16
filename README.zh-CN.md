@@ -101,6 +101,36 @@ npm/npx、uv/uvx 遵循同一套版本化安装契约。
 [**开发环境**](#开发) · [贡献指南](CONTRIBUTING.zh-CN.md) ·
 [架构](docs/architecture.zh-CN.md) · [变更日志](CHANGELOG.zh-CN.md)
 
+## 这 16 个产品
+
+每一格都在浏览器里打开，共用同一个账号、同一份积分、同一个服务端网关——不用一家家
+注册，也不用自备 API key。其中 14 格各自开一个工作台容器（`/work?product_id=<id>`），
+两格数字人住在主站页面上——它们共用 GPU 节点，不给每个用户单开容器。
+
+<!-- app-catalog:start -->
+| 产品 | 一句话 | 能拿到什么 |
+| --- | --- | --- |
+| **DeepSeek Harness**<br>`dsh` | DeepSeek 通用智能体 | 通用智能体：写代码、查资料、跑命令、交付成品。本站的看家产品。 |
+| **Agents Team**<br>`agents-team` | 一群机器人分工开工 | 把一件事交给一群机器人：拉群、同时开工，各自动手再把结果汇总给你。 |
+| **ComfyUI**<br>`comfyui` | 节点编排可控生视频生图 | 节点式画布编排生图与生视频，Seedance、Wan、Qwen-Image 等模型即选即用。 |
+| **Codex**<br>`codex` | OpenAI 编码智能体 | 浏览器里的 OpenAI Codex：同一套编辑器与终端，换成 Codex 干活，开箱就用你的积分。 |
+| **OpenClaw 2.0**<br>`openclaw` | 经典龙虾 2.0 版 | 自托管的常驻个人助理：一个网关同时接 Telegram、Discord、Slack 等几十个渠道，读你的文件、办你的事。 |
+| **Claude Code**<br>`claude-code` | Anthropic 编码智能体 | 浏览器里的 Claude Code：完整 VS Code 加一个会自己读库、改代码、跑测试的智能体，开箱就用你的积分。 |
+| **Hermes Agent**<br>`hermes` | 持久记忆·自学技能 | Nous Research 的常驻智能体：带持久记忆，解过的难题会自己写成可复用技能，越跑越顺手。 |
+| **Dify**<br>`dify` | 可视化应用编排 | 可视化编排 LLM 应用：工作流、知识库、Agent 一站式，模型走平台网关。 |
+| **数字人直播**<br>`/live` · 主站页面 | 数字人 7×24 直播 | 数字人 7×24 不间断直播：五套调好的形象（形象、音色、人设绑在一起）里挑一个，讲稿和商品交给它，它自己开口，画面直推到你的直播间。 |
+| **数字人伴聊**<br>`/avatar` · 主站页面 | 全双工数字人 | 全双工数字人。她一边听你说，一边看着你回话 —— 实时口型、克隆嗓音，按通话分钟计费。 |
+| **Open Design**<br>`open-design` | 开源版 Claude Design | AI 设计智能体：说想法出成品——网页、应用、PPT、图像，由 DeepSeek Harness 驱动。 |
+| **Pi Agent**<br>`pi` | 轻量级开源 AI 智能体 | Pi Agent 编码智能体 + 社区的 pi-web-ui 前端：对话、文件、内置终端、Git 面板，中英双语。开源、可拆可改。 |
+| **AutoGen Studio**<br>`autogen` | 多智能体分工讨论 | 微软的多智能体搭建台。拖出一支队伍，让它们分工讨论着把事做完，全程可见。 |
+| **LangChain**<br>`langchain` | LangGraph 智能体对话 | LangGraph 智能体，配官方对话前端。流式输出、工具调用、中途可打断，模型走你的额度。 |
+| **OpenManus**<br>`openmanus` | 开源版 Manus | 开源版 Manus。一个通用智能体，会用浏览器、会写代码、会调工具，终端里交代给它。 |
+| **OpenMausBot**<br>`openmausbot` | 开源版 Grok Bot | 一个群聊里挂多个机器人，各有性格和本事，能开电脑、连应用、替你把活干完。 |
+<!-- app-catalog:end -->
+
+这张表由站内产品网格的同一份数据源生成（[`server/app/apps_catalog.py`](server/app/apps_catalog.py)
+加 `apps.*` 文案），不会和站上实际提供的东西对不上。
+
 ## 主要能力
 
 | 能力 | Community 行为 |
