@@ -1,0 +1,307 @@
+{# 首页改版预览 —— **孤页**, 不从任何地方链接过来, 只给内部看效果。
+
+   为什么不继承 base.html: 这版是浅色, 而全站是深色 (app.css 的 :root 是
+   color-scheme: dark)。继承过来会顶着深色页头配浅色正文, 看到的不是设计本身
+   而是两套主题打架。所以这页自带一整套浅色样式, 完全隔离 —— 它存在与否,
+   现有站点一个像素都不变。
+
+   卡片用的是**真实目录** (apps_catalog + i18n), 不是稿子里的 ChatGPT/Midjourney:
+   那些不是我们的产品, 拿来演示等于演示一个上不了线的东西。
+   稿子里的 4.9/4.8 星级也没照抄 —— 我们没有评分数据, 编出来就是假评分。
+#}<!doctype html>
+<html lang="{{ lang }}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>AI Store — 首页改版预览</title>
+<style>
+  :root{
+    color-scheme: light;
+    --v2-bg:#f7f9fc; --v2-surface:#fff; --v2-fg:#0f172a; --v2-muted:#64748b;
+    --v2-faint:#94a3b8; --v2-border:#e6ebf3; --v2-brand:#3b6fe0; --v2-brand2:#7c5cf0;
+    --v2-ink:#0b1220; --v2-ok:#16a34a; --v2-star:#f5a524;
+    --v2-radius:14px; --v2-radius-lg:20px;
+    --v2-shadow:0 1px 2px rgba(15,23,42,.04), 0 8px 24px -12px rgba(15,23,42,.12);
+    --v2-font:"Noto Sans SC",-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei","Segoe UI",system-ui,sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--v2-bg);color:var(--v2-fg);font-family:var(--v2-font);
+       -webkit-font-smoothing:antialiased}
+  a{color:inherit;text-decoration:none}
+  .wrap{max-width:1320px;margin:0 auto;padding:0 28px}
+
+  /* ---- 预览条: 让任何看到这页的人立刻知道这不是线上首页 ---- */
+  .v2-flag{background:#1e293b;color:#e2e8f0;font-size:13px;padding:8px 0;text-align:center}
+  .v2-flag b{color:#fbbf24}
+
+  /* ---- 页头 ---- */
+  .v2-head{background:var(--v2-surface);border-bottom:1px solid var(--v2-border)}
+  .v2-head-row{display:flex;align-items:center;gap:28px;height:72px}
+  .v2-logo{display:flex;align-items:center;gap:10px}
+  .v2-logo-mark{width:36px;height:36px;border-radius:10px;flex:none;
+    background:linear-gradient(135deg,var(--v2-brand),var(--v2-brand2));
+    display:grid;place-items:center;color:#fff}
+  .v2-logo-txt b{display:block;font-size:17px;letter-spacing:-.01em;line-height:1.15}
+  .v2-logo-txt i{display:block;font-style:normal;font-size:11px;color:var(--v2-faint);margin-top:1px}
+  .v2-nav{display:flex;gap:26px;font-size:14.5px;color:var(--v2-muted)}
+  .v2-nav a{padding:6px 0;border-bottom:2px solid transparent}
+  .v2-nav a.on{color:var(--v2-fg);font-weight:600;border-bottom-color:var(--v2-brand)}
+  .v2-head-right{margin-left:auto;display:flex;align-items:center;gap:14px}
+  .v2-search-sm{display:flex;align-items:center;gap:8px;background:var(--v2-bg);
+    border:1px solid var(--v2-border);border-radius:999px;padding:9px 16px;width:250px;
+    color:var(--v2-faint);font-size:13.5px}
+  .v2-btn-dark{background:var(--v2-ink);color:#fff;border-radius:999px;padding:11px 22px;
+    font-size:14px;font-weight:600;white-space:nowrap}
+
+  /* ---- Hero ---- */
+  .v2-hero{display:grid;grid-template-columns:1.14fr .86fr;gap:52px;align-items:center;padding:56px 0 8px}
+  /* 中文默认可在任意两字之间断行, 固定 48px 在 1440 下会把「严选商店」断成
+     「严选商 / 店」。字号跟着视口走 + balance 让断点落在词与词之间。 */
+  .v2-hero h1{font-size:clamp(31px,3.35vw,49px);line-height:1.18;letter-spacing:-.025em;
+    margin:0 0 14px;font-weight:800;text-wrap:balance}
+  .v2-grad{background:linear-gradient(100deg,var(--v2-brand),var(--v2-brand2));
+    -webkit-background-clip:text;background-clip:text;color:transparent}
+  .v2-hero-sub{font-size:16px;color:var(--v2-muted);margin:0 0 28px}
+  .v2-searchbar{display:flex;align-items:center;gap:12px;background:var(--v2-surface);
+    border:1px solid var(--v2-border);border-radius:999px;padding:8px 8px 8px 22px;
+    box-shadow:var(--v2-shadow)}
+  .v2-searchbar input{flex:1;border:0;outline:0;background:transparent;font:inherit;
+    font-size:15px;color:var(--v2-fg);min-width:0}
+  .v2-searchbar input::placeholder{color:var(--v2-faint)}
+  .v2-go{background:linear-gradient(100deg,var(--v2-brand),var(--v2-brand2));color:#fff;
+    border:0;border-radius:999px;padding:13px 28px;font:inherit;font-size:15px;font-weight:600;
+    cursor:pointer;white-space:nowrap;display:flex;align-items:center;gap:7px}
+  .v2-feats{display:flex;gap:30px;margin-top:26px;flex-wrap:wrap}
+  .v2-feat{display:flex;align-items:center;gap:9px;font-size:14.5px;color:var(--v2-muted)}
+  .v2-feat svg{flex:none}
+
+  /* ---- 精选卡 ---- */
+  .v2-featured{position:relative;border-radius:var(--v2-radius-lg);overflow:hidden;
+    background:linear-gradient(135deg,#2b1f6b,#3f2d9c 45%,#5b3fd6);color:#fff;
+    padding:30px 32px;min-height:310px;display:flex;flex-direction:column;
+    box-shadow:0 20px 60px -20px rgba(59,63,214,.5)}
+  .v2-badge-sm{display:inline-block;background:rgba(255,255,255,.16);border-radius:999px;
+    padding:5px 13px;font-size:12px;font-weight:600;align-self:flex-start;
+    backdrop-filter:blur(6px)}
+  .v2-feat-row{display:flex;gap:26px;margin-top:20px;flex:1}
+  .v2-feat-left{flex:1;min-width:0;display:flex;flex-direction:column}
+  .v2-feat-name{display:flex;align-items:center;gap:10px;font-size:15px;opacity:.92;margin-bottom:6px}
+  .v2-feat-left h2{font-size:clamp(25px,1.95vw,33px);margin:0 0 10px;font-weight:800;
+    letter-spacing:-.02em;line-height:1.14;text-wrap:balance}
+  .v2-feat-left p{margin:0 0 auto;font-size:14.5px;opacity:.82}
+  .v2-feat-cta{align-self:flex-start;margin-top:20px;background:#fff;color:var(--v2-ink);
+    border-radius:999px;padding:11px 22px;font-size:14px;font-weight:700;
+    display:inline-flex;align-items:center;gap:6px}
+  .v2-code{flex:1;min-width:0;background:rgba(10,12,30,.55);border:1px solid rgba(255,255,255,.14);
+    border-radius:12px;padding:12px;font-family:ui-monospace,Menlo,monospace;font-size:11px;
+    line-height:1.75;color:#c9d3f5;overflow:hidden}
+  .v2-code .k{color:#8ab4ff}.v2-code .s{color:#8ee0a1}.v2-code .c{color:#6b7aa8}
+  .v2-dots{display:flex;gap:6px;align-items:center;margin-top:18px}
+  .v2-dot{width:7px;height:7px;border-radius:999px;background:rgba(255,255,255,.35)}
+  .v2-dot.on{width:22px;background:#fff}
+  .v2-arrows{margin-left:auto;display:flex;gap:8px}
+  .v2-arrow{width:32px;height:32px;border-radius:999px;background:rgba(255,255,255,.16);
+    display:grid;place-items:center;color:#fff}
+
+  /* ---- SOTA 区 ---- */
+  .v2-sec{padding:52px 0 0}
+  .v2-sec-head{display:flex;align-items:baseline;gap:16px;margin-bottom:22px}
+  .v2-sec-head h2{font-size:27px;margin:0;font-weight:800;letter-spacing:-.02em}
+  .v2-sec-head p{margin:0;color:var(--v2-muted);font-size:14.5px}
+  .v2-more{margin-left:auto;color:var(--v2-brand);font-size:14px;font-weight:600;white-space:nowrap}
+  .v2-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:18px}
+  .v2-card{background:var(--v2-surface);border:1px solid var(--v2-border);
+    border-radius:var(--v2-radius);padding:18px;display:flex;flex-direction:column;
+    box-shadow:var(--v2-shadow);transition:transform .15s ease, box-shadow .15s ease}
+  .v2-card:hover{transform:translateY(-2px);box-shadow:0 4px 10px rgba(15,23,42,.06),0 18px 40px -16px rgba(15,23,42,.22)}
+  .v2-card-top{display:flex;align-items:flex-start;gap:12px;margin-bottom:12px}
+  .v2-ico{width:46px;height:46px;border-radius:12px;flex:none;display:grid;place-items:center;
+    background:linear-gradient(135deg,#eef2ff,#e8e5ff);color:var(--v2-brand)}
+  .v2-card-id{flex:1;min-width:0}
+  .v2-card-name{display:flex;align-items:center;gap:7px;min-width:0}
+  .v2-card-name b{font-size:15.5px;letter-spacing:-.01em;overflow:hidden;
+    text-overflow:ellipsis;white-space:nowrap;min-width:0}
+  .v2-tagpill{font-size:11px;padding:2px 8px;border-radius:999px;background:#eef2f8;
+    color:var(--v2-muted);font-weight:600;flex:none}
+  .v2-tagpill.hot{background:#fff1f0;color:#e04a3f}
+  .v2-card-tag{display:block;font-size:12px;color:var(--v2-faint);margin-top:3px}
+  .v2-card-desc{font-size:13px;color:var(--v2-muted);line-height:1.6;margin:0 0 14px;
+    display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+  .v2-tags{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px}
+  .v2-tag{font-size:11.5px;padding:4px 10px;border-radius:7px;background:#f1f5f9;color:#475569}
+  .v2-card-foot{display:flex;align-items:center;gap:8px;margin-top:auto;
+    padding-top:13px;border-top:1px solid var(--v2-border);font-size:12.5px;color:var(--v2-muted)}
+  .v2-state{width:8px;height:8px;border-radius:999px;flex:none;background:var(--v2-faint)}
+  .v2-state.on{background:var(--v2-brand)}
+  .v2-state.lock{background:var(--v2-star)}
+  .v2-chev{margin-left:auto;color:var(--v2-faint)}
+
+  /* ---- 底部 CTA ---- */
+  .v2-cta{margin:52px 0 64px;border-radius:var(--v2-radius-lg);overflow:hidden;position:relative;
+    background:linear-gradient(120deg,#0b1220 0%,#1b2a4a 55%,#2c3e6b 100%);
+    color:#fff;padding:44px 48px;display:flex;align-items:center;gap:24px}
+  .v2-cta::after{content:"";position:absolute;inset:0;pointer-events:none;
+    background:radial-gradient(120% 140% at 82% 40%, rgba(124,92,240,.38), transparent 58%)}
+  .v2-cta-txt{position:relative;z-index:1}
+  .v2-cta h3{font-size:27px;margin:0 0 6px;font-weight:800;letter-spacing:-.02em}
+  .v2-cta p{margin:0;opacity:.74;font-size:14.5px}
+  .v2-cta-btn{position:relative;z-index:1;margin-left:auto;background:#fff;color:var(--v2-ink);
+    border-radius:999px;padding:14px 28px;font-size:15px;font-weight:700;white-space:nowrap;
+    display:inline-flex;align-items:center;gap:8px}
+
+  @media (max-width:1100px){
+    .v2-hero{grid-template-columns:1fr;gap:34px}
+    .v2-grid{grid-template-columns:repeat(2,1fr)}
+    .v2-nav,.v2-search-sm{display:none}
+  }
+  @media (max-width:620px){
+    .wrap{padding:0 16px}
+    .v2-hero h1{font-size:33px}
+    .v2-grid{grid-template-columns:1fr}
+    .v2-cta{flex-direction:column;align-items:flex-start;padding:32px 24px}
+    .v2-cta-btn{margin-left:0}
+    .v2-feat-row{flex-direction:column}
+  }
+</style>
+</head>
+<body>
+
+<div class="v2-flag">
+  <b>预览页</b> · 首页改版方案，未接入线上首页；卡片数据取自真实产品目录
+</div>
+
+<header class="v2-head">
+  <div class="wrap v2-head-row">
+    <a class="v2-logo" href="/preview/home-v2">
+      <span class="v2-logo-mark">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3 8.5 15h-17L12 3Z"/></svg>
+      </span>
+      <span class="v2-logo-txt"><b>AI Store</b><i>发现 · 使用 · 创造更大的可能</i></span>
+    </a>
+    <nav class="v2-nav">
+      <a class="on" href="#">首页</a><a href="/apps">应用</a><a href="#">排行榜</a>
+      <a href="#">社区</a><a href="#">关于我们</a>
+    </nav>
+    <div class="v2-head-right">
+      <span class="v2-search-sm">
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.2-3.2"/></svg>
+        搜索 AI 应用…
+      </span>
+      <a class="v2-btn-dark" href="/login">登录 / 注册</a>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <section class="v2-hero">
+    <div>
+      <h1>世界上最好的 <span class="v2-grad">AI 应用</span>严选商店</h1>
+      <p class="v2-hero-sub">汇聚全球顶尖 AI 产品 · 真实体验 · 深度评测</p>
+
+      <form class="v2-searchbar" action="/apps" method="get">
+        <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="var(--v2-faint)" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.2-3.2"/></svg>
+        <input name="q" placeholder="搜索 AI 应用、功能或场景…" aria-label="搜索">
+        <button class="v2-go" type="submit">探索
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h13M13 6l6 6-6 6"/></svg>
+        </button>
+      </form>
+
+      <div class="v2-feats">
+        <span class="v2-feat"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linejoin="round"><path d="M13 2 4 14h7l-1 8 9-12h-7l1-8Z"/></svg>即开即用</span>
+        <span class="v2-feat"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="var(--v2-brand)" stroke-width="2" stroke-linejoin="round"><path d="M12 3 5 6v6c0 4.2 2.9 7.9 7 9 4.1-1.1 7-4.8 7-9V6l-7-3Z"/><path d="m9 12 2 2 4-4"/></svg>安全可信</span>
+        <span class="v2-feat"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="#7c5cf0" stroke-width="2" stroke-linejoin="round"><path d="m12 3 2.6 5.6 6.1.8-4.5 4.2 1.2 6L12 16.8 6.6 19.6l1.2-6-4.5-4.2 6.1-.8L12 3Z"/></svg>真实评测</span>
+        <span class="v2-feat"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="var(--v2-ok)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3"/><path d="M3.5 19a5.5 5.5 0 0 1 11 0"/><path d="M17 11.5a2.5 2.5 0 1 0 0-5"/><path d="M17.5 19a5 5 0 0 0-3-4.6"/></svg>持续更新</span>
+      </div>
+    </div>
+
+    {# 精选位: 取目录里第一个已上线的产品, 不写死 —— 写死的话它下架了这里就是假的 #}
+    {% set feat = (apps | selectattr("live") | list | first) or apps[0] %}
+    <aside class="v2-featured">
+      <span class="v2-badge-sm">精选应用</span>
+      <div class="v2-feat-row">
+        <div class="v2-feat-left">
+          <span class="v2-feat-name">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">{{ feat.icon | safe }}</svg>
+            {{ feat.name }}
+          </span>
+          <h2>把想法，变成现实</h2>
+          <p>{{ t("apps.tag." + feat.tag) }}</p>
+          <a class="v2-feat-cta" href="/apps">立即探索
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17 17 7M9 7h8v8"/></svg>
+          </a>
+        </div>
+        <div class="v2-code">
+          <div class="c">// Turn ideas into reality</div>
+          <div><span class="k">async function</span> build() {</div>
+          <div>&nbsp;&nbsp;<span class="k">const</span> idea = <span class="k">await</span> prompt();</div>
+          <div>&nbsp;&nbsp;<span class="k">const</span> code = <span class="k">await</span> generate(idea);</div>
+          <div>&nbsp;&nbsp;<span class="k">await</span> deploy(code);</div>
+          <div>&nbsp;&nbsp;<span class="k">return</span> <span class="s">"Better software"</span>;</div>
+          <div>}</div>
+        </div>
+      </div>
+      <div class="v2-dots">
+        <span class="v2-dot on"></span><span class="v2-dot"></span><span class="v2-dot"></span>
+        <span class="v2-arrows">
+          <span class="v2-arrow"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m14 6-6 6 6 6"/></svg></span>
+          <span class="v2-arrow"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m10 6 6 6-6 6"/></svg></span>
+        </span>
+      </div>
+    </aside>
+  </section>
+
+  <section class="v2-sec">
+    <div class="v2-sec-head">
+      <h2>SOTA 精选</h2>
+      <p>来自全球的顶尖 AI 产品，立即体验改变生产力的力量</p>
+      <a class="v2-more" href="/apps">查看全部 →</a>
+    </div>
+
+    <div class="v2-grid">
+      {% for app in apps[:8] %}
+      {% set href = app.href or ('/work' if app.id == 'dsh' else '/work?product_id=' + app.id) %}
+      <a class="v2-card" href="{{ href if app.live else '/apps' }}">
+        <div class="v2-card-top">
+          <span class="v2-ico">
+            <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">{{ app.icon | safe }}</svg>
+          </span>
+          <span class="v2-card-id">
+            <span class="v2-card-name">
+              <b>{{ app.name }}</b>
+              {% if app.live %}<span class="v2-tagpill">已上线</span>{% else %}<span class="v2-tagpill hot">即将上线</span>{% endif %}
+            </span>
+            <span class="v2-card-tag">{{ t("apps.tag." + app.tag) }}</span>
+          </span>
+        </div>
+        <p class="v2-card-desc">{{ t("apps.d." + app.id) }}</p>
+        <div class="v2-tags">
+          <span class="v2-tag">{{ t("apps.tag." + app.tag) }}</span>
+          {% if app.href %}<span class="v2-tag">主站页面</span>{% else %}<span class="v2-tag">云工作台</span>{% endif %}
+        </div>
+        <div class="v2-card-foot">
+          <span class="v2-state {{ 'lock' if app.locked else ('on' if app.live) }}"></span>
+          {% if app.locked %}需解锁{% elif app.live %}可直接打开{% else %}即将上线{% endif %}
+          <span class="v2-chev">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m10 6 6 6-6 6"/></svg>
+          </span>
+        </div>
+      </a>
+      {% endfor %}
+    </div>
+  </section>
+
+  <section class="v2-cta">
+    <div class="v2-cta-txt">
+      <h3>更好的 AI 工具，创造更好的你</h3>
+      <p>Tools for a brighter you.</p>
+    </div>
+    <a class="v2-cta-btn" href="/apps">开始探索
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h13M13 6l6 6-6 6"/></svg>
+    </a>
+  </section>
+
+</main>
+</body>
+</html>

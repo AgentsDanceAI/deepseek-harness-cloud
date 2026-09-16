@@ -412,6 +412,21 @@ def landing(request: Request):
     return _render(request, "index.html", "landing", pricing=pricing, **_apps_ctx(try_resolve_user(request)))
 
 
+@router.get("/preview/home-v2", include_in_schema=False)
+def landing_preview_v2(request: Request):
+    """首页改版方案的**孤页**预览 —— 没有任何地方链接到这里。
+
+    单独开一条路由而不是改 "/": 换首页是线上所有人当场可见的动作, 而这版是浅色、
+    连页头导航都跟现在不一样。先让它有个能点开的地址, 定了再谈换不换。
+
+    模板不继承 base.html, 自带一整套样式 —— 这页存在与否, 现有站点一个像素都不变。
+    响应头带 noindex, 模板里也有一条; 搜索引擎不该先于我们自己看到它。
+    """
+    resp = _render(request, "home_v2.html", "landing-preview", **_apps_ctx(try_resolve_user(request)))
+    resp.headers["X-Robots-Tag"] = "noindex, nofollow"
+    return resp
+
+
 # --- auth pages --------------------------------------------------------------
 
 
