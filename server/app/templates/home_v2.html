@@ -1,307 +1,356 @@
-{# 首页改版预览 —— **孤页**, 不从任何地方链接过来, 只给内部看效果。
+{% extends "base.html" %}
+{# 首页改版预览 —— **孤页**, 不从任何地方链接过来。
 
-   为什么不继承 base.html: 这版是浅色, 而全站是深色 (app.css 的 :root 是
-   color-scheme: dark)。继承过来会顶着深色页头配浅色正文, 看到的不是设计本身
-   而是两套主题打架。所以这页自带一整套浅色样式, 完全隔离 —— 它存在与否,
-   现有站点一个像素都不变。
+   这一版继承 base.html: 老板要"导航 tab 和 LOGO 跟之前主页对齐", 那就别自己造
+   —— 继承过来用的**就是**站上那一套页头、LOGO、页脚和蓝色 token, 不可能对不齐。
+   上一版自带浅色样式是为了先看设计, 现在方向定了, 回到全站蓝。
 
-   卡片用的是**真实目录** (apps_catalog + i18n), 不是稿子里的 ChatGPT/Midjourney:
-   那些不是我们的产品, 拿来演示等于演示一个上不了线的东西。
-   稿子里的 4.9/4.8 星级也没照抄 —— 我们没有评分数据, 编出来就是假评分。
-#}<!doctype html>
-<html lang="{{ lang }}">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+   页内三处是真交互, 不是摆设 (老板: "精选应用多个要能有前端交互"、"搜索要好使"):
+     - 精选轮播: 多个产品, 左右箭头 + 圆点 + 自动轮播, 悬停暂停, 键盘左右可切。
+     - 搜索: 对 16 张卡实时过滤 (名字/一句话/说明/类目全都进索引), 带结果计数与空态。
+     - 卡片墙: 16 个全列, 不再只放 8 个。
+#}
+{% block title %}AI Store — 首页改版预览{% endblock %}
+{% block head %}
 <meta name="robots" content="noindex, nofollow">
-<title>AI Store — 首页改版预览</title>
+<script src="/static/hero-waves.js?v={{ asset_v }}" defer></script>
 <style>
-  :root{
-    color-scheme: light;
-    --v2-bg:#f7f9fc; --v2-surface:#fff; --v2-fg:#0f172a; --v2-muted:#64748b;
-    --v2-faint:#94a3b8; --v2-border:#e6ebf3; --v2-brand:#3b6fe0; --v2-brand2:#7c5cf0;
-    --v2-ink:#0b1220; --v2-ok:#16a34a; --v2-star:#f5a524;
-    --v2-radius:14px; --v2-radius-lg:20px;
-    --v2-shadow:0 1px 2px rgba(15,23,42,.04), 0 8px 24px -12px rgba(15,23,42,.12);
-    --v2-font:"Noto Sans SC",-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei","Segoe UI",system-ui,sans-serif;
-  }
-  *{box-sizing:border-box}
-  body{margin:0;background:var(--v2-bg);color:var(--v2-fg);font-family:var(--v2-font);
-       -webkit-font-smoothing:antialiased}
-  a{color:inherit;text-decoration:none}
-  .wrap{max-width:1320px;margin:0 auto;padding:0 28px}
-
-  /* ---- 预览条: 让任何看到这页的人立刻知道这不是线上首页 ---- */
-  .v2-flag{background:#1e293b;color:#e2e8f0;font-size:13px;padding:8px 0;text-align:center}
-  .v2-flag b{color:#fbbf24}
-
-  /* ---- 页头 ---- */
-  .v2-head{background:var(--v2-surface);border-bottom:1px solid var(--v2-border)}
-  .v2-head-row{display:flex;align-items:center;gap:28px;height:72px}
-  .v2-logo{display:flex;align-items:center;gap:10px}
-  .v2-logo-mark{width:36px;height:36px;border-radius:10px;flex:none;
-    background:linear-gradient(135deg,var(--v2-brand),var(--v2-brand2));
-    display:grid;place-items:center;color:#fff}
-  .v2-logo-txt b{display:block;font-size:17px;letter-spacing:-.01em;line-height:1.15}
-  .v2-logo-txt i{display:block;font-style:normal;font-size:11px;color:var(--v2-faint);margin-top:1px}
-  .v2-nav{display:flex;gap:26px;font-size:14.5px;color:var(--v2-muted)}
-  .v2-nav a{padding:6px 0;border-bottom:2px solid transparent}
-  .v2-nav a.on{color:var(--v2-fg);font-weight:600;border-bottom-color:var(--v2-brand)}
-  .v2-head-right{margin-left:auto;display:flex;align-items:center;gap:14px}
-  .v2-search-sm{display:flex;align-items:center;gap:8px;background:var(--v2-bg);
-    border:1px solid var(--v2-border);border-radius:999px;padding:9px 16px;width:250px;
-    color:var(--v2-faint);font-size:13.5px}
-  .v2-btn-dark{background:var(--v2-ink);color:#fff;border-radius:999px;padding:11px 22px;
-    font-size:14px;font-weight:600;white-space:nowrap}
-
-  /* ---- Hero ---- */
-  .v2-hero{display:grid;grid-template-columns:1.14fr .86fr;gap:52px;align-items:center;padding:56px 0 8px}
-  /* 中文默认可在任意两字之间断行, 固定 48px 在 1440 下会把「严选商店」断成
-     「严选商 / 店」。字号跟着视口走 + balance 让断点落在词与词之间。 */
-  .v2-hero h1{font-size:clamp(31px,3.35vw,49px);line-height:1.18;letter-spacing:-.025em;
-    margin:0 0 14px;font-weight:800;text-wrap:balance}
-  .v2-grad{background:linear-gradient(100deg,var(--v2-brand),var(--v2-brand2));
+  /* 全部用站上的 token (--bg/--card/--brand/--border/--fg/--muted), 不另起一套颜色 */
+  /* 货架比文案页需要更多横向空间: 站上 .container 是 1080, 4 列每张卡只剩 246px。
+     只在本页放宽, 不动全局 .container (那会牵动所有页面)。 */
+  .v2-wide{max-width:1240px}
+  .v2-flag{background:var(--warn-weak);color:var(--warn);font-size:12.5px;padding:7px 0;text-align:center;
+    border-bottom:1px solid var(--border)}
+  .v2-hero{position:relative;padding:52px 0 44px}
+  .v2-hero-inner{position:relative;z-index:2;display:grid;grid-template-columns:1.1fr .9fr;
+    gap:48px;align-items:center}
+  .v2-hero h1{font-size:clamp(30px,3.3vw,46px);line-height:1.18;letter-spacing:-.9px;margin:0 0 14px;
+    font-weight:800;text-wrap:balance}
+  .v2-grad{background:linear-gradient(100deg,var(--brand-strong),#8fb6f5);
     -webkit-background-clip:text;background-clip:text;color:transparent}
-  .v2-hero-sub{font-size:16px;color:var(--v2-muted);margin:0 0 28px}
-  .v2-searchbar{display:flex;align-items:center;gap:12px;background:var(--v2-surface);
-    border:1px solid var(--v2-border);border-radius:999px;padding:8px 8px 8px 22px;
-    box-shadow:var(--v2-shadow)}
-  .v2-searchbar input{flex:1;border:0;outline:0;background:transparent;font:inherit;
-    font-size:15px;color:var(--v2-fg);min-width:0}
-  .v2-searchbar input::placeholder{color:var(--v2-faint)}
-  .v2-go{background:linear-gradient(100deg,var(--v2-brand),var(--v2-brand2));color:#fff;
-    border:0;border-radius:999px;padding:13px 28px;font:inherit;font-size:15px;font-weight:600;
-    cursor:pointer;white-space:nowrap;display:flex;align-items:center;gap:7px}
-  .v2-feats{display:flex;gap:30px;margin-top:26px;flex-wrap:wrap}
-  .v2-feat{display:flex;align-items:center;gap:9px;font-size:14.5px;color:var(--v2-muted)}
-  .v2-feat svg{flex:none}
+  .v2-hero-sub{color:var(--muted);font-size:15.5px;margin:0 0 26px}
 
-  /* ---- 精选卡 ---- */
-  .v2-featured{position:relative;border-radius:var(--v2-radius-lg);overflow:hidden;
-    background:linear-gradient(135deg,#2b1f6b,#3f2d9c 45%,#5b3fd6);color:#fff;
-    padding:30px 32px;min-height:310px;display:flex;flex-direction:column;
-    box-shadow:0 20px 60px -20px rgba(59,63,214,.5)}
-  .v2-badge-sm{display:inline-block;background:rgba(255,255,255,.16);border-radius:999px;
-    padding:5px 13px;font-size:12px;font-weight:600;align-self:flex-start;
-    backdrop-filter:blur(6px)}
-  .v2-feat-row{display:flex;gap:26px;margin-top:20px;flex:1}
-  .v2-feat-left{flex:1;min-width:0;display:flex;flex-direction:column}
-  .v2-feat-name{display:flex;align-items:center;gap:10px;font-size:15px;opacity:.92;margin-bottom:6px}
-  .v2-feat-left h2{font-size:clamp(25px,1.95vw,33px);margin:0 0 10px;font-weight:800;
-    letter-spacing:-.02em;line-height:1.14;text-wrap:balance}
-  .v2-feat-left p{margin:0 0 auto;font-size:14.5px;opacity:.82}
-  .v2-feat-cta{align-self:flex-start;margin-top:20px;background:#fff;color:var(--v2-ink);
-    border-radius:999px;padding:11px 22px;font-size:14px;font-weight:700;
-    display:inline-flex;align-items:center;gap:6px}
-  .v2-code{flex:1;min-width:0;background:rgba(10,12,30,.55);border:1px solid rgba(255,255,255,.14);
-    border-radius:12px;padding:12px;font-family:ui-monospace,Menlo,monospace;font-size:11px;
-    line-height:1.75;color:#c9d3f5;overflow:hidden}
-  .v2-code .k{color:#8ab4ff}.v2-code .s{color:#8ee0a1}.v2-code .c{color:#6b7aa8}
-  .v2-dots{display:flex;gap:6px;align-items:center;margin-top:18px}
-  .v2-dot{width:7px;height:7px;border-radius:999px;background:rgba(255,255,255,.35)}
+  /* ---- 搜索 ---- */
+  .v2-search{display:flex;align-items:center;gap:10px;background:rgba(18,41,75,.78);
+    border:1px solid var(--border-strong);border-radius:999px;padding:7px 7px 7px 20px;
+    backdrop-filter:blur(8px);transition:border-color .15s ease, box-shadow .15s ease}
+  .v2-search:focus-within{border-color:var(--brand);box-shadow:0 0 0 4px var(--brand-weak)}
+  .v2-search input{flex:1;min-width:0;border:0;outline:0;background:transparent;font:inherit;
+    font-size:15px;color:var(--fg)}
+  .v2-search input::placeholder{color:var(--faint)}
+  .v2-search button{border:0;border-radius:999px;padding:12px 26px;font:inherit;font-size:14.5px;
+    font-weight:600;cursor:pointer;background:var(--brand);color:var(--brand-fg);
+    display:flex;align-items:center;gap:7px;white-space:nowrap}
+  .v2-search button:hover{background:var(--brand-strong)}
+  .v2-feats{display:flex;gap:26px;margin-top:22px;flex-wrap:wrap;color:var(--muted);font-size:14px}
+  .v2-feats span{display:flex;align-items:center;gap:8px}
+
+  /* ---- 精选轮播 ---- */
+  .v2-car{position:relative;border:1px solid var(--border-strong);border-radius:var(--radius-lg);
+    background:linear-gradient(140deg,#14305a,#1b3f74 55%,#27508c);overflow:hidden;
+    box-shadow:var(--shadow-md);min-height:322px;display:flex;flex-direction:column}
+  .v2-slide{display:none;padding:26px 28px;flex:1;flex-direction:column}
+  .v2-slide.on{display:flex;animation:v2fade .32s ease}
+  @keyframes v2fade{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+  .v2-badge{align-self:flex-start;background:rgba(255,255,255,.14);border-radius:999px;
+    padding:5px 13px;font-size:11.5px;font-weight:600;letter-spacing:.02em}
+  .v2-slide-body{display:flex;gap:22px;margin-top:18px;flex:1;min-height:0}
+  .v2-slide-l{flex:1;min-width:0;display:flex;flex-direction:column}
+  .v2-slide-name{display:flex;align-items:center;gap:9px;font-size:14.5px;color:#cfe0fb;margin-bottom:7px}
+  .v2-slide-l h2{font-size:clamp(22px,1.9vw,30px);margin:0 0 9px;font-weight:800;letter-spacing:-.5px;
+    line-height:1.18;text-wrap:balance}
+  .v2-slide-l p{margin:0;color:#b9cdea;font-size:13.5px;line-height:1.65;
+    display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+  .v2-slide-cta{align-self:flex-start;margin-top:auto;padding-top:16px}
+  .v2-slide-cta .btn{background:#fff;color:#13233f;border:0}
+  .v2-slide-cta .btn:hover{background:#e7eefb}
+  .v2-slide-art{width:152px;flex:none;border-radius:12px;background:rgba(6,15,32,.5);
+    border:1px solid rgba(255,255,255,.12);display:grid;place-items:center;color:#9fc0f2}
+  .v2-car-foot{display:flex;align-items:center;gap:7px;padding:0 28px 22px}
+  .v2-dot{width:7px;height:7px;border-radius:999px;background:rgba(255,255,255,.3);border:0;
+    padding:0;cursor:pointer;transition:width .2s ease, background .2s ease}
   .v2-dot.on{width:22px;background:#fff}
-  .v2-arrows{margin-left:auto;display:flex;gap:8px}
-  .v2-arrow{width:32px;height:32px;border-radius:999px;background:rgba(255,255,255,.16);
-    display:grid;place-items:center;color:#fff}
+  .v2-nav-btns{margin-left:auto;display:flex;gap:8px}
+  .v2-nav-btns button{width:32px;height:32px;border-radius:999px;border:1px solid rgba(255,255,255,.2);
+    background:rgba(255,255,255,.1);color:#fff;cursor:pointer;display:grid;place-items:center}
+  .v2-nav-btns button:hover{background:rgba(255,255,255,.2)}
 
-  /* ---- SOTA 区 ---- */
-  .v2-sec{padding:52px 0 0}
-  .v2-sec-head{display:flex;align-items:baseline;gap:16px;margin-bottom:22px}
-  .v2-sec-head h2{font-size:27px;margin:0;font-weight:800;letter-spacing:-.02em}
-  .v2-sec-head p{margin:0;color:var(--v2-muted);font-size:14.5px}
-  .v2-more{margin-left:auto;color:var(--v2-brand);font-size:14px;font-weight:600;white-space:nowrap}
-  .v2-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:18px}
-  .v2-card{background:var(--v2-surface);border:1px solid var(--v2-border);
-    border-radius:var(--v2-radius);padding:18px;display:flex;flex-direction:column;
-    box-shadow:var(--v2-shadow);transition:transform .15s ease, box-shadow .15s ease}
-  .v2-card:hover{transform:translateY(-2px);box-shadow:0 4px 10px rgba(15,23,42,.06),0 18px 40px -16px rgba(15,23,42,.22)}
-  .v2-card-top{display:flex;align-items:flex-start;gap:12px;margin-bottom:12px}
-  .v2-ico{width:46px;height:46px;border-radius:12px;flex:none;display:grid;place-items:center;
-    background:linear-gradient(135deg,#eef2ff,#e8e5ff);color:var(--v2-brand)}
+  /* ---- 卡片墙 ---- */
+  .v2-sec{padding:14px 0 0}
+  .v2-sec-head{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:20px}
+  .v2-sec-head h2{font-size:25px;margin:0;font-weight:800;letter-spacing:-.5px}
+  .v2-sec-head p{margin:0;color:var(--muted);font-size:14px}
+  .v2-count{margin-left:auto;color:var(--faint);font-size:13px}
+  .v2-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:16px}
+  .v2-card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);
+    padding:16px;display:flex;flex-direction:column;transition:transform .15s ease,border-color .15s ease}
+  .v2-card:hover{transform:translateY(-2px);border-color:var(--border-strong)}
+  .v2-card-top{display:flex;align-items:flex-start;gap:11px;margin-bottom:11px}
+  .v2-ico{width:42px;height:42px;border-radius:11px;flex:none;display:grid;place-items:center;
+    background:var(--bg-soft);border:1px solid var(--border);color:var(--brand-strong)}
   .v2-card-id{flex:1;min-width:0}
   .v2-card-name{display:flex;align-items:center;gap:7px;min-width:0}
-  .v2-card-name b{font-size:15.5px;letter-spacing:-.01em;overflow:hidden;
-    text-overflow:ellipsis;white-space:nowrap;min-width:0}
-  .v2-tagpill{font-size:11px;padding:2px 8px;border-radius:999px;background:#eef2f8;
-    color:var(--v2-muted);font-weight:600;flex:none}
-  .v2-tagpill.hot{background:#fff1f0;color:#e04a3f}
-  .v2-card-tag{display:block;font-size:12px;color:var(--v2-faint);margin-top:3px}
-  .v2-card-desc{font-size:13px;color:var(--v2-muted);line-height:1.6;margin:0 0 14px;
+  .v2-card-name b{font-size:14.5px;line-height:1.35;overflow:hidden;min-width:0;
+    display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+  .v2-pill{font-size:10.5px;padding:2px 7px;border-radius:999px;font-weight:600;flex:none;
+    background:var(--ok-weak);color:var(--ok)}
+  .v2-pill.soon{background:var(--warn-weak);color:var(--warn)}
+  .v2-pill.lock{background:var(--brand-weak);color:var(--brand-strong)}
+  .v2-card-tag{display:block;font-size:11.5px;color:var(--faint);margin-top:3px;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .v2-card-desc{font-size:12.5px;color:var(--muted);line-height:1.6;margin:0 0 13px;
     display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
-  .v2-tags{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px}
-  .v2-tag{font-size:11.5px;padding:4px 10px;border-radius:7px;background:#f1f5f9;color:#475569}
-  .v2-card-foot{display:flex;align-items:center;gap:8px;margin-top:auto;
-    padding-top:13px;border-top:1px solid var(--v2-border);font-size:12.5px;color:var(--v2-muted)}
-  .v2-state{width:8px;height:8px;border-radius:999px;flex:none;background:var(--v2-faint)}
-  .v2-state.on{background:var(--v2-brand)}
-  .v2-state.lock{background:var(--v2-star)}
-  .v2-chev{margin-left:auto;color:var(--v2-faint)}
+  .v2-card-foot{display:flex;align-items:center;gap:7px;margin-top:auto;padding-top:11px;
+    border-top:1px solid var(--border);font-size:12px;color:var(--muted)}
+  .v2-chev{margin-left:auto;color:var(--faint)}
+  .v2-empty{display:none;text-align:center;padding:52px 0;color:var(--muted)}
+  .v2-empty b{display:block;font-size:16px;color:var(--fg);margin-bottom:6px}
 
-  /* ---- 底部 CTA ---- */
-  .v2-cta{margin:52px 0 64px;border-radius:var(--v2-radius-lg);overflow:hidden;position:relative;
-    background:linear-gradient(120deg,#0b1220 0%,#1b2a4a 55%,#2c3e6b 100%);
-    color:#fff;padding:44px 48px;display:flex;align-items:center;gap:24px}
-  .v2-cta::after{content:"";position:absolute;inset:0;pointer-events:none;
-    background:radial-gradient(120% 140% at 82% 40%, rgba(124,92,240,.38), transparent 58%)}
-  .v2-cta-txt{position:relative;z-index:1}
-  .v2-cta h3{font-size:27px;margin:0 0 6px;font-weight:800;letter-spacing:-.02em}
-  .v2-cta p{margin:0;opacity:.74;font-size:14.5px}
-  .v2-cta-btn{position:relative;z-index:1;margin-left:auto;background:#fff;color:var(--v2-ink);
-    border-radius:999px;padding:14px 28px;font-size:15px;font-weight:700;white-space:nowrap;
-    display:inline-flex;align-items:center;gap:8px}
+  .v2-cta{margin:46px 0 60px;border:1px solid var(--border-strong);border-radius:var(--radius-lg);
+    background:linear-gradient(120deg,#0e2342,#1b3f74 60%,#2a5391);padding:38px 42px;
+    display:flex;align-items:center;gap:22px;flex-wrap:wrap}
+  .v2-cta h3{font-size:24px;margin:0 0 5px;font-weight:800;letter-spacing:-.5px}
+  .v2-cta p{margin:0;color:#b9cdea;font-size:14px}
+  .v2-cta .btn{margin-left:auto;background:#fff;color:#13233f;border:0}
 
-  @media (max-width:1100px){
-    .v2-hero{grid-template-columns:1fr;gap:34px}
+  @media (max-width:1060px){
+    .v2-hero-inner{grid-template-columns:1fr;gap:32px}
     .v2-grid{grid-template-columns:repeat(2,1fr)}
-    .v2-nav,.v2-search-sm{display:none}
   }
   @media (max-width:620px){
-    .wrap{padding:0 16px}
-    .v2-hero h1{font-size:33px}
     .v2-grid{grid-template-columns:1fr}
-    .v2-cta{flex-direction:column;align-items:flex-start;padding:32px 24px}
-    .v2-cta-btn{margin-left:0}
-    .v2-feat-row{flex-direction:column}
+    .v2-slide-art{display:none}
+    .v2-cta{padding:26px 22px}
+    .v2-cta .btn{margin-left:0}
   }
 </style>
-</head>
-<body>
+{% endblock %}
 
-<div class="v2-flag">
-  <b>预览页</b> · 首页改版方案，未接入线上首页；卡片数据取自真实产品目录
-</div>
+{% block content %}
+<div class="v2-flag">预览页 · 首页改版方案，未接入线上首页；卡片与状态取自真实产品目录</div>
 
-<header class="v2-head">
-  <div class="wrap v2-head-row">
-    <a class="v2-logo" href="/preview/home-v2">
-      <span class="v2-logo-mark">
-        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3 8.5 15h-17L12 3Z"/></svg>
-      </span>
-      <span class="v2-logo-txt"><b>AI Store</b><i>发现 · 使用 · 创造更大的可能</i></span>
-    </a>
-    <nav class="v2-nav">
-      <a class="on" href="#">首页</a><a href="/apps">应用</a><a href="#">排行榜</a>
-      <a href="#">社区</a><a href="#">关于我们</a>
-    </nav>
-    <div class="v2-head-right">
-      <span class="v2-search-sm">
-        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.2-3.2"/></svg>
-        搜索 AI 应用…
-      </span>
-      <a class="v2-btn-dark" href="/login">登录 / 注册</a>
-    </div>
-  </div>
-</header>
+{# ---- 品牌图标 ----
+   能对齐官方的就对齐 —— 这一格装的**就是**那个上游项目, 商店里用它自己的视觉是
+   常识。图形是照着各自视觉语言重画的单色 SVG, 不是搬人家的商标文件。
 
-<main class="wrap">
+   **一个例外, 老板点名的那个**: OpenMausBot 是"开源版 Grok Bot", 它不是 xAI 的
+   Grok。给它挂 Grok 的标, 用户读到的信息是"这是 xAI 出的" —— 那不是对齐, 是冒名。
+   其余十五个能对齐是因为名副其实: Claude Code 就是 Anthropic 那个、Codex 就是
+   OpenAI 那个、ComfyUI/Dify/LangChain/AutoGen 就是上游本体。这一格先用"群聊里多个
+   机器人"的自有图形, 要改成 Grok 标得老板点头。 #}
+{% set brand_icons = {
+  'dsh': '<path d="M3.6 8.2c2.9-1.4 5.1-.5 6.6 1.1 1.2 1.3 2.7 1.9 4.3 1.6 1.9-.4 3.3-1.8 3.9-3.6"/><path d="M18.4 7.3a1.15 1.15 0 1 0 2.3 0 1.15 1.15 0 0 0-2.3 0Z" fill="currentColor" stroke="none"/><path d="M3.6 8.2c-.5 3.6.6 6.6 2.7 8.5 2.4 2.2 5.9 2.7 8.9 1.2 2.7-1.3 4.4-3.9 4.6-6.8"/>',
+  'agents-team': '<circle cx="7.5" cy="8" r="2.6"/><circle cx="16.5" cy="8" r="2.6"/><path d="M2.8 19a4.9 4.9 0 0 1 9.4 0"/><path d="M11.8 19a4.9 4.9 0 0 1 9.4 0"/>',
+  'comfyui': '<rect x="2.5" y="4" width="6" height="4.6" rx="1.2"/><rect x="15.5" y="3.2" width="6" height="4.6" rx="1.2"/><rect x="15.5" y="12" width="6" height="4.6" rx="1.2"/><rect x="8" y="16" width="6" height="4.6" rx="1.2"/><path d="M8.5 6.3h3.2a1.6 1.6 0 0 1 1.6 1.6v6.5a1.6 1.6 0 0 0 1.6 1.6h.6"/><path d="M8.5 6.3h7"/><path d="M11 16v-1.7"/>',
+  'codex': '<path d="M12 2.6c1.5 0 2.8.8 3.5 2a4 4 0 0 1 3.4 6 4 4 0 0 1-1.4 5.5 4 4 0 0 1-5.5 1.4 4 4 0 0 1-5.5-1.4 4 4 0 0 1-1.4-5.5 4 4 0 0 1 3.4-6A4 4 0 0 1 12 2.6Z"/><path d="M12 8.3v7.4M8.8 10.2l6.4 3.6M15.2 10.2l-6.4 3.6"/>',
+  'openclaw': '<path d="M8 3.5c-.7 2.2-.3 3.9.8 5M16 3.5c.7 2.2.3 3.9-.8 5"/><path d="M12 8.2c2.8 0 4.6 2 4.6 4.6 0 3.2-2 6.4-4.6 7.7-2.6-1.3-4.6-4.5-4.6-7.7 0-2.6 1.8-4.6 4.6-4.6Z"/><path d="M4.2 11.5c1.3-.5 2.4-.2 3.2.6M19.8 11.5c-1.3-.5-2.4-.2-3.2.6"/><path d="M10.4 12.6h3.2"/>',
+  'claude-code': '<path d="M12 3.2v17.6M5.6 6.4l12.8 11.2M18.4 6.4 5.6 17.6"/><path d="M3.4 12h17.2"/>',
+  'hermes': '<path d="M12 2.8 4.6 7v10L12 21.2 19.4 17V7L12 2.8Z"/><path d="M12 8.2 8.6 10v4l3.4 1.8 3.4-1.8v-4L12 8.2Z"/>',
+  'dify': '<circle cx="12" cy="12" r="8.6"/><path d="M12 3.4c3.4 2.4 3.4 14.8 0 17.2"/><path d="M3.6 12h16.8"/>',
+  'live': '<rect x="2.6" y="5.4" width="13.4" height="13.2" rx="2.4"/><path d="m16 12 5.4-3.4v6.8L16 12Z"/><circle cx="9.3" cy="12" r="2.6"/>',
+  'avatar': '<circle cx="12" cy="8" r="3.6"/><path d="M4.8 20a7.2 7.2 0 0 1 14.4 0"/><path d="M2.4 9.6v4.8M21.6 9.6v4.8"/>',
+  'open-design': '<path d="M12 3a9 9 0 1 0 0 18c1.2 0 1.8-.9 1.8-1.7 0-.9-.7-1.4-.7-2.2 0-.8.6-1.4 1.5-1.4H17a4 4 0 0 0 4-4C21 6.6 17 3 12 3Z"/><circle cx="7.6" cy="11" r="1.05" fill="currentColor" stroke="none"/><circle cx="12" cy="7.6" r="1.05" fill="currentColor" stroke="none"/><circle cx="16.4" cy="11" r="1.05" fill="currentColor" stroke="none"/>',
+  'pi': '<path d="M4.6 7.4h14.8"/><path d="M9 7.4v9.8c0 1.1-.6 1.8-1.7 1.8"/><path d="M15.4 7.4v8.4c0 1.6.7 2.4 2 2.4"/>',
+  'autogen': '<circle cx="12" cy="5.4" r="2.6"/><circle cx="5.6" cy="17" r="2.6"/><circle cx="18.4" cy="17" r="2.6"/><path d="M10.2 7.4 7 14.6M13.8 7.4 17 14.6M8.2 17h7.6"/>',
+  'langchain': '<path d="M9.6 14.4a3.6 3.6 0 0 1 0-5.1l2.2-2.2a3.6 3.6 0 0 1 5.1 5.1l-1 1"/><path d="M14.4 9.6a3.6 3.6 0 0 1 0 5.1l-2.2 2.2a3.6 3.6 0 0 1-5.1-5.1l1-1"/>',
+  'openmanus': '<path d="M8.4 11V5.6a1.5 1.5 0 0 1 3 0V11"/><path d="M11.4 10.4V4.4a1.5 1.5 0 0 1 3 0v6"/><path d="M14.4 10.8V6.4a1.5 1.5 0 0 1 3 0V14c0 3.6-2.4 6.4-6 6.4-3 0-4.6-1.6-5.7-3.9L5.4 14c-.5-1 0-2.1 1-2.5.8-.3 1.7 0 2 .8"/>',
+  'openmausbot': '<rect x="3.2" y="6.4" width="12" height="9.2" rx="2.4"/><path d="M6.6 15.6v2.8l3.2-2.8"/><circle cx="7.4" cy="11" r="1" fill="currentColor" stroke="none"/><circle cx="11" cy="11" r="1" fill="currentColor" stroke="none"/><path d="M14.6 8.6h6.2a1.6 1.6 0 0 1 1.6 1.6v4.6a1.6 1.6 0 0 1-1.6 1.6h-.8v2.2l-2.4-2.2h-2"/>'
+} %}
 
-  <section class="v2-hero">
+{# 精选位: 取目录里前 5 个已上线的, 不写死 —— 写死的话它下架了这里就是假的 #}
+{% set featured = (apps | selectattr("live") | list)[:5] or apps[:5] %}
+
+<section class="hero-dark v2-hero">
+  <canvas id="hero-waves" aria-hidden="true"></canvas>
+  <div class="hero-grid" aria-hidden="true"></div>
+  <div class="container v2-wide v2-hero-inner">
     <div>
       <h1>世界上最好的 <span class="v2-grad">AI 应用</span>严选商店</h1>
       <p class="v2-hero-sub">汇聚全球顶尖 AI 产品 · 真实体验 · 深度评测</p>
 
-      <form class="v2-searchbar" action="/apps" method="get">
-        <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="var(--v2-faint)" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.2-3.2"/></svg>
-        <input name="q" placeholder="搜索 AI 应用、功能或场景…" aria-label="搜索">
-        <button class="v2-go" type="submit">探索
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h13M13 6l6 6-6 6"/></svg>
+      <div class="v2-search">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="var(--faint)" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.2-3.2"/></svg>
+        <input id="v2-q" type="search" autocomplete="off" placeholder="搜索 AI 应用、功能或场景…"
+               aria-label="搜索应用" aria-controls="v2-grid">
+        <button type="button" id="v2-go">探索
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h13M13 6l6 6-6 6"/></svg>
         </button>
-      </form>
+      </div>
 
       <div class="v2-feats">
-        <span class="v2-feat"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linejoin="round"><path d="M13 2 4 14h7l-1 8 9-12h-7l1-8Z"/></svg>即开即用</span>
-        <span class="v2-feat"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="var(--v2-brand)" stroke-width="2" stroke-linejoin="round"><path d="M12 3 5 6v6c0 4.2 2.9 7.9 7 9 4.1-1.1 7-4.8 7-9V6l-7-3Z"/><path d="m9 12 2 2 4-4"/></svg>安全可信</span>
-        <span class="v2-feat"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="#7c5cf0" stroke-width="2" stroke-linejoin="round"><path d="m12 3 2.6 5.6 6.1.8-4.5 4.2 1.2 6L12 16.8 6.6 19.6l1.2-6-4.5-4.2 6.1-.8L12 3Z"/></svg>真实评测</span>
-        <span class="v2-feat"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="var(--v2-ok)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3"/><path d="M3.5 19a5.5 5.5 0 0 1 11 0"/><path d="M17 11.5a2.5 2.5 0 1 0 0-5"/><path d="M17.5 19a5 5 0 0 0-3-4.6"/></svg>持续更新</span>
+        <span><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="var(--warn)" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M13 2 4 14h7l-1 8 9-12h-7l1-8Z"/></svg>即开即用</span>
+        <span><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="var(--brand-strong)" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 5 6v6c0 4.2 2.9 7.9 7 9 4.1-1.1 7-4.8 7-9V6l-7-3Z"/><path d="m9 12 2 2 4-4"/></svg>安全可信</span>
+        <span><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#a78bfa" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="m12 3 2.6 5.6 6.1.8-4.5 4.2 1.2 6L12 16.8 6.6 19.6l1.2-6-4.5-4.2 6.1-.8L12 3Z"/></svg>真实评测</span>
+        <span><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="var(--ok)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3"/><path d="M3.5 19a5.5 5.5 0 0 1 11 0"/><path d="M17 11.5a2.5 2.5 0 1 0 0-5"/><path d="M17.5 19a5 5 0 0 0-3-4.6"/></svg>持续更新</span>
       </div>
     </div>
 
-    {# 精选位: 取目录里第一个已上线的产品, 不写死 —— 写死的话它下架了这里就是假的 #}
-    {% set feat = (apps | selectattr("live") | list | first) or apps[0] %}
-    <aside class="v2-featured">
-      <span class="v2-badge-sm">精选应用</span>
-      <div class="v2-feat-row">
-        <div class="v2-feat-left">
-          <span class="v2-feat-name">
-            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">{{ feat.icon | safe }}</svg>
-            {{ feat.name }}
-          </span>
-          <h2>把想法，变成现实</h2>
-          <p>{{ t("apps.tag." + feat.tag) }}</p>
-          <a class="v2-feat-cta" href="/apps">立即探索
-            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17 17 7M9 7h8v8"/></svg>
-          </a>
-        </div>
-        <div class="v2-code">
-          <div class="c">// Turn ideas into reality</div>
-          <div><span class="k">async function</span> build() {</div>
-          <div>&nbsp;&nbsp;<span class="k">const</span> idea = <span class="k">await</span> prompt();</div>
-          <div>&nbsp;&nbsp;<span class="k">const</span> code = <span class="k">await</span> generate(idea);</div>
-          <div>&nbsp;&nbsp;<span class="k">await</span> deploy(code);</div>
-          <div>&nbsp;&nbsp;<span class="k">return</span> <span class="s">"Better software"</span>;</div>
-          <div>}</div>
+    <div class="v2-car" id="v2-car" aria-roledescription="carousel" aria-label="精选应用">
+      {% for app in featured %}
+      {% set href = app.href or ('/work' if app.id == 'dsh' else '/work?product_id=' + app.id) %}
+      <div class="v2-slide{{ ' on' if loop.first }}" data-slide="{{ loop.index0 }}"
+           aria-hidden="{{ 'false' if loop.first else 'true' }}">
+        <span class="v2-badge">精选应用 · {{ loop.index }}/{{ featured|length }}</span>
+        <div class="v2-slide-body">
+          <div class="v2-slide-l">
+            <span class="v2-slide-name">
+              <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{{ brand_icons.get(app.id, app.icon) | safe }}</svg>
+              {{ app.name }}
+            </span>
+            <h2>{{ t("apps.tag." + app.tag) }}</h2>
+            <p>{{ t("apps.d." + app.id) }}</p>
+            <span class="v2-slide-cta">
+              <a class="btn btn-primary" href="{{ href }}">立即探索
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17 17 7M9 7h8v8"/></svg>
+              </a>
+            </span>
+          </div>
+          <div class="v2-slide-art" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="76" height="76" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round">{{ brand_icons.get(app.id, app.icon) | safe }}</svg>
+          </div>
         </div>
       </div>
-      <div class="v2-dots">
-        <span class="v2-dot on"></span><span class="v2-dot"></span><span class="v2-dot"></span>
-        <span class="v2-arrows">
-          <span class="v2-arrow"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m14 6-6 6 6 6"/></svg></span>
-          <span class="v2-arrow"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m10 6 6 6-6 6"/></svg></span>
+      {% endfor %}
+      <div class="v2-car-foot">
+        {% for app in featured %}
+        <button class="v2-dot{{ ' on' if loop.first }}" data-go="{{ loop.index0 }}"
+                aria-label="第 {{ loop.index }} 张"></button>
+        {% endfor %}
+        <span class="v2-nav-btns">
+          <button type="button" data-car="prev" aria-label="上一个"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m14 6-6 6 6 6"/></svg></button>
+          <button type="button" data-car="next" aria-label="下一个"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m10 6 6 6-6 6"/></svg></button>
         </span>
       </div>
-    </aside>
-  </section>
+    </div>
+  </div>
+</section>
 
+<div class="container v2-wide">
   <section class="v2-sec">
     <div class="v2-sec-head">
       <h2>SOTA 精选</h2>
       <p>来自全球的顶尖 AI 产品，立即体验改变生产力的力量</p>
-      <a class="v2-more" href="/apps">查看全部 →</a>
+      <span class="v2-count" id="v2-count">{{ apps|length }} 个产品</span>
     </div>
 
-    <div class="v2-grid">
-      {% for app in apps[:8] %}
+    <div class="v2-grid" id="v2-grid">
+      {% for app in apps %}
       {% set href = app.href or ('/work' if app.id == 'dsh' else '/work?product_id=' + app.id) %}
-      <a class="v2-card" href="{{ href if app.live else '/apps' }}">
+      <a class="v2-card" href="{{ href if app.live else '/apps' }}"
+         data-k="{{ (app.name ~ ' ' ~ app.id ~ ' ' ~ t('apps.tag.' + app.tag) ~ ' ' ~ t('apps.d.' + app.id)) | lower }}">
         <div class="v2-card-top">
           <span class="v2-ico">
-            <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">{{ app.icon | safe }}</svg>
+            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{{ brand_icons.get(app.id, app.icon) | safe }}</svg>
           </span>
           <span class="v2-card-id">
-            <span class="v2-card-name">
-              <b>{{ app.name }}</b>
-              {% if app.live %}<span class="v2-tagpill">已上线</span>{% else %}<span class="v2-tagpill hot">即将上线</span>{% endif %}
-            </span>
+            <span class="v2-card-name"><b>{{ app.name }}</b></span>
             <span class="v2-card-tag">{{ t("apps.tag." + app.tag) }}</span>
           </span>
         </div>
         <p class="v2-card-desc">{{ t("apps.d." + app.id) }}</p>
-        <div class="v2-tags">
-          <span class="v2-tag">{{ t("apps.tag." + app.tag) }}</span>
-          {% if app.href %}<span class="v2-tag">主站页面</span>{% else %}<span class="v2-tag">云工作台</span>{% endif %}
-        </div>
         <div class="v2-card-foot">
-          <span class="v2-state {{ 'lock' if app.locked else ('on' if app.live) }}"></span>
-          {% if app.locked %}需解锁{% elif app.live %}可直接打开{% else %}即将上线{% endif %}
-          <span class="v2-chev">
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m10 6 6 6-6 6"/></svg>
-          </span>
+          {# 状态放这行而不是挨着名字: 4 列下卡片只有 ~270px, 徽章挤在名字旁边
+             会把「DeepSeek Harness」截成「DeepSeek H...」。底部这行本来就是状态行。 #}
+          {% if app.locked %}<span class="v2-pill lock">需解锁</span>
+          {% elif app.live %}<span class="v2-pill">已上线</span>
+          {% else %}<span class="v2-pill soon">即将上线</span>{% endif %}
+          {% if app.href %}主站页面{% else %}云工作台{% endif %}
+          <span class="v2-chev"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m10 6 6 6-6 6"/></svg></span>
         </div>
       </a>
       {% endfor %}
     </div>
+
+    <div class="v2-empty" id="v2-empty">
+      <b>没有匹配的应用</b>
+      换个词试试，或者 <a href="/apps">看全部 {{ apps|length }} 个</a>
+    </div>
   </section>
 
   <section class="v2-cta">
-    <div class="v2-cta-txt">
+    <div>
       <h3>更好的 AI 工具，创造更好的你</h3>
       <p>Tools for a brighter you.</p>
     </div>
-    <a class="v2-cta-btn" href="/apps">开始探索
-      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h13M13 6l6 6-6 6"/></svg>
+    <a class="btn" href="/apps">开始探索
+      <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h13M13 6l6 6-6 6"/></svg>
     </a>
   </section>
+</div>
+{% endblock %}
 
-</main>
-</body>
-</html>
+{% block scripts %}
+<script>
+(function () {
+  "use strict";
+
+  /* ---- 精选轮播 ---- */
+  var car = document.getElementById("v2-car");
+  if (car) {
+    var slides = car.querySelectorAll("[data-slide]");
+    var dots = car.querySelectorAll("[data-go]");
+    var at = 0, timer = null;
+
+    function show(i) {
+      at = (i + slides.length) % slides.length;
+      for (var s = 0; s < slides.length; s++) {
+        var on = s === at;
+        slides[s].classList.toggle("on", on);
+        slides[s].setAttribute("aria-hidden", on ? "false" : "true");
+      }
+      for (var d = 0; d < dots.length; d++) dots[d].classList.toggle("on", d === at);
+    }
+    // 自动轮播。悬停/聚焦时停 —— 正在读的那张被换走最恼人。
+    function play() { stop(); if (slides.length > 1) timer = setInterval(function () { show(at + 1); }, 5200); }
+    function stop() { if (timer) { clearInterval(timer); timer = null; } }
+
+    car.addEventListener("click", function (ev) {
+      var go = ev.target.closest("[data-go]"), nav = ev.target.closest("[data-car]");
+      if (go) { show(+go.dataset.go); play(); }
+      else if (nav) { show(at + (nav.dataset.car === "next" ? 1 : -1)); play(); }
+    });
+    car.addEventListener("mouseenter", stop);
+    car.addEventListener("mouseleave", play);
+    car.addEventListener("focusin", stop);
+    // 键盘左右切换 —— 轮播只能用鼠标点是个无障碍缺口
+    car.tabIndex = 0;
+    car.addEventListener("keydown", function (ev) {
+      if (ev.key === "ArrowRight") { show(at + 1); play(); }
+      else if (ev.key === "ArrowLeft") { show(at - 1); play(); }
+    });
+    play();
+  }
+
+  /* ---- 搜索: 对 16 张卡实时过滤 ---- */
+  var q = document.getElementById("v2-q");
+  var grid = document.getElementById("v2-grid");
+  if (q && grid) {
+    var cards = grid.querySelectorAll("[data-k]");
+    var countEl = document.getElementById("v2-count");
+    var emptyEl = document.getElementById("v2-empty");
+    var total = cards.length;
+
+    function filter() {
+      // 空格分词, 每个词都要命中 (AND) —— "编码 智能体" 应当收窄而不是放宽
+      var terms = q.value.trim().toLowerCase().split(/\s+/).filter(Boolean);
+      var hit = 0;
+      for (var i = 0; i < cards.length; i++) {
+        var k = cards[i].dataset.k, ok = true;
+        for (var t = 0; t < terms.length; t++) { if (k.indexOf(terms[t]) < 0) { ok = false; break; } }
+        cards[i].hidden = !ok;
+        if (ok) hit++;
+      }
+      grid.hidden = hit === 0;
+      emptyEl.style.display = hit === 0 ? "block" : "none";
+      countEl.textContent = terms.length ? (hit + " / " + total + " 个产品") : (total + " 个产品");
+    }
+    q.addEventListener("input", filter);
+    q.addEventListener("keydown", function (ev) { if (ev.key === "Escape") { q.value = ""; filter(); } });
+    document.getElementById("v2-go").addEventListener("click", function () {
+      filter();
+      document.getElementById("v2-grid").scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  }
+})();
+</script>
+{% endblock %}
