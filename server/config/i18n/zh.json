@@ -192,6 +192,7 @@
   "console.devices.th.status": "状态",
   "console.devices.title": "我的设备",
   "console.keys.copy": "复制",
+  "console.keys.loadfail": "密钥列表加载失败，请稍后重试。",
   "console.keys.create": "新建密钥",
   "console.keys.lede": "用任意 OpenAI 兼容的客户端接入我们的网关。密钥用量与你的套餐额度共享，可随时吊销。",
   "console.keys.ph_label": "用途备注（可选，如：我的脚本）",

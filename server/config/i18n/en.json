@@ -192,6 +192,7 @@
   "console.devices.th.status": "Status",
   "console.devices.title": "My devices",
   "console.keys.copy": "Copy",
+  "console.keys.loadfail": "Couldn’t load your keys. Retry in a moment.",
   "console.keys.create": "Create key",
   "console.keys.lede": "Use any OpenAI-compatible client with our gateway. Usage draws on your plan's allowance; revoke a key at any time.",
   "console.keys.ph_label": "Label (optional, e.g. my script)",
