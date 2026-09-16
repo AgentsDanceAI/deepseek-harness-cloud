@@ -189,9 +189,29 @@ def set_session_cookie(response: Response, user: dict) -> None:
 
 
 def _client_ip(request: Request) -> str:
+    """真实客户端 IP —— 按 IP 的限流/锁定全靠它, 取错了等于没限流。
+
+    原来取的是 X-Forwarded-For 的**最左**一段。线上链路是
+    Cloudflare -> Caddy -> 本服务, 两者都只往右边**追加**、不覆盖, 所以最左那段
+    完全由调用方写。2026-09-16 实测: 每次换一个伪造 XFF 撞库, 按 IP 的 30 次/15 分
+    全程不触发; 发验证码那条 (5 次/600 秒) 同样绕开 —— 可以拿来无限刷验证邮件。
+
+    改成优先信 CF-Connecting-IP: 它由 Cloudflare 覆盖写入, 调用方改不了; 而源站
+    iptables 的 CF-ONLY 链只放行 Cloudflare 网段 (eth0 上非 CF 来源 LOG+DROP),
+    绕过 CF 直连源站这条路是断的, 所以这个头可信。
+    没有该头时退回 XFF, 但**从右往左**数 TRUSTED_PROXY_HOPS 跳 —— 右边那几段是我们
+    自己的代理写的, 伪造不了。都没有才用 TCP 对端。
+    """
+    cf = request.headers.get("cf-connecting-ip", "").strip()
+    if cf:
+        return cf
     fwd = request.headers.get("x-forwarded-for", "")
     if fwd:
-        return fwd.split(",")[0].strip()
+        parts = [p.strip() for p in fwd.split(",") if p.strip()]
+        if parts:
+            hops = config.TRUSTED_PROXY_HOPS
+            # 跳数比实际链还长时退回最左 —— 宁可粒度粗, 也不要取到空。
+            return parts[-hops] if hops >= 1 and len(parts) >= hops else parts[0]
     return request.client.host if request.client else ""
 
 

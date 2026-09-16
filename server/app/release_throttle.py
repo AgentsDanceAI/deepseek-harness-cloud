@@ -47,9 +47,25 @@ class ReleaseThrottle:
     def _client(self, scope) -> str:
         # Behind Caddy, so the socket peer is always the proxy. Fall back to it
         # only when the header is absent (direct access in dev).
+        #
+        # 与 accounts._client_ip 同一个洞同一种修法: 最左那段 XFF 由调用方伪造,
+        # 每次换一个就能把按 IP 的下载配额刷干净。优先信 Cloudflare 覆盖写入的
+        # CF-Connecting-IP, 否则从右往左数可信跳数。
+        from . import config as _config
+
+        xff = None
         for name, value in scope.get("headers") or ():
-            if name == b"x-forwarded-for":
-                return value.decode("latin-1").split(",")[0].strip()
+            if name == b"cf-connecting-ip":
+                cf = value.decode("latin-1").strip()
+                if cf:
+                    return cf
+            elif name == b"x-forwarded-for":
+                xff = value.decode("latin-1")
+        if xff:
+            parts = [p.strip() for p in xff.split(",") if p.strip()]
+            if parts:
+                hops = _config.TRUSTED_PROXY_HOPS
+                return parts[-hops] if hops >= 1 and len(parts) >= hops else parts[0]
         client = scope.get("client")
         return client[0] if client else "unknown"
 

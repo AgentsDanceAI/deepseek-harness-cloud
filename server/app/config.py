@@ -63,6 +63,10 @@ RELEASE_REVISION = _env("RELEASE_REVISION", "")
 SESSION_COOKIE = "dhc_session"
 SESSION_TTL = _env_int("AUTH_TOKEN_TTL", 90 * 24 * 3600)  # browser session tokens
 DEVICE_TOKEN_TTL = _env_int("DEVICE_TOKEN_TTL", 365 * 24 * 3600)  # desktop device tokens
+# 本服务前面隔着几层**我们自己的**代理。线上是 Cloudflare -> Caddy -> 这里, 两者都
+# 只往 X-Forwarded-For 右边追加、不覆盖, 所以真实客户端在倒数第 TRUSTED_PROXY_HOPS 位;
+# 最左边那个完全由调用方伪造。自部署直接暴露则设 0。
+TRUSTED_PROXY_HOPS = _env_int("TRUSTED_PROXY_HOPS", 2)
 
 # --- database ---------------------------------------------------------------
 DB_BACKEND = _env("DB_BACKEND", "sqlite")  # sqlite | postgres

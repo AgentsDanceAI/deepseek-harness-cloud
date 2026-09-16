@@ -93,6 +93,24 @@ def spend(
                     "SELECT pg_advisory_xact_lock(hashtextextended(?, 0))",
                     (f"dsh-credit:{holder}",),
                 )
+        # 幂等: 带了 request_id 就把它当幂等键。工作台计费 reaper 每分钟按
+        # ws-{product}-{分钟桶} 记一次, 而 usage_log.request_id 上**没有唯一约束** ——
+        # 多进程 (多 worker / 第二个实例) 下同一分钟会被记两次, 用户被多扣。
+        #
+        # 查-写放在**持锁事务内**: 上面已经对每个付款方加了事务级 advisory lock,
+        # 同一付款方的并发调用在那里串行, 后来者一定看得见前者刚写的行。所以不需要
+        # 加唯一索引 —— 生产表上加约束要先清历史重复, 那是另一次停机风险。
+        #
+        # 对合法流程无副作用: 网关每请求是 dhc-{uuid4}, avatar say 是 uuid4,
+        # 只有 reaper 与 avatar 计量是确定性 id —— 那两个本来就该只算一次。
+        if request_id:
+            dup = conn.execute(
+                "SELECT 1 FROM usage_log WHERE user_id=? AND request_id=? LIMIT 1",
+                (user_id, request_id),
+            ).fetchone()
+            if dup:
+                return
+
         left = amount
         # org pool first, then personal; soonest-expiry bucket first within each
         for holder in holders:

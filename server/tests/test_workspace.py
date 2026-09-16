@@ -260,12 +260,17 @@ def test_meters_every_minute_the_workspace_runs(fake):
     assert credits.balance(uid) == before_credits
 
     # 页面开着但智能体闲着时，容器仍在运行，因此继续计量。
+    #
+    # 时钟往前推一分钟: 计量的幂等键是 ws-{product}-{分钟桶}, 同一分钟内连着 tick
+    # 两次本来就**只该算一分钟** (2026-09-16 加的幂等)。生产里 reaper 是
+    # sleep(60) 一跳, 桶必然递进; 这里不推时钟就成了在测"同一分钟重复计费"。
+    later = time.time() + 60
     _mark_agent_active(uid, ago_s=300)
-    workspace._last_seen[uid] = time.time()
-    workspace._started_at[uid] = time.time()
+    workspace._last_seen[uid] = later
+    workspace._started_at[uid] = later
     before_minutes = work_access.used_minutes(uid)
     stops_before = fake.stops
-    asyncio.run(workspace.reaper_tick(time.time()))
+    asyncio.run(workspace.reaper_tick(later))
     assert work_access.used_minutes(uid) == before_minutes + 1, "运行中的闲置分钟必须计量"
     assert fake.stops == stops_before  # 还没到回收窗口
 

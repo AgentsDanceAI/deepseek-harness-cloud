@@ -1173,7 +1173,11 @@ async def incidents(hours: float = 6.0, limit: int = 200, room: str = "", user: 
     """最近发生过什么。回答的是"什么时候开始出问题的"。
 
     不回 user_id —— 要的是"卡了多少次", 不是"谁卡了"。
+
+    管理员专用, 与本文件其它运维读口一致 (原来漏了这道闸: 只认登录不认管理员,
+    任何注册用户都能读任意房间的卡顿/延迟曲线 —— 那是运营数据, 不是公开信息)。
     """
+    _require_admin(user)
     if not _enabled():
         raise HTTPException(404, "live_disabled")
     room = _room(room)
