@@ -25,5 +25,10 @@ desktop/.cache-electron/
 # stray build cache from a desktop build run
 .gradle-cache/
 
+# deploy/workspace-opendesign/build.sh 打出来的 profile bundle / runtime tarball,
+# 是构建产物不是源码。固定名 open-design-dsh-runtime.tgz, npm pack 的带版本变体
+# 也一并挡掉, 免得 git add -A 把它扫进仓库 (CLAUDE.md 记过整文件误带上线的事故)。
+deploy/workspace-opendesign/open-design-dsh-runtime*.tgz
+
 # macOS 目录元数据, 从来不该进仓库
 .DS_Store
