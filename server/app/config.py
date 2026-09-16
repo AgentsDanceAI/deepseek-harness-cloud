@@ -563,6 +563,15 @@ OPENMANUS_CLI_IMAGE_REF = _env(
     "OPENMANUS_CLI_IMAGE_REF", "ghcr.io/agentsdancepro/workspace-cli:0.77.0-r8-openmanus"
 )
 #: pi-web-ui 监听 8787 (与 pi 那格同一个外壳, 同一个端口)。
+#: 终端 /model 菜单里那一档"最省的"。**显式配, 不按目录里最便宜的自动选** ——
+#: 目录里同为 0.04 倍的还有两个 omni/VL 型号, 自动选很容易选到一个不会写代码的。
+#: 留空 = 不加这一档。
+#: ⛔ 换之前必须实测: 这条路是 Claude Code 的 Anthropic 报文**逐字**转给上游 (我们
+#:    这层不做协议翻译), 而"200 但 content 是空的"是真实发生过的失败形状 —— 0001-cli-engine
+#:    的注释记着 deepseek-v4-flash 当初就是这么被踢出默认位的。2026-09-16 重测 24/24
+#:    通过(含 tool_use), 判据是"有内容 + 会调工具", 不是状态码。复测:
+#:      docker exec dhc-server python /tmp/probe_rep.py   (见 scripts/probe_anthropic_face.py 的铸令牌姿势)
+CLI_WORKSPACE_CHEAP_MODEL = _env("CLI_WORKSPACE_CHEAP_MODEL", "deepseek-v4-flash")
 CLI_WORKSPACE_PORT = 8787
 
 # --- 数字人 (实时口型视频通话) ----------------------------------------------

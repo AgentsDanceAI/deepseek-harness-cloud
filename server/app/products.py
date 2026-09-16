@@ -1967,6 +1967,17 @@ def _claude_menu_env() -> dict[str, str]:
         env[f"ANTHROPIC_DEFAULT_{slot}_MODEL"] = m["id"]
         env[f"ANTHROPIC_DEFAULT_{slot}_MODEL_NAME"] = name
         env[f"ANTHROPIC_DEFAULT_{slot}_MODEL_DESCRIPTION"] = desc + note
+    # 第五个槽是**追加**的一项 (不替换上面四个), 留给"最省的那一档": Anthropic 系最便宜的
+    # 也要 1.0 倍, 而试用的人最该先摸到的是几分钱那一档。创始人 2026-09-16 提的就是这件事。
+    # 设了它还有个附带好处: 用户手打 `/model <这个名字>` 时 CLI 不会再先发一发 max_tokens:1
+    # 的探针去验证型号存不存在 (名字等于这个变量就直接认)。
+    cheap_id = (config.CLI_WORKSPACE_CHEAP_MODEL or "").strip()
+    cheap = model_catalog.resolve(cheap_id) if cheap_id else None
+    if cheap:
+        name, desc = _menu_label(cheap)
+        env["ANTHROPIC_CUSTOM_MODEL_OPTION"] = cheap_id
+        env["ANTHROPIC_CUSTOM_MODEL_OPTION_NAME"] = name
+        env["ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION"] = desc + " · 最省"
     return env
 
 

@@ -156,6 +156,39 @@ def test_terminal_menu_lists_the_catalog(monkeypatch):
     assert not [k for k in products.env_for("codex", "TOK", "") if k.startswith("ANTHROPIC")]
 
 
+def test_menu_has_a_cheap_option_and_it_is_a_real_model(monkeypatch):
+    """菜单里要有"最省的那一档"。
+
+    创始人 2026-09-16: "能不能都切成 deepseek-v4-flash, 这样可以降低用户的试用成本"。
+    Anthropic 系最便宜的也要 1.0 倍 (1000 积分/M), 而 deepseek-v4-flash 是 0.04 倍
+    (44 积分/M) —— 差 25 倍。四个别名槽只认在售的 Anthropic 型号, 所以这一档走
+    CLI 的第五个槽 (ANTHROPIC_CUSTOM_MODEL_OPTION, 它是**追加**不是替换)。
+
+    ⚠️ 钉住"必须是目录里真有的型号": 配错一个名字, 菜单上就摆着一行点了必 404 的选项。
+    """
+    monkeypatch.setattr(config, "USE_CLI_WORKSPACE", True)
+    env = products.env_for("claude-code", "TOK", "")
+    cheap = env.get("ANTHROPIC_CUSTOM_MODEL_OPTION")
+    assert cheap, "菜单里没有便宜档"
+    assert model_catalog.resolve(cheap), f"{cheap} 不在在售目录里 —— 菜单上摆了个点了必 404 的选项"
+    assert env.get("ANTHROPIC_CUSTOM_MODEL_OPTION_NAME")
+    assert "最省" in env.get("ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION", "")
+    # 比 Anthropic 系任何一个都便宜, 否则这一档没有存在的理由
+    cheapest_claude = min(
+        float(m.get("multiplier") or 0)
+        for m in model_catalog.catalog().values()
+        if str(m.get("provider")) == "Anthropic"
+    )
+    assert float(model_catalog.resolve(cheap).get("multiplier") or 0) < cheapest_claude
+
+    # 配空 = 不加这一档 (而不是摆一个空名字上去)
+    monkeypatch.setattr(config, "CLI_WORKSPACE_CHEAP_MODEL", "")
+    assert "ANTHROPIC_CUSTOM_MODEL_OPTION" not in products.env_for("claude-code", "TOK", "")
+    # 配一个目录里没有的 = 同样不加 (宁可少一档, 不摆一个点了必 404 的)
+    monkeypatch.setattr(config, "CLI_WORKSPACE_CHEAP_MODEL", "nope-v9")
+    assert "ANTHROPIC_CUSTOM_MODEL_OPTION" not in products.env_for("claude-code", "TOK", "")
+
+
 def test_codex_boot_replaces_its_model_menu_with_the_catalog(monkeypatch):
     """codex 那格的菜单**烧在二进制里**, 只能靠开机写 models_cache.json 换掉。
 
