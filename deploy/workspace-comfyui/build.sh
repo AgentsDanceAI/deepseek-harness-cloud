@@ -88,7 +88,12 @@ else
   KEEP=999999
 fi
 
-mapfile -t all < <(docker images "$IMAGE" --format '{{.Tag}}' \
+# 不用 mapfile: 它是 bash 4+ 的, 而 macOS 自带的还是 3.2 —— 在 Mac 上建完、推完,
+# 最后栽在这一行 127, 日志尾巴看着像"构建失败"其实镜像已经推上去了。
+all=()
+while IFS= read -r t; do
+  [ -n "$t" ] && all+=("$t")
+done < <(docker images "$IMAGE" --format '{{.Tag}}' \
   | grep -E 'r[0-9]+$' | sort -t r -k2 -n -r)
 kept=0
 for t in "${all[@]}"; do
