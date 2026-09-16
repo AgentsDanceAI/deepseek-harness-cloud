@@ -86,6 +86,15 @@
          other. #}
       <a class="lang-switch" href="{{ lang_switch_url }}" rel="nofollow"
          aria-label="{{ 'Switch to English' if lang == 'zh' else '切换到中文' }}">{{ other_lang_label }}</a>
+      {# 首页改版预览的浅/深对照开关。**只在那一页出现** —— 它是给老板比稿用的,
+         不是全站功能; 挂在所有页面上会变成一个半成品的主题切换 (其余页面没有
+         浅色样式)。挨着语言切换放, 是老板指定的位置。 #}
+      {% if page == "landing-preview" %}
+      <button type="button" class="lang-switch" id="v2-theme" aria-label="切换配色（浅色／深色）"
+              title="切换配色：白色 ／ 主页蓝" style="cursor:pointer;background:none">
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v18"/><path d="M12 3a9 9 0 0 1 0 18"/><circle cx="12" cy="12" r="9"/></svg>
+      </button>
+      {% endif %}
       {# The two ways into the product sit together on the right, styled the
          same, because they are the same kind of choice: run it here, or run it
          on your own machine. #}
