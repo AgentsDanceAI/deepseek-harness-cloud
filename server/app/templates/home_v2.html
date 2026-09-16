@@ -188,6 +188,68 @@
   html[data-v2theme="light"] .site-nav > a:not(.btn):hover,
   html[data-v2theme="light"] .nav-group[data-open="true"] > button{
     color:var(--fg);background:rgba(15,23,42,.06)}
+  /* ---- 浅色版的"型", 不只是"色" ----
+     第一版只把深色的变量换了个色, 结果又灰又挤 —— 深色靠对比撑, 浅色靠**留白、
+     圆角、柔和投影**撑, 同一套尺寸照搬过来必然塌。以下按参考稿重调型。 */
+
+  /* 底: 白→淡紫蓝渐变 + 顶部一团柔光, 不是死灰平涂 */
+  html[data-v2theme="light"] body{
+    background:
+      radial-gradient(120% 60% at 78% -8%, rgba(124,92,240,.13), transparent 60%),
+      radial-gradient(90% 50% at 8% 0%, rgba(59,111,224,.10), transparent 58%),
+      linear-gradient(180deg,#ffffff 0%,#f4f7fd 38%,#eef2fb 100%);
+    background-attachment:fixed}
+  html[data-v2theme="light"] .hero-dark{background:transparent}
+
+  /* 标题更大, 渐变更足 */
+  html[data-v2theme="light"] .v2-hero{padding:64px 0 52px}
+  /* 52px 会把「世界上最好的 AI 应用严选商店」挤成两行 (46px 时是一行) —— 上限收到 47 */
+  html[data-v2theme="light"] .v2-hero h1{font-size:clamp(32px,3.45vw,47px);letter-spacing:-1.2px}
+  html[data-v2theme="light"] .v2-grad{
+    background:linear-gradient(100deg,#3b6fe0 10%,#7c5cf0 90%);
+    -webkit-background-clip:text;background-clip:text;color:transparent}
+  html[data-v2theme="light"] .v2-hero-sub{font-size:16.5px;margin-bottom:30px}
+
+  /* 搜索条: 更高、更圆、按钮上渐变 */
+  html[data-v2theme="light"] .v2-search{
+    padding:9px 9px 9px 24px;border-radius:999px;border-color:#e3e9f4;
+    box-shadow:0 2px 6px rgba(15,23,42,.05), 0 18px 40px -22px rgba(15,23,42,.28)}
+  html[data-v2theme="light"] .v2-search input{font-size:16px}
+  html[data-v2theme="light"] .v2-search button{
+    padding:15px 32px;font-size:15.5px;
+    background:linear-gradient(100deg,#3b6fe0,#7c5cf0);box-shadow:0 8px 20px -8px rgba(90,80,230,.7)}
+  html[data-v2theme="light"] .v2-feats{gap:34px;margin-top:28px;font-size:15px}
+
+  /* 卡片: 圆角与留白放大, 投影做实 —— 浅色下这三样就是全部的"质感" */
+  html[data-v2theme="light"] .v2-grid{gap:20px}
+  html[data-v2theme="light"] .v2-card{
+    background:#fff;border-color:#e9eef7;border-radius:16px;padding:20px;
+    box-shadow:0 1px 2px rgba(15,23,42,.04), 0 10px 26px -14px rgba(15,23,42,.22)}
+  html[data-v2theme="light"] .v2-card:hover{
+    transform:translateY(-3px);border-color:#d8e2f4;
+    box-shadow:0 2px 6px rgba(15,23,42,.06), 0 22px 46px -18px rgba(15,23,42,.3)}
+  html[data-v2theme="light"] .v2-ico{width:46px;height:46px;border-radius:13px;
+    box-shadow:0 6px 16px -8px rgba(15,23,42,.45), inset 0 0 0 1px rgba(255,255,255,.14)}
+  html[data-v2theme="light"] .v2-card-name b{font-size:15.5px}
+  html[data-v2theme="light"] .v2-card-tag{font-size:12px}
+  html[data-v2theme="light"] .v2-card-desc{font-size:13px;margin-bottom:15px}
+  html[data-v2theme="light"] .v2-card-foot{padding-top:14px;border-top-color:#eef2f8}
+  html[data-v2theme="light"] .v2-pill{background:#e8f6ee;color:#1a8a4f}
+  html[data-v2theme="light"] .v2-pill.soon{background:#fdf1dd;color:#9a6a00}
+  html[data-v2theme="light"] .v2-pill.lock{background:#eaf0fd;color:#3257b8}
+
+  html[data-v2theme="light"] .v2-sec{padding:6px 0 0}
+  html[data-v2theme="light"] .v2-sec-head h2{font-size:28px;letter-spacing:-.8px}
+  html[data-v2theme="light"] .v2-sec-head{margin-bottom:24px}
+
+  /* 底部 CTA: 深底 + 一团紫光, 在白页上是收尾的重色块 */
+  html[data-v2theme="light"] .v2-cta{
+    border:0;padding:44px 48px;
+    background:linear-gradient(120deg,#131c33 0%,#24325c 52%,#3a3f7d 100%);
+    box-shadow:0 24px 60px -28px rgba(30,30,90,.65)}
+  html[data-v2theme="light"] .v2-cta h3{font-size:27px;color:#fff}
+  html[data-v2theme="light"] .v2-cta p{color:#c3cbe6}
+
   /* 精选卡与底部 CTA 保持深色: 它们是"发光的主视觉", 白底上更跳 (参考稿也是这么处理的) */
 
   @media (max-width:1060px){
