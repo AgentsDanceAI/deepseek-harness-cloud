@@ -86,11 +86,13 @@
     padding:16px;display:flex;flex-direction:column;transition:transform .15s ease,border-color .15s ease}
   .v2-card:hover{transform:translateY(-2px);border-color:var(--border-strong)}
   .v2-card-top{display:flex;align-items:flex-start;gap:11px;margin-bottom:11px}
+  /* 图标块吃各家品牌色, 字形取对比色 —— 深色底上单色蓝的标既没牌子感也不好认 */
   .v2-ico{width:42px;height:42px;border-radius:11px;flex:none;display:grid;place-items:center;
-    background:var(--bg-soft);border:1px solid var(--border);color:var(--brand-strong)}
+    box-shadow:inset 0 0 0 1px rgba(255,255,255,.09)}
   .v2-card-id{flex:1;min-width:0}
   .v2-card-name{display:flex;align-items:center;gap:7px;min-width:0}
-  .v2-card-name b{font-size:14.5px;line-height:1.35;overflow:hidden;min-width:0;
+  /* 卡片是 <a>, 不显式给色就继承站上链接蓝 —— 深底上发暗、也跟首页不一致 */
+  .v2-card-name b{font-size:14.5px;line-height:1.35;color:var(--fg);overflow:hidden;min-width:0;
     display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
   .v2-pill{font-size:10.5px;padding:2px 7px;border-radius:999px;font-weight:600;flex:none;
     background:var(--ok-weak);color:var(--ok)}
@@ -180,6 +182,33 @@
 {%- else %}<svg viewBox="0 0 24 24" width="{{ size }}" height="{{ size }}" fill="none" stroke="currentColor" stroke-width="{{ sw }}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{{ brand_icons.get(app.id, app.icon) | safe }}</svg>{% endif %}
 {%- endmacro %}
 
+{# ---- 品牌色 ----
+   (图标块底色, 字形色)。字形色跟着底色深浅走 —— LangChain 的 #7FC8FF 很浅,
+   白字形在上面糊成一片, 得用深色字形。
+
+   前四个是**官方色值** (随 simple-icons 一起来的 hex)。其余是我按各家视觉调的:
+   拿不到官方矢量的那几家 (OpenAI / 微软 / Grok) 本来就是黑白单色体系, 黑底白字形
+   正是它们自己的用法, 也正是老板给的那张稿子里 Codex、Cursor 卡的样子。 #}
+{% set brand_color = {
+  'dsh':          ('#5786FE', '#fff'),
+  'claude-code':  ('#D97757', '#fff'),
+  'dify':         ('#0033FF', '#fff'),
+  'langchain':    ('#7FC8FF', '#0b2136'),
+  'codex':        ('#101010', '#fff'),
+  'autogen':      ('#0078D4', '#fff'),
+  'openmausbot':  ('#000000', '#fff'),
+  'openmanus':    ('#2E2E2B', '#fff'),
+  'hermes':       ('#1F2937', '#fff'),
+  'openclaw':     ('#E0523C', '#fff'),
+  'comfyui':      ('#7A5AF8', '#fff'),
+  'open-design':  ('#8B5CF6', '#fff'),
+  'pi':           ('#10B981', '#fff'),
+  'agents-team':  ('#4D84E0', '#fff'),
+  'live':         ('#EF4444', '#fff'),
+  'avatar':       ('#EC4899', '#fff')
+} %}
+{% set _dflt = ('#1d3559', '#eef3fb') %}
+
 {# 精选位: 取目录里前 5 个已上线的, 不写死 —— 写死的话它下架了这里就是假的 #}
 {% set featured = (apps | selectattr("live") | list)[:5] or apps[:5] %}
 
@@ -216,7 +245,8 @@
         <span class="v2-badge">精选应用 · {{ loop.index }}/{{ featured|length }}</span>
         <div class="v2-slide-body">
           <div class="v2-slide-l">
-            <span class="v2-slide-name">
+            {% set bc = brand_color.get(app.id, _dflt) %}
+            <span class="v2-slide-name" style="color:{{ bc[0] if bc[0] not in ('#101010','#000000','#2E2E2B','#1F2937') else '#cfe0fb' }}">
               {{ appicon(app, 17, 1.7) }}
               {{ app.name }}
             </span>
@@ -228,7 +258,8 @@
               </a>
             </span>
           </div>
-          <div class="v2-slide-art" aria-hidden="true">
+          <div class="v2-slide-art" aria-hidden="true"
+               style="background:{{ bc[0] }};color:{{ bc[1] }};border-color:rgba(255,255,255,.14)">
             {{ appicon(app, 76, 1.1) }}
           </div>
         </div>
@@ -262,7 +293,8 @@
       <a class="v2-card" href="{{ href if app.live else '/apps' }}"
          data-k="{{ (app.name ~ ' ' ~ app.id ~ ' ' ~ t('apps.tag.' + app.tag) ~ ' ' ~ t('apps.d.' + app.id)) | lower }}">
         <div class="v2-card-top">
-          <span class="v2-ico">
+          {% set bc = brand_color.get(app.id, _dflt) %}
+          <span class="v2-ico" style="background:{{ bc[0] }};color:{{ bc[1] }}">
             {{ appicon(app, 22, 1.6) }}
           </span>
           <span class="v2-card-id">
