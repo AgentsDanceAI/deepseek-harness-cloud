@@ -93,6 +93,7 @@ def create_app() -> FastAPI:
     from .live import router as live_router
     from .local_api import router as local_router
     from .media import router as media_router
+    from .models_hub import router as models_hub_router
     from .oauth import router as oauth_router
     from .payments.api import router as payments_router
     from .teams import router as teams_router
@@ -107,6 +108,7 @@ def create_app() -> FastAPI:
     app.include_router(gateway_router)
     app.include_router(avatar_router)
     app.include_router(live_router)
+    app.include_router(models_hub_router)
     app.include_router(local_router)
     app.include_router(media_router)
     app.include_router(payments_router)

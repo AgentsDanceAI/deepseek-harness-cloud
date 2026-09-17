@@ -374,7 +374,8 @@ def test_pi_took_over_the_openhands_slot():
 
     ids = [a.id for a in apps_catalog.CATALOG]
     assert "pi" in ids and "openhands" not in ids
-    assert len(ids) == 16
+    # 不写死张数 (见 test_webpages 同条): 货架多一个产品不该让这条无关的断言变红
+    assert len(ids) >= 16
     root = pathlib.Path(__file__).resolve().parents[1] / "config" / "i18n"
     for lang in ("zh", "en"):
         d = json.loads((root / f"{lang}.json").read_text(encoding="utf-8"))

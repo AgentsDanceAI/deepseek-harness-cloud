@@ -1,0 +1,117 @@
+{% extends "base.html" %}
+{% block title %}{{ t('models_hub.title') }} · AI Store{% endblock %}
+{% block head %}
+{# 复用直播列表页那套卡片样式 (live.css 的 .lv-*) —— 与伴聊列表页同一条:
+   共用而不是复制, 改卡片时几处一起变。 #}
+<link rel="stylesheet" href="/static/live.css?v={{ asset_v }}">
+{% endblock %}
+{% block content %}
+<section class="section">
+  <div class="container">
+    <div class="lv-head">
+      <h1 class="lv-title">{{ t('models_hub.title') }}</h1>
+    </div>
+    <p class="lv-sub">{{ t('models_hub.sub') }}</p>
+
+    {# 三块各自加载、各自报错 —— 节点某一条接口挂了不该让整页空白。
+       渲染时一个上游都不打 (见 webpages.models_hub_page)。 #}
+    <div id="mh-offline" class="lv-sub" hidden>{{ t('models_hub.not_configured') }}</div>
+
+    <div id="mh-body" hidden>
+      <h2 class="lv-title" style="font-size:1.1rem;margin-top:1.5rem">{{ t('models_hub.gpu') }}</h2>
+      <div id="mh-gpu" class="lv-sub">{{ t('models_hub.loading') }}</div>
+
+      <h2 class="lv-title" style="font-size:1.1rem;margin-top:1.5rem">{{ t('models_hub.engines') }}</h2>
+      <div id="mh-engines" class="lv-sub">{{ t('models_hub.loading') }}</div>
+    </div>
+  </div>
+</section>
+
+<script>
+// 模型中心的一点原生 JS (站内约定: 页面是 Jinja 壳, 交互用原生 JS, 不引框架)。
+// ⚠️ 全部请求打 /api/models-hub/proxy?path=... —— 节点凭证在服务端, 页面手上没有。
+(function () {
+  const T = {
+    loading: {{ t('models_hub.loading')|tojson }},
+    unreachable: {{ t('models_hub.unreachable')|tojson }},
+    none: {{ t('models_hub.none')|tojson }},
+    load: {{ t('models_hub.load')|tojson }},
+    unload: {{ t('models_hub.unload')|tojson }},
+    busy: {{ t('models_hub.busy')|tojson }},
+  };
+  const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g,
+    (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+  async function call(path, method, body) {
+    const res = await fetch("/api/models-hub/proxy?path=" + encodeURIComponent(path), {
+      method: method || "GET",
+      headers: { "Content-Type": "application/json" },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    if (!res.ok) throw new Error(String(res.status));
+    return res.json();
+  }
+
+  function renderGpu(data) {
+    const rows = Array.isArray(data) ? data : (data && data.gpus) || [];
+    if (!rows.length) return T.none;
+    return rows.map((g) =>
+      `<div>${esc(g.name || g.model || "GPU")} — ${esc(g.memory_used || g.used || "?")} / ${esc(g.memory_total || g.total || "?")}</div>`
+    ).join("");
+  }
+
+  function renderEngines(rows) {
+    const list = Array.isArray(rows) ? rows : (rows && rows.engines) || [];
+    if (!list.length) return T.none;
+    return list.map((e) => {
+      const name = esc(e.name || e.id || "");
+      const loaded = e.loaded || e.running;
+      const action = loaded ? "unload" : "load";
+      const label = loaded ? T.unload : T.load;
+      return `<div class="lv-roomcard" style="display:flex;justify-content:space-between;align-items:center;padding:.6rem .9rem">
+        <span>${name}</span>
+        <button type="button" data-engine="${name}" data-action="${action}">${esc(label)}</button>
+      </div>`;
+    }).join("");
+  }
+
+  async function refresh() {
+    const gpu = document.getElementById("mh-gpu");
+    const eng = document.getElementById("mh-engines");
+    // 两块各自 try —— 一块挂了另一块照常出来
+    try { gpu.innerHTML = renderGpu(await call("/v1/gpu")); }
+    catch (_) { gpu.textContent = T.unreachable; }
+    try { eng.innerHTML = renderEngines(await call("/v1/engines")); }
+    catch (_) { eng.textContent = T.unreachable; }
+  }
+
+  document.addEventListener("click", async function (ev) {
+    const btn = ev.target.closest("button[data-engine]");
+    if (!btn) return;
+    const was = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = T.busy;
+    try {
+      await call("/v1/models/" + encodeURIComponent(btn.dataset.engine) + "/" + btn.dataset.action, "POST", {});
+      await refresh();
+    } catch (_) {
+      btn.textContent = T.unreachable;
+      // 失败了把按钮放回去, 别让它卡在"处理中"骗人
+      setTimeout(() => { btn.textContent = was; btn.disabled = false; }, 2000);
+      return;
+    }
+    btn.disabled = false;
+  });
+
+  fetch("/api/models-hub/status")
+    .then((r) => r.json())
+    .then((d) => {
+      const on = d && d.configured;
+      document.getElementById("mh-offline").hidden = !!on;
+      document.getElementById("mh-body").hidden = !on;
+      if (on) refresh();
+    })
+    .catch(() => { document.getElementById("mh-offline").hidden = false; });
+})();
+</script>
+{% endblock %}

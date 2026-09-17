@@ -77,17 +77,21 @@ def test_the_headline_count_comes_from_the_shelf(client):
     assert int(m.group(1)) == tiles, f"标题说 {m.group(1)} 个, 首屏实际摆了 {tiles} 个"
 
 
-def test_apps_page_shows_all_16_with_live_status(client, monkeypatch):
-    """云空间: 16 张卡, 上线与否由 products.enabled() 实时判定。
+def test_apps_page_shows_every_card_with_live_status(client, monkeypatch):
+    """云空间: 每张卡都在, 上线与否由 products.enabled() 实时判定。
 
     目录 (apps_catalog) 是愿景, registry 才是事实 —— 卡片可点性必须跟着 registry
     走, 否则接入新产品时这页会静默漏掉它, 或者反过来给没上线的挂真链接。
+
+    ⚠️ 这里**不再写死张数**。原先钉的是 16 ("4x4 网格就是 16 个"), 但那是审美意图
+    不是布局约束 —— 网格是 auto-fill 的, 多一张只是换行。写死张数的结果是每加一个
+    产品都要回来改一个与被测行为无关的数字, 而它挡不住任何真问题 (重复 id 那条才是)。
     """
     from app import apps_catalog, config, products
 
-    assert len(apps_catalog.CATALOG) == 16, "4x4 网格就是 16 个, 少一个都摆不满"
     ids = [a.id for a in apps_catalog.CATALOG]
-    assert len(set(ids)) == 16, "目录里有重复 id"
+    assert len(ids) >= 16, "货架上的产品少于 16 个, 是不是有人误删了目录条目"
+    assert len(set(ids)) == len(ids), "目录里有重复 id"
 
     monkeypatch.setattr(config, "WORK_ENABLED", True)
     monkeypatch.setattr(config, "COMFY_IMAGE", "comfy:test")

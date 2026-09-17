@@ -589,6 +589,14 @@ AVATAR_TOKEN_SECRET = _env("AVATAR_TOKEN_SECRET", "")
 # 反映这一点, 否则每一分钟都是我们在补贴。
 AVATAR_CREDITS_PER_MIN = _env_int("AVATAR_CREDITS_PER_MIN", 10)
 
+# ── 模型中心 (2026-09-17, 自口袋专家迁入) ───────────────────────────────
+# 自托管推理节点。**留空 = 这一格不上线** (与直播间同一条: 配不全就点不进去,
+# 而不是让人点进一个空页面)。
+INFERENCE_URL = _env("INFERENCE_URL", "")
+# 节点凭证。⛔ 只在服务端用 —— 页面打的是 /api/models-hub/*, 由我们代转,
+# 一个字节都不下发 (与 gateway.py 的上游 key 同一条纪律)。
+INFERENCE_KEY = _env("INFERENCE_KEY", "")
+
 # ── 数字人直播间 (2026-09-08) ────────────────────────────────────────────
 # 与数字人通话共用 AVATAR_TOKEN_SECRET (GPU 侧是同一把)。**留空 = 这一格不上线**
 # —— 目录里的卡直接不出现。这既是开关也是防呆: 配不全就点不进去, 而不是让人点

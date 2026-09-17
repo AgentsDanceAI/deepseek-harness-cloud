@@ -111,6 +111,16 @@ CATALOG: tuple[AppEntry, ...] = (
     # 转售**, 而我们正是这个模式 —— 那一格本来就接不了, 一直空占着。
     # 数字人反过来是我们最独特的一块: 实时口型 + 用户自定义形象 + 定制音色,
     # 零件全在自己手上 (SoulX-FlashHead 跑在我们的 GPU 节点上)。
+    # 模型中心 (2026-09-17 自口袋专家迁入): 自托管推理节点的引擎、显卡与模型装卸。
+    # 与数字人两格同类 —— 住在主站上, 没有每用户容器, 打的是我们自己的节点。
+    AppEntry(
+        "models-hub", "模型中心", "models-hub",
+        '<rect x="3" y="4" width="18" height="6" rx="2"/>'
+        '<rect x="3" y="14" width="18" height="6" rx="2"/>'
+        '<path d="M7 7h.01M7 17h.01"/>',
+        href="/models-hub",
+        name_key="apps.n.models-hub",
+    ),
     AppEntry(
         "avatar", "数字人伴聊", "avatar",
         '<circle cx="12" cy="8" r="4"/><path d="M4.5 20a7.5 7.5 0 0 1 15 0"/>'
@@ -179,7 +189,7 @@ CATEGORIES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("coding", ("claude-code", "codex", "pi")),
     ("work", ("dsh", "openmanus", "openclaw", "hermes")),
     ("staff", ("agents-team", "openmausbot", "autogen")),
-    ("dev", ("dify", "langchain")),
+    ("dev", ("dify", "langchain", "models-hub")),
     ("design", ("open-design", "comfyui")),
     ("avatar", ("live", "avatar")),
 )
