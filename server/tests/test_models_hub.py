@@ -128,3 +128,57 @@ class TestItIsOnTheShelf:
     def test_card_is_categorised(self):
         placed = {i for _key, ids in apps_catalog.CATEGORIES for i in ids}
         assert "models-hub" in placed, "没归类会掉进无标题的兜底组"
+
+
+class TestUnlistedMeansHiddenNotUnreachable:
+    """创始人 2026-09-17:「前期先不展示, 给我链接就行」。
+
+    ⚠️ 「不展示」的语义是**货架与 README 一起当它不存在, 但链接照常打得开** ——
+    它不是访问控制, 谁拿到链接谁都能开。真要拦人得另做闸。
+    """
+
+    def test_models_hub_is_unlisted(self):
+        entry = next(a for a in apps_catalog.CATALOG if a.id == "models-hub")
+        assert entry.unlisted is True
+
+    def test_listed_excludes_it(self):
+        assert "models-hub" not in {a.id for a in apps_catalog.listed()}
+        assert "models-hub" in {a.id for a in apps_catalog.CATALOG}, "藏起来不等于从目录里删掉"
+
+    def test_listed_keeps_everything_else_in_order(self):
+        """只摘掉未上架的那几个, 其余顺序一个字不动。"""
+        shown = [a.id for a in apps_catalog.listed()]
+        expect = [a.id for a in apps_catalog.CATALOG if not a.unlisted]
+        assert shown == expect
+
+    def test_the_page_is_still_routable(self):
+        """藏的是卡片, 不是页面 —— 拿着链接要能直接打开。"""
+        from fastapi.testclient import TestClient
+
+        from app.main import app
+
+        with TestClient(app) as client:
+            res = client.get("/models-hub", headers={"accept-language": "zh"})
+        assert res.status_code == 200, "未上架把页面也一起关掉了, 那就拿不到链接看"
+        assert "models_hub" in res.text or "模型中心" in res.text
+
+    def test_it_is_not_on_the_shelf(self):
+        from fastapi.testclient import TestClient
+
+        from app.main import app
+
+        with TestClient(app) as client:
+            body = client.get("/apps", headers={"accept-language": "zh"}).text
+        assert "模型中心" not in body
+        assert "/models-hub" not in body, "货架上不该留着指过去的链接"
+
+    def test_readme_does_not_advertise_it(self):
+        """README 的产品表由脚本从 listed() 生成 —— 未上架的进去就成了"文档在宣传一个
+        货架上找不到的东西"。"""
+        from pathlib import Path
+
+        root = Path(apps_catalog.__file__).resolve().parents[2]
+        for name in ("README.md", "README.zh-CN.md"):
+            text = (root / name).read_text(encoding="utf-8")
+            assert "models-hub" not in text
+            assert "模型中心" not in text

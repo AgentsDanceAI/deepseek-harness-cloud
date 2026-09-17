@@ -89,7 +89,7 @@ def test_apps_page_shows_every_card_with_live_status(client, monkeypatch):
     """
     from app import apps_catalog, config, products
 
-    ids = [a.id for a in apps_catalog.CATALOG]
+    ids = [a.id for a in apps_catalog.listed()]
     assert len(ids) >= 16, "货架上的产品少于 16 个, 是不是有人误删了目录条目"
     assert len(set(ids)) == len(ids), "目录里有重复 id"
 
@@ -97,14 +97,14 @@ def test_apps_page_shows_every_card_with_live_status(client, monkeypatch):
     monkeypatch.setattr(config, "COMFY_IMAGE", "comfy:test")
     monkeypatch.setattr(config, "COMFY_DOMAIN", "comfy.test.local")
     body = client.get("/apps").text
-    for a in apps_catalog.CATALOG:
+    for a in apps_catalog.listed():
         assert a.name in body, f"{a.name} 没出现在页面上"
     # 上线的卡是真链接
     assert "/work?product_id=comfyui" in body
     enabled = {pr.id for pr in products.enabled()}
     assert "comfyui" in enabled, "前提: 测试配置里 comfyui 已启用"
     # 没上线的绝不能挂工作台链接 —— 点进去是 404/错误页
-    for a in apps_catalog.CATALOG:
+    for a in apps_catalog.listed():
         if a.id not in enabled:
             assert f"/work?product_id={a.id}" not in body, f"{a.id} 未上线却挂了链接"
 
@@ -171,7 +171,7 @@ def test_landing_is_the_storefront(client, monkeypatch):
     monkeypatch.setattr(config, "COMFY_DOMAIN", "comfy.test.local")
     body = client.get("/").text
     assert 'href="/apps"' in body, "主页没有云空间入口"
-    for a in apps_catalog.CATALOG:
+    for a in apps_catalog.listed():
         assert a.name in body, f"{a.name} 没上主页货架"
     assert "hero-composer" in body, "composer 挪没了 —— 那是 dsh 的转化入口"
     assert "/work?product_id=comfyui" in body, "ComfyUI 旗舰卡没直达工作台"

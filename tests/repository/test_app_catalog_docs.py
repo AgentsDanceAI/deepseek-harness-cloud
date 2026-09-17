@@ -16,7 +16,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "server"))
 
-from app.apps_catalog import CATALOG  # noqa: E402
+# 用 listed(): 未上架的 (unlisted) 不进 README —— 否则文档在宣传一个
+# 货架上找不到的东西 (2026-09-17 创始人「前期先不展示」)。
+from app.apps_catalog import listed  # noqa: E402
+
+CATALOG = listed()
 
 START = "<!-- app-catalog:start -->"
 END = "<!-- app-catalog:end -->"
