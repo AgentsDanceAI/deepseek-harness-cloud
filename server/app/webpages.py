@@ -540,6 +540,20 @@ def _live_gate(request: Request):
     return None
 
 
+@router.get("/models-hub")
+def models_hub_page(request: Request):
+    """模型中心: 自托管推理节点的引擎、显卡与模型装卸 (2026-09-17 自口袋专家迁入)。
+
+    ⚠️ 与直播列表页同一条: **渲染时一个上游都不打**。引擎、显卡、模型清单全由前端
+    去要 /api/models-hub/*, 节点够不着时页面照常出来、只是几块显示"没应答" ——
+    而不是整页 502。推理节点是自己那台机器, 但"自己的机器"照样会重启。
+
+    没配 INFERENCE_URL 时**不跳转也不 404**: 照常渲染, 页面自己从 /status 得知没接,
+    摆一句人话。跳走会让人以为链接坏了。
+    """
+    return _render(request, "models_hub.html", "models-hub")
+
+
 @router.get("/live")
 def live_rooms_page(request: Request):
     """直播间列表。

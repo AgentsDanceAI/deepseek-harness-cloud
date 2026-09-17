@@ -69,7 +69,7 @@ def test_every_product_has_a_description(lang):
 def test_grouping_keeps_the_usage_order_inside_a_category():
     """分组只改大块的次序。组内仍是 entries_with_status 排好的顺序 (按使用时长),
     那是老板 2026-09-06 定的规矩, 别在这儿顺手废掉。"""
-    fake = [{"id": a.id} for a in cat.CATALOG]
+    fake = [{"id": a.id} for a in cat.listed()]
     groups = cat.grouped(fake)
     seen = [x["id"] for _, g in groups for x in g]
     assert sorted(seen) == sorted(x["id"] for x in fake), "分组把产品弄丢或弄重了"
@@ -96,12 +96,19 @@ def test_the_shelf_really_renders_those_anchors(client):
 
 
 def test_the_shelf_shows_every_product_under_a_heading(client):
-    """货架上 16 格一个都不能少, 且都在某个类目标题下面。"""
+    """货架上摆着的一格都不能少, 且都在某个类目标题下面。
+
+    ⚠️ 判据是 `listed()` 不是整份 CATALOG —— 未上架的 (unlisted) **本来就不该出现**,
+    拿 CATALOG 比就会把"按要求藏起来"报成"卡丢了"。
+    """
     import json as _json
 
     zh = _json.loads((I18N / "zh.json").read_text())
     body = client.get("/apps", headers={"accept-language": "zh"}).text
-    for a in cat.CATALOG:
+    for a in cat.listed():
         assert a.name in body, f"{a.name} 从货架上消失了"
+    for a in cat.CATALOG:
+        if a.unlisted:
+            assert a.name not in body, f"{a.name} 标了未上架, 却还摆在货架上"
     for k in CAT_KEYS:
         assert zh[f"apps.cat.{k}"] in body, f"类目标题「{zh[f'apps.cat.{k}']}」没渲染出来"

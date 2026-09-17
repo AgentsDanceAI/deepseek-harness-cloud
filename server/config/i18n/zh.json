@@ -882,5 +882,19 @@
   "js.home.v2.theme_light": "当前：白色 — 点击切回主页蓝",
   "js.home.v2.theme_blue": "当前：主页蓝 — 点击切成白色",
   "apps.n.live": "数字人直播",
-  "apps.n.avatar": "数字人伴聊"
+  "apps.n.avatar": "数字人伴聊",
+  "apps.n.models-hub": "模型中心",
+  "apps.tag.models-hub": "自托管推理 · 引擎与显卡",
+  "apps.d.models-hub": "自托管推理节点的看板：哪块显卡在忙、哪个引擎装着哪个模型，一键装载或卸载。",
+  "models_hub.title": "模型中心",
+  "models_hub.sub": "自托管推理节点的引擎、显卡与模型装卸。",
+  "models_hub.gpu": "显卡",
+  "models_hub.engines": "引擎",
+  "models_hub.loading": "读取中…",
+  "models_hub.unreachable": "推理节点没有应答",
+  "models_hub.not_configured": "推理节点尚未接入。",
+  "models_hub.none": "暂无",
+  "models_hub.load": "装载",
+  "models_hub.unload": "卸载",
+  "models_hub.busy": "处理中…"
 }

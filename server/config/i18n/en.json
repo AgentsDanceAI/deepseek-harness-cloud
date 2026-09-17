@@ -882,5 +882,19 @@
   "js.home.v2.theme_light": "Now: light — click for the blue home",
   "js.home.v2.theme_blue": "Now: blue home — click for light",
   "apps.n.live": "Digital Human Live",
-  "apps.n.avatar": "Digital Human Companion"
+  "apps.n.avatar": "Digital Human Companion",
+  "apps.n.models-hub": "Model Hub",
+  "apps.tag.models-hub": "Your own inference node · engines & GPUs",
+  "apps.d.models-hub": "A board for your self-hosted inference node: which GPU is busy, which engine holds which model, load or unload in one click.",
+  "models_hub.title": "Model Hub",
+  "models_hub.sub": "Engines, GPUs and model load/unload on the self-hosted inference node.",
+  "models_hub.gpu": "GPUs",
+  "models_hub.engines": "Engines",
+  "models_hub.loading": "Loading…",
+  "models_hub.unreachable": "The inference node did not answer",
+  "models_hub.not_configured": "The inference node is not connected yet.",
+  "models_hub.none": "None",
+  "models_hub.load": "Load",
+  "models_hub.unload": "Unload",
+  "models_hub.busy": "Working…"
 }

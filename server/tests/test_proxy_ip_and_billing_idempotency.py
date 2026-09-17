@@ -86,9 +86,9 @@ def test_rotating_forged_xff_still_hits_the_per_ip_login_cap():
     for i in range(40):
         r = fresh.post(
             "/api/auth/login",
-            json={"email": "victim@test.local", "password": "wrong-%d" % i},
+            json={"email": "victim@test.local", "password": f"wrong-{i}"},
             # 每次换一个最左段, 右边两跳固定 —— 模拟真实链路下的伪造
-            headers={"x-forwarded-for": "9.9.%d.%d, 203.0.113.7, 172.68.0.1" % (i, i)},
+            headers={"x-forwarded-for": f"9.9.{i}.{i}, 203.0.113.7, 172.68.0.1"},
         )
         if r.status_code == 429:
             got429 = True
@@ -121,7 +121,7 @@ def test_live_incidents_requires_admin(live_on):
     c = TestClient(app)
     signup_with_password(c, "plain@test.local", "password123")
     r = c.get("/api/live/incidents")
-    assert r.status_code == 403, "普通登录用户不该读到运营事件数据, 期望 403, 实得 %s" % r.status_code
+    assert r.status_code == 403, f"普通登录用户不该读到运营事件数据, 期望 403, 实得 {r.status_code}"
 
 
 def test_live_incidents_still_open_to_admin(live_on):
@@ -137,9 +137,7 @@ def test_live_incidents_still_open_to_admin(live_on):
 
 
 def _usage_rows(user_id: str, request_id: str) -> int:
-    rows = db.query(
-        "SELECT id FROM usage_log WHERE user_id=? AND request_id=?", (user_id, request_id)
-    )
+    rows = db.query("SELECT id FROM usage_log WHERE user_id=? AND request_id=?", (user_id, request_id))
     return len(rows)
 
 
@@ -165,11 +163,8 @@ def test_distinct_request_ids_still_bill_each_time():
     uid = db.query_one("SELECT id FROM users WHERE email=?", ("meter2@test.local",))["id"]
 
     for minute in (29000010, 29000011, 29000012):
-        credits.spend(uid, 2, kind="work", model="work:dsh",
-                      request_id="ws-dsh-%d" % minute, units=1)
-    total = db.query(
-        "SELECT id FROM usage_log WHERE user_id=? AND kind=?", (uid, "work")
-    )
+        credits.spend(uid, 2, kind="work", model="work:dsh", request_id=f"ws-dsh-{minute}", units=1)
+    total = db.query("SELECT id FROM usage_log WHERE user_id=? AND kind=?", (uid, "work"))
     assert len(total) == 3, "不同 request_id 被误判成重复, 会少收钱"
 
 

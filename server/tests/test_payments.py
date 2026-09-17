@@ -172,8 +172,7 @@ def test_intro_is_once_per_account_and_never_applies_to_a_year():
 
     # 买过 Plus 的首月, Pro 就不再是首次购买了。
     assert (
-        base.create_order(uid, "stripe", "plan:pro:monthly")["amount_cents"]
-        == table["pro"]["monthly_cents"]
+        base.create_order(uid, "stripe", "plan:pro:monthly")["amount_cents"] == table["pro"]["monthly_cents"]
     )
     assert base.intro_eligible(uid) is False
     # A first month is a first MONTH: the yearly SKU is sold at its own price.

@@ -34,6 +34,16 @@ class AppEntry:
     #: 摆着中文就是"没翻到位"(创始人 2026-09-17)。填了这个键, 渲染时用译文 (见
     #: webpages._ctx); 第三方产品照旧用 name, 一个字都不动。
     name_key: str = ""
+    #: 还没上架 (2026-09-17 创始人「前期先不展示, 给我链接就行」)。
+    #:
+    #: 与 `products.disabled_ids()` (整格下架) 的区别是**意图**: 下架是"它不该在目录
+    #: 里了", 这里是"它还没到摆出来的时候"。表现上也不同 —— 下架只挡卡片, README 的
+    #: 产品表照旧宣传它; unlisted 是**货架与 README 一起当它不存在**, 但页面照常直达,
+    #: 这样才能先拿链接自己看。上架 = 把这个字段删掉, 一个开关的事。
+    #:
+    #: ⚠️ 它**不是访问控制**。链接谁拿到谁都能开, 只是首页/货架/README 不提。
+    #: 真要拦人得另外做闸。
+    unlisted: bool = False
 
 
 # 排布顺序即页面顺序: 已上线的两个放最前, 其余按"编码 -> 应用搭建 -> 媒体 ->
@@ -111,6 +121,18 @@ CATALOG: tuple[AppEntry, ...] = (
     # 转售**, 而我们正是这个模式 —— 那一格本来就接不了, 一直空占着。
     # 数字人反过来是我们最独特的一块: 实时口型 + 用户自定义形象 + 定制音色,
     # 零件全在自己手上 (SoulX-FlashHead 跑在我们的 GPU 节点上)。
+    # 模型中心 (2026-09-17 自口袋专家迁入): 自托管推理节点的引擎、显卡与模型装卸。
+    # 与数字人两格同类 —— 住在主站上, 没有每用户容器, 打的是我们自己的节点。
+    AppEntry(
+        "models-hub", "模型中心", "models-hub",
+        '<rect x="3" y="4" width="18" height="6" rx="2"/>'
+        '<rect x="3" y="14" width="18" height="6" rx="2"/>'
+        '<path d="M7 7h.01M7 17h.01"/>',
+        href="/models-hub",
+        name_key="apps.n.models-hub",
+        # 创始人 2026-09-17:「前期先不展示, 给我链接就行」。页面照常在 /models-hub。
+        unlisted=True,
+    ),
     AppEntry(
         "avatar", "数字人伴聊", "avatar",
         '<circle cx="12" cy="8" r="4"/><path d="M4.5 20a7.5 7.5 0 0 1 15 0"/>'
@@ -179,7 +201,7 @@ CATEGORIES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("coding", ("claude-code", "codex", "pi")),
     ("work", ("dsh", "openmanus", "openclaw", "hermes")),
     ("staff", ("agents-team", "openmausbot", "autogen")),
-    ("dev", ("dify", "langchain")),
+    ("dev", ("dify", "langchain", "models-hub")),
     ("design", ("open-design", "comfyui")),
     ("avatar", ("live", "avatar")),
 )
@@ -207,6 +229,15 @@ def grouped(apps: list[dict]) -> list[tuple[str, list[dict]]]:
     if rest:
         out.append(("", rest))
     return out
+
+
+def listed() -> tuple:
+    """摆在货架上的那些 —— 未上架的 (unlisted) 不算。
+
+    首页那句"N 个产品"、货架网格、README 的产品表都得用这一份, 否则会出现
+    "README 在宣传一个货架上找不到的东西"。
+    """
+    return tuple(a for a in CATALOG if not a.unlisted)
 
 
 def name_of(app_id: str) -> str:
@@ -252,7 +283,7 @@ def entries_with_status(
 
     # 下架的格子直接不出卡 —— "没上线"的灰卡还占一个位置, 而下架的意思是它不该在
     # 目录里 (products.disabled_ids / WORK_DISABLED_PRODUCTS)。
-    off = _p.disabled_ids()
+    off = _p.disabled_ids() | {a.id for a in CATALOG if a.unlisted}
     order = {a.id: i for i, a in enumerate(CATALOG) if a.id not in off}
     out = [
         {

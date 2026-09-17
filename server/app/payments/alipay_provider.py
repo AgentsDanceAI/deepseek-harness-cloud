@@ -24,8 +24,8 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
 from fastapi import HTTPException
 
-from . import base
 from .. import config
+from . import base
 
 GATEWAY = "https://openapi.alipay.com/gateway.do"
 

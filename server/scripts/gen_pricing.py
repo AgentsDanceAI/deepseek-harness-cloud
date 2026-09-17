@@ -93,6 +93,10 @@ PASS_PRODUCTS = [
     "openmausbot",
     "avatar",
     "live",
+    # 2026-09-17 自口袋专家迁入的第一格。价与我们自己那两格 (avatar/live) 同 ——
+    # ⚠️ 这是**照抄同类**不是定价决策; INFERENCE_URL 留空时这一格根本不上线,
+    # 所以在有人拍价之前它是 inert 的。
+    "models-hub",
 ]
 
 # id,        $,  base credits, bonus %

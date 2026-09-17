@@ -310,7 +310,8 @@ def test_catalog_sorts_by_usage_and_sinks_the_offline_ones():
     """用得多的排前面; 没上线的一律沉底 —— 一张点不进去的卡排在第一屏, 比不排序更碍事。"""
     from app import apps_catalog
 
-    ids = [a.id for a in apps_catalog.CATALOG]
+    # 未上架的 (unlisted) 不进货架, 所以这里问的是 listed() 而不是整份 CATALOG
+    ids = [a.id for a in apps_catalog.listed()]
     live = set(ids[:4])
     minutes = {ids[3]: 900, ids[1]: 100, ids[0]: 5}
     out = apps_catalog.entries_with_status(live, minutes)
@@ -323,7 +324,8 @@ def test_catalog_keeps_hand_order_when_there_is_no_usage():
     """没有用量的新站看到的还是手工编排的那个顺序 —— 不能因为都是 0 就洗牌。"""
     from app import apps_catalog
 
-    ids = [a.id for a in apps_catalog.CATALOG]
+    # 未上架的 (unlisted) 不进货架, 所以这里问的是 listed() 而不是整份 CATALOG
+    ids = [a.id for a in apps_catalog.listed()]
     assert [a["id"] for a in apps_catalog.entries_with_status(set(ids), {})] == ids
     assert [a["id"] for a in apps_catalog.entries_with_status(set(ids), None)] == ids
 

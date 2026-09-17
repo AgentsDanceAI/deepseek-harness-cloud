@@ -21,13 +21,11 @@ os.environ.update(
     }
 )
 
-import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
 from app import accounts, db, security  # noqa: E402
 from app.main import app  # noqa: E402
 from tests._signup import _CODE, _put_code, signup, signup_with_password  # noqa: E402
-
 
 # --- 1) 枚举 ------------------------------------------------------------------
 
@@ -49,14 +47,13 @@ def test_email_send_answers_the_same_whether_or_not_the_account_exists():
 
     # 造一个**确实存在**的同形账号, 直接写库绕开注册校验 (老账号就是这么来的)
     db.query(
-        "INSERT INTO users (id, email, password_hash, display_name, status, created) "
-        "VALUES (?,?,?,?,?,?)",
+        "INSERT INTO users (id, email, password_hash, display_name, status, created) VALUES (?,?,?,?,?,?)",
         ("u_legacy_probe", bad, "", "legacy", "active", time.time()),
     )
     existing = c.post("/api/auth/email/send", json={"email": bad}).status_code
 
     assert missing == existing, (
-        "注册过与没注册过拿到了不同状态码 (%s vs %s) —— 账号枚举 oracle" % (missing, existing)
+        f"注册过与没注册过拿到了不同状态码 ({missing} vs {existing}) —— 账号枚举 oracle"
     )
 
 
@@ -86,8 +83,7 @@ def test_login_does_not_leak_account_existence_through_timing():
 
     ratio = max(known, unknown) / max(min(known, unknown), 0.01)
     assert ratio < 3.0, (
-        "存在与不存在的登录耗时差了 %.1f 倍 (%.1fms vs %.1fms) —— 可以计时问出账号存不存在"
-        % (ratio, known, unknown)
+        f"存在与不存在的登录耗时差了 {ratio:.1f} 倍 ({known:.1f}ms vs {unknown:.1f}ms) —— 可以计时问出账号存不存在"
     )
 
 
@@ -127,7 +123,9 @@ def test_the_code_is_single_use():
     email = "first-pw-replay@test.local"
     c = _passwordless(email)
     _put_code(email)
-    assert c.post("/api/auth/password", json={"old": "", "new": "pass-one-1", "code": _CODE}).status_code == 200
+    assert (
+        c.post("/api/auth/password", json={"old": "", "new": "pass-one-1", "code": _CODE}).status_code == 200
+    )
     r = c.post("/api/auth/password", json={"old": "pass-one-1", "new": "pass-two-2", "code": _CODE})
     # 这次走的是"有密码"那条路 (旧密码对), 码已被消耗但不再需要 —— 关键是别 500
     assert r.status_code in (200, 401), r.status_code

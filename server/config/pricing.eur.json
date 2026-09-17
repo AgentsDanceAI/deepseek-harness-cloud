@@ -141,6 +141,10 @@
     "live": {
       "days": 7,
       "cents": 139
+    },
+    "models-hub": {
+      "days": 7,
+      "cents": 139
     }
   },
   "team": {
