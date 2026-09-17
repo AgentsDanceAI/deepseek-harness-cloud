@@ -54,6 +54,13 @@ def _ctx(request: Request, page: str, **extra) -> dict:
 
     _cur_ctx = _currency_ctx(request)
     _i18n = _i18n_ctx(request)
+    # 我们自己那几格的名字要跟着语言走 (见 apps_catalog.AppEntry.name_key)。在这里做
+    # 而不是在模板里: app.name 在四个模板里出现了六处, 逐处改必漏一处, 而漏掉的那处
+    # 就是"英文页上蹦出一个中文名"。
+    _t_now = _i18n["t"]
+    for _a in extra.get("apps") or ():
+        if isinstance(_a, dict) and _a.get("name_key"):
+            _a["name"] = _t_now(_a["name_key"])
     ctx = {
         "request": request,
         "page": page,

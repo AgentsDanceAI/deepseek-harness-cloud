@@ -607,6 +607,51 @@ def test_avatar_page_renders_for_a_signed_in_user(client, monkeypatch):
         assert hook in body, f"通话页少了 {hook}"
 
 
+def test_store_page_is_fully_translated(client):
+    """切成英文之后, 首页正文里**不能再有中文**。
+
+    创始人 2026-09-17 截图报的: 英文页上标题、副标题、搜索框、四个卖点、精选卡的角标
+    与按钮、SOTA 那一段、状态药丸、页尾全是中文 —— 因为那些文案压根没进 i18n, 是写死
+    在 home_v2.html 里的。这条测试就是钉住"别再往模板里写死文案"。
+
+    ⚠️ 只查 <section> 到 </footer> 之间: 页头的语言切换按钮**本来就**写着"中文"
+       (那是给中文读者看的入口), 把它算进来这条永远红。
+    ⚠️ 产品名是例外中的例外: 第三方名字(ComfyUI/Codex)不翻, 而我们自己那两格是
+       描述性名字, 走 AppEntry.name_key —— 所以这里顺带钉住它们译出来了。
+    """
+    import re
+
+    body = client.get("/store", params={"lang": "en"}).text
+    i = body.find('<section class="hero-dark')
+    j = body.find("</footer>", i)
+    assert i > 0, "首页结构变了, 这条测试该跟着改"
+    main = body[i : j if j > 0 else None]
+    cjk = re.findall(r"[\u4e00-\u9fff]+", main)
+    assert not cjk, f"英文页正文里还有中文: {cjk[:8]}"
+    for s in ("Digital Human Live", "Digital Human Companion", "SOTA picks"):
+        assert s in main, f"英文页少了 {s!r}"
+
+    # 中文页照旧
+    zh = client.get("/store", params={"lang": "zh"}).text
+    assert "严选商店" in zh and "数字人直播" in zh
+
+
+def test_store_card_name_is_not_painted_with_the_brand_color(client):
+    """精选卡上的应用名**不能涂品牌色**。
+
+    创始人 2026-09-17: "右侧紫色区域中的文字颜色与紫色不搭配"。那张卡的底是固定的
+    紫/蓝渐变, 而一半应用的品牌色就在同一个色系里 —— ComfyUI 的 #7A5AF8 涂在 #8b46e0
+    上对比度只有 1.08:1, 等于看不见。
+    原来的写法是黑名单四个近黑色换成浅蓝, 只挡住"太黑", 挡不住"跟底同色系"。
+    ⚠️ 也别改成"把品牌色提亮": 连纯白在这张卡最亮处(扫光经过时约 #9a5ae8)也只有
+       4.20:1, 带彩的字更低。品牌辨识交给右边那个自带底色的图标块。
+    """
+    body = client.get("/store", params={"lang": "zh"}).text
+    i = body.find('class="v2-slide-name"')
+    assert i > 0, "精选卡结构变了"
+    assert "style=" not in body[i : i + 60], "应用名又被涂上了内联颜色 — 那正是看不见的原因"
+
+
 def test_avatar_pick_page_lists_every_persona(client, monkeypatch):
     """伴聊的第一屏是**挑人**, 不是直接进一通电话。
 

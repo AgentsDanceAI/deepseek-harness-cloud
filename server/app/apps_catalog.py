@@ -30,6 +30,10 @@ class AppEntry:
     # 指过去 (数字人: 没有每用户容器可开, 通话页在 /avatar, 走 /api/avatar/*
     # 转发到我们自己的 GPU 节点)。空 = 老路, /work?product_id=<id>。
     href: str = ""
+    #: 例外: **我们自己**那几格的名字是描述性的("数字人直播"), 不是商标, 英文页上
+    #: 摆着中文就是"没翻到位"(创始人 2026-09-17)。填了这个键, 渲染时用译文 (见
+    #: webpages._ctx); 第三方产品照旧用 name, 一个字都不动。
+    name_key: str = ""
 
 
 # 排布顺序即页面顺序: 已上线的两个放最前, 其余按"编码 -> 应用搭建 -> 媒体 ->
@@ -101,6 +105,7 @@ CATALOG: tuple[AppEntry, ...] = (
         '<rect x="2" y="6" width="14" height="12" rx="2"/><path d="M16 11l6-3.5v9L16 13z"/>'
         '<circle cx="8" cy="11" r="2"/><path d="M5.5 15.5a3.5 3.5 0 0 1 5 0"/>',
         href="/live",
+        name_key="apps.n.live",
     ),
     # 数字人顶掉了 n8n: 后者的 Sustainable Use 许可证**明确禁止把它作为服务
     # 转售**, 而我们正是这个模式 —— 那一格本来就接不了, 一直空占着。
@@ -111,6 +116,7 @@ CATALOG: tuple[AppEntry, ...] = (
         '<circle cx="12" cy="8" r="4"/><path d="M4.5 20a7.5 7.5 0 0 1 15 0"/>'
         '<path d="M19 5.5a5 5 0 0 1 0 5M21.5 3.5a8.5 8.5 0 0 1 0 9"/>',
         href="/avatar",
+        name_key="apps.n.avatar",
     ),
     # Open Design 顶替 SD WebUI: 生图已被 ComfyUI 覆盖, 而 open-design 是老板
     # 点名的 (nexu-io/open-design —— AI 设计智能体, 里面跑的就是我们的 dsh)。
@@ -252,6 +258,7 @@ def entries_with_status(
         {
             "id": a.id,
             "name": a.name,
+            "name_key": a.name_key,
             "tag": a.tag,
             "icon": a.icon,
             "href": a.href,
