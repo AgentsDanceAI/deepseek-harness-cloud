@@ -13,6 +13,11 @@
     {# 静止背景与视频层是**同一个人**: /bg.png 吐的是模型自渲染的中性帧合成图,
        视频起播时不会跳脸。两层按 crop 对齐 —— 那组坐标由服务端按形象给出。 #}
     <img id="avBg" class="av-bg" alt="">
+    {# 空闲时她还在呼吸: 同一个形象喂静音渲的待机循环, 位置/羽化与视频层完全一样,
+       她一开口就交叉换成真视频。拿不到这段片子就什么都不显示 —— 底下那张静止的
+       合成图还在, 退回的正是 2026-09-17 之前的样子。 #}
+    <video id="avIdle" class="av-video av-idle" playsinline muted loop autoplay
+           preload="auto" aria-hidden="true"></video>
     <video id="avVideo" class="av-video" playsinline></video>
     <div id="avHint" class="av-hint">{{ t('avatar.tap_to_start') }}</div>
     {# 字幕压在画面下沿 —— 这是一通电话, 说的话就该在脸下面, 而不是在右栏里

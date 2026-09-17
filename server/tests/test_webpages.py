@@ -703,6 +703,42 @@ def test_avatar_pick_page_lists_every_persona(client, monkeypatch):
     )
 
 
+def test_avatar_idle_layer_breathes(client, monkeypatch):
+    """通话页空闲时她要**还在呼吸**, 不是一张定格的合成图。
+
+    创始人 2026-09-17:「伴聊中, 空镜状态, 没有呼吸的感觉啊」。直播那边当天已经把补空镜
+    换成模型喂静音渲的待机循环, 通话页跟上 —— 同一段片子, 因为它就是这个形象的人像
+    裁剪区, 与视频层同一块位置。
+
+    钉四件:
+    · 待机层在页面上, 且**带 .av-video 类** —— 定位与羽化遮罩必须与视频层共用一套,
+      各写一份迟早错位 (她一开口画面会挪一下)。
+    · muted/loop/playsinline/autoplay 四样齐全: 少一样浏览器就不给自动播, 空闲态又变回定格。
+    · 前端从 /api/avatar/idle.mp4 取片, 且**取不到要把这一层藏起来** —— 底下那张静止
+      合成图还在, 退回改之前的样子; 绝不能因此变成一块黑。
+    · 她开口时待机层要让位 (两层画的是同一张脸, 叠着就是重影)。
+    """
+    from pathlib import Path
+
+    from app import config
+
+    monkeypatch.setattr(config, "AVATAR_TOKEN_SECRET", "s" * 32)
+    signup(client, "avatar-idle@example.com")
+    body = client.get("/avatar/serena").text
+    i = body.find('id="avIdle"')
+    assert i > 0, "通话页没有待机层 — 空闲时又变成一张定格图了"
+    tag = body[body.rfind("<video", 0, i) : body.find(">", i) + 1]
+    assert "av-video" in tag, "待机层没跟视频层共用 .av-video — 定位/羽化会各走各的"
+    for attr in ("muted", "loop", "playsinline", "autoplay"):
+        assert attr in tag, f"待机层少了 {attr}, 浏览器不会自动播 — 空闲态还是定格"
+
+    js = (Path(__file__).resolve().parents[1] / "app" / "static" / "avatar.js").read_text("utf-8")
+    assert "/api/avatar/idle.mp4" in js, "前端没去取待机片"
+    assert "onerror" in js and "avIdle" in js, "待机片取不到时没有藏起来的兜底"
+    k = js.find("function showVideo")
+    assert k > 0 and "avIdle" in js[k : k + 900], "她开口时待机层没让位 — 两层同一张脸会重影"
+
+
 def test_avatar_unknown_person_falls_back_to_the_list(client, monkeypatch):
     """乱填的形象要回列表页, 而且**永远不能**拿去问上游。
 

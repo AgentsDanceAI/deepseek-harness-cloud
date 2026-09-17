@@ -488,6 +488,29 @@ async def avatar_bg(person: str = "", user: dict = Depends(resolve_user)):
         raise HTTPException(502, "avatar_unreachable") from None
 
 
+@router.get("/api/avatar/idle.mp4")
+async def avatar_idle(person: str = "", user: dict = Depends(resolve_user)):
+    """待机循环片: 她不说话时的样子 (模型喂静音渲的, 见 GPU 侧 _render_idle)。
+
+    与 bg.png 同一块裁剪区、同一个 person —— 通话页把它铺在视频层的位置上, 空闲时
+    播它, 她一开口就换成真视频。取不到不是错: 前端会保持原来那张静止图, 而**绝不能**
+    因为这个让通话开不起来。
+    """
+    if not config.AVATAR_TOKEN_SECRET:
+        raise HTTPException(503, "avatar_not_configured")
+    tok = sign_token(user["id"])
+    try:
+        async with httpx.AsyncClient(timeout=120.0) as c:
+            r = await c.get(f"{config.AVATAR_GPU_URL}/idle.mp4", params={"token": tok, "person": person})
+    except httpx.HTTPError:
+        raise HTTPException(502, "avatar_unreachable") from None
+    if r.status_code != 200:
+        raise HTTPException(r.status_code if r.status_code in (404, 503) else 502, "upstream")
+    return Response(
+        content=r.content, media_type="video/mp4", headers={"Cache-Control": "public, max-age=86400"}
+    )
+
+
 # 用户上传形象这条路**撤掉了** (2026-09-01 老板拍板)。三个理由, 按分量排:
 #   1. 效果不对。上游取参考图用的是 center crop —— 脸不在正中的照片会被裁歪,
 #      而人随手拍的自拍恰恰都是脸占满画面。用户看到的是"我传的图怎么这样"。

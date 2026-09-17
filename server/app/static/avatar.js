@@ -135,6 +135,7 @@
     const p = $("#avPerson").value || "";
     const v = bgVer[p] || st.cfg?.bg_ver || 0;
     $("#avBg").src = `/api/avatar/bg.png?person=${encodeURIComponent(p)}&v=${v}`;
+    loadIdle(p, v);
   }
 
   /* 重建选项时**保住已经选好的那个人**。
@@ -160,15 +161,33 @@
     if (keep && Array.prototype.some.call(sel.options, (o) => o.value === keep)) sel.value = keep;
   }
 
-  /* 视频层要按 crop 贴回背景 —— 每个形象的 crop 不同, 用错了就是错位。 */
+  /* 空闲时的呼吸: 同一个形象喂静音渲的待机循环 (GPU 侧 /idle.mp4)。
+     ⚠️ 取不到就**把这一层藏起来**, 露出底下那张静止的合成图 —— 退回 2026-09-17 之前
+        的样子。空闲态绝不能因为这段片子取不到就变成一块黑。
+     ⚠️ 首帧解出来之前也别露: 否则会先闪一下黑底再出画。 */
+  function loadIdle(p, v) {
+    const el = $("#avIdle");
+    if (!el) return;
+    el.style.opacity = "0";
+    el.onerror = () => { el.style.opacity = "0"; };
+    el.onloadeddata = () => { if (!st.speaking) el.style.opacity = "1"; };
+    el.src = `/api/avatar/idle.mp4?person=${encodeURIComponent(p)}&v=${v}`;
+    const go = el.play();
+    if (go && go.catch) go.catch(() => {});   // 自动播放被拒: 静音循环通常不会, 拒了就静止
+  }
+
+  /* 视频层要按 crop 贴回背景 —— 每个形象的 crop 不同, 用错了就是错位。
+     待机层与视频层是**同一块位置**, 一起排, 不然她一开口画面会挪一下。 */
   function layout() {
     const crop = (st.cfg?.person_crops || {})[$("#avPerson").value] || st.cfg?.crop;
     if (!crop) return;
-    const v = $("#avVideo");
-    v.style.left = crop.x * 100 + "%";
-    v.style.top = crop.y * 100 + "%";
-    v.style.width = crop.w * 100 + "%";
-    v.style.height = crop.h * 100 + "%";
+    for (const v of [$("#avVideo"), $("#avIdle")]) {
+      if (!v) continue;
+      v.style.left = crop.x * 100 + "%";
+      v.style.top = crop.y * 100 + "%";
+      v.style.width = crop.w * 100 + "%";
+      v.style.height = crop.h * 100 + "%";
+    }
   }
   $("#avSay").addEventListener("keydown", (e) => {
     if (e.key !== "Enter") return;
@@ -265,6 +284,14 @@
   function showVideo(on) {
     if (on === st.speaking) return;
     st.speaking = on;
+    // 她一开口待机层就让位 (两层都画同一张脸, 叠着就是重影); 说完再回来。
+    // 让位时顺手暂停 —— 看不见的循环没必要一直解码。
+    const idle = $("#avIdle");
+    if (idle) {
+      idle.style.opacity = on ? "0" : (idle.readyState >= 2 ? "1" : "0");
+      if (on) idle.pause();
+      else { const go = idle.play(); if (go && go.catch) go.catch(() => {}); }
+    }
     if (on) paintVideo(); else $("#avVideo").style.opacity = "0";
     if (st.duplex !== "half") return;
     if (on) micGate(false); else maybeReopenMic();
