@@ -157,6 +157,7 @@ class ReportEndToEnd(unittest.TestCase):
         # 读口 2026-09-16 起是管理员专用 (原先只认登录, 任何注册用户都能读
         # 任意房间的运营曲线)。写口仍是普通登录用户 —— 上报的就是他们。
         from app import db as _db
+
         _db.query("UPDATE users SET role='admin' WHERE email=?", ("incident-probe@example.com",))
         cls.room = config.LIVE_ROOM
 

@@ -137,9 +137,7 @@ def test_live_incidents_still_open_to_admin(live_on):
 
 
 def _usage_rows(user_id: str, request_id: str) -> int:
-    rows = db.query(
-        "SELECT id FROM usage_log WHERE user_id=? AND request_id=?", (user_id, request_id)
-    )
+    rows = db.query("SELECT id FROM usage_log WHERE user_id=? AND request_id=?", (user_id, request_id))
     return len(rows)
 
 
@@ -165,11 +163,8 @@ def test_distinct_request_ids_still_bill_each_time():
     uid = db.query_one("SELECT id FROM users WHERE email=?", ("meter2@test.local",))["id"]
 
     for minute in (29000010, 29000011, 29000012):
-        credits.spend(uid, 2, kind="work", model="work:dsh",
-                      request_id="ws-dsh-%d" % minute, units=1)
-    total = db.query(
-        "SELECT id FROM usage_log WHERE user_id=? AND kind=?", (uid, "work")
-    )
+        credits.spend(uid, 2, kind="work", model="work:dsh", request_id="ws-dsh-%d" % minute, units=1)
+    total = db.query("SELECT id FROM usage_log WHERE user_id=? AND kind=?", (uid, "work"))
     assert len(total) == 3, "不同 request_id 被误判成重复, 会少收钱"
 
 
