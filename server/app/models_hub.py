@@ -83,8 +83,14 @@ def allowed_target(method: str, path: str) -> str:
         return path
     # /v1/models/<engine>/load|unload
     parts = path.split("/")
-    if (method == "POST" and len(parts) == 5 and parts[1] == "v1"
-            and parts[2] == "models" and parts[3] and parts[4] in _ENGINE_ACTIONS):
+    if (
+        method == "POST"
+        and len(parts) == 5
+        and parts[1] == "v1"
+        and parts[2] == "models"
+        and parts[3]
+        and parts[4] in _ENGINE_ACTIONS
+    ):
         return path
     raise HTTPException(status_code=404, detail="不支持的路径")
 
@@ -109,19 +115,24 @@ async def models_hub_proxy(request: Request, user: dict = Depends(resolve_user))
     try:
         async with httpx.AsyncClient(timeout=_TIMEOUT) as http:
             upstream = await http.request(
-                request.method, _base_url() + target,
+                request.method,
+                _base_url() + target,
                 headers={**_headers(), "Content-Type": "application/json"},
-                content=body)
+                content=body,
+            )
     except httpx.HTTPError as exc:
         # ⛔ 不把异常原文回给页面: 里面可能带内网地址。日志里留全的。
         logger.warning("[models-hub] 代转失败 %s %s: %s", request.method, target, exc)
         raise HTTPException(status_code=502, detail="推理节点没有应答") from exc
     media = upstream.headers.get("content-type", "application/json")
-    return JSONResponse(
-        content=_safe_json(upstream),
-        status_code=upstream.status_code,
-    ) if media.startswith("application/json") else JSONResponse(
-        content={"detail": "推理节点返回了非 JSON 内容"}, status_code=502)
+    return (
+        JSONResponse(
+            content=_safe_json(upstream),
+            status_code=upstream.status_code,
+        )
+        if media.startswith("application/json")
+        else JSONResponse(content={"detail": "推理节点返回了非 JSON 内容"}, status_code=502)
+    )
 
 
 def _safe_json(resp: httpx.Response):

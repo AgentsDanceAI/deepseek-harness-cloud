@@ -56,9 +56,31 @@ def test_every_product_is_listed():
             assert app.name in block, f"{path} 少了 {app.name} ({app.id})"
 
 
+#: 英文开场白把数字写成单词 ("Seventeen open-source AI products")。这里跟着 CATALOG
+#: 推导而不是写死 —— 原先中文是推导的、英文却钉着 "Sixteen", 于是加一个产品必然红在
+#: 一个跟被测行为无关的字上, 而且报错还指不出该改成什么。
+_NUMBER_WORDS = {
+    14: "Fourteen",
+    15: "Fifteen",
+    16: "Sixteen",
+    17: "Seventeen",
+    18: "Eighteen",
+    19: "Nineteen",
+    20: "Twenty",
+}
+
+
 def test_readme_product_count_claims_stay_honest():
     n = len(CATALOG)
-    for path, phrase in (("README.md", "Sixteen"), ("README.zh-CN.md", f"{n} 个开源 AI 产品")):
+    word = _NUMBER_WORDS.get(n)
+    assert word, f"货架上有 {n} 个产品, 但 _NUMBER_WORDS 里没有这个数的英文写法, 补一个"
+    for path, phrase in (
+        (("README.md"), word),
+        ("README.zh-CN.md", f"{n} 个开源 AI 产品"),
+    ):
         text = (ROOT / path).read_text(encoding="utf-8")
-        assert phrase in text, f"{path} 开场白的数量说法要跟着 CATALOG ({n} 个) 改: 找不到 {phrase!r}"
-    assert n == 16, f"CATALOG 现在有 {n} 个 —— README 开场白写的是十六个, 两边一起改"
+        assert phrase in text, (
+            f"{path} 开场白的数量说法要跟着 CATALOG ({n} 个) 改: 找不到 {phrase!r}"
+        )
+    # 上面两条已经把"开场白与 CATALOG 对不对得上"钉死了; 再钉一个具体数字是**重复**,
+    # 而且它每加一个产品都会红在一个与被测行为无关的字上 (这次就是它)。删。

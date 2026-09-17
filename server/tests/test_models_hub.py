@@ -19,37 +19,46 @@ from app import apps_catalog, models_hub
 class TestOnlyTheBoardPathsGetThrough:
     """白名单是这一页唯一挡得住事的东西。"""
 
-    @pytest.mark.parametrize("method,path", [
-        ("GET", "/v1/engines"),
-        ("GET", "/v1/gpu"),
-        ("GET", "/v1/models"),
-        ("GET", "/v1/models/base"),
-        ("POST", "/v1/models/register"),
-        ("POST", "/v1/models/unregister"),
-        ("POST", "/v1/models/vllm-a/load"),
-        ("POST", "/v1/models/vllm-a/unload"),
-    ])
+    @pytest.mark.parametrize(
+        "method,path",
+        [
+            ("GET", "/v1/engines"),
+            ("GET", "/v1/gpu"),
+            ("GET", "/v1/models"),
+            ("GET", "/v1/models/base"),
+            ("POST", "/v1/models/register"),
+            ("POST", "/v1/models/unregister"),
+            ("POST", "/v1/models/vllm-a/load"),
+            ("POST", "/v1/models/vllm-a/unload"),
+        ],
+    )
     def test_board_and_load_paths_pass(self, method, path):
         assert models_hub.allowed_target(method, path) == path
 
-    @pytest.mark.parametrize("path", [
-        "/v1/chat/completions",
-        "/v1/embeddings",
-        "/v1/rerank",
-        "/v1/responses",
-    ])
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "/v1/chat/completions",
+            "/v1/embeddings",
+            "/v1/rerank",
+            "/v1/responses",
+        ],
+    )
     def test_inference_surfaces_are_refused(self, path):
         """⛔ 这几条是花钱的推理面。放过去 = 绕开积分计费的免费入口。"""
         with pytest.raises(HTTPException) as got:
             models_hub.allowed_target("POST", path)
         assert got.value.status_code == 404
 
-    @pytest.mark.parametrize("path", [
-        "/v1/models/../chat/completions",
-        "/v1/models/..%2F..%2Fadmin",
-        "//v1/chat/completions",
-        "/v1/models/x/load/../../chat/completions",
-    ])
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "/v1/models/../chat/completions",
+            "/v1/models/..%2F..%2Fadmin",
+            "//v1/chat/completions",
+            "/v1/models/x/load/../../chat/completions",
+        ],
+    )
     def test_traversal_cannot_escape_the_whitelist(self, path):
         """⚠️ 这几条**本来就被白名单挡住**(段数/表里没有), `..` 那两行只是冗余加固。
         所以注红删掉那两行时这条不会变红 —— 那是对的, 真正的防线是上面那组。"""
@@ -88,12 +97,12 @@ class TestCredentialsStayServerSide:
         from pathlib import Path
 
         html = (Path(models_hub.__file__).parent / "templates" / "models_hub.html").read_text(
-            encoding="utf-8")
+            encoding="utf-8"
+        )
         for leak in ("INFERENCE_KEY", "X-API-Key", "inference_key"):
             assert leak not in html, f"模板里出现了 {leak}"
         assert "/api/models-hub/" in html, "页面该打我们自己的代转口"
-        assert "/v1/" in html and "http" not in html.split("fetch(")[1][:60], \
-            "页面不该直连推理节点"
+        assert "/v1/" in html and "http" not in html.split("fetch(")[1][:60], "页面不该直连推理节点"
 
 
 class TestNotConfiguredIsQuiet:
@@ -102,13 +111,11 @@ class TestNotConfiguredIsQuiet:
     def test_configured_follows_the_url(self, monkeypatch):
         monkeypatch.setattr(models_hub.config, "INFERENCE_URL", "", raising=False)
         assert models_hub.configured() is False
-        monkeypatch.setattr(models_hub.config, "INFERENCE_URL", "http://node:50001",
-                            raising=False)
+        monkeypatch.setattr(models_hub.config, "INFERENCE_URL", "http://node:50001", raising=False)
         assert models_hub.configured() is True
 
     def test_trailing_slash_is_normalised(self, monkeypatch):
-        monkeypatch.setattr(models_hub.config, "INFERENCE_URL", "http://node:50001/",
-                            raising=False)
+        monkeypatch.setattr(models_hub.config, "INFERENCE_URL", "http://node:50001/", raising=False)
         assert models_hub._base_url() == "http://node:50001"
 
 

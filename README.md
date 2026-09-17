@@ -2,7 +2,7 @@
 
 # AI Store
 
-**Sixteen open-source AI products behind one account—hosted, or pulled onto
+**Seventeen open-source AI products behind one account—hosted, or pulled onto
 your own machine with a single command.**
 
 DeepSeek Harness, ComfyUI, Dify, OpenManus… each slot is its own workspace.
@@ -146,6 +146,7 @@ instead, because they share GPU nodes rather than running a container per user.
 | **Hermes Agent**<br>`hermes` | Persistent memory, self-taught skills | Nous Research's always-on agent: persistent memory, and it writes each solved problem into a reusable skill — it gets better the longer it runs. |
 | **Dify**<br>`dify` | Visual LLM app builder | Visual LLM app platform: workflows, knowledge bases and agents, with models through the platform gateway. |
 | **数字人直播**<br>`/live` · on the main site | 24/7 digital host | A digital human streaming 24/7: pick one of five ready-made personas (look, voice and character as a set), hand it your script and products, and it speaks — straight into your channel. |
+| **模型中心**<br>`/models-hub` · on the main site | Your own inference node · engines & GPUs | A board for your self-hosted inference node: which GPU is busy, which engine holds which model, load or unload in one click. |
 | **数字人伴聊**<br>`/avatar` · on the main site | Full-duplex digital human | Full-duplex digital human. She listens while she speaks — real-time lip sync, cloned voice, billed by the minute. |
 | **Open Design**<br>`open-design` | Open-source Claude Design | An AI design agent: describe it, get the artifact — pages, apps, decks, images, driven by DeepSeek Harness. |
 | **Pi Agent**<br>`pi` | Lightweight open-source AI agent | The Pi Agent coding agent with the community pi-web-ui front end: chat, files, built-in terminal, Git panel. Open source, take it apart and rebuild. |
