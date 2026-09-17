@@ -540,6 +540,19 @@ def _live_gate(request: Request):
     return None
 
 
+@router.get("/smart-search")
+def smart_search_page(request: Request):
+    """AI 智慧搜索 (2026-09-17 自口袋专家迁入)。渲染时一个上游都不打 —— 索引清单与
+    结果都由前端去要 /api/smart-search/*, 后端够不着时页面照常出来只是几块显示没应答。"""
+    return _render(request, "smart_search.html", "smart-search")
+
+
+@router.get("/smart-recommend")
+def smart_recommend_page(request: Request):
+    """AI 智慧推荐 (2026-09-17 自口袋专家迁入)。同上: 渲染不打上游。"""
+    return _render(request, "smart_recommend.html", "smart-recommend")
+
+
 @router.get("/models-hub")
 def models_hub_page(request: Request):
     """模型中心: 自托管推理节点的引擎、显卡与模型装卸 (2026-09-17 自口袋专家迁入)。

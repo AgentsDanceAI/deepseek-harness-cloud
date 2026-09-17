@@ -97,6 +97,8 @@ PASS_PRODUCTS = [
     # ⚠️ 这是**照抄同类**不是定价决策; INFERENCE_URL 留空时这一格根本不上线,
     # 所以在有人拍价之前它是 inert 的。
     "models-hub",
+    "smart-search",
+    "smart-recommend",
 ]
 
 # id,        $,  base credits, bonus %
