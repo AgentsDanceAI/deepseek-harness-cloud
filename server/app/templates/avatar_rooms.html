@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}{{ t('avatar.title') }} · AI Store{% endblock %}
+{% block head %}
+{# 卡片样式与数字人直播的列表页**共用一份** (live.css 里的 .lv-room*)。
+   创始人 2026-09-17 要的就是"类似布局排版" —— 共用而不是复制一份, 是为了以后
+   改卡片的时候两边一起变, 不会出现"直播的卡好看了、伴聊的还是旧的"。 #}
+<link rel="stylesheet" href="/static/live.css?v={{ asset_v }}">
+<link rel="stylesheet" href="/static/avatar.css?v={{ asset_v }}">
+{% endblock %}
+{% block content %}
+<section class="section">
+  <div class="container">
+    <div class="lv-head">
+      <h1 class="lv-title">{{ t('avatar.title') }}</h1>
+    </div>
+    <p class="lv-sub">{{ t('avatar.pick_sub') }}</p>
+
+    <div class="lv-roomgrid">
+      {% for p in persons %}
+      <a class="lv-roomcard" href="/avatar/{{ p.id }}" data-person="{{ p.id }}">
+        <span class="lv-roomcover">
+          {# 宽高写死是为了占位: 图后到时下面的字不会被顶得跳一下 (与直播列表页同款) #}
+          <img src="{{ p.cover }}" alt="" width="640" height="360" loading="lazy" decoding="async">
+        </span>
+        <span class="lv-roommeta">
+          <span class="lv-roomname">{{ t(p.key) }}</span>
+          <span class="lv-roomanchor">{{ t('avatar.card_hint') }}</span>
+        </span>
+      </a>
+      {% endfor %}
+    </div>
+    <div class="lv-note">{{ t('avatar.note') }}</div>
+  </div>
+</section>
+{% endblock %}

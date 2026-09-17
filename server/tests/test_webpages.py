@@ -598,12 +598,70 @@ def test_avatar_page_renders_for_a_signed_in_user(client, monkeypatch):
 
     monkeypatch.setattr(config, "AVATAR_TOKEN_SECRET", "s" * 32)
     signup(client, "avatar-page@example.com")
-    body = client.get("/avatar").text
+    # 2026-09-17 伴聊拆成 /avatar(挑人) + /avatar/{形象}(通话) —— 钩子在后者上
+    body = client.get("/avatar/serena").text
     # 只有**一个**选择器 (成套预设), 没有单独的音色选择 —— 分开选会出现"男样子
     # 配女嗓音"。少了这条断言, 谁把音色选择加回来都没人拦。
     assert "avVoice" not in body, "音色不该能单独选 — 它跟着人走"
     for hook in ("avPerson", "avCall", "avBg", "avTimer", "/static/avatar.js"):
         assert hook in body, f"通话页少了 {hook}"
+
+
+def test_avatar_pick_page_lists_every_persona(client, monkeypatch):
+    """伴聊的第一屏是**挑人**, 不是直接进一通电话。
+
+    创始人 2026-09-17: 「伴聊那个现在是 1 个直播间, 能不能复制数字人直播中的形象,
+    类似布局排版开出对应的伴聊直播间」。形象本来就有十七套, 之前全藏在通话页侧栏的
+    一个 select 里 —— 没进来过的人根本不知道有谁可聊。
+
+    ⚠️ 这条同时钉住**两处清单不许漂**: 服务端的 AVATAR_PERSONS 与 static/avatar.js 的
+       PRESETS 必须是同一批 id。漂了的表现是"卡片点进去是另一个人"或"列表里少一个人",
+       而两边都不会报错。
+    """
+    import re
+    from pathlib import Path
+
+    from app import config
+    from app.avatar import AVATAR_PERSONS
+
+    monkeypatch.setattr(config, "AVATAR_TOKEN_SECRET", "s" * 32)
+    signup(client, "avatar-pick@example.com")
+    body = client.get("/avatar").text
+
+    assert body.count('class="lv-roomcard"') == len(AVATAR_PERSONS), "卡片数与清单对不上"
+    for pid, _key in AVATAR_PERSONS:
+        assert f'href="/avatar/{pid}"' in body, f"列表里少了 {pid}"
+        assert f"/api/avatar/cover/{pid}" in body, f"{pid} 没有封面"
+    # 名字必须是翻译过的, 不能回落成 i18n 键本身 (source-v3-head 的键是历史遗留的
+    # "default", 少那条特判第一张卡就会显示成 js.avatar.p.default)。
+    # ⚠️ 只能查卡片标题那一处: 整份 i18n 字典本来就嵌在页面里给前端 t() 用, 所以
+    #    "整页不含 js.avatar.p." 这种写法必红 —— 我第一版就是这么写的。
+    assert 'lv-roomname">js.avatar.p.' not in body, "有名字没翻出来 — 卡片上会显示键名"
+
+    js = (Path(__file__).resolve().parents[1] / "app" / "static" / "avatar.js").read_text("utf-8")
+    block = js[js.index("const PRESETS") : js.index("const PRESETS") + 2000]
+    in_js = set(re.findall(r'"([a-z0-9-]+)":\s*\{\s*name:', block))
+    ours = {p for p, _ in AVATAR_PERSONS}
+    assert ours == in_js, (
+        f"服务端清单与 avatar.js 的 PRESETS 漂了 — "
+        f"只在服务端: {sorted(ours - in_js)}; 只在 JS: {sorted(in_js - ours)}"
+    )
+
+
+def test_avatar_unknown_person_falls_back_to_the_list(client, monkeypatch):
+    """乱填的形象要回列表页, 而且**永远不能**拿去问上游。
+
+    形象名会被拼进上游 URL, 而库里还有别的租户上传的**人脸照片**(前缀 t-<租户>--)。
+    放行任意字符串就是隐私事故, 所以只认清单里的共享形象。
+    """
+    from app import config
+
+    monkeypatch.setattr(config, "AVATAR_TOKEN_SECRET", "s" * 32)
+    signup(client, "avatar-404@example.com")
+    r = client.get("/avatar/nope", follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"] == "/avatar"
+    assert client.get("/api/avatar/cover/t-someone--face").status_code == 404
+    assert client.get("/api/avatar/cover/../etc/passwd").status_code in (404, 400)
 
 
 def test_tab_icon_is_wired_up(client):

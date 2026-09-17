@@ -35,6 +35,77 @@ from .accounts import resolve_user, try_resolve_user
 router = APIRouter(tags=["avatar"])
 log = logging.getLogger("dhc.avatar")
 
+#: 伴聊的形象清单: (形象 id, i18n 键的后缀)。**与 static/avatar.js 的 PRESETS 同一批 id、
+#: 同一个顺序** —— 那边管通话里怎么用 (还带音色), 这边管列表页摆哪几张卡。两处对不上
+#: 会表现成"卡片点进去是另一个人"或"列表里少一个", 所以有一条守护测试逐个比对。
+#: ⚠️ source-v3-head 的 i18n 键是历史遗留的 "default", 不是它的 id —— 少这一条特判,
+#:    首页第一张卡就会显示成键名本身。
+#: 名字不写在这里: 它们是 js.avatar.p.<后缀>, 模板直接取 (与直播列表页同款做法)。
+AVATAR_PERSONS: list[tuple[str, str]] = [
+    ("source-v3-head", "default"),
+    ("lin", "lin"),
+    ("yue", "yue"),
+    ("chen", "chen"),
+    ("hao", "hao"),
+    ("serena", "serena"),
+    ("momo", "momo"),
+    ("vivian", "vivian"),
+    ("moon", "moon"),
+    ("maia", "maia"),
+    ("kai", "kai"),
+    ("katerina", "katerina"),
+    ("sage", "sage"),
+    ("neil", "neil"),
+    ("bellona", "bellona"),
+    ("vincent", "vincent"),
+    ("nini", "nini"),
+]
+
+
+def persons() -> list[dict]:
+    """列表页要摆的那些卡。封面走我们自己的代转, 不让浏览器直连 GPU 节点。"""
+    return [
+        {"id": pid, "key": f"js.avatar.p.{suffix}", "cover": f"/api/avatar/cover/{pid}"}
+        for pid, suffix in AVATAR_PERSONS
+    ]
+
+
+def is_person(pid: str) -> bool:
+    """这个 id 是不是清单里的共享形象。
+
+    **这是唯一一处把浏览器给的字符串变成形象名的地方。** 放行任意字符串 = 任人拿
+    `t-<别的租户>--<id>` 去要别人上传的脸 —— 而那些是人脸照片 (见 GPU 侧 _ns 那段注释)。
+    """
+    return any(pid == p for p, _ in AVATAR_PERSONS)
+
+
+@router.get("/api/avatar/cover/{person}")
+async def avatar_cover(person: str):
+    """形象的封面 (上游把她的场景图缩成 640 宽的 JPEG)。
+
+    **公开** —— 与直播列表页的封面同一批图、同一个道理: 十七张图各带一次鉴权往返,
+    首屏就白给。而清单外的 id 一律 404, 所以租户私有形象永远走不到这条路上。
+    """
+    # 白名单在配置检查**之前**: 清单外的 id 无论服务配没配全, 回的都该是"没这个人",
+    # 不该因为配置没齐就变成另一种错 —— 那会让人以为"配好了就能取到别人的脸"。
+    if not is_person(person):
+        raise HTTPException(404, "no_such_person")
+    if not config.AVATAR_TOKEN_SECRET:
+        raise HTTPException(503, "avatar_not_configured")
+    tok = sign_token("cover")
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as c:
+            r = await c.get(f"{config.AVATAR_GPU_URL}/cover.jpg", params={"token": tok, "person": person})
+    except httpx.HTTPError as e:
+        log.warning("[avatar] 封面取不到 %s: %s", person, type(e).__name__)
+        raise HTTPException(502, "avatar_unreachable") from None
+    if r.status_code != 200:
+        raise HTTPException(r.status_code if r.status_code == 404 else 502, "upstream")
+    return Response(
+        content=r.content, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=86400"}
+    )
+
+
 #: AI Store 用户在 GPU 侧的租户前缀。口袋专家用的是自己的租户 id, 两边共用一张
 #: 卡 —— 不加前缀的话两个产品线的用户可能撞 id, 而撞了就是**看到别人的形象**。
 TENANT_PREFIX = "d-"

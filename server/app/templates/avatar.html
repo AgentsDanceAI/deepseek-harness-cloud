@@ -6,7 +6,9 @@
 {% block content %}
 <section class="section">
   <div class="container">
-<div class="av-wrap">
+{# 从 /avatar/{形象} 带进来的那个人。JS 用它做初始选中 —— 不带的话点了卡片
+   进来还是"默认", 等于卡片白点。 #}
+<div class="av-wrap" data-person="{{ person | default("", true) }}">
   <div class="av-stage">
     {# 静止背景与视频层是**同一个人**: /bg.png 吐的是模型自渲染的中性帧合成图,
        视频起播时不会跳脸。两层按 crop 对齐 —— 那组坐标由服务端按形象给出。 #}

@@ -142,7 +142,10 @@
      会把选择冲回第一项"默认"。表现是: 换成林、打一通、挂断, 下一通又变回初雪,
      而侧栏里那行小字变了没人会注意 —— 看到的就是"我明明换了人, 脸还是之前的"。 */
   function fill(sel, ids, def, names) {
-    const keep = sel.value;
+    /* 首次进来时页面会带一个人 (从 /avatar/{形象} 点进来的那张卡)。keep 为空才用它 ——
+       用户在侧栏换过人之后, 那个选择要盖过地址里的。 */
+    const wrap = document.querySelector(".av-wrap");
+    const keep = sel.value || (wrap && wrap.dataset.person) || "";
     sel.innerHTML = "";
     const o0 = document.createElement("option");
     o0.value = ""; o0.textContent = t("js.avatar.default", "默认") + (def ? `（${def}）` : "");

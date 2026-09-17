@@ -847,5 +847,8 @@
   "live.kind_script": "话术",
   "live.kind_interject": "回评论",
   "live.sending": "正在让她组织语言…",
-  "live.queued": "已排上，她接下来会说："
+  "live.queued": "已排上，她接下来会说：",
+  "avatar.pick_sub": "挑一个人聊。形象、声音、口型都是我们自己的模型实时生成的，没有第三方水印。",
+  "avatar.card_hint": "点进去打电话",
+  "avatar.note": "通话按分钟计费，挂断即停。形象与音色是成套的：一张脸配一副嗓子。"
 }

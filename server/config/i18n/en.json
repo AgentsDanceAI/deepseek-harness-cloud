@@ -847,5 +847,8 @@
   "live.kind_script": "script",
   "live.kind_interject": "reply",
   "live.sending": "Working out what to say…",
-  "live.queued": "Queued. She will say:"
+  "live.queued": "Queued. She will say:",
+  "avatar.pick_sub": "Pick someone to talk to. The face, the voice and the lip sync are all generated live by our own models — no third-party watermark.",
+  "avatar.card_hint": "Tap to call",
+  "avatar.note": "Calls are billed per minute and stop the moment you hang up. Each face comes with its own voice."
 }

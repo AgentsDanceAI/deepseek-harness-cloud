@@ -21,8 +21,15 @@ def _needs_blob_media(path: str) -> bool:
     症状极具欺骗性: Safari 原生放 HLS, 不走 MediaSource, **在 Mac 上一切正常**;
     Chrome / Edge / 安卓是纯黑一帧, 只有控制台里一行 CSP 违规。
     (数字人通话当年栽过同一个坑, 这次是同一个坑的第二次。)
+    ⚠️ 2026-09-17 伴聊也拆成了 /avatar (挑人) + /avatar/{形象} (通话), 于是同一条
+       规则第三次适用 —— 通话页现在在子路径上, 精确匹配会让它拿不到 media-src。
     """
-    return path == AVATAR_PATH or path == LIVE_PATH or path.startswith(LIVE_PATH + "/")
+    return (
+        path == AVATAR_PATH
+        or path.startswith(AVATAR_PATH + "/")
+        or path == LIVE_PATH
+        or path.startswith(LIVE_PATH + "/")
+    )
 
 
 class SecurityHeaders:

@@ -468,28 +468,53 @@ def product_page(request: Request):
     return _render(request, "product.html", "product")
 
 
-@router.get("/avatar")
-def avatar_page(request: Request):
-    """数字人通话页。
-
-    与其它产品不同, 它**不是一个云工作台** —— 没有每用户容器可开, 页面就在主站
-    这里, 通话经 /api/avatar/* 转发到我们自己的 GPU 节点。所以它不走
-    /work/... 那条路, 也不出现在工作台的启动/回收逻辑里。
-
-    未登录先送去登录: 页面上**每一个**动作都要账号 (形象清单、背景图、通话本身
-    全挂 resolve_user)。让人先看到界面再一路 401, 只会像是坏了。
-    """
+def _avatar_gate(request: Request):
+    """进伴聊前的两道闸。过了返回 None, 没过返回要跳去哪。"""
     user = try_resolve_user(request)
     if user is None:
-        return RedirectResponse("/login?next=/avatar", status_code=303)
-    # 数字人也可以上锁 (老板 2026-09-06 锁了它和 Coze)。它不是工作台, 所以
-    # /api/work/route 那道闸够不着它 —— 页面这里自己拦一道。
+        return RedirectResponse(f"/login?next={request.url.path}", status_code=303)
     from . import products as _products
     from . import work_access as _wa
 
     if _products.is_locked("avatar") and not _wa.can_open_locked(user, "avatar"):
         return RedirectResponse("/pricing?reason=locked&product_id=avatar#unlock", status_code=303)
-    return _render(request, "avatar.html", "avatar")
+    return None
+
+
+@router.get("/avatar")
+def avatar_pick_page(request: Request):
+    """伴聊: 先挑人。
+
+    2026-09-17 由创始人定成与数字人直播同款的一屏卡片 —— 形象本来就有十七套, 之前
+    藏在通话页侧栏的一个 select 里, 没进来过的人根本不知道有谁。
+    这一页**不问上游**: 封面是我们自己代转的静态图, 谁在不在线这一格不需要 (伴聊是
+    按需接通的, 不像直播有"在播/未开播"之分)。
+    """
+    gate = _avatar_gate(request)
+    if gate is not None:
+        return gate
+    from .avatar import persons
+
+    return _render(request, "avatar_rooms.html", "avatar", persons=persons())
+
+
+@router.get("/avatar/{person}")
+def avatar_page(request: Request, person: str):
+    """跟某一个形象通话。
+
+    与数字人直播一样**不是云工作台** —— 没有每用户容器, 画面来自我们自己的 GPU 节点,
+    通话经 /api/avatar/* 转发。所以它不走工作台那套闸, 自己拦一道 (见 _avatar_gate)。
+    ⚠️ 这条**必须**注册在 /avatar 之后 —— 路由按注册顺序匹配, 排在前面会把列表页
+       当成一个叫空串的形象吃掉。
+    """
+    from .avatar import is_person
+
+    if not is_person(person):
+        return RedirectResponse("/avatar", status_code=303)
+    gate = _avatar_gate(request)
+    if gate is not None:
+        return gate
+    return _render(request, "avatar.html", "avatar", person=person)
 
 
 def _live_gate(request: Request):
