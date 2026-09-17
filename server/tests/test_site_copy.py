@@ -176,4 +176,4 @@ def test_keys_used_from_javascript_are_shipped_to_javascript():
         for key in _re.findall(r'\bT\(\s*"([^"]+)"', p.read_text()):
             if not key.startswith("js."):
                 bad.setdefault(p.name, []).append(key)
-    assert not bad, "这些键在 JS 里用但不会被发到前端 (要 js. 前缀): %s" % bad
+    assert not bad, f"这些键在 JS 里用但不会被发到前端 (要 js. 前缀): {bad}"

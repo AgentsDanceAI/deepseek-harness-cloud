@@ -25,8 +25,8 @@ from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from fastapi import HTTPException
 
-from . import base
 from .. import config
+from . import base
 
 API_BASE = "https://api.mch.weixin.qq.com"
 
