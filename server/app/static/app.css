@@ -1091,7 +1091,11 @@ form .btn-block { margin-top: 16px; }
 :target,
 [id]:target,
 .card[id], section[id], div[id].feature {
-  scroll-margin-top: 88px;
+  /* 88px 时落点离导航底边只剩 23px, 而导航底部那条渐变只有 74% 不透明 ——
+     内容从它下面透出来会发灰, 加上全站 smooth 滚动, 动画途中那一下标题就压在
+     导航的模糊区里, 看着比别的标题暗一截 (老板 2026-09-16 从「产品」下拉落到
+     /apps#coding 时看到的正是这个)。留足余量, 落点彻底离开那条带。 */
+  scroll-margin-top: 112px;
 }
 html { scroll-behavior: smooth; }
 @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }

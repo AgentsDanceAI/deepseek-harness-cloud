@@ -23,7 +23,7 @@
   /* 首屏必须装得下两排 8 张卡 (老板 2026-09-16, 参考稿就是这个信息密度)。
      预算: 页头 64 + 预览条 30 + 本节 + 分区标题 ~50 + 两排卡 ~330 <= 视口高。
      所以这一节连内边距压到 ~330, 轮播卡跟着从 352 降到 296。 */
-  .v2-hero{position:relative;padding:26px 0 22px}
+  .v2-hero{position:relative;padding:22px 0 18px}
   .v2-hero-inner{position:relative;z-index:2;display:grid;grid-template-columns:1.1fr .9fr;
     gap:48px;align-items:center}
   .v2-hero h1{font-size:clamp(30px,3.3vw,46px);line-height:1.18;letter-spacing:-.9px;margin:0 0 14px;
@@ -52,7 +52,7 @@
      "有的大有的小", 切换时整页还会跳。叠放后尺寸恒定, 切换只是交叉淡入。 */
   .v2-car{position:relative;border:1px solid var(--border-strong);border-radius:var(--radius-lg);
     background:linear-gradient(140deg,#14305a,#1b3f74 52%,#2b5a9e);overflow:hidden;
-    box-shadow:var(--shadow-md);height:296px}
+    box-shadow:var(--shadow-md);height:276px}
   /* 科技感: 斜向扫光 + 网格 + 角落辉光, 都在内容之下, 不抢读 */
   .v2-car::before{content:"";position:absolute;inset:0;pointer-events:none;z-index:0;
     background:
@@ -69,7 +69,7 @@
   @media (prefers-reduced-motion:reduce){.v2-car::after{animation:none;opacity:0}}
 
   .v2-slide{position:absolute;inset:0;z-index:1;display:flex;flex-direction:column;
-    padding:18px 22px 48px;opacity:0;pointer-events:none;
+    padding:16px 20px 44px;opacity:0;pointer-events:none;
     transition:opacity .45s ease, transform .45s ease;transform:translateY(8px)}
   .v2-slide.on{opacity:1;pointer-events:auto;transform:none}
   .v2-badge{align-self:flex-start;background:rgba(255,255,255,.15);border-radius:999px;
@@ -111,7 +111,8 @@
   .v2-sec-head h2{font-size:25px;margin:0;font-weight:800;letter-spacing:-.5px}
   .v2-sec-head p{margin:0;color:var(--muted);font-size:14px}
   .v2-count{margin-left:auto;color:var(--faint);font-size:13px}
-  .v2-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
+  /* 下方留白: 两排卡压在折叠线上会显得被切掉, 留一截空出来才知道下面还有 */
+  .v2-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;padding-bottom:28px}
   .v2-card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);
     padding:14px;display:flex;flex-direction:column;transition:transform .15s ease,border-color .15s ease}
   .v2-card:hover{transform:translateY(-2px);border-color:var(--border-strong)}
@@ -224,9 +225,20 @@
   html[data-v2theme="light"] .v2-sec-head h2{letter-spacing:-.6px}
 
   /* 精选卡与底部 CTA 在浅底上保持深色: 它们是主视觉, 白底上更跳 (参考稿同理) */
+  /* 浅色下精选卡不能还是深蓝: 白页上摆一块深蓝像贴错了图 (老板 2026-09-16)。
+     换成饱和的蓝紫渐变 —— 它是整页唯一的大色块, 该跳但要跳在同一个色系里。 */
   html[data-v2theme="light"] .v2-car{
-    border-color:rgba(13,21,38,.12);
-    box-shadow:0 10px 26px -14px rgba(13,21,38,.5), 0 30px 60px -36px rgba(47,98,217,.6)}
+    background:linear-gradient(135deg,#3f5ae0 0%,#6b4ae8 48%,#8b46e0 100%);
+    border-color:rgba(255,255,255,.22);
+    box-shadow:0 12px 28px -14px rgba(90,70,230,.5), 0 34px 64px -34px rgba(90,70,230,.65)}
+  html[data-v2theme="light"] .v2-car::before{
+    background:
+      radial-gradient(90% 70% at 88% 12%, rgba(255,255,255,.3), transparent 60%),
+      radial-gradient(70% 60% at 6% 96%, rgba(255,255,255,.14), transparent 62%),
+      repeating-linear-gradient(0deg, rgba(255,255,255,.07) 0 1px, transparent 1px 34px),
+      repeating-linear-gradient(90deg, rgba(255,255,255,.07) 0 1px, transparent 1px 34px)}
+  html[data-v2theme="light"] .v2-slide-l p{color:#e7e4ff}
+  html[data-v2theme="light"] .v2-code{background:rgba(22,16,58,.5);border-color:rgba(255,255,255,.18);color:#d8d4f6}
   html[data-v2theme="light"] .v2-cta{
     border:0;background:linear-gradient(120deg,#141d33 0%,#25335e 52%,#3b3f80 100%);
     box-shadow:0 22px 52px -26px rgba(30,30,90,.6)}
