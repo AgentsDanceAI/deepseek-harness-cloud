@@ -157,3 +157,23 @@ def test_terms_do_not_advertise_a_withdrawn_plan():
         for gone in ("11,000", "125,000", "5,250"):
             if gone not in packs:
                 assert gone not in text, f"{doc} still offers a withdrawn {gone}-credit pack"
+
+
+def test_keys_used_from_javascript_are_shipped_to_javascript():
+    """JS 里 T() 引用的键必须是 js.* —— 否则运行时取不到, 原样把键名显示给用户。
+
+    只有 js. 前缀的键会进 window.__T (见 webpages._ctx 的 js_strings)。而 T() 找不到
+    键时返回**键本身**, 所以这类错误不会报错、不会红, 只会让按钮上出现
+    "console.keys.copy" 这样一串。2026-09-16 实测线上就有一个: 密钥页的"复制"按钮
+    点完 1.5 秒后变成原始键名。
+
+    test_every_referenced_key_exists 抓不到这一类: 键在目录里是存在的, 只是没发给前端。
+    """
+    import re as _re
+
+    bad = {}
+    for p in STATIC_JS:
+        for key in _re.findall(r'\bT\(\s*"([^"]+)"', p.read_text()):
+            if not key.startswith("js."):
+                bad.setdefault(p.name, []).append(key)
+    assert not bad, "这些键在 JS 里用但不会被发到前端 (要 js. 前缀): %s" % bad

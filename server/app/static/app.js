@@ -462,11 +462,43 @@
     payBanner();
     initApiKeys();
 
+    // 无密码账号 (验证码注册 / OAuth) 首次设密码要一封现拿的邮箱验证码 —— 只凭会话
+    // 就能设上长期密码的话, 一个泄漏的会话等于一条永久入口。这里只负责把那一栏
+    // 显出来并把码带上; 真正的判定在服务端 (accounts.change_password)。
+    var pwdFirst = $("#pwd-first");
+    api("/api/auth/me").then(function (me) {
+      var u = me && me.user;
+      if (u && u.has_password === false && pwdFirst) pwdFirst.hidden = false;
+    }).catch(function () {});
+
+    var sendBtn = $("#pwd-send-code");
+    if (sendBtn) {
+      sendBtn.addEventListener("click", function () {
+        var errEl = $("#pwd-error");
+        hideError(errEl);
+        api("/api/auth/me")
+          .then(function (me) {
+            return api("/api/auth/email/send", { method: "POST", body: { email: me.user.email } });
+          })
+          .then(function () {
+            sendBtn.textContent = T("js.pwd.code_sent");
+            sendBtn.disabled = true;
+            setTimeout(function () {
+              sendBtn.textContent = T("js.pwd.send_code");
+              sendBtn.disabled = false;
+            }, 60000);
+          })
+          .catch(function (e) { showError(errEl, e); });
+      });
+    }
+
     $("#form-password").addEventListener("submit", function (ev) {
       ev.preventDefault();
       var f = ev.target, errEl = $("#pwd-error");
       hideError(errEl);
-      api("/api/auth/password", { method: "POST", body: { old: f.old.value, new: f.new.value } })
+      var payload = { old: f.old.value, new: f.new.value };
+      if (pwdFirst && !pwdFirst.hidden && f.code) payload.code = f.code.value.trim();
+      api("/api/auth/password", { method: "POST", body: payload })
         .then(function () {
           toast(T("js.msg.11"));
           setTimeout(function () { location.href = "/login?next=/console"; }, 1200);
@@ -631,7 +663,7 @@
         // 就是这么来的), 用户既看不到出错也不知道该重试。
         tbody.textContent = "";
         var tr = document.createElement("tr"), td = document.createElement("td");
-        td.colSpan = 5; td.className = "muted"; td.textContent = T("console.keys.loadfail");
+        td.colSpan = 5; td.className = "muted"; td.textContent = T("js.keys.loadfail");
         tr.appendChild(td); tbody.appendChild(tr);
         showError(errEl, e);
       });
@@ -662,7 +694,7 @@
       }
       this.textContent = T("js.msg.copied");
       var self = this;
-      setTimeout(function () { self.textContent = T("console.keys.copy"); }, 1500);
+      setTimeout(function () { self.textContent = T("js.keys.copy"); }, 1500);
     });
 
     render();

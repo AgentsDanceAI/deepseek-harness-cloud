@@ -255,6 +255,33 @@ def find_or_create_oauth_user(email: str, display_name: str = "") -> dict | None
     return user
 
 
+# 与真哈希同算法同参数的占位值 (口令是随机的, 任何输入都不会匹配上)。
+# 用它把"没有密码可验"这条路径的耗时拉到与"有密码但验错了"一致。
+def consume_email_code(email: str, code: str) -> bool:
+    """校验并**一次性消耗**这个邮箱的登录验证码。对了返 True 并删掉它。
+
+    从 email_login 里抽出来的同一份实现 —— 改密码那条路也要验一封现拿的码
+    (见 change_password), 两处各写一遍必然漂: 漏掉 attempts 上限或过期判断的那份
+    就成了爆破入口。
+    """
+    row = db.query_one("SELECT * FROM email_codes WHERE email=? AND purpose=?", (email, "login"))
+    if (
+        row is None
+        or float(row["expires"]) < time.time()
+        or int(row["attempts"]) >= 5
+        or not secrets.compare_digest(row["code_hash"], security.token_hash(code))
+    ):
+        if row is not None:
+            db.query(
+                "UPDATE email_codes SET attempts=attempts+1 WHERE email=? AND purpose=?", (email, "login")
+            )
+        return False
+    db.query("DELETE FROM email_codes WHERE email=? AND purpose=?", (email, "login"))
+    return True
+
+
+_DUMMY_PASSWORD_HASH = security.hash_password(secrets.token_urlsafe(32))
+
 # New accounts require verified email-code or OAuth ownership. Password login
 # remains available for existing accounts.
 
@@ -267,11 +294,13 @@ def login(body: dict, request: Request, response: Response):
     if rate_limit.login_locked(email, ip):
         raise HTTPException(429, "locked_try_later")
     user = db.query_one("SELECT * FROM users WHERE email=?", (email,))
-    if (
-        user is None
-        or not user["password_hash"]
-        or not security.verify_password(password, user["password_hash"])
-    ):
+    # scrypt 故意很慢, 而 Python 的 or 会短路: 账号不存在 / 没设过密码时
+    # verify_password 根本不跑, 于是"查无此人"比"密码错了"快一个量级 —— 计时就能
+    # 问出账号存不存在、有没有密码。所以**无论如何都跑一次**校验: 没有真哈希时
+    # 拿一个同参数的假哈希去比, 两条路径的代价一样。
+    stored = (user["password_hash"] if user is not None else "") or _DUMMY_PASSWORD_HASH
+    verified = security.verify_password(password, stored)
+    if user is None or not user["password_hash"] or not verified:
         rate_limit.login_failed(email, ip)
         raise HTTPException(401, "bad_credentials")
     if user["status"] != "active":
@@ -320,7 +349,11 @@ def _send_mail(to: str, subject: str, text: str) -> None:
 @router.post("/email/send")
 def email_send(body: dict, request: Request):
     email = normalize_email_identity(body.get("email"))
-    if not EMAIL_RE.fullmatch(email) and db.query_one("SELECT id FROM users WHERE email=?", (email,)) is None:
+    # 格式不合法就一律 400 —— 原来这里挂着一条"但该账号已存在就放行"的兼容旁路,
+    # 结果是**同一个地址, 注册过返 200、没注册过返 400**, 一个现成的账号枚举 oracle。
+    # 那条旁路本是给老格式账号留的后路; 2026-09-16 实测线上 47 个账号里**零个**
+    # 是老格式, 它在保护一个空集。真有 OAuth 建出的怪地址, 那条路本身还能登。
+    if not EMAIL_RE.fullmatch(email):
         raise HTTPException(400, "invalid_email")
     ip = _client_ip(request)
     if not (
@@ -348,20 +381,9 @@ def email_login(body: dict, request: Request, response: Response):
     ip = _client_ip(request)
     if rate_limit.login_locked(email, ip):
         raise HTTPException(429, "locked_try_later")
-    row = db.query_one("SELECT * FROM email_codes WHERE email=? AND purpose=?", (email, "login"))
-    if (
-        row is None
-        or float(row["expires"]) < time.time()
-        or int(row["attempts"]) >= 5
-        or not secrets.compare_digest(row["code_hash"], security.token_hash(code))
-    ):
-        if row is not None:
-            db.query(
-                "UPDATE email_codes SET attempts=attempts+1 WHERE email=? AND purpose=?", (email, "login")
-            )
+    if not consume_email_code(email, code):
         rate_limit.login_failed(email, ip)
         raise HTTPException(401, "bad_code")
-    db.query("DELETE FROM email_codes WHERE email=? AND purpose=?", (email, "login"))
     user = db.query_one("SELECT * FROM users WHERE email=?", (email,))
     if user is None:
         if not config.ALLOW_REGISTRATION:
@@ -383,6 +405,9 @@ def public_user(user: dict) -> dict:
         "email": user["email"],
         "display_name": user["display_name"],
         "created": user["created"],
+        # 前端据此决定改密表单要不要显示"验证码"那一栏: 没密码的账号首次设密码
+        # 需要一封现拿的码 (见 change_password)。只是布尔, 不泄漏任何凭据。
+        "has_password": bool(user.get("password_hash")),
     }
 
 
@@ -443,8 +468,16 @@ def change_password(body: dict, user: dict = Depends(resolve_user)):
     old, new = str(body.get("old", "")), str(body.get("new", ""))
     if len(new) < 8:
         raise HTTPException(400, "password_too_short")
-    if user["password_hash"] and not security.verify_password(old, user["password_hash"]):
-        raise HTTPException(401, "bad_credentials")
+    if user["password_hash"]:
+        if not security.verify_password(old, user["password_hash"]):
+            raise HTTPException(401, "bad_credentials")
+    else:
+        # 无密码账号 (验证码注册 / OAuth) 原来只凭会话就能设上首个密码 —— 一个泄漏的
+        # 或临时的会话因此能被换成**长期有效**的密码凭据, 会话过期了还留着一条入口。
+        # 所以首次设密码要一封现拿的邮箱验证码: 证明的是"这个邮箱现在归你", 而不是
+        # "你手上有张 cookie"。老密码这一栏对这条路径本来就没有意义。
+        if not consume_email_code(user["email"], str(body.get("code", "")).strip()):
+            raise HTTPException(401, "bad_code")
     with db.tx() as conn:
         conn.execute(
             "UPDATE users SET password_hash=?, session_epoch=session_epoch+1 WHERE id=?",

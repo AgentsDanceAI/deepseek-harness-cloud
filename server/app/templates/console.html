@@ -145,6 +145,19 @@
         <label>{{ t("console.pwd.new") }}
           <input type="password" name="new" required minlength="8" autocomplete="new-password" placeholder="{{ t('console.pwd.new_ph') }}">
         </label>
+        {# 无密码账号 (验证码注册 / OAuth) 首次设密码要一封现拿的验证码 —— 只凭会话
+           就能设上长期密码的话, 一个泄漏的会话就被换成了永久入口。
+           默认藏着, app.js 读 /api/auth/me 的 has_password 决定显不显示。 #}
+        <div id="pwd-first" hidden>
+          <label>{{ t("console.pwd.code") }}
+            <span class="key-form">
+              <input type="text" name="code" inputmode="numeric" autocomplete="one-time-code"
+                     placeholder="{{ t('console.pwd.code_ph') }}">
+              <button class="btn btn-ghost" type="button" id="pwd-send-code">{{ t("console.pwd.send_code") }}</button>
+            </span>
+          </label>
+          <p class="muted small">{{ t("console.pwd.first_note") }}</p>
+        </div>
         <p class="form-error" id="pwd-error" hidden></p>
         <button class="btn btn-primary" type="submit">{{ t("console.pwd.submit") }}</button>
         <p class="muted small">{{ t("console.pwd.note") }}</p>
