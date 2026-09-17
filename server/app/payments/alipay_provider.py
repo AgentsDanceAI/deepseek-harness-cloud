@@ -24,6 +24,7 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
 from fastapi import HTTPException
 
+from . import base
 from .. import config
 
 GATEWAY = "https://openapi.alipay.com/gateway.do"
@@ -72,6 +73,7 @@ def _base_params(method: str) -> dict:
 
 def create_page_pay(order: dict) -> str:
     """Returns the signed gateway redirect URL for 电脑网站支付."""
+    base.assert_settles("alipay", order)  # 支付宝只结人民币; 订单币种是访客选的
     oid = order["order_id"]
     biz = {
         "out_trade_no": oid,

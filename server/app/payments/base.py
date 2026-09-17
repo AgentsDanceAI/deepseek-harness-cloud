@@ -189,6 +189,47 @@ def price_for(user_id: str, info: dict) -> int:
     return intro if intro_eligible(user_id, str(info["tier"])) else amount
 
 
+# 每个 provider 能结算哪些币种。空集 = 不限 (自己按订单币种下单, 如 stripe/waffo)。
+#
+# 为什么要有这张表: 支付宝与微信**只结人民币**, 而它们原来把订单的 amount_cents
+# 直接当分提交 (微信更是把 currency 写死 "CNY")。结账币种是访客用 ?cur= 选的,
+# 于是选个 GBP 下单、按人民币分收钱 —— 拿真实价目表算, Max 档 ¥700 实收 ¥78
+# (-88.9%); 反方向同样成立: 日元档 ¥700 会收成 ¥15000, 把客户多扣 20 倍。
+# 键名与 ORDER_PREFIX 那套一致 —— 第一版写成 "wechatpay", 与 active_providers()
+# 返回的 "wechat" 对不上, 结果是矫正不生效、反倒撞上兜底闸, 微信支付整条 500。
+SETTLEMENT_CURRENCIES = {"alipay": {"CNY"}, "wechat": {"CNY"}}
+
+
+def settles(provider: str, cur: str) -> bool:
+    allowed = SETTLEMENT_CURRENCIES.get(provider)
+    return not allowed or cur in allowed
+
+
+def order_currency(provider: str, quoted: str | None) -> str | None:
+    """这个 provider 该按哪个币种建单。
+
+    **不是拒绝而是矫正**: 站点默认报价币种是 USD (currency.DEFAULT), 没带 ?cur=
+    的访客拿到的就是美元报价; 直接拒掉外币会把「美元报价 + 选支付宝」这条最常见的
+    路径整条打断 —— 那比漏洞本身更糟。矫正成人民币后, 金额取的是人民币价目表里的
+    正确价, 套利和断流两头都不占。
+    """
+    allowed = SETTLEMENT_CURRENCIES.get(provider)
+    if not allowed:
+        return quoted
+    if quoted in allowed:
+        return quoted
+    return sorted(allowed)[0]
+
+
+def assert_settles(provider: str, order: dict) -> None:
+    """收款前的最后一道闸。checkout 已经矫正过币种, 这里兜住绕过 checkout 直接
+    走 provider 的任何路径 —— 金额是按订单币种的价目表算的, 币种一旦对不上,
+    收到的就不是那个数 (微信把 currency 写死 CNY, 支付宝按分当元)。"""
+    cur = str(order.get("currency") or "")
+    if not settles(provider, cur):
+        raise HTTPException(500, "currency_not_settleable")
+
+
 def create_order(user_id: str, provider: str, item: str, cur: str | None = None) -> dict:
     info = resolve_item(item, cur)
     info["amount_cents"] = price_for(user_id, info)

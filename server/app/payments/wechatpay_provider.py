@@ -25,6 +25,7 @@ from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from fastapi import HTTPException
 
+from . import base
 from .. import config
 
 API_BASE = "https://api.mch.weixin.qq.com"
@@ -52,6 +53,7 @@ def _auth_header(method: str, path: str, body: str) -> str:
 
 def create_native(order: dict) -> str:
     """POST /v3/pay/transactions/native; returns the QR code_url."""
+    base.assert_settles("wechat", order)  # 微信只结人民币, 下面那行把 currency 写死了
     path = "/v3/pay/transactions/native"
     body = json.dumps(
         {

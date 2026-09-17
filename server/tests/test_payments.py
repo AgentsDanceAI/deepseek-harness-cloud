@@ -425,7 +425,10 @@ def test_alipay_sign_verify_roundtrip(monkeypatch):
     qs = dict(parse_qsl(urlsplit(body["pay_url"]).query, keep_blank_values=True))
     assert qs["method"] == "alipay.trade.page.pay" and qs["sign_type"] == "RSA2"
     biz = json.loads(qs["biz_content"])
-    expected = "%.2f" % (plans.pricing()["packs"]["pack1000"]["cents"] / 100)
+    # 支付宝只结人民币, 所以订单按人民币建 (checkout 会把报价币种矫正过去)。
+    # 原来这里取的是**默认美元表**的 cents —— 那正是被修掉的 bug: 美元的数字
+    # 被当成人民币分收走, Max 档 ¥700 实收 ¥100。
+    expected = "%.2f" % (plans.pricing("CNY")["packs"]["pack1000"]["cents"] / 100)
     assert biz["out_trade_no"] == oid and biz["total_amount"] == expected
     assert qs["notify_url"].endswith("/api/pay/webhook/alipay")
     # request signature verifies against our public key (sign covers everything but `sign`)
@@ -516,8 +519,11 @@ def test_wechat_native_and_webhook(monkeypatch, tmp_path):
     req = json.loads(sent["content"])
     # WeChat settles in CNY only, so this one IS a literal — the provider
     # would reject anything else regardless of what the page was showing.
+    #
+    # 取的必须是**人民币表**: 原来写的是默认美元表, 等于断言了"美元数字当人民币收"
+    # 这个 bug。checkout 现在会把报价币种矫正成 CNY, 金额才是这一格真该收的数。
     assert (
-        req["amount"] == {"total": plans.pricing()["packs"]["pack1000"]["cents"], "currency": "CNY"}
+        req["amount"] == {"total": plans.pricing("CNY")["packs"]["pack1000"]["cents"], "currency": "CNY"}
         and req["out_trade_no"] == oid
     )
 

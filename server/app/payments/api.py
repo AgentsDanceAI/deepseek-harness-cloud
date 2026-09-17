@@ -108,6 +108,10 @@ def checkout(request: Request, body: dict, user: dict = Depends(resolve_user)):
             )
         return {"order_id": order_id, "provider": None, "intent": True}
     provider = requested if requested in active else active[0]
+    # 结算币种矫正: 支付宝/微信只结人民币, 而报价币种是访客用 ?cur= 选的 (默认还是
+    # USD)。不矫正的话, GBP 报价的单会被按分当人民币收走 —— Max 档 ¥700 实收 ¥78;
+    # 反向日元档会收成 ¥15000, 把客户多扣 20 倍。
+    cur = base.order_currency(provider, cur) or cur
     if provider == "waffo":
         # Ask before writing the order row: CNY is WeChat-only on Waffo and
         # WeChat has a ceiling, so the priciest yuan-quoted items have no
