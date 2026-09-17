@@ -20,8 +20,6 @@
      两条边界对不齐 (老板 2026-09-16 指出)。只作用于本页, 不动全局 .container。 */
   body[data-page="landing-preview"] .container{max-width:1240px}
   .v2-wide{max-width:1240px}
-  .v2-flag{background:var(--warn-weak);color:var(--warn);font-size:12.5px;padding:7px 0;text-align:center;
-    border-bottom:1px solid var(--border)}
   /* 首屏必须装得下两排 8 张卡 (老板 2026-09-16, 参考稿就是这个信息密度)。
      预算: 页头 64 + 预览条 30 + 本节 + 分区标题 ~50 + 两排卡 ~330 <= 视口高。
      所以这一节连内边距压到 ~330, 轮播卡跟着从 352 降到 296。 */
@@ -192,7 +190,6 @@
     color:var(--fg);background:rgba(13,21,38,.055)}
   html[data-v2theme="light"] .nav-menu{background:#fff;border-color:var(--border);
     box-shadow:0 20px 50px -22px rgba(13,21,38,.35)}
-  html[data-v2theme="light"] .v2-flag{background:#fdf4e0;color:#8a5a00;border-bottom:1px solid #f0e3c4}
 
   /* 标题: 浅底上要更重的字重与更实的渐变 */
   html[data-v2theme="light"] .v2-hero h1{letter-spacing:-1.2px}
@@ -250,10 +247,6 @@
 {% endblock %}
 
 {% block content %}
-{# 这条横幅是给内部看的: 这一页已经挂在主导航的「AI Store」上, 但**线上首页仍是原版**。
-   定下来要不要换首页之后, 这一行就该去掉。 #}
-<div class="v2-flag">改版方案 · 已挂在导航「AI Store」；线上首页仍是原版，尚未替换</div>
-
 {# ---- 品牌图标 ----
    能对齐官方的就对齐 —— 这一格装的**就是**那个上游项目, 商店里用它自己的视觉是
    常识。图形是照着各自视觉语言重画的单色 SVG, 不是搬人家的商标文件。
