@@ -1342,3 +1342,31 @@ td.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size
   .hero-fit .hero-actions-sub { margin-top: 16px; }
   .hero-fit .hero-checks { margin-top: 10px; }
 }
+
+/* --- /apps 的紧凑瓦片 --------------------------------------------------------
+   与主页 hero 那 16 格同一个体量。原来这一页用的是 .app-card 富卡 (260px 高),
+   六个类目铺下来要滚很久 —— 而这一页的用途是"按类目找到那一格"。 */
+.app-tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.app-tile {
+  display: flex; align-items: center; gap: 11px; padding: 12px 14px; border-radius: 12px;
+  background: var(--card); border: 1px solid var(--border); color: var(--fg);
+  text-decoration: none; transition: background .15s, border-color .15s, transform .15s;
+}
+.app-tile svg { flex: none; color: var(--brand-strong); }
+.app-tile .at-txt { display: flex; flex-direction: column; min-width: 0; line-height: 1.3; }
+.app-tile .at-txt b { font-size: 14px; font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.app-tile .at-txt i { font-style: normal; font-size: 11px; color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.app-tile .at-dot { width: 7px; height: 7px; border-radius: 50%; background: rgba(255, 255, 255, .22); margin-left: auto; flex: none; }
+.app-tile .at-badge { margin-left: auto; flex: none; font-size: 10.5px; font-weight: 600; padding: 2px 7px; border-radius: 999px; }
+.app-tile .at-badge.lock { background: var(--brand-weak); color: var(--brand-strong); }
+.app-tile .at-badge.soon { background: var(--warn-weak); color: var(--warn); }
+/* 上锁那格的"开通试用": 平时不占地方, 悬停才显出来 —— 瓦片这个体量塞不下常驻文案,
+   但这句话必须在 DOM 里 (它是"说清楚要买"的那一半)。 */
+.app-tile .at-cta { flex: none; font-size: 10.5px; color: var(--brand-strong); opacity: 0; max-width: 0; overflow: hidden; white-space: nowrap; transition: opacity .15s, max-width .15s; }
+a.app-tile:hover .at-cta { opacity: 1; max-width: 70px; margin-left: 6px; }
+.app-tile .at-dot.on { background: var(--ok); box-shadow: 0 0 8px rgba(95, 211, 154, .75); }
+.app-tile .at-dot.lock { background: #7aa2ff; box-shadow: 0 0 8px rgba(122, 162, 255, .7); }
+a.app-tile:hover { background: var(--bg-soft); border-color: var(--border-strong); transform: translateY(-1px); }
+.app-tile.soon { opacity: .58; }
+@media (max-width: 900px) { .app-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 560px) { .app-tiles { grid-template-columns: 1fr; } }

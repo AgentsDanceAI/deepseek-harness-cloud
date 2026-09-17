@@ -1,0 +1,30 @@
+{# 一张**紧凑**产品瓦片 —— 与主页 hero 上那 16 格同一个尺寸 (老板 2026-09-16:
+   "/apps 的产品框太大了, 最好和主页那种一样大小, 只是分类了而已")。
+
+   与 _app_card.html 的区别只在体量: 链接语义、上锁分支、新标签规则三处必须
+   逐字一致, 否则就会出现"主页能点进去、/apps 点进去被弹回来"这类两份实现漂掉的
+   老毛病。上下文要求: app, apps_clickable, apps_base。 #}
+{% if app.live and apps_clickable and app.locked %}
+<a class="app-tile is-live is-locked"
+   href="{{ apps_base }}/pricing?reason=locked&product_id={{ app.id }}#unlock">
+{% elif app.live and apps_clickable %}
+{% set app_href = app.href or ('/work' if app.id == 'dsh' else '/work?product_id=' + app.id) %}
+<a class="app-tile is-live" href="{{ apps_base }}{{ app_href }}"
+   {% if not app.href %}target="_blank" rel="noopener"{% endif %}>
+{% else %}
+<div class="app-tile soon">
+{% endif %}
+  <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{{ app.icon | safe }}</svg>
+  <span class="at-txt"><b>{{ app.name }}</b><i>{{ t("apps.tag." + app.tag) }}</i></span>
+  {# 上锁与未上线用**文字**说清楚, 不能只给一个点 —— "把要买藏起来"正是 2026-09-06
+     定下要避免的 (守护用例 test_locked_apps_point_at_the_unlock_flow 钉着这条)。
+     已上线的不需要文字: 一个绿灯就够, 卡上塞满徽章反而看不出哪些是要注意的。 #}
+  {% if app.locked %}
+  <span class="at-badge lock">{{ t("apps.badge.locked") }}</span>
+  <span class="at-cta">{{ t("apps.unlock") }}</span>
+  {% elif not app.live %}
+  <span class="at-badge soon">{{ t("apps.badge.soon") }}</span>
+  {% else %}
+  <span class="at-dot on" aria-hidden="true"></span>
+  {% endif %}
+{% if app.live and apps_clickable %}</a>{% else %}</div>{% endif %}

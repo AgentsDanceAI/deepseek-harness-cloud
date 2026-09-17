@@ -24,9 +24,12 @@
       <h2 class="apps-cat-title">{{ t("apps.cat." ~ cat) }}</h2>
       <p class="apps-cat-desc muted small">{{ t("apps.cat." ~ cat ~ "_desc") }}</p>
       {% endif %}
-      <div class="grid-4 apps-grid" style="margin-top:16px">
+      {# 紧凑瓦片而不是富卡片 (老板 2026-09-16): 一张富卡 260px 高, 六个类目铺下来
+         要滚很久; 这一页的用途是"按类目找到那一格", 名字 + 一句话 + 状态灯就够,
+         详情在产品页里。 #}
+      <div class="app-tiles" style="margin-top:14px">
         {% for app in group %}
-        {% include "_app_card.html" %}
+        {% include "_app_tile.html" %}
         {% endfor %}
       </div>
     </div>

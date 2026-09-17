@@ -72,7 +72,9 @@
             <strong>{{ t("nav.s.subscription") }}</strong><span>{{ t("nav.s.subscription_desc") }}</span></a>
         </div>
       </div>
-      <a href="/apps" {% if page == 'apps' %}class="active"{% endif %}>{{ t("nav.apps") }}</a>
+      {# AI Store = 货架首页 (老板 2026-09-16); 按类目找产品走「产品」下拉,
+         那几项本来就指向 /apps 的分区锚点。 #}
+      <a href="/store" {% if page == 'landing-preview' %}class="active"{% endif %}>{{ t("nav.apps") }}</a>
       <a href="/pricing" {% if page == 'pricing' %}class="active"{% endif %}>{{ t("nav.pricing") }}</a>
     </nav>
     {# The main nav row is identical logged in or out — account state lives here,

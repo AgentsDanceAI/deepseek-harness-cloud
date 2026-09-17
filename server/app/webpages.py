@@ -412,6 +412,7 @@ def landing(request: Request):
     return _render(request, "index.html", "landing", pricing=pricing, **_apps_ctx(try_resolve_user(request)))
 
 
+@router.get("/store")
 @router.get("/preview/home-v2", include_in_schema=False)
 def landing_preview_v2(request: Request):
     """首页改版方案的**孤页**预览 —— 没有任何地方链接到这里。
@@ -423,7 +424,6 @@ def landing_preview_v2(request: Request):
     响应头带 noindex, 模板里也有一条; 搜索引擎不该先于我们自己看到它。
     """
     resp = _render(request, "home_v2.html", "landing-preview", **_apps_ctx(try_resolve_user(request)))
-    resp.headers["X-Robots-Tag"] = "noindex, nofollow"
     return resp
 
 
