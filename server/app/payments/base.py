@@ -146,23 +146,46 @@ def resolve_item(item: str, cur: str | None = None) -> dict:
     raise HTTPException(400, "unknown_item")
 
 
-def intro_eligible(user_id: str, tier: str) -> bool:
-    """Has this user never paid for a month of `tier`?
+def intro_eligible(user_id: str, tier: str | None = None) -> bool:
+    """这个账号还能不能拿首月价。
 
-    Per tier, not per account: the first month of Plus and the first month of Pro
-    are two separate offers, and someone who tried Plus has not yet been sold Pro.
+    **按账号终身一次** (老板 2026-09-16 定, 原先是按档位各给一次)。改口径的原因:
+    按档位算时, 买过 Plus 首月的人还能再拿 Pro、Max 的首月价, 一个账号能薅三次;
+    而这是"首次购买"的招徕价, 招徕只发生一次。
 
-    Only 'paid' counts. A refunded order gives the offer back — we did not end up
-    selling that month, and holding the discount against the buyer turns a refund
-    into a second, silent penalty. 'pending'/'expired' rows are abandoned
-    checkouts; treating those as consumed would let anyone burn a stranger's
-    offer, or their own by closing a tab.
+    只有 'paid' 算消耗。退款把优惠还回去 —— 那个月我们最终没卖出去, 拿折扣扣着
+    买家等于让退款变成第二次惩罚。'pending'/'expired' 是没付掉的结账, 不算消耗,
+    否则关个标签页就烧掉自己的优惠 (tier 参数只为兼容旧调用, 现在不参与判定)。
     """
     row = db.query_one(
-        "SELECT 1 FROM orders WHERE user_id=? AND item=? AND status='paid' LIMIT 1",
-        (user_id, f"plan:{tier}:monthly"),
+        "SELECT 1 FROM orders WHERE user_id=? AND item LIKE 'plan:%:monthly' AND status='paid' LIMIT 1",
+        (user_id,),
     )
     return row is None
+
+
+def _release_outstanding_intro(user_id: str, keep_order_id: str = "") -> None:
+    """把这个账号名下**没付掉的**首月价订单改回标准价。
+
+    只改判据不够: 优惠在付款时才消耗, 于是够资格时批量建 N 张待付单、每张都把首月价
+    快照进去, 再逐张付 —— 每张都按折扣成交, "终身一次"形同虚设。
+    这里让**同时只有一张**订单持有首月价: 新建一张就把旧的那些改回标准价。
+
+    为什么是改价而不是作废: 作废掉的单如果用户正好去付了, 就是钱收了东西没给
+    (mark_paid 刻意接受 expired 正是为了防这个)。改价后它仍然可付, 只是按标准价。
+    """
+    rows = db.query(
+        "SELECT id, item, currency, amount_cents FROM orders "
+        "WHERE user_id=? AND item LIKE 'plan:%:monthly' AND status IN ('pending','expired')",
+        (user_id,),
+    )
+    for r in rows:
+        if keep_order_id and r["id"] == keep_order_id:
+            continue
+        std = int(resolve_item(str(r["item"]), str(r["currency"]))["amount_cents"])
+        if int(r["amount_cents"]) < std:
+            db.query("UPDATE orders SET amount_cents=? WHERE id=?", (std, r["id"]))
+            logger.info("首月价回收: 订单 %s %s -> %s (同时只留一张)", r["id"], r["amount_cents"], std)
 
 
 def intro_eligibility(user_id: str, cur: str | None = None) -> dict[str, bool]:
@@ -170,7 +193,10 @@ def intro_eligibility(user_id: str, cur: str | None = None) -> dict[str, bool]:
     price they will actually be charged. The page defaults to eligible (the
     common case, and what a logged-out visitor is quoted); this narrows it."""
     tiers = plans.pricing(cur).get("tiers") or {}
-    return {t: intro_eligible(user_id, t) for t in tiers if t != "free"}
+    # 契约仍是"每档一个布尔" (app.js 按 data-tier 取), 但口径改成账号终身一次后
+    # 各档共用同一个答案 —— 前端不用改。
+    ok = intro_eligible(user_id)
+    return {t: ok for t in tiers if t != "free"}
 
 
 def price_for(user_id: str, info: dict) -> int:
@@ -186,7 +212,7 @@ def price_for(user_id: str, info: dict) -> int:
     intro = int(info.get("intro_cents") or 0)
     if not intro or info.get("kind") != "plan" or info.get("cycle") != "monthly":
         return amount
-    return intro if intro_eligible(user_id, str(info["tier"])) else amount
+    return intro if intro_eligible(user_id) else amount
 
 
 # 每个 provider 能结算哪些币种。空集 = 不限 (自己按订单币种下单, 如 stripe/waffo)。
@@ -232,7 +258,12 @@ def assert_settles(provider: str, order: dict) -> None:
 
 def create_order(user_id: str, provider: str, item: str, cur: str | None = None) -> dict:
     info = resolve_item(item, cur)
+    standard = int(info["amount_cents"])
     info["amount_cents"] = price_for(user_id, info)
+    took_intro = info["amount_cents"] < standard
+    if took_intro:
+        # 这张拿了首月价 -> 之前没付掉的首月单一律回到标准价, 全账号同时只留一张。
+        _release_outstanding_intro(user_id)
     order_id = ORDER_PREFIX[provider] + time.strftime("%y%m%d") + secrets.token_hex(5).upper()
     now = time.time()
     with db.tx() as conn:

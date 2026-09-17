@@ -160,20 +160,52 @@ def test_first_month_is_charged_the_advertised_intro_price():
     )
 
 
-def test_intro_is_per_tier_and_never_applies_to_a_year():
+def test_intro_is_once_per_account_and_never_applies_to_a_year():
+    """首月价按**账号**终身一次 (老板 2026-09-16 定, 原先是每档各一次)。
+
+    改口径的原因: 按档位算时, 买过 Plus 首月的人还能再拿 Pro、Max 的首月价,
+    一个账号能薅三次 —— 而这是"首次购买"的招徕价, 招徕只发生一次。
+    """
     table = plans.pricing()["tiers"]
     uid, headers = make_user()
     base.mark_paid(base.create_order(uid, "stripe", "plan:plus:monthly")["order_id"])
 
-    # Plus is spent; Pro is a different offer this buyer has not been sold yet.
+    # 买过 Plus 的首月, Pro 就不再是首次购买了。
     assert (
         base.create_order(uid, "stripe", "plan:pro:monthly")["amount_cents"]
-        == table["pro"]["monthly_intro_cents"]
+        == table["pro"]["monthly_cents"]
     )
+    assert base.intro_eligible(uid) is False
     # A first month is a first MONTH: the yearly SKU is sold at its own price.
     assert base.create_order(uid, "stripe", "plan:pro:yearly")["amount_cents"] == table["pro"]["yearly_cents"]
-    # ...and buying the year does not consume the monthly offer either.
-    assert base.intro_eligible(uid, "max") is True
+
+
+def test_buying_a_year_does_not_consume_the_first_month_offer():
+    uid, _ = make_user()
+    base.mark_paid(base.create_order(uid, "stripe", "plan:pro:yearly")["order_id"])
+    assert base.intro_eligible(uid) is True
+
+
+def test_only_one_order_holds_the_intro_price_at_a_time():
+    """终身一次要真的成立: 优惠在**付款**时才消耗, 所以够资格时批量建单、逐张付,
+    每张都能拿折扣。新建一张拿走首月价时, 旧的未付首月单要回到标准价。
+
+    注意不是作废 —— 作废掉的单用户正好去付就成了"钱收了东西没给"。
+    """
+    table = plans.pricing()["tiers"]
+    intro, std = table["plus"]["monthly_intro_cents"], table["plus"]["monthly_cents"]
+    uid, _ = make_user()
+
+    a = base.create_order(uid, "stripe", "plan:plus:monthly")
+    assert a["amount_cents"] == intro
+    b = base.create_order(uid, "stripe", "plan:plus:monthly")
+    assert b["amount_cents"] == intro, "重开结账页不该烧掉优惠"
+
+    # 旧那张已经被收回标准价, 两张不可能都按折扣成交
+    row = db.query_one("SELECT amount_cents, status FROM orders WHERE id=?", (a["order_id"],))
+    assert int(row["amount_cents"]) == std, "两张订单同时持有首月价 —— 可以叠加薅"
+    assert row["status"] == "pending", "旧单不能被作废, 否则用户去付就是钱收了东西没给"
+    assert base.mark_paid(a["order_id"], "still-payable") is True
 
 
 def test_a_refund_gives_the_first_month_offer_back():
@@ -203,8 +235,9 @@ def test_pay_context_reports_intro_eligibility_and_stays_anonymous_safe():
 
     base.mark_paid(base.create_order(uid, "stripe", "plan:pro:monthly")["order_id"])
     body = client.get("/api/pay/context", headers=headers).json()
-    assert body["intro_eligible"]["pro"] is False
-    assert body["intro_eligible"]["plus"] is True
+    # 口径改成账号终身一次后各档共用同一个答案 —— 契约仍是"每档一个布尔"
+    # (app.js 按 data-tier 取), 所以前端不用改。
+    assert body["intro_eligible"] == {t: False for t in plans.pricing()["tiers"] if t != "free"}
 
 
 def test_checkout_charges_the_currency_the_page_quoted():
