@@ -74,15 +74,19 @@
   .v2-slide.on{opacity:1;pointer-events:auto;transform:none}
   .v2-badge{align-self:flex-start;background:rgba(255,255,255,.15);border-radius:999px;
     padding:5px 13px;font-size:11.5px;font-weight:600;letter-spacing:.02em;
-    border:1px solid rgba(255,255,255,.18)}
+    border:1px solid rgba(255,255,255,.18);color:#fff}
   .v2-slide-body{display:flex;gap:20px;margin-top:16px;flex:1;min-height:0}
   .v2-slide-l{flex:1;min-width:0;display:flex;flex-direction:column}
   /* 白色写死: 这张卡两个主题下都是饱和色底, 白永远是对的; 而**不能靠继承** ——
      浅色主题下外层 .hero-dark 的字色是 var(--fg)(深色), 继承过来就是深字压深底。 */
   .v2-slide-name{display:flex;align-items:center;gap:9px;font-size:14px;margin-bottom:6px;
     font-weight:600;color:#fff}
+  /* ⚠️ 卡片上每一处文字都要**显式给颜色**, 一处都不能继承。
+     这张卡两个主题下都是饱和色底, 而浅色主题下外层 .hero-dark 的字色是 var(--fg)
+     (#0d1526, 近黑) —— 谁忘了声明, 谁就在紫底上变成一行黑字。2026-09-17 线上实测:
+     标题与角标都是 rgb(13,21,38), 就是这么来的(它们从一开始就没声明过)。 */
   .v2-slide-l h2{font-size:23px;margin:0 0 8px;font-weight:800;letter-spacing:-.5px;
-    line-height:1.2;text-wrap:balance;
+    color:#fff;line-height:1.2;text-wrap:balance;
     display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
   .v2-slide-l p{margin:0;color:#b9cdea;font-size:13px;line-height:1.62;
     display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}

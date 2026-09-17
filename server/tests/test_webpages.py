@@ -651,6 +651,16 @@ def test_store_card_name_is_not_painted_with_the_brand_color(client):
     assert i > 0, "精选卡结构变了"
     assert "style=" not in body[i : i + 60], "应用名又被涂上了内联颜色 — 那正是看不见的原因"
 
+    # 卡上每一处文字都要**显式声明颜色**, 一处都不能继承: 浅色主题下外层 .hero-dark
+    # 的字色是 var(--fg)(近黑), 忘了声明的那一处就在紫底上变成黑字。
+    # 2026-09-17 线上实测过: 标题与角标当时都是 rgb(13,21,38)。
+    css = body[body.find("<style") : body.find("</style>")]
+    for sel in (".v2-slide-l h2{", ".v2-badge{", ".v2-slide-name{"):
+        j = css.find(sel)
+        assert j > 0, f"样式里找不到 {sel}"
+        rule = css[j : css.find("}", j)]
+        assert "color:" in rule, f"{sel} 没有显式给颜色 — 浅色主题下会继承成黑字"
+
 
 def test_avatar_pick_page_lists_every_persona(client, monkeypatch):
     """伴聊的第一屏是**挑人**, 不是直接进一通电话。
