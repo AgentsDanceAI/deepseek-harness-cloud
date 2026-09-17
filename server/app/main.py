@@ -96,6 +96,8 @@ def create_app() -> FastAPI:
     from .models_hub import router as models_hub_router
     from .oauth import router as oauth_router
     from .payments.api import router as payments_router
+    from .smart_recommend import router as smart_recommend_router
+    from .smart_search import router as smart_search_router
     from .teams import router as teams_router
     from .webpages import router as pages_router
     from .workspace import preview_fallback as workspace_preview_fallback
@@ -109,6 +111,8 @@ def create_app() -> FastAPI:
     app.include_router(avatar_router)
     app.include_router(live_router)
     app.include_router(models_hub_router)
+    app.include_router(smart_search_router)
+    app.include_router(smart_recommend_router)
     app.include_router(local_router)
     app.include_router(media_router)
     app.include_router(payments_router)

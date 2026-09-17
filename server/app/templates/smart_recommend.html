@@ -1,0 +1,160 @@
+{% extends "base.html" %}
+{% block title %}{{ t('smart_recommend.title') }} · AI Store{% endblock %}
+{% block head %}
+<link rel="stylesheet" href="/static/live.css?v={{ asset_v }}">
+{% endblock %}
+{% block content %}
+<section class="section">
+  <div class="container">
+    <div class="lv-head"><h1 class="lv-title">{{ t('smart_recommend.title') }}</h1></div>
+    <p class="lv-sub">{{ t('smart_recommend.sub') }}</p>
+
+    <div id="sr-offline" class="lv-sub" hidden>{{ t('pe.not_configured') }}</div>
+
+    <div id="sr-body" hidden>
+      <div style="display:flex;gap:.6rem;flex-wrap:wrap;align-items:center;margin-top:1rem">
+        <select id="sr-index" style="padding:.5rem .7rem;min-width:12rem"></select>
+        <select id="sr-mode" style="padding:.5rem .7rem">
+          <option value="feed">{{ t('smart_recommend.feed') }}</option>
+          <option value="related">{{ t('smart_recommend.related') }}</option>
+        </select>
+        <button type="button" id="sr-roll">{{ t('smart_recommend.roll_user') }}</button>
+        <button type="button" id="sr-go">{{ t('smart_recommend.run') }}</button>
+      </div>
+      {# 掷出来的画像/物品摆出来 —— 不摆的话用户不知道推荐是基于什么算的 #}
+      <pre id="sr-seed" class="lv-sub" style="margin-top:1rem;white-space:pre-wrap"></pre>
+      <div id="sr-why" class="lv-sub" style="white-space:pre-wrap"></div>
+      <div id="sr-items" style="margin-top:1rem"></div>
+    </div>
+  </div>
+</section>
+
+<script>
+(function () {
+  const T = {
+    loading: {{ t('pe.loading')|tojson }},
+    unreachable: {{ t('pe.unreachable')|tojson }},
+    none: {{ t('pe.none')|tojson }},
+    busy: {{ t('pe.busy')|tojson }},
+    pick: {{ t('pe.pick_index')|tojson }},
+    run: {{ t('smart_recommend.run')|tojson }},
+    rollUser: {{ t('smart_recommend.roll_user')|tojson }},
+    rollItem: {{ t('smart_recommend.roll_item')|tojson }},
+  };
+  const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g,
+    (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const api = (p) => "/api/smart-recommend/proxy?path=" + encodeURIComponent(p);
+  let seed = null;
+
+  async function getJSON(p) {
+    const r = await fetch(api(p));
+    if (!r.ok) throw new Error(String(r.status));
+    return r.json();
+  }
+
+  function mode() { return document.getElementById("sr-mode").value; }
+  function index() { return document.getElementById("sr-index").value; }
+
+  async function loadIndexes() {
+    const sel = document.getElementById("sr-index");
+    try {
+      const d = await getJSON("/api/datasets");
+      const rows = Array.isArray(d) ? d : (d.datasets || d.items || []);
+      if (!rows.length) { sel.innerHTML = `<option value="">${esc(T.none)}</option>`; return; }
+      sel.innerHTML = rows.map((x) => {
+        const id = esc(x.index || x.id || x.name || "");
+        return `<option value="${id}">${esc(x.name || x.index || id)}</option>`;
+      }).join("");
+    } catch (_) { sel.innerHTML = `<option value="">${esc(T.unreachable)}</option>`; }
+  }
+
+  async function roll() {
+    if (!index()) { document.getElementById("sr-seed").textContent = T.pick; return; }
+    const btn = document.getElementById("sr-roll");
+    btn.disabled = true;
+    try {
+      const path = (mode() === "feed" ? "/api/recommend/random-user" : "/api/recommend/random-item")
+        + "?index=" + encodeURIComponent(index());
+      seed = await getJSON(path);
+      document.getElementById("sr-seed").textContent = JSON.stringify(seed, null, 2).slice(0, 1200);
+    } catch (_) {
+      document.getElementById("sr-seed").textContent = T.unreachable;
+    } finally { btn.disabled = false; }
+  }
+
+  function renderItems(items) {
+    if (!items || !items.length) return `<div class="lv-sub">${esc(T.none)}</div>`;
+    return items.slice(0, 20).map((it) => {
+      const src = it._source || it.source || it;
+      return `<div class="lv-roomcard" style="padding:.6rem .9rem">
+        <b>${esc(src.title || src.name || it._id || "")}</b>
+        <div class="lv-sub" style="margin:0">${esc(String(src.description || src.content || "").slice(0, 160))}</div>
+      </div>`;
+    }).join("");
+  }
+
+  async function run() {
+    if (!index()) { document.getElementById("sr-why").textContent = T.pick; return; }
+    if (!seed) await roll();
+    const why = document.getElementById("sr-why");
+    const items = document.getElementById("sr-items");
+    const btn = document.getElementById("sr-go");
+    btn.disabled = true; btn.textContent = T.busy;
+    why.textContent = T.loading; items.innerHTML = "";
+    try {
+      const isFeed = mode() === "feed";
+      const body = isFeed
+        ? { index: index(), user_profile: seed, size: 10 }
+        : { index: index(), item: seed, size: 10 };
+      // ⚠️ SSE: 推荐理由是逐字出的, 边收边显
+      const res = await fetch(api(isFeed ? "/api/recommend/feed" : "/api/recommend/related"), {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok || !res.body) throw new Error(String(res.status));
+      const reader = res.body.getReader();
+      const dec = new TextDecoder();
+      let buf = "", text = "";
+      why.textContent = "";
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        const lines = buf.split("\n");
+        buf = lines.pop() || "";
+        for (const line of lines) {
+          if (!line.startsWith("data:")) continue;
+          const raw = line.slice(5).trim();
+          if (!raw || raw === "[DONE]") continue;
+          try {
+            const ev = JSON.parse(raw);
+            if (ev.results || ev.items) items.innerHTML = renderItems(ev.results || ev.items);
+            const piece = ev.delta || ev.text || ev.content || "";
+            if (piece) { text += piece; why.textContent = text; }
+          } catch (_) { /* 坏的一行不该打断整条流 */ }
+        }
+      }
+      if (!text) why.textContent = "";
+    } catch (_) {
+      why.textContent = T.unreachable;
+    } finally { btn.disabled = false; btn.textContent = T.run; }
+  }
+
+  document.getElementById("sr-mode").addEventListener("change", () => {
+    seed = null;
+    document.getElementById("sr-seed").textContent = "";
+    document.getElementById("sr-roll").textContent =
+      mode() === "feed" ? T.rollUser : T.rollItem;
+  });
+  document.getElementById("sr-roll").addEventListener("click", roll);
+  document.getElementById("sr-go").addEventListener("click", run);
+
+  fetch("/api/smart-recommend/status").then((r) => r.json()).then((d) => {
+    const on = d && d.configured;
+    document.getElementById("sr-offline").hidden = !!on;
+    document.getElementById("sr-body").hidden = !on;
+    if (on) loadIndexes();
+  }).catch(() => { document.getElementById("sr-offline").hidden = false; });
+})();
+</script>
+{% endblock %}

@@ -121,6 +121,26 @@ CATALOG: tuple[AppEntry, ...] = (
     # 转售**, 而我们正是这个模式 —— 那一格本来就接不了, 一直空占着。
     # 数字人反过来是我们最独特的一块: 实时口型 + 用户自定义形象 + 定制音色,
     # 零件全在自己手上 (SoulX-FlashHead 跑在我们的 GPU 节点上)。
+    # AI 智慧搜索 / AI 智慧推荐 (2026-09-17 自口袋专家迁入, 与模型中心同批)。
+    # 三格同类: 住在主站上, 没有每用户容器, 数据面在我们自己那台后端上。
+    # 都先 unlisted —— 上游是按租户隔离并计费的, 我们这边拿的是一把服务端密钥,
+    # 所有访客会共用同一个上游租户, 上架前得先做"访客 → 上游租户"的映射。
+    AppEntry(
+        "smart-search", "AI 智慧搜索", "smart-search",
+        '<circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/>'
+        '<path d="M8.5 11h5M11 8.5v5"/>',
+        href="/smart-search",
+        name_key="apps.n.smart-search",
+        unlisted=True,
+    ),
+    AppEntry(
+        "smart-recommend", "AI 智慧推荐", "smart-recommend",
+        '<path d="M4 6h10M4 12h16M4 18h7"/><circle cx="18" cy="6" r="2"/>'
+        '<circle cx="14" cy="18" r="2"/>',
+        href="/smart-recommend",
+        name_key="apps.n.smart-recommend",
+        unlisted=True,
+    ),
     # 模型中心 (2026-09-17 自口袋专家迁入): 自托管推理节点的引擎、显卡与模型装卸。
     # 与数字人两格同类 —— 住在主站上, 没有每用户容器, 打的是我们自己的节点。
     AppEntry(
@@ -201,7 +221,7 @@ CATEGORIES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("coding", ("claude-code", "codex", "pi")),
     ("work", ("dsh", "openmanus", "openclaw", "hermes")),
     ("staff", ("agents-team", "openmausbot", "autogen")),
-    ("dev", ("dify", "langchain", "models-hub")),
+    ("dev", ("dify", "langchain", "models-hub", "smart-search", "smart-recommend")),
     ("design", ("open-design", "comfyui")),
     ("avatar", ("live", "avatar")),
 )

@@ -1,0 +1,136 @@
+{% extends "base.html" %}
+{% block title %}{{ t('smart_search.title') }} · AI Store{% endblock %}
+{% block head %}
+{# 复用直播列表页那套卡片样式 (live.css 的 .lv-*) —— 与伴聊/模型中心同一条:
+   共用而不是复制, 改卡片时几处一起变。 #}
+<link rel="stylesheet" href="/static/live.css?v={{ asset_v }}">
+{% endblock %}
+{% block content %}
+<section class="section">
+  <div class="container">
+    <div class="lv-head"><h1 class="lv-title">{{ t('smart_search.title') }}</h1></div>
+    <p class="lv-sub">{{ t('smart_search.sub') }}</p>
+
+    <div id="ss-offline" class="lv-sub" hidden>{{ t('pe.not_configured') }}</div>
+
+    <div id="ss-body" hidden>
+      <div style="display:flex;gap:.6rem;flex-wrap:wrap;margin-top:1rem">
+        <select id="ss-index" style="padding:.5rem .7rem;min-width:12rem"></select>
+        <input id="ss-q" placeholder="{{ t('smart_search.q_ph') }}"
+               style="flex:1;min-width:14rem;padding:.5rem .7rem">
+        <button type="button" id="ss-go">{{ t('smart_search.ask') }}</button>
+      </div>
+      {# 总结是 SSE 一个字一个字出来的, 所以给它一个会长高的容器而不是一次性替换 #}
+      <div id="ss-answer" class="lv-sub" style="margin-top:1rem;white-space:pre-wrap"></div>
+      <div id="ss-hits" style="margin-top:1rem"></div>
+    </div>
+  </div>
+</section>
+
+<script>
+(function () {
+  const T = {
+    loading: {{ t('pe.loading')|tojson }},
+    unreachable: {{ t('pe.unreachable')|tojson }},
+    none: {{ t('pe.none')|tojson }},
+    busy: {{ t('pe.busy')|tojson }},
+    pick: {{ t('pe.pick_index')|tojson }},
+    ask: {{ t('smart_search.ask')|tojson }},
+  };
+  const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g,
+    (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const api = (path) => "/api/smart-search/proxy?path=" + encodeURIComponent(path);
+
+  async function getJSON(path) {
+    const r = await fetch(api(path));
+    if (!r.ok) throw new Error(String(r.status));
+    return r.json();
+  }
+
+  async function loadIndexes() {
+    const sel = document.getElementById("ss-index");
+    try {
+      const d = await getJSON("/api/datasets");
+      const rows = Array.isArray(d) ? d : (d.datasets || d.items || []);
+      if (!rows.length) { sel.innerHTML = `<option value="">${esc(T.none)}</option>`; return; }
+      sel.innerHTML = rows.map((x) => {
+        const id = esc(x.index || x.id || x.name || "");
+        return `<option value="${id}">${esc(x.name || x.index || id)}</option>`;
+      }).join("");
+    } catch (_) {
+      sel.innerHTML = `<option value="">${esc(T.unreachable)}</option>`;
+    }
+  }
+
+  function renderHits(hits) {
+    if (!hits.length) return `<div class="lv-sub">${esc(T.none)}</div>`;
+    return hits.slice(0, 20).map((h) => {
+      const src = h._source || h.source || h;
+      const title = src.title || src.name || h._id || "";
+      const body = src.description || src.cover_description || src.content || "";
+      return `<div class="lv-roomcard" style="padding:.6rem .9rem">
+        <b>${esc(title)}</b>
+        <div class="lv-sub" style="margin:0">${esc(String(body).slice(0, 180))}</div>
+      </div>`;
+    }).join("");
+  }
+
+  async function run() {
+    const idx = document.getElementById("ss-index").value;
+    const q = document.getElementById("ss-q").value.trim();
+    const ans = document.getElementById("ss-answer");
+    const hits = document.getElementById("ss-hits");
+    if (!idx) { ans.textContent = T.pick; return; }
+    if (!q) return;
+    const btn = document.getElementById("ss-go");
+    btn.disabled = true; btn.textContent = T.busy;
+    ans.textContent = T.loading; hits.innerHTML = "";
+    try {
+      // ⚠️ 这条是 SSE —— 边收边显, 不要等整段回来 (上游总结是逐字出的)
+      const qs = new URLSearchParams({ query: q, index: idx, ai_search: "true" });
+      const res = await fetch(api("/api/ai-search?" + qs.toString()));
+      if (!res.ok || !res.body) throw new Error(String(res.status));
+      const reader = res.body.getReader();
+      const dec = new TextDecoder();
+      let buf = "", text = "";
+      ans.textContent = "";
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        const lines = buf.split("\n");
+        buf = lines.pop() || "";
+        for (const line of lines) {
+          if (!line.startsWith("data:")) continue;
+          const raw = line.slice(5).trim();
+          if (!raw || raw === "[DONE]") continue;
+          try {
+            const ev = JSON.parse(raw);
+            if (ev.hits) hits.innerHTML = renderHits(ev.hits);
+            const piece = ev.delta || ev.text || ev.content || "";
+            if (piece) { text += piece; ans.textContent = text; }
+          } catch (_) { /* 不是 JSON 的行忽略, 别让一行坏数据把整条流打断 */ }
+        }
+      }
+      if (!text) ans.textContent = T.none;
+    } catch (_) {
+      ans.textContent = T.unreachable;
+    } finally {
+      btn.disabled = false; btn.textContent = T.ask;
+    }
+  }
+
+  document.getElementById("ss-go").addEventListener("click", run);
+  document.getElementById("ss-q").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") run();
+  });
+
+  fetch("/api/smart-search/status").then((r) => r.json()).then((d) => {
+    const on = d && d.configured;
+    document.getElementById("ss-offline").hidden = !!on;
+    document.getElementById("ss-body").hidden = !on;
+    if (on) loadIndexes();
+  }).catch(() => { document.getElementById("ss-offline").hidden = false; });
+})();
+</script>
+{% endblock %}

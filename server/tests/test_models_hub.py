@@ -14,6 +14,7 @@ import pytest
 from fastapi import HTTPException
 
 from app import apps_catalog, models_hub
+from app import config as _config
 
 
 class TestOnlyTheBoardPathsGetThrough:
@@ -85,12 +86,12 @@ class TestCredentialsStayServerSide:
     """节点凭证一个字节都不下发 —— 与 gateway.py 的上游 key 同一条纪律。"""
 
     def test_key_is_only_in_request_headers(self, monkeypatch):
-        monkeypatch.setattr(models_hub.config, "INFERENCE_KEY", "secret-key", raising=False)
-        assert models_hub._headers()["X-API-Key"] == "secret-key"
+        monkeypatch.setattr(_config, "INFERENCE_KEY", "secret-key", raising=False)
+        assert models_hub._UP.headers()["X-API-Key"] == "secret-key"
 
     def test_no_key_configured_sends_no_header(self, monkeypatch):
-        monkeypatch.setattr(models_hub.config, "INFERENCE_KEY", "", raising=False)
-        assert "X-API-Key" not in models_hub._headers()
+        monkeypatch.setattr(_config, "INFERENCE_KEY", "", raising=False)
+        assert "X-API-Key" not in models_hub._UP.headers()
 
     def test_page_never_embeds_the_key(self):
         """模板里不许出现凭证相关的变量 —— 页面打的是我们自己的 /api/models-hub/*。"""
@@ -109,14 +110,14 @@ class TestNotConfiguredIsQuiet:
     """没接推理节点时: 卡片仍在, 点进去说人话, 不是 500 也不是空白。"""
 
     def test_configured_follows_the_url(self, monkeypatch):
-        monkeypatch.setattr(models_hub.config, "INFERENCE_URL", "", raising=False)
+        monkeypatch.setattr(_config, "INFERENCE_URL", "", raising=False)
         assert models_hub.configured() is False
-        monkeypatch.setattr(models_hub.config, "INFERENCE_URL", "http://node:50001", raising=False)
+        monkeypatch.setattr(_config, "INFERENCE_URL", "http://node:50001", raising=False)
         assert models_hub.configured() is True
 
     def test_trailing_slash_is_normalised(self, monkeypatch):
-        monkeypatch.setattr(models_hub.config, "INFERENCE_URL", "http://node:50001/", raising=False)
-        assert models_hub._base_url() == "http://node:50001"
+        monkeypatch.setattr(_config, "INFERENCE_URL", "http://node:50001/", raising=False)
+        assert models_hub._UP.base_url() == "http://node:50001"
 
 
 class TestItIsOnTheShelf:

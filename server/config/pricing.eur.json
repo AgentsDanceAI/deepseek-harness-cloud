@@ -145,6 +145,14 @@
     "models-hub": {
       "days": 7,
       "cents": 139
+    },
+    "smart-search": {
+      "days": 7,
+      "cents": 139
+    },
+    "smart-recommend": {
+      "days": 7,
+      "cents": 139
     }
   },
   "team": {
